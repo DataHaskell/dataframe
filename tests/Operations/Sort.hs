@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TypeApplications #-}
 
 module Operations.Sort where
 
@@ -6,6 +7,7 @@ import Assertions
 import Data.Char
 import qualified Data.Text as T
 import qualified DataFrame as D
+import qualified DataFrame.Functions as F
 import qualified DataFrame.Internal.Column as DI
 import System.Random
 import System.Random.Shuffle (shuffle')
@@ -40,7 +42,7 @@ sortByAscendingWAI =
                 , ("test2", DI.fromList ['a' .. 'z'])
                 ]
             )
-            (D.sortBy [D.Asc "test1"] testData)
+            (D.sortBy [D.Asc (F.col @Int "test1")] testData)
         )
 
 sortByDescendingWAI :: Test
@@ -53,7 +55,7 @@ sortByDescendingWAI =
                 , ("test2", DI.fromList $ reverse ['a' .. 'z'])
                 ]
             )
-            (D.sortBy [D.Desc "test1"] testData)
+            (D.sortBy [D.Desc (F.col @Int "test1")] testData)
         )
 
 sortByTwoColumns :: Test
@@ -62,7 +64,7 @@ sortByTwoColumns =
         ( assertEqual
             "Sorting moreTestData (which is already sorted) is idempotent."
             moreTestData
-            (D.sortBy [D.Asc "test1", D.Asc "test2"] moreTestData)
+            (D.sortBy [D.Asc (F.col @Int "test1"), D.Asc (F.col @Int "test2")] moreTestData)
         )
 
 sortByOneColumnAscOneColumnDesc :: Test
@@ -75,7 +77,7 @@ sortByOneColumnAscOneColumnDesc =
                 , ("test2", DI.fromList $ [10 :: Int, 9 .. 1] ++ [10, 9 .. 1])
                 ]
             )
-            (D.sortBy [D.Asc "test1", D.Desc "test2"] moreTestData)
+            (D.sortBy [D.Asc (F.col @Int "test1"), D.Desc (F.col @Int "test2")] moreTestData)
         )
 
 sortByColumnDoesNotExist :: Test
@@ -84,7 +86,7 @@ sortByColumnDoesNotExist =
         ( assertExpectException
             "[Error Case]"
             (D.columnNotFound "[\"test0\"]" "sortBy" (D.columnNames testData))
-            (print $ D.sortBy [D.Asc "test0"] testData)
+            (print $ D.sortBy [D.Asc (F.col @Int "test0")] testData)
         )
 
 tests :: [Test]
