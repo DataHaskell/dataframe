@@ -1,9 +1,9 @@
 module DataFrame.IO.Parquet.Types where
 
+import qualified Data.ByteString as BS
 import Data.Int
 import qualified Data.Text as T
 import Data.Time
-import Data.Word
 
 data ParquetType
     = PBOOLEAN
@@ -125,26 +125,26 @@ emptyGeospatialStatistics :: GeospatialStatistics
 emptyGeospatialStatistics = GeospatialStatistics emptyBoundingBox []
 
 data ColumnStatistics = ColumnStatistics
-    { columnMin :: [Word8]
-    , columnMax :: [Word8]
+    { columnMin :: BS.ByteString
+    , columnMax :: BS.ByteString
     , columnNullCount :: Int64
     , columnDistictCount :: Int64
-    , columnMinValue :: [Word8]
-    , columnMaxValue :: [Word8]
+    , columnMinValue :: BS.ByteString
+    , columnMaxValue :: BS.ByteString
     , isColumnMaxValueExact :: Bool
     , isColumnMinValueExact :: Bool
     }
     deriving (Show, Eq)
 
 emptyColumnStatistics :: ColumnStatistics
-emptyColumnStatistics = ColumnStatistics [] [] 0 0 [] [] False False
+emptyColumnStatistics = ColumnStatistics BS.empty BS.empty 0 0 BS.empty BS.empty False False
 
 data ColumnCryptoMetadata
     = COLUMN_CRYPTO_METADATA_UNKNOWN
     | ENCRYPTION_WITH_FOOTER_KEY
     | EncryptionWithColumnKey
         { columnCryptPathInSchema :: [String]
-        , columnKeyMetadata :: [Word8]
+        , columnKeyMetadata :: BS.ByteString
         }
     deriving (Show, Eq)
 
@@ -166,13 +166,13 @@ data ColumnOrder
 data EncryptionAlgorithm
     = ENCRYPTION_ALGORITHM_UNKNOWN
     | AesGcmV1
-        { aadPrefix :: [Word8]
-        , aadFileUnique :: [Word8]
+        { aadPrefix :: BS.ByteString
+        , aadFileUnique :: BS.ByteString
         , supplyAadPrefix :: Bool
         }
     | AesGcmCtrV1
-        { aadPrefix :: [Word8]
-        , aadFileUnique :: [Word8]
+        { aadPrefix :: BS.ByteString
+        , aadFileUnique :: BS.ByteString
         , supplyAadPrefix :: Bool
         }
     deriving (Show, Eq)
@@ -189,7 +189,7 @@ data DictVals
 
 data Page = Page
     { pageHeader :: PageHeader
-    , pageBytes :: [Word8]
+    , pageBytes :: BS.ByteString
     }
     deriving (Show, Eq)
 

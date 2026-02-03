@@ -10,13 +10,13 @@ module DataFrame.IO.Parquet (
 import Control.Monad
 import Data.Bits
 import qualified Data.ByteString as BSO
-import Data.Char
 import Data.Either
 import Data.IORef
 import Data.Int
 import qualified Data.List as L
 import qualified Data.Map as M
 import qualified Data.Text as T
+import Data.Text.Encoding
 import Data.Word
 import qualified DataFrame.Internal.Column as DI
 import DataFrame.Internal.DataFrame (DataFrame)
@@ -82,8 +82,7 @@ readParquet path = do
                         else colDataPageOffset
             let colLength = columnTotalCompressedSize metadata
 
-            let columnBytes =
-                    map (BSO.index contents . fromIntegral) [colStart .. (colStart + colLength - 1)]
+            let columnBytes = BSO.take (fromIntegral colLength) (BSO.drop (fromIntegral colStart) contents)
 
             pages <- readAllPages (columnCodec metadata) columnBytes
 
@@ -225,13 +224,13 @@ processColumnPages (maxDef, maxRep) pages pType _ maybeTypeLength = do
                                  in pure (toMaybeDouble maxDef defLvls vals)
                             PBYTE_ARRAY ->
                                 let (raws, _) = readNByteArrays nPresent afterLvls
-                                    texts = map (T.pack . map (chr . fromIntegral)) raws
+                                    texts = map decodeUtf8 raws
                                  in pure (toMaybeText maxDef defLvls texts)
                             PFIXED_LEN_BYTE_ARRAY ->
                                 case maybeTypeLength of
                                     Just len ->
                                         let (raws, _) = splitFixed nPresent (fromIntegral len) afterLvls
-                                            texts = map (T.pack . map (chr . fromIntegral)) raws
+                                            texts = map decodeUtf8 raws
                                          in pure (toMaybeText maxDef defLvls texts)
                                     Nothing -> error "FIXED_LEN_BYTE_ARRAY requires type length"
                             PARQUET_TYPE_UNKNOWN -> error "Cannot read unknown Parquet type"
@@ -277,13 +276,13 @@ processColumnPages (maxDef, maxRep) pages pType _ maybeTypeLength = do
                                  in pure (toMaybeDouble maxDef defLvls vals)
                             PBYTE_ARRAY ->
                                 let (raws, _) = readNByteArrays nPresent afterLvls
-                                    texts = map (T.pack . map (chr . fromIntegral)) raws
+                                    texts = map decodeUtf8 raws
                                  in pure (toMaybeText maxDef defLvls texts)
                             PFIXED_LEN_BYTE_ARRAY ->
                                 case maybeTypeLength of
                                     Just len ->
                                         let (raws, _) = splitFixed nPresent (fromIntegral len) afterLvls
-                                            texts = map (T.pack . map (chr . fromIntegral)) raws
+                                            texts = map decodeUtf8 raws
                                          in pure (toMaybeText maxDef defLvls texts)
                                     Nothing -> error "FIXED_LEN_BYTE_ARRAY requires type length"
                             PARQUET_TYPE_UNKNOWN -> error "Cannot read unknown Parquet type"

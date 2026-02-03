@@ -1,19 +1,19 @@
 module DataFrame.IO.Parquet.ColumnStatistics where
 
-import Data.Int
-import Data.Word
+import qualified Data.ByteString as BS
+import Data.Int (Int64)
 
 data ColumnStatistics = ColumnStatistics
-    { columnMin :: [Word8]
-    , columnMax :: [Word8]
+    { columnMin :: BS.ByteString
+    , columnMax :: BS.ByteString
     , columnNullCount :: Int64
     , columnDistictCount :: Int64
-    , columnMinValue :: [Word8]
-    , columnMaxValue :: [Word8]
+    , columnMinValue :: BS.ByteString
+    , columnMaxValue :: BS.ByteString
     , isColumnMaxValueExact :: Bool
     , isColumnMinValueExact :: Bool
     }
     deriving (Show, Eq)
 
 emptyColumnStatistics :: ColumnStatistics
-emptyColumnStatistics = ColumnStatistics [] [] 0 0 [] [] False False
+emptyColumnStatistics = ColumnStatistics BS.empty BS.empty 0 0 BS.empty BS.empty False False

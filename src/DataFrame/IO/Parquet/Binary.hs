@@ -10,32 +10,45 @@ import Data.IORef
 import Data.Int
 import Data.Word
 
-littleEndianWord32 :: [Word8] -> Word32
+littleEndianWord32 :: BS.ByteString -> Word32
 littleEndianWord32 bytes
-    | length bytes >= 4 =
+    | BS.length bytes >= 4 =
         foldr
             (.|.)
             0
-            (zipWith (\b i -> fromIntegral b `shiftL` i) (take 4 bytes) [0, 8, 16, 24])
-    | otherwise = littleEndianWord32 (take 4 $ bytes ++ repeat 0)
+            ( zipWith
+                (\b i -> fromIntegral b `shiftL` i)
+                (BS.unpack $ BS.take 4 bytes)
+                [0, 8, 16, 24]
+            )
+    | otherwise =
+        littleEndianWord32 (BS.take 4 $ bytes `BS.append` BS.pack [0, 0, 0, 0])
 
-littleEndianWord64 :: [Word8] -> Word64
+littleEndianWord64 :: BS.ByteString -> Word64
 littleEndianWord64 bytes =
     foldr
         (.|.)
         0
-        (zipWith (\b i -> fromIntegral b `shiftL` i) (take 8 bytes) [0, 8 ..])
+        ( zipWith
+            (\b i -> fromIntegral b `shiftL` i)
+            (BS.unpack $ BS.take 8 bytes)
+            [0, 8 ..]
+        )
 
-littleEndianInt32 :: [Word8] -> Int32
+littleEndianInt32 :: BS.ByteString -> Int32
 littleEndianInt32 = fromIntegral . littleEndianWord32
 
-word64ToLittleEndian :: Word64 -> [Word8]
-word64ToLittleEndian w = map (\i -> fromIntegral (w `shiftR` i)) [0, 8, 16, 24, 32, 40, 48, 56]
+word64ToLittleEndian :: Word64 -> BS.ByteString
+word64ToLittleEndian w =
+    BS.map
+        (\i -> fromIntegral (w `shiftR` fromIntegral i))
+        (BS.pack [0, 8, 16, 24, 32, 40, 48, 56])
 
-word32ToLittleEndian :: Word32 -> [Word8]
-word32ToLittleEndian w = map (\i -> fromIntegral (w `shiftR` i)) [0, 8, 16, 24]
+word32ToLittleEndian :: Word32 -> BS.ByteString
+word32ToLittleEndian w =
+    BS.map (\i -> fromIntegral (w `shiftR` fromIntegral i)) (BS.pack [0, 8, 16, 24])
 
-readUVarInt :: [Word8] -> (Word64, [Word8])
+readUVarInt :: BS.ByteString -> (Word64, BS.ByteString)
 readUVarInt xs = loop xs 0 0 0
   where
     {-
@@ -44,31 +57,34 @@ readUVarInt xs = loop xs 0 0 0
     - The high bit (0x80) is the continuation flag: 1 = more bytes follow, 0 = last byte
     Why the magic number 10: For a 64‑bit integer we need at most ceil(64 / 7) = 10 bytes
     -}
-    loop :: [Word8] -> Word64 -> Int -> Int -> (Word64, [Word8])
+    loop :: BS.ByteString -> Word64 -> Int -> Int -> (Word64, BS.ByteString)
     loop bs result _ 10 = (result, bs)
-    loop (b : bs) result shift i
-        | b < 0x80 = (result .|. (fromIntegral b `shiftL` shift), bs)
-        | otherwise =
-            let payloadBits = fromIntegral (b .&. 0x7f) :: Word64
-             in loop bs (result .|. (payloadBits `shiftL` shift)) (shift + 7) (i + 1)
-    loop [] _ _ _ = error "readUVarInt: not enough input bytes"
+    loop xs result shift i = case BS.uncons xs of
+        Nothing -> error "readUVarInt: not enough input bytes"
+        Just (b, bs) ->
+            if b < 0x80
+                then (result .|. (fromIntegral b `shiftL` shift), bs)
+                else
+                    let payloadBits = fromIntegral (b .&. 0x7f) :: Word64
+                     in loop bs (result .|. (payloadBits `shiftL` shift)) (shift + 7) (i + 1)
 
-readVarIntFromBytes :: (Integral a) => [Word8] -> (a, [Word8])
+readVarIntFromBytes :: (Integral a) => BS.ByteString -> (a, BS.ByteString)
 readVarIntFromBytes bs = (fromIntegral n, rem)
   where
     (n, rem) = loop 0 0 bs
-    loop _ result [] = (result, [])
-    loop shift result (x : xs) =
-        let res = result .|. (fromIntegral (x .&. 0x7f) :: Integer) `shiftL` shift
-         in if x .&. 0x80 /= 0x80 then (res, xs) else loop (shift + 7) res xs
+    loop shift result bs = case BS.uncons bs of
+        Nothing -> (result, BS.empty)
+        Just (x, xs) ->
+            let res = result .|. (fromIntegral (x .&. 0x7f) :: Integer) `shiftL` shift
+             in if x .&. 0x80 /= 0x80 then (res, xs) else loop (shift + 7) res xs
 
-readIntFromBytes :: (Integral a) => [Word8] -> (a, [Word8])
+readIntFromBytes :: (Integral a) => BS.ByteString -> (a, BS.ByteString)
 readIntFromBytes bs =
     let (n, rem) = readVarIntFromBytes bs
         u = fromIntegral n :: Word32
      in (fromIntegral $ (fromIntegral (u `shiftR` 1) :: Int32) .^. (-(n .&. 1)), rem)
 
-readInt32FromBytes :: [Word8] -> (Int32, [Word8])
+readInt32FromBytes :: BS.ByteString -> (Int32, BS.ByteString)
 readInt32FromBytes bs =
     let (n', rem) = readVarIntFromBytes @Int64 bs
         n = fromIntegral n' :: Int32
@@ -110,20 +126,20 @@ readString buf pos = do
     nameSize <- readVarIntFromBuffer @Int buf pos
     map (chr . fromIntegral) <$> replicateM nameSize (readAndAdvance pos buf)
 
-readByteStringFromBytes :: [Word8] -> ([Word8], [Word8])
+readByteStringFromBytes :: BS.ByteString -> (BS.ByteString, BS.ByteString)
 readByteStringFromBytes xs =
     let
         (size, rem) = readVarIntFromBytes @Int xs
      in
-        splitAt size rem
+        BS.splitAt size rem
 
-readByteString :: BS.ByteString -> IORef Int -> IO [Word8]
+readByteString :: BS.ByteString -> IORef Int -> IO BS.ByteString
 readByteString buf pos = do
     size <- readVarIntFromBuffer @Int buf pos
-    replicateM size (readAndAdvance pos buf)
+    BS.pack <$> replicateM size (readAndAdvance pos buf)
 
-readByteString' :: BS.ByteString -> Int64 -> IO [Word8]
-readByteString' buf size = mapM (`readSingleByte` buf) [0 .. (size - 1)]
+readByteString' :: BS.ByteString -> Int64 -> IO BS.ByteString
+readByteString' buf size = BS.pack <$> mapM (`readSingleByte` buf) [0 .. (size - 1)]
 
 readSingleByte :: Int64 -> BS.ByteString -> IO Word8
 readSingleByte pos buffer = return $ BS.index buffer (fromIntegral pos)

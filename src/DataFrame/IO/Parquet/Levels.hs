@@ -1,5 +1,6 @@
 module DataFrame.IO.Parquet.Levels where
 
+import qualified Data.ByteString as BS
 import Data.Int
 import Data.List
 import qualified Data.Text as T
@@ -10,7 +11,8 @@ import DataFrame.IO.Parquet.Encoding
 import DataFrame.IO.Parquet.Thrift
 import DataFrame.IO.Parquet.Types
 
-readLevelsV1 :: Int -> Int -> Int -> [Word8] -> ([Int], [Int], [Word8])
+readLevelsV1 ::
+    Int -> Int -> Int -> BS.ByteString -> ([Int], [Int], BS.ByteString)
 readLevelsV1 n maxDef maxRep bs =
     let bwDef = bitWidthForMaxLevel maxDef
         bwRep = bitWidthForMaxLevel maxRep
@@ -19,9 +21,9 @@ readLevelsV1 n maxDef maxRep bs =
             if bwRep == 0
                 then (replicate n 0, bs)
                 else
-                    let repLength = littleEndianWord32 (take 4 bs)
-                        repData = take (fromIntegral repLength) (drop 4 bs)
-                        afterRepData = drop (4 + fromIntegral repLength) bs
+                    let repLength = littleEndianWord32 (BS.take 4 bs)
+                        repData = BS.take (fromIntegral repLength) (BS.drop 4 bs)
+                        afterRepData = BS.drop (4 + fromIntegral repLength) bs
                         (repVals, _) = decodeRLEBitPackedHybrid bwRep n repData
                      in (repVals, afterRepData)
 
@@ -29,18 +31,24 @@ readLevelsV1 n maxDef maxRep bs =
             if bwDef == 0
                 then (replicate n 0, afterRep)
                 else
-                    let defLength = littleEndianWord32 (take 4 afterRep)
-                        defData = take (fromIntegral defLength) (drop 4 afterRep)
-                        afterDefData = drop (4 + fromIntegral defLength) afterRep
+                    let defLength = littleEndianWord32 (BS.take 4 afterRep)
+                        defData = BS.take (fromIntegral defLength) (BS.drop 4 afterRep)
+                        afterDefData = BS.drop (4 + fromIntegral defLength) afterRep
                         (defVals, _) = decodeRLEBitPackedHybrid bwDef n defData
                      in (defVals, afterDefData)
      in (map fromIntegral defLvlsU32, map fromIntegral repLvlsU32, afterDef)
 
 readLevelsV2 ::
-    Int -> Int -> Int -> Int32 -> Int32 -> [Word8] -> ([Int], [Int], [Word8])
+    Int ->
+    Int ->
+    Int ->
+    Int32 ->
+    Int32 ->
+    BS.ByteString ->
+    ([Int], [Int], BS.ByteString)
 readLevelsV2 n maxDef maxRep defLen repLen bs =
-    let (repBytes, afterRepBytes) = splitAt (fromIntegral repLen) bs
-        (defBytes, afterDefBytes) = splitAt (fromIntegral defLen) afterRepBytes
+    let (repBytes, afterRepBytes) = BS.splitAt (fromIntegral repLen) bs
+        (defBytes, afterDefBytes) = BS.splitAt (fromIntegral defLen) afterRepBytes
         bwDef = bitWidthForMaxLevel maxDef
         bwRep = bitWidthForMaxLevel maxRep
         (repLvlsU32, _) =
