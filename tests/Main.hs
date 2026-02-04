@@ -1,23 +1,24 @@
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE OverloadedStrings   #-}
+{-# LANGUAGE RecordWildCards     #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
 module Main where
 
-import qualified Data.Text as T
-import qualified Data.Vector as V
-import qualified Data.Vector.Unboxed as VU
-import qualified DataFrame as D
-import qualified DataFrame.Internal.Column as DI
+import qualified Data.Text                   as T
+import qualified Data.Vector                 as V
+import qualified Data.Vector.Unboxed         as VU
+import qualified DataFrame                   as D
+import qualified DataFrame.Internal.Column   as DI
 import qualified DataFrame.Operations.Typing as D
-import qualified System.Exit as Exit
+import qualified System.Exit                 as Exit
 
-import Data.Time
-import GenDataFrame ()
-import Test.HUnit
-import Test.QuickCheck
+import           Data.Time
+import           GenDataFrame                ()
+import           Test.HUnit
+import           Test.QuickCheck
 
 import qualified Functions
+import qualified Monad
 import qualified Operations.Aggregations
 import qualified Operations.Apply
 import qualified Operations.Core
@@ -5128,7 +5129,7 @@ tests =
 
 isSuccessful :: Result -> Bool
 isSuccessful (Success{..}) = True
-isSuccessful _ = False
+isSuccessful _             = False
 
 main :: IO ()
 main = do
@@ -5138,6 +5139,7 @@ main = do
         mapM
             (quickCheckWithResult stdArgs)
             Operations.Subset.tests
-    if failures result > 0 || errors result > 0 || not (all isSuccessful propRes)
+    monadRes <- mapM (quickCheckWithResult stdArgs) Monad.tests
+    if failures result > 0 || errors result > 0 || not (all isSuccessful propRes) || not (all isSuccessful monadRes)
         then Exit.exitFailure
         else Exit.exitSuccess
