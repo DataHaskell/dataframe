@@ -270,10 +270,10 @@ You can also can use the `<>` operator to concatenate dataframes vertically (sim
 
 ```haskell
 -- Sort by ascending age
-df |> D.sortBy [D.Asc "age"]
+df |> D.sortBy [D.Asc age]
 -- 1. Sort by descending age
 -- 2. Within those who have the same age, sort by alphabetical order of name.
-df |> D.sortBy [D.Asc "age", D.Desc "name"]  
+df |> D.sortBy [D.Asc age, D.Desc name]  
 ```
 
 You can also derive new columns using `derive` to compute values based on existing columns:

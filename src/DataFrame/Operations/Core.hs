@@ -680,7 +680,8 @@ fromRows names rows =
 
 @
 -}
-valueCounts :: forall a. (Columnable a) => Expr a -> DataFrame -> [(a, Int)]
+valueCounts ::
+    forall a. (Ord a, Columnable a) => Expr a -> DataFrame -> [(a, Int)]
 valueCounts expr df = case columnAsVector expr df of
     Left e -> throw e
     Right column' ->
@@ -702,7 +703,7 @@ valueCounts expr df = case columnAsVector expr df of
 @
 -}
 valueProportions ::
-    forall a. (Columnable a) => Expr a -> DataFrame -> [(a, Double)]
+    forall a. (Ord a, Columnable a) => Expr a -> DataFrame -> [(a, Double)]
 valueProportions expr df = case columnAsVector expr df of
     Left e -> throw e
     Right column' ->

@@ -269,7 +269,7 @@ python> df.sort_values(by='E')
 Since we don't support row indexes, we only provide column-based sorting. You specify the sort direction and column names:
 
 ```haskell
-dataframe> D.sortBy [D.Asc "E"] df
+dataframe> D.sortBy [D.Asc (F.col @Transport "E")] df
 -------------------------------------------------------
    A    |     B      |   C   |  D  |     E     |   F   
 --------|------------|-------|-----|-----------|-------
@@ -1077,7 +1077,7 @@ starwars
  Darth Vader           | Just 202  | Just 136  | ...
 ```
 
-For multi-column sorting, provide multiple column names: `D.sortBy [D.Desc "mass", D.Asc "height"]`
+For multi-column sorting, provide multiple column names: `D.sortBy [D.Desc mass, D.Asc height]`
 
 ### Grouping and Summarizing
 

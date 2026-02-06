@@ -2,16 +2,17 @@
 
 module DataFrame.IO.Parquet.Time where
 
+import qualified Data.ByteString as BS
 import Data.Time
 import Data.Word
 
 import DataFrame.IO.Parquet.Binary
 
-int96ToUTCTime :: [Word8] -> UTCTime
+int96ToUTCTime :: BS.ByteString -> UTCTime
 int96ToUTCTime bytes
-    | length bytes /= 12 = error "INT96 must be exactly 12 bytes"
+    | BS.length bytes /= 12 = error "INT96 must be exactly 12 bytes"
     | otherwise =
-        let (nanosBytes, julianBytes) = splitAt 8 bytes
+        let (nanosBytes, julianBytes) = BS.splitAt 8 bytes
             nanosSinceMidnight = littleEndianWord64 nanosBytes
             julianDay = littleEndianWord32 julianBytes
          in julianDayAndNanosToUTCTime (fromIntegral julianDay) nanosSinceMidnight
@@ -38,13 +39,13 @@ julianDayToDay julianDay =
 
 -- I include this here even though it's unused because we'll likely use
 -- it for the writer. Since int96 is deprecated this is only included for completeness anyway.
-utcTimeToInt96 :: UTCTime -> [Word8]
+utcTimeToInt96 :: UTCTime -> BS.ByteString
 utcTimeToInt96 (UTCTime day diffTime) =
     let julianDay = dayToJulianDay day
         nanosSinceMidnight = floor (realToFrac diffTime * 1_000_000_000)
         nanosBytes = word64ToLittleEndian nanosSinceMidnight
         julianBytes = word32ToLittleEndian (fromIntegral julianDay)
-     in nanosBytes ++ julianBytes
+     in nanosBytes `BS.append` julianBytes
 
 dayToJulianDay :: Day -> Integer
 dayToJulianDay day =

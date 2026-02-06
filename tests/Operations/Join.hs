@@ -5,6 +5,7 @@ module Operations.Join where
 
 import Data.Text (Text)
 import qualified DataFrame as D
+import qualified DataFrame.Functions as F
 import DataFrame.Operations.Join
 import Test.HUnit
 
@@ -33,7 +34,7 @@ testInnerJoin =
                 , ("B", D.fromList ["B0" :: Text, "B1", "B2"])
                 ]
             )
-            (D.sortBy [D.Asc "key"] (innerJoin ["key"] df1 df2))
+            (D.sortBy [D.Asc (F.col @Text "key")] (innerJoin ["key"] df1 df2))
         )
 
 testLeftJoin :: Test
@@ -47,7 +48,7 @@ testLeftJoin =
                 , ("B", D.fromList [Just "B0", Just "B1" :: Maybe Text, Just "B2"])
                 ]
             )
-            (D.sortBy [D.Asc "key"] (leftJoin ["key"] df2 df1))
+            (D.sortBy [D.Asc (F.col @Text "key")] (leftJoin ["key"] df2 df1))
         )
 
 testRightJoin :: Test
@@ -61,7 +62,7 @@ testRightJoin =
                 , ("B", D.fromList ["B0" :: Text, "B1", "B2"])
                 ]
             )
-            (D.sortBy [D.Asc "key"] (rightJoin ["key"] df2 df1))
+            (D.sortBy [D.Asc (F.col @Text "key")] (rightJoin ["key"] df2 df1))
         )
 
 staffDf :: D.DataFrame
@@ -108,7 +109,7 @@ testFullOuterJoin =
                     )
                 ]
             )
-            (D.sortBy [D.Asc "Name"] (fullOuterJoin ["Name"] studentDf staffDf))
+            (D.sortBy [D.Asc (F.col @Text "Name")] (fullOuterJoin ["Name"] studentDf staffDf))
         )
 
 tests :: [Test]

@@ -37,7 +37,7 @@ main = do
                 , F.mean measurement `F.as` "mean"
                 , F.maximum measurement `F.as` "maximum"
                 ]
-            |> D.sortBy [D.Asc (F.name city)]
+            |> D.sortBy [D.Asc city]
     endCalculation <- getCurrentTime
     let calculationTime = diffUTCTime endCalculation startCalculation
     putStrLn $ "Calculation Time: " ++ show calculationTime

@@ -57,33 +57,28 @@ ghci> D.frequencies "ocean_proximity" df
  Percentage (%) | 44.26%    | 31.74% | 0.02%  | 11.09%   | 12.88%
 @
 -}
-frequencies :: T.Text -> DataFrame -> DataFrame
-frequencies name df =
+frequencies :: forall a. (Columnable a) => Expr a -> DataFrame -> DataFrame
+frequencies expr df =
     let
-        counts :: forall a. (Columnable a) => [(a, Int)]
-        counts = valueCounts (Col @a name) df
+        counts = valueCounts expr df
         calculatePercentage cs k = toAny $ toPct2dp (fromIntegral k / fromIntegral (P.sum $ map snd cs))
         initDf =
             empty
                 & insertVector "Statistic" (V.fromList ["Count" :: T.Text, "Percentage (%)"])
-        freqs :: forall v a. (VG.Vector v a, Columnable a) => v a -> DataFrame
         freqs col =
             L.foldl'
                 ( \d (col, k) ->
                     insertVector
                         (showValue @a col)
-                        (V.fromList [toAny k, calculatePercentage (counts @a) k])
+                        (V.fromList [toAny k, calculatePercentage counts k])
                         d
                 )
                 initDf
                 counts
      in
-        case getColumn name df of
-            Nothing ->
-                throw $ ColumnNotFoundException name "frequencies" (M.keys $ columnIndices df)
-            Just ((BoxedColumn (column :: V.Vector a))) -> freqs column
-            Just ((OptionalColumn (column :: V.Vector a))) -> freqs column
-            Just ((UnboxedColumn (column :: VU.Vector a))) -> freqs column
+        case columnAsVector expr df of
+            Left err -> throw err
+            Right column -> freqs column
 
 -- | Calculates the mean of a given column as a standalone value.
 mean ::

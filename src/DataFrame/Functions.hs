@@ -146,7 +146,7 @@ count expr = AggFold expr "count" 0 (\acc _ -> acc + 1)
 collect :: (Columnable a) => Expr a -> Expr [a]
 collect expr = AggFold expr "collect" [] (flip (:))
 
-mode :: (Columnable a, Eq a) => Expr a -> Expr a
+mode :: (Ord a, Columnable a, Eq a) => Expr a -> Expr a
 mode expr =
     AggVector
         expr
@@ -219,7 +219,7 @@ pow (Lit n) i = Lit (n ^ i)
 pow expr 1 = expr
 pow expr i = BinaryOp "pow" (^) expr (lit i)
 
-relu :: (Columnable a, Num a) => Expr a -> Expr a
+relu :: (Columnable a, Num a, Ord a) => Expr a -> Expr a
 relu = UnaryOp "relu" (Prelude.max 0)
 
 min :: (Columnable a, Ord a) => Expr a -> Expr a -> Expr a

@@ -93,7 +93,7 @@ data FileMetadata = FileMetaData
     , createdBy :: Maybe String
     , columnOrders :: [ColumnOrder]
     , encryptionAlgorithm :: EncryptionAlgorithm
-    , footerSigningKeyMetadata :: [Word8]
+    , footerSigningKeyMetadata :: BS.ByteString
     }
     deriving (Show, Eq)
 
@@ -149,7 +149,7 @@ defaultMetadata =
         , createdBy = Nothing
         , columnOrders = []
         , encryptionAlgorithm = ENCRYPTION_ALGORITHM_UNKNOWN
-        , footerSigningKeyMetadata = []
+        , footerSigningKeyMetadata = BS.empty
         }
 
 data ColumnMetaData = ColumnMetaData
@@ -182,7 +182,7 @@ data ColumnChunk = ColumnChunk
     , columnChunkColumnIndexOffset :: Int64
     , columnChunkColumnIndexLength :: Int32
     , cryptoMetadata :: ColumnCryptoMetadata
-    , encryptedColumnMetadata :: [Word8]
+    , encryptedColumnMetadata :: BS.ByteString
     }
     deriving (Show, Eq)
 
@@ -234,7 +234,16 @@ emptyColumnMetadata =
 
 emptyColumnChunk :: ColumnChunk
 emptyColumnChunk =
-    ColumnChunk "" 0 emptyColumnMetadata 0 0 0 0 COLUMN_CRYPTO_METADATA_UNKNOWN []
+    ColumnChunk
+        ""
+        0
+        emptyColumnMetadata
+        0
+        0
+        0
+        0
+        COLUMN_CRYPTO_METADATA_UNKNOWN
+        BS.empty
 
 emptyKeyValue :: KeyValue
 emptyKeyValue = KeyValue{key = "", value = ""}
@@ -754,13 +763,23 @@ readEncryptionAlgorithm buf pos lastFieldId = do
         Just (elemType, identifier) -> case identifier of
             1 -> do
                 readAesGcmV1
-                    (AesGcmV1{aadPrefix = [], aadFileUnique = [], supplyAadPrefix = False})
+                    ( AesGcmV1
+                        { aadPrefix = BS.empty
+                        , aadFileUnique = BS.empty
+                        , supplyAadPrefix = False
+                        }
+                    )
                     buf
                     pos
                     0
             2 -> do
                 readAesGcmCtrV1
-                    (AesGcmCtrV1{aadPrefix = [], aadFileUnique = [], supplyAadPrefix = False})
+                    ( AesGcmCtrV1
+                        { aadPrefix = BS.empty
+                        , aadFileUnique = BS.empty
+                        , supplyAadPrefix = False
+                        }
+                    )
                     buf
                     pos
                     0

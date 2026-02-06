@@ -1,3 +1,6 @@
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE GADTs #-}
+{-# LANGUAGE InstanceSigs #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 module DataFrame.Operations.Permutation where
@@ -11,19 +14,26 @@ import Control.Exception (throw)
 import DataFrame.Errors (DataFrameException (..))
 import DataFrame.Internal.Column
 import DataFrame.Internal.DataFrame (DataFrame (..))
+import DataFrame.Internal.Expression
 import DataFrame.Internal.Row
 import DataFrame.Operations.Core
 import System.Random
 
 -- | Sort order taken as a parameter by the 'sortBy' function.
-data SortOrder
-    = Asc T.Text
-    | Desc T.Text
-    deriving (Eq)
+data SortOrder where
+    Asc :: (Columnable a) => Expr a -> SortOrder
+    Desc :: (Columnable a) => Expr a -> SortOrder
+
+instance Eq SortOrder where
+    (==) :: SortOrder -> SortOrder -> Bool
+    (==) (Asc _) (Asc _) = True
+    (==) (Desc _) (Desc _) = True
+    (==) _ _ = False
 
 getSortColumnName :: SortOrder -> T.Text
-getSortColumnName (Asc n) = n
-getSortColumnName (Desc n) = n
+getSortColumnName (Asc (Col n)) = n
+getSortColumnName (Desc (Col n)) = n
+getSortColumnName _ = error "Sorting on compound column"
 
 mustFlipCompare :: SortOrder -> Bool
 mustFlipCompare (Asc _) = True
