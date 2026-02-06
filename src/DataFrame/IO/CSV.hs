@@ -388,6 +388,9 @@ constructOptionalBoxed vec valid = do
 writeCsv :: FilePath -> DataFrame -> IO ()
 writeCsv = writeSeparated ','
 
+writeTsv :: FilePath -> DataFrame -> IO ()
+writeTsv = writeSeparated '\t'
+
 writeSeparated ::
     -- | Separator
     Char ->
