@@ -331,6 +331,9 @@ countRows c path = withFile path ReadMode $! go 0 ""
 writeCsv :: FilePath -> DataFrame -> IO ()
 writeCsv = writeSeparated ','
 
+writeTsv :: FilePath -> DataFrame -> IO ()
+writeTsv = writeSeparated '\t'
+
 writeSeparated ::
     -- | Separator
     Char ->
