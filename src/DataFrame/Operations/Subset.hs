@@ -10,6 +10,7 @@ module DataFrame.Operations.Subset where
 
 import qualified Data.List as L
 import qualified Data.Map as M
+import qualified Data.Set as S
 import qualified Data.Text as T
 import qualified Data.Vector as V
 import qualified Data.Vector.Generic as VG
@@ -295,9 +296,10 @@ byIndexRange = ColumnIndexRange
 
 -- | O(n) select columns by column predicate name.
 selectBy :: [SelectionCriteria] -> DataFrame -> DataFrame
-selectBy xs df = select columnsWithProperties df
+selectBy xs df = select finalSelection df
   where
-    columnsWithProperties = L.foldl' columnWithProperty [] xs
+    finalSelection = Prelude.filter (`S.member` columnsWithProperties) (columnNames df)
+    columnsWithProperties = S.fromList (L.foldl' columnWithProperty [] xs)
     columnWithProperty acc (ColumnName name) = acc ++ [name]
     columnWithProperty acc (ColumnNameProperty f) = acc ++ L.filter f (columnNames df)
     columnWithProperty acc (ColumnTextRange (from, to)) =
