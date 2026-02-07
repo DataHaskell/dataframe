@@ -280,7 +280,7 @@ recodeWithDefault d mapping =
         (Maybe.fromMaybe d . (`lookup` mapping))
 
 firstOrNothing :: (Columnable a) => Expr [a] -> Expr (Maybe a)
-firstOrNothing = lift Maybe.listToMaybe
+firstOrNothing = UnaryOp "firstOrNothing" Maybe.listToMaybe
 
 lastOrNothing :: (Columnable a) => Expr [a] -> Expr (Maybe a)
 lastOrNothing = lift (Maybe.listToMaybe . reverse)
