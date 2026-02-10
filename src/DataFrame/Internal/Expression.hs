@@ -51,11 +51,11 @@ data Expr a where
     Agg :: (Columnable a, Columnable b) => AggStrategy a b -> Expr b -> Expr a
 
 data UExpr where
-    Wrap :: (Columnable a) => Expr a -> UExpr
+    UExpr :: (Columnable a) => Expr a -> UExpr
 
 instance Show UExpr where
     show :: UExpr -> String
-    show (Wrap expr) = show expr
+    show (UExpr expr) = show expr
 
 type NamedExpr = (T.Text, UExpr)
 

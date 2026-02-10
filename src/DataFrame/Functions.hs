@@ -58,7 +58,7 @@ col :: (Columnable a) => T.Text -> Expr a
 col = Col
 
 as :: (Columnable a) => Expr a -> T.Text -> NamedExpr
-as expr name = (name, Wrap expr)
+as expr name = (name, UExpr expr)
 
 infixr 0 .=
 (.=) :: (Columnable a) => T.Text -> Expr a -> NamedExpr

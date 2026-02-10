@@ -261,7 +261,7 @@ aggregate aggs gdf@(Grouped df groupingColumns valueIndices offsets) =
                 (VU.map (valueIndices VU.!) (VU.init offsets))
                 (select groupingColumns df)
 
-        f (name, Wrap (expr :: Expr a)) d =
+        f (name, UExpr (expr :: Expr a)) d =
             let
                 value = case interpretAggregation @a gdf expr of
                     Left e -> throw e
