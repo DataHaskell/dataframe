@@ -466,8 +466,8 @@ pruneExpr (If cond trueBranch falseBranch) =
                 (If condInner tInner _, _) | cond == condInner -> If cond tInner f
                 (_, If condInner _ fInner) | cond == condInner -> If cond t fInner
                 _ -> If cond t f
-pruneExpr (UnaryOp name op e) = UnaryOp name op (pruneExpr e)
-pruneExpr (BinaryOp name op l r) = BinaryOp name op (pruneExpr l) (pruneExpr r)
+pruneExpr (Unary op e) = Unary op (pruneExpr e)
+pruneExpr (Binary op l r) = Binary op (pruneExpr l) (pruneExpr r)
 pruneExpr e = e
 
 buildGreedyTree ::

@@ -17,30 +17,38 @@ import Data.String
 import qualified Data.Text as T
 import Data.Type.Equality (TestEquality (testEquality), type (:~:) (Refl))
 import qualified Data.Vector.Generic as VG
-import qualified Data.Vector.Unboxed as VU
 import DataFrame.Internal.Column
 import Type.Reflection (Typeable, typeOf, typeRep)
+
+data UnaryOp a b = MkUnaryOp
+    { unaryFn :: a -> b
+    , unaryName :: T.Text
+    , unarySymbol :: Maybe T.Text
+    }
+
+data BinaryOp a b c = MkBinaryOp
+    { binaryFn :: a -> b -> c
+    , binaryName :: T.Text
+    , binarySymbol :: Maybe T.Text
+    , binaryCommutative :: Bool
+    , binaryPrecedence :: Int
+    }
+
+data AggStrategy a b where
+    CollectAgg ::
+        (VG.Vector v b, Typeable v) => T.Text -> (v b -> a) -> AggStrategy a b
+    FoldAgg :: T.Text -> Maybe a -> (a -> b -> a) -> AggStrategy a b
 
 data Expr a where
     Col :: (Columnable a) => T.Text -> Expr a
     Lit :: (Columnable a) => a -> Expr a
-    UnaryOp ::
-        (Columnable a, Columnable b) => T.Text -> (b -> a) -> Expr b -> Expr a
-    BinaryOp ::
+    Unary ::
+        (Columnable a, Columnable b) => UnaryOp b a -> Expr b -> Expr a
+    Binary ::
         (Columnable c, Columnable b, Columnable a) =>
-        T.Text -> (c -> b -> a) -> Expr c -> Expr b -> Expr a
+        BinaryOp c b a -> Expr c -> Expr b -> Expr a
     If :: (Columnable a) => Expr Bool -> Expr a -> Expr a -> Expr a
-    AggVector ::
-        (VG.Vector v b, Typeable v, Columnable a, Columnable b) =>
-        Expr b -> T.Text -> (v b -> a) -> Expr a
-    AggReduce :: (Columnable a) => Expr a -> T.Text -> (a -> a -> a) -> Expr a
-    -- TODO(mchav): Numeric reduce might be superfluous since expressions are already type checked.
-    AggNumericVector ::
-        (Columnable a, Columnable b, VU.Unbox a, VU.Unbox b, Num a, Num b) =>
-        Expr b -> T.Text -> (VU.Vector b -> a) -> Expr a
-    AggFold ::
-        forall a b.
-        (Columnable a, Columnable b) => Expr b -> T.Text -> a -> (a -> b -> a) -> Expr a
+    Agg :: (Columnable a, Columnable b) => AggStrategy a b -> Expr b -> Expr a
 
 data UExpr where
     Wrap :: (Columnable a) => Expr a -> UExpr
@@ -53,39 +61,56 @@ type NamedExpr = (T.Text, UExpr)
 
 instance (Num a, Columnable a) => Num (Expr a) where
     (+) :: Expr a -> Expr a -> Expr a
-    (+) (Lit x) (Lit y) = Lit (x + y)
-    (+) e1 e2
-        | e1 == e2 = BinaryOp "mult" (*) e1 (Lit 2)
-        | otherwise = BinaryOp "add" (+) e1 e2
+    (+) =
+        Binary
+            ( MkBinaryOp
+                { binaryFn = (+)
+                , binaryName = "add"
+                , binarySymbol = Just "+"
+                , binaryCommutative = True
+                , binaryPrecedence = 1
+                }
+            )
 
     (-) :: Expr a -> Expr a -> Expr a
-    (-) (Lit x) (Lit y) = Lit (x - y)
-    (-) e1 e2 = BinaryOp "sub" (-) e1 e2
+    (-) =
+        Binary
+            ( MkBinaryOp
+                { binaryFn = (-)
+                , binaryName = "sub"
+                , binarySymbol = Just "-"
+                , binaryCommutative = False
+                , binaryPrecedence = 1
+                }
+            )
 
     (*) :: Expr a -> Expr a -> Expr a
-    (*) (Lit 0) _ = Lit 0
-    (*) _ (Lit 0) = Lit 0
-    (*) (Lit 1) e = e
-    (*) e (Lit 1) = e
-    (*) (Lit x) (Lit y) = Lit (x * y)
-    (*) e1 e2
-        | e1 == e2 = BinaryOp "pow" (^) e1 (Lit @Int 2)
-        | otherwise = BinaryOp "mult" (*) e1 e2
+    (*) =
+        Binary
+            ( MkBinaryOp
+                { binaryFn = (*)
+                , binaryName = "mult"
+                , binarySymbol = Just "*"
+                , binaryCommutative = True
+                , binaryPrecedence = 2
+                }
+            )
 
     fromInteger :: Integer -> Expr a
     fromInteger = Lit . fromInteger
 
     negate :: Expr a -> Expr a
-    negate (Lit n) = Lit (negate n)
-    negate expr = UnaryOp "negate" negate expr
+    negate =
+        Unary
+            (MkUnaryOp{unaryFn = negate, unaryName = "negate", unarySymbol = Nothing})
 
     abs :: (Num a) => Expr a -> Expr a
-    abs (Lit n) = Lit (abs n)
-    abs expr = UnaryOp "abs" abs expr
+    abs = Unary (MkUnaryOp{unaryFn = abs, unaryName = "abs", unarySymbol = Nothing})
 
     signum :: (Num a) => Expr a -> Expr a
-    signum (Lit n) = Lit (signum n)
-    signum expr = UnaryOp "signum" signum expr
+    signum =
+        Unary
+            (MkUnaryOp{unaryFn = signum, unaryName = "signum", unarySymbol = Nothing})
 
 add :: (Num a, Columnable a) => Expr a -> Expr a -> Expr a
 add = (+)
@@ -101,8 +126,16 @@ instance (Fractional a, Columnable a) => Fractional (Expr a) where
     fromRational = Lit . fromRational
 
     (/) :: (Fractional a, Columnable a) => Expr a -> Expr a -> Expr a
-    (/) (Lit l1) (Lit l2) = Lit (l1 / l2)
-    (/) e1 e2 = BinaryOp "divide" (/) e1 e2
+    (/) =
+        Binary
+            ( MkBinaryOp
+                { binaryFn = (/)
+                , binaryName = "divide"
+                , binarySymbol = Just "/"
+                , binaryCommutative = True
+                , binaryPrecedence = 2
+                }
+            )
 
 divide :: (Fractional a, Columnable a) => Expr a -> Expr a -> Expr a
 divide = (/)
@@ -115,75 +148,96 @@ instance (Floating a, Columnable a) => Floating (Expr a) where
     pi :: (Floating a, Columnable a) => Expr a
     pi = Lit pi
     exp :: (Floating a, Columnable a) => Expr a -> Expr a
-    exp = UnaryOp "exp" exp
+    exp = Unary (MkUnaryOp{unaryFn = exp, unaryName = "exp", unarySymbol = Nothing})
+    sqrt :: (Floating a, Columnable a) => Expr a -> Expr a
+    sqrt =
+        Unary (MkUnaryOp{unaryFn = sqrt, unaryName = "sqrt", unarySymbol = Nothing})
+    (**) :: (Floating a, Columnable a) => Expr a -> Expr a -> Expr a
+    (**) =
+        Binary
+            ( MkBinaryOp
+                { binaryFn = (**)
+                , binaryName = "exponentiate"
+                , binarySymbol = Just "**"
+                , binaryCommutative = False
+                , binaryPrecedence = 3
+                }
+            )
     log :: (Floating a, Columnable a) => Expr a -> Expr a
-    log = UnaryOp "log" log
+    log = Unary (MkUnaryOp{unaryFn = log, unaryName = "log", unarySymbol = Nothing})
+    logBase :: (Floating a, Columnable a) => Expr a -> Expr a -> Expr a
+    logBase =
+        Binary
+            ( MkBinaryOp
+                { binaryFn = logBase
+                , binaryName = "logBase"
+                , binarySymbol = Nothing
+                , binaryCommutative = False
+                , binaryPrecedence = 1
+                }
+            )
     sin :: (Floating a, Columnable a) => Expr a -> Expr a
-    sin = UnaryOp "sin" sin
+    sin = Unary (MkUnaryOp{unaryFn = sin, unaryName = "sin", unarySymbol = Nothing})
     cos :: (Floating a, Columnable a) => Expr a -> Expr a
-    cos = UnaryOp "cos" cos
+    cos = Unary (MkUnaryOp{unaryFn = cos, unaryName = "cos", unarySymbol = Nothing})
+    tan :: (Floating a, Columnable a) => Expr a -> Expr a
+    tan = Unary (MkUnaryOp{unaryFn = tan, unaryName = "tan", unarySymbol = Nothing})
     asin :: (Floating a, Columnable a) => Expr a -> Expr a
-    asin = UnaryOp "asin" asin
+    asin =
+        Unary (MkUnaryOp{unaryFn = asin, unaryName = "asin", unarySymbol = Nothing})
     acos :: (Floating a, Columnable a) => Expr a -> Expr a
-    acos = UnaryOp "acos" acos
+    acos =
+        Unary (MkUnaryOp{unaryFn = acos, unaryName = "acos", unarySymbol = Nothing})
     atan :: (Floating a, Columnable a) => Expr a -> Expr a
-    atan = UnaryOp "atan" atan
+    atan =
+        Unary (MkUnaryOp{unaryFn = atan, unaryName = "atan", unarySymbol = Nothing})
     sinh :: (Floating a, Columnable a) => Expr a -> Expr a
-    sinh = UnaryOp "sinh" sinh
+    sinh =
+        Unary (MkUnaryOp{unaryFn = sinh, unaryName = "sinh", unarySymbol = Nothing})
     cosh :: (Floating a, Columnable a) => Expr a -> Expr a
-    cosh = UnaryOp "cosh" cosh
+    cosh =
+        Unary (MkUnaryOp{unaryFn = cosh, unaryName = "cosh", unarySymbol = Nothing})
     asinh :: (Floating a, Columnable a) => Expr a -> Expr a
-    asinh = UnaryOp "asinh" sinh
+    asinh =
+        Unary
+            (MkUnaryOp{unaryFn = asinh, unaryName = "asinh", unarySymbol = Nothing})
     acosh :: (Floating a, Columnable a) => Expr a -> Expr a
-    acosh = UnaryOp "acosh" acosh
+    acosh =
+        Unary
+            (MkUnaryOp{unaryFn = acosh, unaryName = "acosh", unarySymbol = Nothing})
     atanh :: (Floating a, Columnable a) => Expr a -> Expr a
-    atanh = UnaryOp "atanh" atanh
+    atanh =
+        Unary
+            (MkUnaryOp{unaryFn = atanh, unaryName = "atanh", unarySymbol = Nothing})
 
 instance (Show a) => Show (Expr a) where
     show :: forall a. (Show a) => Expr a -> String
     show (Col name) = "(col @" ++ show (typeRep @a) ++ " " ++ show name ++ ")"
     show (Lit value) = "(lit (" ++ show value ++ "))"
     show (If cond l r) = "(ifThenElse " ++ show cond ++ " " ++ show l ++ " " ++ show r ++ ")"
-    show (UnaryOp name f value) = "(" ++ T.unpack name ++ " " ++ show value ++ ")"
-    show (BinaryOp name f a b) = "(" ++ T.unpack name ++ " " ++ show a ++ " " ++ show b ++ ")"
-    show (AggNumericVector expr op _) = "(" ++ T.unpack op ++ " " ++ show expr ++ ")"
-    show (AggVector expr op _) = "(" ++ T.unpack op ++ " " ++ show expr ++ ")"
-    show (AggReduce expr op _) = "(" ++ T.unpack op ++ " " ++ show expr ++ ")"
-    show (AggFold expr op _ _) = "(" ++ T.unpack op ++ " " ++ show expr ++ ")"
+    show (Unary op value) = "(" ++ T.unpack (unaryName op) ++ " " ++ show value ++ ")"
+    show (Binary op a b) = "(" ++ T.unpack (binaryName op) ++ " " ++ show a ++ " " ++ show b ++ ")"
+    show (Agg (CollectAgg op _) expr) = "(" ++ T.unpack op ++ " " ++ show expr ++ ")"
+    show (Agg (FoldAgg op _ _) expr) = "(" ++ T.unpack op ++ " " ++ show expr ++ ")"
 
 normalize :: (Eq a, Ord a, Show a, Typeable a) => Expr a -> Expr a
 normalize expr = case expr of
     Col name -> Col name
     Lit val -> Lit val
     If cond th el -> If (normalize cond) (normalize th) (normalize el)
-    UnaryOp name f e -> UnaryOp name f (normalize e)
-    BinaryOp name f e1 e2
-        | isCommutative name ->
+    Unary op e -> Unary op (normalize e)
+    Binary op e1 e2
+        | binaryCommutative op ->
             let n1 = normalize e1
                 n2 = normalize e2
              in case testEquality (typeOf n1) (typeOf n2) of
                     Nothing -> expr
                     Just Refl ->
                         if compareExpr n1 n2 == GT
-                            then BinaryOp name f n2 n1 -- Swap to canonical order
-                            else BinaryOp name f n1 n2
-        | otherwise -> BinaryOp name f (normalize e1) (normalize e2)
-    AggVector e name f -> AggVector (normalize e) name f
-    AggReduce e name f -> AggReduce (normalize e) name f
-    AggNumericVector e name f -> AggNumericVector (normalize e) name f
-    AggFold e name init f -> AggFold (normalize e) name init f
-
-isCommutative :: T.Text -> Bool
-isCommutative name =
-    name
-        `elem` [ "add"
-               , "mult"
-               , "min"
-               , "max"
-               , "eq"
-               , "and"
-               , "or"
-               ]
+                            then Binary op n2 n1 -- Swap to canonical order
+                            else Binary op n1 n2
+        | otherwise -> Binary op (normalize e1) (normalize e2)
+    Agg strat e -> Agg strat (normalize e)
 
 -- Compare expressions for ordering (used in normalization)
 compareExpr :: Expr a -> Expr a -> Ordering
@@ -193,12 +247,10 @@ compareExpr e1 e2 = compare (exprKey e1) (exprKey e2)
     exprKey (Col name) = "0:" ++ T.unpack name
     exprKey (Lit val) = "1:" ++ show val
     exprKey (If c t e) = "2:" ++ exprKey c ++ exprKey t ++ exprKey e
-    exprKey (UnaryOp name _ e) = "3:" ++ T.unpack name ++ exprKey e
-    exprKey (BinaryOp name _ e1 e2) = "4:" ++ T.unpack name ++ exprKey e1 ++ exprKey e2
-    exprKey (AggVector e name _) = "5:" ++ T.unpack name ++ exprKey e
-    exprKey (AggReduce e name _) = "6:" ++ T.unpack name ++ exprKey e
-    exprKey (AggNumericVector e name _) = "7:" ++ T.unpack name ++ exprKey e
-    exprKey (AggFold e name _ _) = "8:" ++ T.unpack name ++ exprKey e
+    exprKey (Unary op e) = "3:" ++ T.unpack (unaryName op) ++ exprKey e
+    exprKey (Binary op e1 e2) = "4:" ++ T.unpack (binaryName op) ++ exprKey e1 ++ exprKey e2
+    exprKey (Agg (CollectAgg name _) e) = "5:" ++ T.unpack name ++ exprKey e
+    exprKey (Agg (FoldAgg name _ _) e) = "5:" ++ T.unpack name ++ exprKey e
 
 instance (Eq a, Columnable a) => Eq (Expr a) where
     (==) l r = eqNormalized (normalize l) (normalize r)
@@ -212,18 +264,12 @@ instance (Eq a, Columnable a) => Eq (Expr a) where
         eqNormalized (Lit v1) (Lit v2) = v1 == v2
         eqNormalized (If c1 t1 e1) (If c2 t2 e2) =
             c1 == c2 && t1 `exprEq` t2 && e1 `exprEq` e2
-        eqNormalized (UnaryOp n1 _ e1) (UnaryOp n2 _ e2) =
+        eqNormalized (Unary op1 e1) (Unary op2 e2) = unaryName op1 == unaryName op2 && e1 `exprEq` e2
+        eqNormalized (Binary op1 e1a e1b) (Binary op2 e2a e2b) = binaryName op1 == binaryName op2 && e1a `exprEq` e2a && e1b `exprEq` e2b
+        eqNormalized (Agg (CollectAgg n1 _) e1) (Agg (CollectAgg n2 _) e2) =
             n1 == n2 && e1 `exprEq` e2
-        eqNormalized (BinaryOp n1 _ e1a e1b) (BinaryOp n2 _ e2a e2b) =
-            n1 == n2 && e1a `exprEq` e2a && e1b `exprEq` e2b
-        eqNormalized (AggVector e1 n1 _) (AggVector e2 n2 _) =
+        eqNormalized (Agg (FoldAgg n1 _ _) e1) (Agg (FoldAgg n2 _ _) e2) =
             n1 == n2 && e1 `exprEq` e2
-        eqNormalized (AggReduce e1 n1 _) (AggReduce e2 n2 _) =
-            n1 == n2 && e1 `exprEq` e2
-        eqNormalized (AggNumericVector e1 n1 _) (AggNumericVector e2 n2 _) =
-            n1 == n2 && e1 `exprEq` e2
-        eqNormalized (AggFold e1 n1 i1 _) (AggFold e2 n2 i2 _) =
-            n1 == n2 && e1 `exprEq` e2 && i1 == i2
         eqNormalized _ _ = False
 
 instance (Ord a, Columnable a) => Ord (Expr a) where
@@ -233,35 +279,23 @@ instance (Ord a, Columnable a) => Ord (Expr a) where
         (Lit v1, Lit v2) -> compare v1 v2
         (If c1 t1 e1', If c2 t2 e2') ->
             compare c1 c2 <> exprComp t1 t2 <> exprComp e1' e2'
-        (UnaryOp n1 _ e1', UnaryOp n2 _ e2') ->
-            compare n1 n2 <> exprComp e1' e2'
-        (BinaryOp n1 _ a1 b1, BinaryOp n2 _ a2 b2) ->
-            compare n1 n2 <> exprComp a1 a2 <> exprComp b1 b2
-        (AggVector e1' n1 _, AggVector e2' n2 _) ->
-            compare n1 n2 <> exprComp e1' e2'
-        (AggReduce e1' n1 _, AggReduce e2' n2 _) ->
-            compare n1 n2 <> exprComp e1' e2'
-        (AggNumericVector e1' n1 _, AggNumericVector e2' n2 _) ->
-            compare n1 n2 <> exprComp e1' e2'
-        (AggFold e1' n1 i1 _, AggFold e2' n2 i2 _) ->
-            compare n1 n2 <> exprComp e1' e2' <> compare i1 i2
+        (Unary op1 e1', Unary op2 e2') -> compare (unaryName op1) (unaryName op2) <> exprComp e1' e2'
+        (Binary op1 a1 b1, Binary op2 a2 b2) ->
+            compare (binaryName op1) (binaryName op2) <> exprComp a1 a2 <> exprComp b1 b2
+        (Agg (CollectAgg n1 _) e1', Agg (CollectAgg n2 _) e2') -> compare n1 n2 <> exprComp e1' e2'
+        (Agg (FoldAgg n1 _ _) e1', Agg (FoldAgg n2 _ _) e2') -> compare n1 n2 <> exprComp e1' e2'
         -- Different constructors - compare by priority
         (Col _, _) -> LT
         (_, Col _) -> GT
         (Lit _, _) -> LT
         (_, Lit _) -> GT
-        (UnaryOp{}, _) -> LT
-        (_, UnaryOp{}) -> GT
-        (BinaryOp{}, _) -> LT
-        (_, BinaryOp{}) -> GT
+        (Unary{}, _) -> LT
+        (_, Unary{}) -> GT
+        (Binary{}, _) -> LT
+        (_, Binary{}) -> GT
         (If{}, _) -> LT
         (_, If{}) -> GT
-        (AggVector{}, _) -> LT
-        (_, AggVector{}) -> GT
-        (AggReduce{}, _) -> LT
-        (_, AggReduce{}) -> GT
-        (AggNumericVector{}, _) -> LT
-        (_, AggNumericVector{}) -> GT
+        (Agg{}, _) -> LT
 
 exprComp :: (Columnable b, Columnable c) => Expr b -> Expr c -> Ordering
 exprComp e1 e2 = case testEquality (typeOf e1) (typeOf e2) of
@@ -283,34 +317,25 @@ replaceExpr new old expr = case testEquality (typeRep @b) (typeRep @c) of
         (Lit _) -> expr
         (If cond l r) ->
             If (replaceExpr new old cond) (replaceExpr new old l) (replaceExpr new old r)
-        (UnaryOp name f value) -> UnaryOp name f (replaceExpr new old value)
-        (BinaryOp name f l r) -> BinaryOp name f (replaceExpr new old l) (replaceExpr new old r)
-        (AggNumericVector expr op f) -> AggNumericVector (replaceExpr new old expr) op f
-        (AggVector expr op f) -> AggVector (replaceExpr new old expr) op f
-        (AggReduce expr op f) -> AggReduce (replaceExpr new old expr) op f
-        (AggFold expr op acc f) -> AggFold (replaceExpr new old expr) op acc f
+        (Unary op value) -> Unary op (replaceExpr new old value)
+        (Binary op l r) -> Binary op (replaceExpr new old l) (replaceExpr new old r)
+        (Agg op expr) -> Agg op (replaceExpr new old expr)
 
 eSize :: Expr a -> Int
 eSize (Col _) = 1
 eSize (Lit _) = 1
 eSize (If c l r) = 1 + eSize c + eSize l + eSize r
-eSize (UnaryOp _ _ e) = 1 + eSize e
-eSize (BinaryOp _ _ l r) = 1 + eSize l + eSize r
-eSize (AggNumericVector expr op _) = eSize expr + 1
-eSize (AggVector expr op _) = eSize expr + 1
-eSize (AggReduce expr op _) = eSize expr + 1
-eSize (AggFold expr op _ _) = eSize expr + 1
+eSize (Unary _ e) = 1 + eSize e
+eSize (Binary _ l r) = 1 + eSize l + eSize r
+eSize (Agg strategy expr) = eSize expr + 1
 
 getColumns :: Expr a -> [T.Text]
 getColumns (Col cName) = [cName]
 getColumns expr@(Lit _) = []
 getColumns (If cond l r) = getColumns cond <> getColumns l <> getColumns r
-getColumns (UnaryOp name f value) = getColumns value
-getColumns (BinaryOp name f l r) = getColumns l <> getColumns r
-getColumns (AggNumericVector expr op f) = getColumns expr
-getColumns (AggVector expr op f) = getColumns expr
-getColumns (AggReduce expr op f) = getColumns expr
-getColumns (AggFold expr op acc f) = getColumns expr
+getColumns (Unary op value) = getColumns value
+getColumns (Binary op l r) = getColumns l <> getColumns r
+getColumns (Agg strategy expr) = getColumns expr
 
 prettyPrint :: Expr a -> String
 prettyPrint = go 0
@@ -321,32 +346,14 @@ prettyPrint = go 0
         Lit value -> show value
         If cond t e ->
             "if (" ++ go 0 cond ++ ") then (" ++ go 0 t ++ ") else (" ++ go 0 e ++ ")"
-        UnaryOp name _ arg -> T.unpack name ++ "(" ++ go 0 arg ++ ")"
-        BinaryOp name _ l r ->
-            let p = opPrec name
-                inner = go p l ++ " " ++ opSym name ++ " " ++ go p r
+        Unary op arg -> case unarySymbol op of
+            Nothing -> T.unpack (unaryName op) ++ "(" ++ go 0 arg ++ ")"
+            Just sym -> T.unpack sym ++ "(" ++ go 0 arg ++ ")"
+        Binary op l r ->
+            let p = binaryPrecedence op
+                inner = case binarySymbol op of
+                    Just name -> go p l ++ " " ++ T.unpack name ++ " " ++ go p r
+                    Nothing -> T.unpack (binaryName op) ++ "(" ++ go p l ++ ", " ++ go p r ++ ")"
              in if prec > p then "(" ++ inner ++ ")" else inner
-        AggVector arg op _ -> T.unpack op ++ "(" ++ go 0 arg ++ ")"
-        AggReduce arg op _ -> T.unpack op ++ "(" ++ go 0 arg ++ ")"
-        AggNumericVector arg op _ -> T.unpack op ++ "(" ++ go 0 arg ++ ")"
-        AggFold arg op _ _ -> T.unpack op ++ "(" ++ go 0 arg ++ ")"
-
-    opPrec :: T.Text -> Int
-    opPrec "add" = 1
-    opPrec "sub" = 1
-    opPrec "mult" = 2
-    opPrec "divide" = 2
-    opPrec "pow" = 3
-    opPrec _ = 0
-
-    opSym :: T.Text -> String
-    opSym "add" = "+"
-    opSym "sub" = "-"
-    opSym "mult" = "*"
-    opSym "divide" = "/"
-    opSym "pow" = "^"
-    opSym "lt" = "<"
-    opSym "leq" = "<="
-    opSym "gt" = ">"
-    opSym "geq" = ">="
-    opSym other = T.unpack other
+        Agg (CollectAgg op _) arg -> T.unpack op ++ "(" ++ go 0 arg ++ ")"
+        Agg (FoldAgg op _ _) arg -> T.unpack op ++ "(" ++ go 0 arg ++ ")"

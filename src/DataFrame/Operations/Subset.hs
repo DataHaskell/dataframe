@@ -341,7 +341,19 @@ sample pureGen p df =
      in
         df
             & insertUnboxedVector "__rand__" rand
-            & filterWhere (BinaryOp "geq" (>=) (Col @Double "__rand__") (Lit (1 - p)))
+            & filterWhere
+                ( Binary
+                    ( MkBinaryOp
+                        { binaryFn = (>=)
+                        , binaryName = "geq"
+                        , binarySymbol = Just ">="
+                        , binaryCommutative = False
+                        , binaryPrecedence = 1
+                        }
+                    )
+                    (Col @Double "__rand__")
+                    (Lit (1 - p))
+                )
             & exclude ["__rand__"]
 
 {- | Split a dataset into two. The first in the tuple gets a sample of p (0 <= p <= 1) and the second gets (1 - p). This is useful for creating test and train splits.
@@ -361,10 +373,34 @@ randomSplit pureGen p df =
         withRand = df & insertUnboxedVector "__rand__" rand
      in
         ( withRand
-            & filterWhere (BinaryOp "leq" (<=) (Col @Double "__rand__") (Lit p))
+            & filterWhere
+                ( Binary
+                    ( MkBinaryOp
+                        { binaryFn = (<=)
+                        , binaryName = "leq"
+                        , binarySymbol = Just "<="
+                        , binaryCommutative = False
+                        , binaryPrecedence = 1
+                        }
+                    )
+                    (Col @Double "__rand__")
+                    (Lit p)
+                )
             & exclude ["__rand__"]
         , withRand
-            & filterWhere (BinaryOp "gt" (>) (Col @Double "__rand__") (Lit p))
+            & filterWhere
+                ( Binary
+                    ( MkBinaryOp
+                        { binaryFn = (>)
+                        , binaryName = "gt"
+                        , binarySymbol = Just ">"
+                        , binaryCommutative = False
+                        , binaryPrecedence = 1
+                        }
+                    )
+                    (Col @Double "__rand__")
+                    (Lit p)
+                )
             & exclude ["__rand__"]
         )
 
@@ -386,9 +422,15 @@ kFolds pureGen folds df =
         singleFold n d =
             d
                 & filterWhere
-                    ( BinaryOp
-                        "geq"
-                        (>=)
+                    ( Binary
+                        ( MkBinaryOp
+                            { binaryFn = (>=)
+                            , binaryName = "geq"
+                            , binarySymbol = Just ">="
+                            , binaryCommutative = False
+                            , binaryPrecedence = 1
+                            }
+                        )
                         (Col @Double "__rand__")
                         (Lit (fromIntegral n * partitionSize))
                     )
@@ -399,9 +441,15 @@ kFolds pureGen folds df =
                 d'' =
                     d
                         & filterWhere
-                            ( BinaryOp
-                                "lt"
-                                (<)
+                            ( Binary
+                                ( MkBinaryOp
+                                    { binaryFn = (<)
+                                    , binaryName = "lt"
+                                    , binarySymbol = Just "<"
+                                    , binaryCommutative = False
+                                    , binaryPrecedence = 1
+                                    }
+                                )
                                 (Col @Double "__rand__")
                                 (Lit (fromIntegral n * partitionSize))
                             )

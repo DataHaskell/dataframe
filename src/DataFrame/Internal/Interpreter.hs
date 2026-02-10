@@ -43,36 +43,36 @@ interpret df (Col name) = maybe columnNotFound (pure . TColumn) (getColumn name 
   where
     columnNotFound = Left $ ColumnNotFoundException name "" (M.keys $ columnIndices df)
 -- Unary operations.
-interpret df expr@(UnaryOp _ (f :: c -> d) value) = first (handleInterpretException (show expr)) $ do
-    (TColumn value') <- interpret @c df value
-    fmap TColumn (mapColumn f value')
+interpret df expr@(Unary (op :: UnaryOp b c) value) = first (handleInterpretException (show expr)) $ do
+    (TColumn value') <- interpret df value
+    fmap TColumn (mapColumn (unaryFn op) value')
 -- Variations of binary operations.
-interpret df expr@(BinaryOp _ (f :: c -> d -> e) left right) = first (handleInterpretException (show expr)) $ case (left, right) of
-    (Lit left, Lit right) -> interpret df (Lit (f left right))
+interpret df expr@(Binary (op :: BinaryOp c b a) left right) = first (handleInterpretException (show expr)) $ case (left, right) of
+    (Lit left, Lit right) -> interpret df (Lit (binaryFn op left right))
     (Lit left, right) -> do
         -- If we have a literal then we don't have to materialise
         -- the column.
-        (TColumn value') <- interpret @d df right
-        fmap TColumn (mapColumn (f left) value')
+        (TColumn value') <- interpret df right
+        fmap TColumn (mapColumn (binaryFn op left) value')
     (left, Lit right) -> do
         -- Same as the above except the right side is the
         -- literl.
-        (TColumn value') <- interpret @c df left
-        fmap TColumn (mapColumn (`f` right) value')
+        (TColumn value') <- interpret df left
+        fmap TColumn (mapColumn (flip (binaryFn op) right) value')
     (_, _) -> do
         -- In the general case we interpret and zip.
-        (TColumn left') <- interpret @c df left
-        (TColumn right') <- interpret @d df right
-        fmap TColumn (zipWithColumns f left' right')
+        (TColumn left') <- interpret df left
+        (TColumn right') <- interpret df right
+        fmap TColumn (zipWithColumns (binaryFn op) left' right')
 -- Conditionals
 interpret df expr@(If cond l r) = first (handleInterpretException (show expr)) $ do
-    (TColumn conditions) <- interpret @Bool df cond
-    (TColumn left) <- interpret @a df l
-    (TColumn right) <- interpret @a df r
+    (TColumn conditions) <- interpret df cond
+    (TColumn left) <- interpret df l
+    (TColumn right) <- interpret df r
     let branch (c :: Bool) (l' :: a, r' :: a) = if c then l' else r'
     fmap TColumn (zipWithColumns branch conditions (zipColumns left right))
-interpret df expression@(AggVector expr op (f :: v b -> c)) = do
-    (TColumn column) <- interpret @b df expr
+interpret df expression@(Agg (CollectAgg op (f :: v b -> c)) expr) = do
+    (TColumn column) <- interpret df expr
     -- Helper for errors. Should probably find a way of throwing this
     -- without leaking the fact that we use `Vector` to users.
     let aggTypeError expected =
@@ -93,29 +93,15 @@ interpret df expression@(AggVector expr op (f :: v b -> c)) = do
         (BoxedColumn col) -> processColumn col
         (OptionalColumn col) -> processColumn col
         (UnboxedColumn col) -> processColumn col
-interpret df expression@(AggReduce expr op (f :: a -> a -> a)) = first (handleInterpretException (show expr)) $ do
-    (TColumn column) <- interpret @a df expr
-    value <- foldl1Column f column
+interpret df expression@(Agg (FoldAgg op (Just v) f) expr) = first (handleInterpretException (show expr)) $ do
+    (TColumn column) <- interpret df expr
+    value <- foldlColumn f v column
     pure $ TColumn $ fromVector $ V.replicate (fst $ dataframeDimensions df) value
-interpret df expression@(AggNumericVector expr op (f :: VU.Vector b -> c)) = first (handleInterpretException (show expression)) $ do
-    (TColumn column) <- interpret @b df expr
-    case column of
-        (UnboxedColumn (v :: VU.Vector d)) -> case testEquality (typeRep @d) (typeRep @b) of
-            Just Refl ->
-                pure $ TColumn $ fromVector $ V.replicate (fst $ dataframeDimensions df) (f v)
-            Nothing ->
-                Left $
-                    TypeMismatchException
-                        ( MkTypeErrorContext
-                            (Right (typeRep @b))
-                            (Right (typeRep @d))
-                            (Just "interpret")
-                            (Just (show expression))
-                        )
-        _ -> error "Trying to apply numeric computation to non-numeric column"
-interpret df expression@(AggFold expr op start (f :: (a -> b -> a))) = first (handleInterpretException (show expression)) $ do
-    (TColumn column) <- interpret @b df expr
-    value <- foldlColumn f start column
+interpret df expression@(Agg (FoldAgg op Nothing (f :: a -> b -> a)) expr) = first (handleInterpretException (show expr)) $ do
+    (TColumn column) <- interpret df expr
+    value <- case testEquality (typeRep @a) (typeRep @b) of
+        Just Refl -> foldl1Column f column
+        Nothing -> error "Type error"
     pure $ TColumn $ fromVector $ V.replicate (fst $ dataframeDimensions df) value
 
 data AggregationResult a
@@ -138,8 +124,8 @@ interpretAggregation gdf@(Grouped df names indices os) (Col name) = case getColu
     Just (OptionalColumn col) -> Right $ UnAggregated $ fromVector $ mkUnaggregatedColumnBoxed col os indices
     Just (UnboxedColumn col) ->
         Right $ UnAggregated $ fromVector $ mkUnaggregatedColumnUnboxed col os indices
-interpretAggregation gdf expression@(UnaryOp _ (f :: c -> d) expr) =
-    case interpretAggregation @c gdf expr of
+interpretAggregation gdf expression@(Unary (op :: UnaryOp b a) expr) =
+    case interpretAggregation @b gdf expr of
         Left (TypeMismatchException context) ->
             Left $
                 TypeMismatchException
@@ -150,105 +136,95 @@ interpretAggregation gdf expression@(UnaryOp _ (f :: c -> d) expr) =
                     )
         Left e -> Left e
         Right (UnAggregated unaggregated) -> case unaggregated of
-            BoxedColumn (col :: V.Vector b) -> case testEquality (typeRep @b) (typeRep @(V.Vector c)) of
-                Just Refl -> case sUnbox @d of
-                    SFalse -> Right $ UnAggregated $ fromVector $ V.map (V.map f) col
+            BoxedColumn (col :: V.Vector c) -> case testEquality (typeRep @c) (typeRep @(V.Vector b)) of
+                Just Refl -> case sUnbox @a of
+                    SFalse -> Right $ UnAggregated $ fromVector $ V.map (V.map (unaryFn op)) col
                     STrue ->
                         Right $
                             UnAggregated $
                                 fromVector $
-                                    V.map (V.convert @V.Vector @d @VU.Vector . V.map f) col
-                Nothing -> case testEquality (typeRep @b) (typeRep @(VU.Vector c)) of
-                    Nothing -> Left $ nestedTypeException @b @c (show expression)
-                    Just Refl -> case (sUnbox @c, sUnbox @a) of
+                                    V.map (V.convert @V.Vector @a @VU.Vector . V.map (unaryFn op)) col
+                Nothing -> case testEquality (typeRep @c) (typeRep @(VU.Vector b)) of
+                    Nothing -> Left $ nestedTypeException @c @a (show expression)
+                    Just Refl -> case (sUnbox @b, sUnbox @a) of
                         (SFalse, _) -> Left $ InternalException "Boxed type inside an unboxed column"
-                        (STrue, STrue) -> Right $ UnAggregated $ fromVector $ V.map (VU.map f) col
-                        (STrue, _) -> Right $ UnAggregated $ fromVector $ V.map (V.map f . VU.convert) col
+                        (STrue, STrue) -> Right $ UnAggregated $ fromVector $ V.map (VU.map (unaryFn op)) col
+                        (STrue, _) ->
+                            Right $ UnAggregated $ fromVector $ V.map (V.map (unaryFn op) . VU.convert) col
             _ -> Left $ InternalException "Aggregated into a non-boxed column"
-        Right (Aggregated (TColumn aggregated)) -> case mapColumn f aggregated of
+        Right (Aggregated (TColumn aggregated)) -> case mapColumn (unaryFn op) aggregated of
             Left e -> Left e
             Right col -> Right $ Aggregated $ TColumn col
-interpretAggregation gdf expression@(BinaryOp name (f :: c -> d -> e) left (Lit (right :: g))) = case testEquality (typeRep @g) (typeRep @d) of
-    Just Refl -> interpretAggregation gdf (UnaryOp name (`f` right) left)
-    Nothing ->
-        Left $
-            TypeMismatchException
-                ( MkTypeErrorContext
-                    { userType = Right (typeRep @g)
-                    , expectedType = Right (typeRep @d)
-                    , callingFunctionName = Just "interpretAggregation"
-                    , errorColumnName = Just (show expression)
-                    }
-                )
-interpretAggregation gdf expression@(BinaryOp name (f :: c -> d -> e) (Lit (left :: g)) right) = case testEquality (typeRep @g) (typeRep @c) of
-    Just Refl -> interpretAggregation gdf (UnaryOp name (f left) right)
-    Nothing ->
-        Left $
-            TypeMismatchException
-                ( MkTypeErrorContext
-                    { userType = Right (typeRep @g)
-                    , expectedType = Right (typeRep @c)
-                    , callingFunctionName = Just "interpretAggregation"
-                    , errorColumnName = Just (show expression)
-                    }
-                )
-interpretAggregation gdf expression@(BinaryOp _ (f :: c -> d -> e) left right) =
-    case (interpretAggregation @c gdf left, interpretAggregation @d gdf right) of
-        (Right (Aggregated (TColumn left')), Right (Aggregated (TColumn right'))) -> case zipWithColumns f left' right' of
+interpretAggregation gdf expression@(Binary (op :: t c b a) left (Lit (right :: b))) =
+    interpretAggregation
+        gdf
+        (Unary (MkUnaryOp (flip (binaryFn op) right) "udf" Nothing) left)
+interpretAggregation gdf expression@(Binary (op :: BinaryOp c b a) (Lit (left :: c)) right) =
+    interpretAggregation
+        gdf
+        (Unary (MkUnaryOp (binaryFn op left) "udf" Nothing) right)
+interpretAggregation gdf expression@(Binary (op :: BinaryOp c b a) left right) =
+    case (interpretAggregation gdf left, interpretAggregation gdf right) of
+        (Right (Aggregated (TColumn left')), Right (Aggregated (TColumn right'))) -> case zipWithColumns (binaryFn op) left' right' of
             Left e -> Left e
             Right col -> Right $ Aggregated $ TColumn col
         (Right (UnAggregated left'), Right (UnAggregated right')) -> case (left', right') of
             (BoxedColumn (l :: V.Vector m), BoxedColumn (r :: V.Vector n)) -> case testEquality (typeRep @m) (typeRep @(VU.Vector c)) of
-                Just Refl -> case testEquality (typeRep @n) (typeRep @(VU.Vector d)) of
-                    Just Refl -> case (sUnbox @c, sUnbox @d, sUnbox @e) of
+                Just Refl -> case testEquality (typeRep @n) (typeRep @(VU.Vector b)) of
+                    Just Refl -> case (sUnbox @c, sUnbox @b, sUnbox @a) of
                         (STrue, STrue, STrue) ->
-                            Right $ UnAggregated $ fromVector $ V.zipWith (VU.zipWith f) l r
+                            Right $ UnAggregated $ fromVector $ V.zipWith (VU.zipWith (binaryFn op)) l r
                         (STrue, STrue, SFalse) ->
                             Right $
                                 UnAggregated $
                                     fromVector $
-                                        V.zipWith (\l' r' -> V.zipWith f (V.convert l') (V.convert r')) l r
+                                        V.zipWith (\l' r' -> V.zipWith (binaryFn op) (V.convert l') (V.convert r')) l r
                         (_, _, _) -> Left $ InternalException "Boxed vectors contain unboxed types"
-                    Nothing -> case testEquality (typeRep @n) (typeRep @(V.Vector d)) of
+                    Nothing -> case testEquality (typeRep @n) (typeRep @(V.Vector b)) of
                         Just Refl -> case sUnbox @c of
                             STrue ->
                                 Right $
                                     UnAggregated $
                                         fromVector $
-                                            V.zipWith (V.zipWith f . V.convert) l r
+                                            V.zipWith (V.zipWith (binaryFn op) . V.convert) l r
                             SFalse -> Left $ InternalException "Unboxed vectors contain boxed types"
-                        Nothing -> Left $ nestedTypeException @n @d (show right)
+                        Nothing -> Left $ nestedTypeException @n @b (show right)
                 Nothing -> case testEquality (typeRep @m) (typeRep @(V.Vector c)) of
                     Nothing -> Left $ nestedTypeException @m @c (show left)
-                    Just Refl -> case testEquality (typeRep @n) (typeRep @(VU.Vector d)) of
-                        Just Refl -> case (sUnbox @d, sUnbox @e) of
+                    Just Refl -> case testEquality (typeRep @n) (typeRep @(VU.Vector b)) of
+                        Just Refl -> case (sUnbox @b, sUnbox @a) of
                             (STrue, STrue) ->
                                 Right $
                                     UnAggregated $
                                         fromVector $
                                             V.zipWith
-                                                (\l' r' -> V.convert @V.Vector @e @VU.Vector $ V.zipWith f l' (V.convert r'))
+                                                ( \l' r' ->
+                                                    V.convert @V.Vector @a @VU.Vector $ V.zipWith (binaryFn op) l' (V.convert r')
+                                                )
                                                 l
                                                 r
                             (STrue, SFalse) ->
                                 Right $
                                     UnAggregated $
                                         fromVector $
-                                            V.zipWith (\l' r' -> V.zipWith f l' (V.convert r')) l r
+                                            V.zipWith (\l' r' -> V.zipWith (binaryFn op) l' (V.convert r')) l r
                             (_, _) -> Left $ InternalException "Unboxed vectors contain boxed types"
-                        Nothing -> case testEquality (typeRep @n) (typeRep @(V.Vector d)) of
-                            Just Refl -> case sUnbox @e of
+                        Nothing -> case testEquality (typeRep @n) (typeRep @(V.Vector b)) of
+                            Just Refl -> case sUnbox @a of
                                 SFalse ->
                                     Right $
                                         UnAggregated $
                                             fromVector $
-                                                V.zipWith (V.zipWith f . V.convert) l r
+                                                V.zipWith (V.zipWith (binaryFn op) . V.convert) l r
                                 STrue ->
                                     Right $
                                         UnAggregated $
                                             fromVector $
-                                                V.zipWith (\l' r' -> V.convert @V.Vector @e @VU.Vector $ V.zipWith f l' r') l r
-                            Nothing -> Left $ nestedTypeException @n @d (show right)
+                                                V.zipWith
+                                                    (\l' r' -> V.convert @V.Vector @a @VU.Vector $ V.zipWith (binaryFn op) l' r')
+                                                    l
+                                                    r
+                            Nothing -> Left $ nestedTypeException @n @b (show right)
             _ -> Left $ InternalException "Aggregated into a non-boxed column"
         (Right _, Right _) ->
             Left $
@@ -571,7 +547,7 @@ interpretAggregation gdf expression@(If cond l r) =
                         }
                     )
         (_, _, Left e) -> Left e
-interpretAggregation gdf@(Grouped df names indices os) expression@(AggVector expr op (f :: v b -> c)) =
+interpretAggregation gdf@(Grouped df names indices os) expression@(Agg (CollectAgg op (f :: v b -> c)) expr) =
     case interpretAggregation @b gdf expr of
         Right (UnAggregated (BoxedColumn (col :: V.Vector d))) -> case testEquality (typeRep @(v b)) (typeRep @d) of
             Nothing -> Left $ nestedTypeException @d @b (show expr)
@@ -630,93 +606,9 @@ interpretAggregation gdf@(Grouped df names indices os) expression@(AggVector exp
                         }
                     )
         (Left e) -> Left e
-interpretAggregation gdf@(Grouped df names indices os) expression@(AggNumericVector (Col name) op (f :: VU.Vector b -> c)) =
-    case getColumn name df of
-        -- TODO(mchavinda): Fix the compedium of type errors here
-        -- This is mostly done help with the benchmarking.
-        Nothing -> Left $ ColumnNotFoundException name "" (M.keys $ columnIndices df)
-        Just (BoxedColumn col) -> error "Type mismatch."
-        Just (OptionalColumn col) -> error "Type mismatch."
-        Just (UnboxedColumn (col :: VU.Vector d)) -> case testEquality (typeRep @b) (typeRep @d) of
-            Just Refl -> case testEquality (typeRep @c) (typeRep @a) of
-                Just Refl ->
-                    Right $
-                        Aggregated $
-                            TColumn $
-                                fromUnboxedVector $
-                                    mkAggregatedColumnUnboxed col os indices f
-                Nothing -> error "Type mismatch"
-            Nothing -> error "Type mismatch"
-interpretAggregation gdf@(Grouped df names indices os) expression@(AggNumericVector expr op (f :: VU.Vector b -> c)) =
-    case interpretAggregation @b gdf expr of
-        (Left (TypeMismatchException context)) ->
-            Left $
-                TypeMismatchException
-                    ( context
-                        { callingFunctionName = Just "interpretAggregation"
-                        , errorColumnName = Just (show expression)
-                        }
-                    )
-        (Left e) -> Left e
-        Right (UnAggregated (BoxedColumn (col :: V.Vector d))) -> case testEquality (typeRep @(VU.Vector b)) (typeRep @d) of
-            Nothing -> case testEquality (typeRep @(VU.Vector Int)) (typeRep @d) of
-                Nothing -> case testEquality (typeRep @(V.Vector Integer)) (typeRep @d) of
-                    Nothing -> Left $ nestedTypeException @d @b (show expr)
-                    Just Refl ->
-                        Right $
-                            Aggregated $
-                                TColumn $
-                                    fromVector $
-                                        V.map (f . VU.convert . V.map fromIntegral) col
-                Just Refl ->
-                    Right $
-                        Aggregated $
-                            TColumn $
-                                fromVector $
-                                    V.map f (V.map (VU.map fromIntegral) col)
-            Just Refl -> Right $ Aggregated $ TColumn $ fromVector $ V.map f col
-        Right (UnAggregated _) -> Left $ InternalException "Aggregated into non-boxed column"
-        Right (Aggregated (TColumn (BoxedColumn (col :: V.Vector d)))) -> case testEquality (typeRep @Integer) (typeRep @d) of
-            Just Refl -> interpretAggregation @c gdf (Lit ((f . V.convert . V.map fromIntegral) col))
-            Nothing ->
-                Left $
-                    TypeMismatchException
-                        ( MkTypeErrorContext
-                            { userType = Right (typeRep @b)
-                            , expectedType = Right (typeRep @d)
-                            , callingFunctionName = Just "interpretAggregation"
-                            , errorColumnName = Just (show expr)
-                            }
-                        )
-        Right (Aggregated (TColumn (UnboxedColumn (col :: VU.Vector d)))) -> case testEquality (typeRep @b) (typeRep @d) of
-            Just Refl -> interpretAggregation @c gdf (Lit (f col))
-            Nothing ->
-                Left $
-                    TypeMismatchException
-                        ( MkTypeErrorContext
-                            { userType = Right (typeRep @b)
-                            , expectedType = Right (typeRep @d)
-                            , callingFunctionName = Just "interpretAggregation"
-                            , errorColumnName = Just (show expr)
-                            }
-                        )
-        Right (Aggregated (TColumn (OptionalColumn (col :: V.Vector (Maybe d))))) -> case testEquality (typeRep @b) (typeRep @d) of
-            Just Refl ->
-                interpretAggregation @c
-                    gdf
-                    (Lit ((f . V.convert . V.map (fromMaybe 0) . V.filter isJust) col))
-            Nothing ->
-                Left $
-                    TypeMismatchException
-                        ( MkTypeErrorContext
-                            { userType = Right (typeRep @b)
-                            , expectedType = Right (typeRep @d)
-                            , callingFunctionName = Just "interpretAggregation"
-                            , errorColumnName = Just (show expr)
-                            }
-                        )
-interpretAggregation gdf@(Grouped df names indices os) expression@(AggReduce (Col name) op (f :: a -> a -> a)) =
-    case getColumn name df of
+interpretAggregation gdf@(Grouped df names indices os) expression@(Agg (FoldAgg op Nothing (f :: a -> b -> a)) (Col name)) = case testEquality (typeRep @a) (typeRep @b) of
+    Nothing -> error "Type mismatch"
+    Just Refl -> case getColumn name df of
         Nothing -> Left $ ColumnNotFoundException name "" (M.keys $ columnIndices df)
         Just (BoxedColumn (col :: V.Vector d)) -> case testEquality (typeRep @a) (typeRep @d) of
             Nothing -> error "Type mismatch"
@@ -742,8 +634,9 @@ interpretAggregation gdf@(Grouped df names indices os) expression@(AggReduce (Co
                             fromUnboxedVector $
                                 mkReducedColumnUnboxed col os indices f
             Nothing -> error "Type mismatch"
-interpretAggregation gdf@(Grouped df names indices os) expression@(AggReduce expr op (f :: a -> a -> a)) =
-    case interpretAggregation @a gdf expr of
+interpretAggregation gdf@(Grouped df names indices os) expression@(Agg (FoldAgg op Nothing (f :: a -> b -> a)) expr) = case testEquality (typeRep @a) (typeRep @b) of
+    Nothing -> error "Type mismatch"
+    Just Refl -> case interpretAggregation @a gdf expr of
         (Left (TypeMismatchException context)) ->
             Left $
                 TypeMismatchException
@@ -774,8 +667,8 @@ interpretAggregation gdf@(Grouped df names indices os) expression@(AggReduce exp
         Right (Aggregated (TColumn column)) -> case foldl1Column f column of
             Left e -> Left e
             Right value -> interpretAggregation @a gdf (Lit value)
-interpretAggregation gdf@(Grouped df names indices os) expression@(AggFold expr op s (f :: (a -> b -> a))) =
-    case interpretAggregation @b gdf expr of
+interpretAggregation gdf@(Grouped df names indices os) expression@(Agg (FoldAgg op (Just s) (f :: a -> b -> a)) expr) =
+    case interpretAggregation gdf expr of
         (Left (TypeMismatchException context)) ->
             Left $
                 TypeMismatchException
