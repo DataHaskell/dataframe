@@ -99,10 +99,11 @@ interpret df expression@(Agg (FoldAgg op (Just v) f) expr) = first (handleInterp
     pure $ TColumn $ fromVector $ V.replicate (fst $ dataframeDimensions df) value
 interpret df expression@(Agg (FoldAgg op Nothing (f :: a -> b -> a)) expr) = first (handleInterpretException (show expr)) $ do
     (TColumn column) <- interpret df expr
-    value <- case testEquality (typeRep @a) (typeRep @b) of
-        Just Refl -> foldl1Column f column
+    case testEquality (typeRep @a) (typeRep @b) of
+        Just Refl -> do
+            value <- foldl1Column f column
+            pure $ TColumn $ fromVector $ V.replicate (fst $ dataframeDimensions df) value
         Nothing -> error "Type error"
-    pure $ TColumn $ fromVector $ V.replicate (fst $ dataframeDimensions df) value
 
 data AggregationResult a
     = UnAggregated Column
