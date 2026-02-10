@@ -17,7 +17,6 @@ module DataFrame.Internal.Interpreter where
 import Control.Monad.ST (runST)
 import Data.Bifunctor
 import qualified Data.Map as M
-import Data.Maybe (fromMaybe, isJust)
 import qualified Data.Text as T
 import Data.Type.Equality (TestEquality (testEquality), type (:~:) (Refl))
 import qualified Data.Vector as V
