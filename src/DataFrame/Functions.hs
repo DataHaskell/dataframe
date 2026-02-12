@@ -44,6 +44,7 @@ import Text.Regex.TDFA
 import Prelude hiding (maximum, minimum)
 import Prelude as P
 
+infix 8 .^^, `div`
 infix 4 .==, .<, .<=, .>=, .>, ./=
 infixr 3 .&&
 infixr 2 .||
@@ -125,10 +126,10 @@ toDouble =
         )
 
 div :: (Integral a, Columnable a) => Expr a -> Expr a -> Expr a
-div = lift2Decorated Prelude.div "div" (Just "//") False 2
+div = lift2Decorated Prelude.div "div" (Just "//") False 7
 
 mod :: (Integral a, Columnable a) => Expr a -> Expr a -> Expr a
-mod = lift2Decorated Prelude.mod "mod" Nothing False 2
+mod = lift2Decorated Prelude.mod "mod" Nothing False 7
 
 (.==) :: (Columnable a, Eq a) => Expr a -> Expr a -> Expr Bool
 (.==) =
@@ -138,7 +139,7 @@ mod = lift2Decorated Prelude.mod "mod" Nothing False 2
             , binaryName = "eq"
             , binarySymbol = Just "=="
             , binaryCommutative = True
-            , binaryPrecedence = 1
+            , binaryPrecedence = 4
             }
         )
 
@@ -150,7 +151,7 @@ mod = lift2Decorated Prelude.mod "mod" Nothing False 2
             , binaryName = "neq"
             , binarySymbol = Just "/="
             , binaryCommutative = True
-            , binaryPrecedence = 1
+            , binaryPrecedence = 4
             }
         )
 
@@ -165,7 +166,7 @@ eq = (.==)
             , binaryName = "lt"
             , binarySymbol = Just "<"
             , binaryCommutative = False
-            , binaryPrecedence = 1
+            , binaryPrecedence = 4
             }
         )
 
@@ -180,7 +181,7 @@ lt = (.<)
             , binaryName = "gt"
             , binarySymbol = Just ">"
             , binaryCommutative = False
-            , binaryPrecedence = 1
+            , binaryPrecedence = 4
             }
         )
 
@@ -195,7 +196,7 @@ gt = (.>)
             , binaryName = "leq"
             , binarySymbol = Just "<="
             , binaryCommutative = False
-            , binaryPrecedence = 1
+            , binaryPrecedence = 4
             }
         )
 
@@ -210,7 +211,7 @@ leq = (.<=)
             , binaryName = "geq"
             , binarySymbol = Just ">="
             , binaryCommutative = False
-            , binaryPrecedence = 1
+            , binaryPrecedence = 4
             }
         )
 
@@ -228,7 +229,7 @@ and = (.&&)
             , binaryName = "and"
             , binarySymbol = Just "&&"
             , binaryCommutative = True
-            , binaryPrecedence = 1
+            , binaryPrecedence = 3
             }
         )
 
@@ -243,7 +244,7 @@ or = (.||)
             , binaryName = "or"
             , binarySymbol = Just "||"
             , binaryCommutative = True
-            , binaryPrecedence = 1
+            , binaryPrecedence = 2
             }
         )
 
@@ -328,10 +329,10 @@ zScore :: Expr Double -> Expr Double
 zScore c = (c - mean c) / stddev c
 
 pow :: (Columnable a, Num a) => Expr a -> Int -> Expr a
-pow _ 0 = Lit 1
-pow (Lit n) i = Lit (n ^ i)
-pow expr 1 = expr
-pow expr i = lift2Decorated (^) "pow" (Just "^") False 3 expr (lit i)
+pow expr i = lift2Decorated (^) "pow" (Just "^") False 8 expr (lit i)
+
+(.^^) :: (Columnable a, Num a) => Expr a -> Int -> Expr a
+(.^^) = pow
 
 relu :: (Columnable a, Num a, Ord a) => Expr a -> Expr a
 relu = lift (Prelude.max 0)

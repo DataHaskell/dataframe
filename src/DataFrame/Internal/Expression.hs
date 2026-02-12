@@ -68,7 +68,7 @@ instance (Num a, Columnable a) => Num (Expr a) where
                 , binaryName = "add"
                 , binarySymbol = Just "+"
                 , binaryCommutative = True
-                , binaryPrecedence = 1
+                , binaryPrecedence = 6
                 }
             )
 
@@ -80,7 +80,7 @@ instance (Num a, Columnable a) => Num (Expr a) where
                 , binaryName = "sub"
                 , binarySymbol = Just "-"
                 , binaryCommutative = False
-                , binaryPrecedence = 1
+                , binaryPrecedence = 6
                 }
             )
 
@@ -92,7 +92,7 @@ instance (Num a, Columnable a) => Num (Expr a) where
                 , binaryName = "mult"
                 , binarySymbol = Just "*"
                 , binaryCommutative = True
-                , binaryPrecedence = 2
+                , binaryPrecedence = 7
                 }
             )
 
@@ -133,7 +133,7 @@ instance (Fractional a, Columnable a) => Fractional (Expr a) where
                 , binaryName = "divide"
                 , binarySymbol = Just "/"
                 , binaryCommutative = True
-                , binaryPrecedence = 2
+                , binaryPrecedence = 7
                 }
             )
 
@@ -160,7 +160,7 @@ instance (Floating a, Columnable a) => Floating (Expr a) where
                 , binaryName = "exponentiate"
                 , binarySymbol = Just "**"
                 , binaryCommutative = False
-                , binaryPrecedence = 3
+                , binaryPrecedence = 8
                 }
             )
     log :: (Floating a, Columnable a) => Expr a -> Expr a
@@ -338,22 +338,37 @@ getColumns (Binary op l r) = getColumns l <> getColumns r
 getColumns (Agg strategy expr) = getColumns expr
 
 prettyPrint :: Expr a -> String
-prettyPrint = go 0
+prettyPrint = go 0 0
   where
-    go :: Int -> Expr a -> String
-    go prec expr = case expr of
+    indent :: Int -> String
+    indent n = replicate (n * 2) ' '
+
+    go :: Int -> Int -> Expr a -> String
+    go depth prec expr = case expr of
         Col name -> T.unpack name
         Lit value -> show value
         If cond t e ->
-            "if (" ++ go 0 cond ++ ") then (" ++ go 0 t ++ ") else (" ++ go 0 e ++ ")"
+            let inner =
+                    "if "
+                        ++ go (depth + 1) 0 cond
+                        ++ "\n"
+                        ++ indent (depth + 1)
+                        ++ "then "
+                        ++ go (depth + 1) 0 t
+                        ++ "\n"
+                        ++ indent (depth + 1)
+                        ++ "else "
+                        ++ go (depth + 1) 0 e
+             in if prec > 0 then "(" ++ inner ++ ")" else inner
         Unary op arg -> case unarySymbol op of
-            Nothing -> T.unpack (unaryName op) ++ "(" ++ go 0 arg ++ ")"
-            Just sym -> T.unpack sym ++ "(" ++ go 0 arg ++ ")"
+            Nothing -> T.unpack (unaryName op) ++ "(" ++ go depth 0 arg ++ ")"
+            Just sym -> T.unpack sym ++ "(" ++ go depth 0 arg ++ ")"
         Binary op l r ->
             let p = binaryPrecedence op
                 inner = case binarySymbol op of
-                    Just name -> go p l ++ " " ++ T.unpack name ++ " " ++ go p r
-                    Nothing -> T.unpack (binaryName op) ++ "(" ++ go p l ++ ", " ++ go p r ++ ")"
+                    Just name -> go depth p l ++ " " ++ T.unpack name ++ " " ++ go depth p r
+                    Nothing ->
+                        T.unpack (binaryName op) ++ "(" ++ go depth p l ++ ", " ++ go depth p r ++ ")"
              in if prec > p then "(" ++ inner ++ ")" else inner
-        Agg (CollectAgg op _) arg -> T.unpack op ++ "(" ++ go 0 arg ++ ")"
-        Agg (FoldAgg op _ _) arg -> T.unpack op ++ "(" ++ go 0 arg ++ ")"
+        Agg (CollectAgg op _) arg -> T.unpack op ++ "(" ++ go depth 0 arg ++ ")"
+        Agg (FoldAgg op _ _) arg -> T.unpack op ++ "(" ++ go depth 0 arg ++ ")"
