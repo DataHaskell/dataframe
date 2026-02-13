@@ -226,7 +226,7 @@ pow :: (Columnable a, Num a) => Expr a -> Int -> Expr a
 pow = (.^^)
 
 relu :: (Columnable a, Num a, Ord a) => Expr a -> Expr a
-relu = lift (Prelude.max 0)
+relu = liftDecorated (Prelude.max 0) "relu" Nothing
 
 min :: (Columnable a, Ord a) => Expr a -> Expr a -> Expr a
 min = lift2Decorated Prelude.min "max" Nothing True 1
@@ -240,19 +240,19 @@ reduce ::
 reduce expr start f = Agg (FoldAgg "foldUdf" (Just start) f) expr
 
 toMaybe :: (Columnable a) => Expr a -> Expr (Maybe a)
-toMaybe = lift Just
+toMaybe = liftDecorated Just "toMaybe" Nothing
 
 fromMaybe :: (Columnable a) => a -> Expr (Maybe a) -> Expr a
-fromMaybe d = lift (Maybe.fromMaybe d)
+fromMaybe d = liftDecorated (Maybe.fromMaybe d) "fromMaybe" Nothing
 
 isJust :: (Columnable a) => Expr (Maybe a) -> Expr Bool
-isJust = lift Maybe.isJust
+isJust = liftDecorated Maybe.isJust "isJust" Nothing
 
 isNothing :: (Columnable a) => Expr (Maybe a) -> Expr Bool
-isNothing = lift Maybe.isNothing
+isNothing = liftDecorated Maybe.isNothing "isNothing" Nothing
 
 fromJust :: (Columnable a) => Expr (Maybe a) -> Expr a
-fromJust = lift Maybe.fromJust
+fromJust = liftDecorated Maybe.fromJust "fromJust" Nothing
 
 whenPresent ::
     forall a b.
@@ -268,7 +268,14 @@ whenBothPresent f = lift2 (\l r -> f <$> l <*> r)
 recode ::
     forall a b.
     (Columnable a, Columnable b) => [(a, b)] -> Expr a -> Expr (Maybe b)
-recode mapping = lift (`lookup` mapping)
+recode mapping =
+    Unary
+        ( MkUnaryOp
+            { unaryFn = (`lookup` mapping)
+            , unaryName = "recode " <> T.pack (show mapping)
+            , unarySymbol = Nothing
+            }
+        )
 
 recodeWithCondition ::
     forall a b.
@@ -280,28 +287,55 @@ recodeWithCondition fallback ((cond, value) : rest) expr = ifThenElse (cond expr
 recodeWithDefault ::
     forall a b.
     (Columnable a, Columnable b) => b -> [(a, b)] -> Expr a -> Expr b
-recodeWithDefault d mapping = lift (Maybe.fromMaybe d . (`lookup` mapping))
+recodeWithDefault d mapping =
+    Unary
+        ( MkUnaryOp
+            { unaryFn = Maybe.fromMaybe d . (`lookup` mapping)
+            , unaryName =
+                "recodeWithDefault " <> T.pack (show d) <> " " <> T.pack (show mapping)
+            , unarySymbol = Nothing
+            }
+        )
 
 firstOrNothing :: (Columnable a) => Expr [a] -> Expr (Maybe a)
-firstOrNothing = lift Maybe.listToMaybe
+firstOrNothing = liftDecorated Maybe.listToMaybe "firstOrNothing" Nothing
 
 lastOrNothing :: (Columnable a) => Expr [a] -> Expr (Maybe a)
-lastOrNothing = lift (Maybe.listToMaybe . reverse)
+lastOrNothing = liftDecorated (Maybe.listToMaybe . reverse) "lastOrNothing" Nothing
 
 splitOn :: T.Text -> Expr T.Text -> Expr [T.Text]
-splitOn delim = lift (T.splitOn delim)
+splitOn delim = liftDecorated (T.splitOn delim) "splitOn" Nothing
 
 match :: T.Text -> Expr T.Text -> Expr (Maybe T.Text)
-match regex = lift ((\r -> if T.null r then Nothing else Just r) . (=~ regex))
+match regex =
+    liftDecorated
+        ((\r -> if T.null r then Nothing else Just r) . (=~ regex))
+        ("match " <> T.pack (show regex))
+        Nothing
 
 matchAll :: T.Text -> Expr T.Text -> Expr [T.Text]
-matchAll regex = lift (getAllTextMatches . (=~ regex))
+matchAll regex =
+    liftDecorated
+        (getAllTextMatches . (=~ regex))
+        ("matchAll " <> T.pack (show regex))
+        Nothing
 
-parseDate :: T.Text -> Expr T.Text -> Expr (Maybe Day)
-parseDate format = lift (parseTimeM True defaultTimeLocale (T.unpack format) . T.unpack)
+parseDate ::
+    (ParseTime t, Columnable t) => T.Text -> Expr T.Text -> Expr (Maybe t)
+parseDate format =
+    liftDecorated
+        (parseTimeM True defaultTimeLocale (T.unpack format) . T.unpack)
+        ("parseDate " <> format)
+        Nothing
 
 daysBetween :: Expr Day -> Expr Day -> Expr Int
-daysBetween d1 d2 = lift fromIntegral (lift2 diffDays d1 d2)
+daysBetween =
+    lift2Decorated
+        (\d1 d2 -> fromIntegral (diffDays d1 d2))
+        "daysBetween"
+        Nothing
+        True
+        2
 
 bind ::
     forall a b m.

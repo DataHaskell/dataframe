@@ -1,16 +1,24 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
+
 module DataFrame.Operators where
 
-import DataFrame.Internal.Column ( Columnable )
-import DataFrame.Internal.Expression
-    ( Expr(Lit, Binary),
-      NamedExpr,
-      UExpr(UExpr),
-      BinaryOp(MkBinaryOp, binaryPrecedence, binaryFn, binaryName,
-               binarySymbol, binaryCommutative) )
 import Data.Function ((&))
 import qualified Data.Text as T
+import DataFrame.Internal.Column (Columnable)
+import DataFrame.Internal.Expression (
+    BinaryOp (
+        MkBinaryOp,
+        binaryCommutative,
+        binaryFn,
+        binaryName,
+        binaryPrecedence,
+        binarySymbol
+    ),
+    Expr (Binary, Lit),
+    NamedExpr,
+    UExpr (UExpr),
+ )
 
 infix 8 .^^
 infix 4 .==, .<, .<=, .>=, .>, ./=
@@ -124,7 +132,8 @@ as expr name = (name, UExpr expr)
         )
 
 (.^^) :: (Columnable a, Num a) => Expr a -> Int -> Expr a
-(.^^) expr i = Binary
+(.^^) expr i =
+    Binary
         ( MkBinaryOp
             { binaryFn = (^)
             , binaryName = "pow"
@@ -132,4 +141,6 @@ as expr name = (name, UExpr expr)
             , binaryCommutative = False
             , binaryPrecedence = 8
             }
-        ) expr (Lit i)
+        )
+        expr
+        (Lit i)

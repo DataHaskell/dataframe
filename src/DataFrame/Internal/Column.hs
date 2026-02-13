@@ -68,6 +68,10 @@ instance (Ord a) => Ord (TypedColumn a) where
 unwrapTypedColumn :: TypedColumn a -> Column
 unwrapTypedColumn (TColumn value) = value
 
+-- | Gets the underlying vector from a TypedColumn.
+vectorFromTypedColumn :: TypedColumn a -> VB.Vector a
+vectorFromTypedColumn (TColumn value) = either throw id (toVector value)
+
 -- | Checks if a column contains missing values.
 hasMissing :: Column -> Bool
 hasMissing (OptionalColumn column) = True
