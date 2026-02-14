@@ -257,22 +257,22 @@ aggregate :: [NamedExpr] -> GroupedDataFrame -> DataFrame
 aggregate aggs gdf@(Grouped df groupingColumns valueIndices offsets)
     | VU.null valueIndices = df
     | otherwise =
-    let
-        df' =
-            selectIndices
-                (VU.map (valueIndices VU.!) (VU.init offsets))
-                (select groupingColumns df)
+        let
+            df' =
+                selectIndices
+                    (VU.map (valueIndices VU.!) (VU.init offsets))
+                    (select groupingColumns df)
 
-        f (name, Wrap (expr :: Expr a)) d =
-            let
-                value = case interpretAggregation @a gdf expr of
-                    Left e -> throw e
-                    Right (UnAggregated _) -> throw $ UnaggregatedException (T.pack $ show expr)
-                    Right (Aggregated (TColumn col)) -> col
-             in
-                insertColumn name value d
-     in
-        fold f aggs df'
+            f (name, Wrap (expr :: Expr a)) d =
+                let
+                    value = case interpretAggregation @a gdf expr of
+                        Left e -> throw e
+                        Right (UnAggregated _) -> throw $ UnaggregatedException (T.pack $ show expr)
+                        Right (Aggregated (TColumn col)) -> col
+                in
+                    insertColumn name value d
+        in
+            fold f aggs df'
 
 selectIndices :: VU.Vector Int -> DataFrame -> DataFrame
 selectIndices xs df =
