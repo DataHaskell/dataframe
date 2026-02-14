@@ -255,10 +255,12 @@ All ungrouped columns will be dropped.
 -}
 aggregate :: [NamedExpr] -> GroupedDataFrame -> DataFrame
 aggregate aggs gdf@(Grouped df groupingColumns valueIndices offsets)
-    | VU.null valueIndices = 
+    | VU.null valueIndices =
         let
             df' = exclude (M.keys (columnIndices df) L.\\ groupingColumns) df
-            f (name, UExpr (expr :: Expr a)) = insert name ([] :: [a])
+            
+            f :: NamedExpr -> DataFrame -> DataFrame
+            f (name, UExpr (_ :: Expr a)) = insert name ([] :: [a])
         in
             fold f aggs df'
     | otherwise =
@@ -289,7 +291,7 @@ selectIndices xs df =
 -- | Filter out all non-unique values in a dataframe.
 distinct :: DataFrame -> DataFrame
 distinct df
-    | nRows df == 0 = df 
+    | nRows df == 0 = df
     | otherwise = selectIndices (VU.map (indices VU.!) (VU.init os)) df
   where
     (Grouped _ _ indices os) = groupBy (columnNames df) df
