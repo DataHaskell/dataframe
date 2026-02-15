@@ -237,10 +237,14 @@ ghci> D.readSeparated (D.defaultReadOptions { columnSeparator = ';' }) ".\/data\
 @
 -}
 readSeparated :: ReadOptions -> FilePath -> IO DataFrame
-readSeparated !opts !path = do
-    let sep = columnSeparator opts
+readSeparated opts !path = do
     let stripUtf8Bom bs = fromMaybe bs (BL.stripPrefix "\xEF\xBB\xBF" bs)
     csvData <- stripUtf8Bom <$> BL.readFile path
+    decodeSeparated opts csvData
+
+decodeSeparated :: ReadOptions -> BL.ByteString -> IO DataFrame
+decodeSeparated !opts csvData = do
+    let sep = columnSeparator opts
     let decodeOpts = Csv.defaultDecodeOptions{Csv.decDelimiter = fromIntegral (ord sep)}
     let stream = CsvStream.decodeWith decodeOpts Csv.NoHeader csvData
 
