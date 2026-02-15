@@ -258,10 +258,10 @@ aggregate aggs gdf@(Grouped df groupingColumns valueIndices offsets)
     | VU.null valueIndices =
         let
             df' = exclude (M.keys (columnIndices df) L.\\ groupingColumns) df
-            
+
             f :: NamedExpr -> DataFrame -> DataFrame
             f (name, UExpr (_ :: Expr a)) = insert name ([] :: [a])
-        in
+         in
             fold f aggs df'
     | otherwise =
         let
@@ -276,9 +276,9 @@ aggregate aggs gdf@(Grouped df groupingColumns valueIndices offsets)
                         Left e -> throw e
                         Right (UnAggregated _) -> throw $ UnaggregatedException (T.pack $ show expr)
                         Right (Aggregated (TColumn col)) -> col
-                in
+                 in
                     insertColumn name value d
-        in
+         in
             fold f aggs df'
 
 selectIndices :: VU.Vector Int -> DataFrame -> DataFrame
