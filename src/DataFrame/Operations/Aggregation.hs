@@ -273,9 +273,9 @@ aggregate aggs gdf@(Grouped df groupingColumns valueIndices offsets) =
                     Left e -> throw e
                     Right (UnAggregated _) -> throw $ UnaggregatedException (T.pack $ show expr)
                     Right (Aggregated (TColumn col)) -> col
-                in
+             in
                 insertColumn name value d
-        in
+     in
         fold f aggs df'
 
 selectIndices :: VU.Vector Int -> DataFrame -> DataFrame
