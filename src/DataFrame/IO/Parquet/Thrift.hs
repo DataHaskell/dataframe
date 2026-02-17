@@ -1139,7 +1139,7 @@ readTimeType isAdjustedToUTC unit buf pos lastFieldId = do
         Nothing -> return (TimeType{isAdjustedToUTC = isAdjustedToUTC, unit = unit})
         Just (elemType, identifier) -> case identifier of
             1 -> do
-                isAdjustedToUTC' <- (== compactBooleanTrue) <$> readAndAdvance pos buf
+                let isAdjustedToUTC' = elemType == toTType compactBooleanTrue
                 readTimeType isAdjustedToUTC' unit buf pos identifier
             2 -> do
                 unit' <- readUnit TIME_UNIT_UNKNOWN buf pos 0
@@ -1156,16 +1156,15 @@ readTimestampType ::
 readTimestampType isAdjustedToUTC unit buf pos lastFieldId = do
     fieldContents <- readField buf pos lastFieldId
     case fieldContents of
-        Nothing -> return (TimestampType isAdjustedToUTC unit)
+        Nothing -> return (TimestampType{isAdjustedToUTC = isAdjustedToUTC, unit = unit})
         Just (elemType, identifier) -> case identifier of
             1 -> do
-                isAdjustedToUTC' <- (== compactBooleanTrue) <$> readNoAdvance pos buf
-                readTimestampType False unit buf pos identifier
+                let isAdjustedToUTC' = elemType == toTType compactBooleanTrue
+                readTimestampType isAdjustedToUTC' unit buf pos identifier
             2 -> do
-                _ <- readField buf pos 0
                 unit' <- readUnit TIME_UNIT_UNKNOWN buf pos 0
                 readTimestampType isAdjustedToUTC unit' buf pos identifier
-            _ -> error $ "UNKNOWN field ID for TimestampType" ++ show identifier
+            _ -> error $ "UNKNOWN field ID for TimestampType " ++ show identifier
 
 readUnit :: TimeUnit -> BS.ByteString -> IORef Int -> Int16 -> IO TimeUnit
 readUnit unit buf pos lastFieldId = do
@@ -1174,9 +1173,12 @@ readUnit unit buf pos lastFieldId = do
         Nothing -> return unit
         Just (elemType, identifier) -> case identifier of
             1 -> do
+                _ <- readField buf pos 0
                 readUnit MILLISECONDS buf pos identifier
             2 -> do
+                _ <- readField buf pos 0
                 readUnit MICROSECONDS buf pos identifier
             3 -> do
+                _ <- readField buf pos 0
                 readUnit NANOSECONDS buf pos identifier
             n -> error $ "Unknown time unit: " ++ show n
