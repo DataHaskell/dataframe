@@ -811,21 +811,21 @@ readAesGcmCtrV1 v@(AesGcmCtrV1 aadPrefix aadFileUnique supplyAadPrefix) buf pos 
         Just (elemType, identifier) -> case identifier of
             1 -> do
                 aadPrefix <- readByteString buf pos
-                readAesGcmCtrV1 (v{aadPrefix = aadPrefix}) buf pos lastFieldId
+                readAesGcmCtrV1 (v{aadPrefix = aadPrefix}) buf pos identifier
             2 -> do
                 aadFileUnique <- readByteString buf pos
                 readAesGcmCtrV1
                     (v{aadFileUnique = aadFileUnique})
                     buf
                     pos
-                    lastFieldId
+                    identifier
             3 -> do
                 supplyAadPrefix <- readAndAdvance pos buf
                 readAesGcmCtrV1
                     (v{supplyAadPrefix = supplyAadPrefix == compactBooleanTrue})
                     buf
                     pos
-                    lastFieldId
+                    identifier
             _ -> return ENCRYPTION_ALGORITHM_UNKNOWN
 readAesGcmCtrV1 _ _ _ _ =
     error "readAesGcmCtrV1 called with non AesGcmCtrV1"
@@ -843,17 +843,17 @@ readAesGcmV1 v@(AesGcmV1 aadPrefix aadFileUnique supplyAadPrefix) buf pos lastFi
         Just (elemType, identifier) -> case identifier of
             1 -> do
                 aadPrefix <- readByteString buf pos
-                readAesGcmV1 (v{aadPrefix = aadPrefix}) buf pos lastFieldId
+                readAesGcmV1 (v{aadPrefix = aadPrefix}) buf pos identifier
             2 -> do
                 aadFileUnique <- readByteString buf pos
-                readAesGcmV1 (v{aadFileUnique = aadFileUnique}) buf pos lastFieldId
+                readAesGcmV1 (v{aadFileUnique = aadFileUnique}) buf pos identifier
             3 -> do
                 supplyAadPrefix <- readAndAdvance pos buf
                 readAesGcmV1
                     (v{supplyAadPrefix = supplyAadPrefix == compactBooleanTrue})
                     buf
                     pos
-                    lastFieldId
+                    identifier
             _ -> return ENCRYPTION_ALGORITHM_UNKNOWN
 readAesGcmV1 _ _ _ _ =
     error "readAesGcmV1 called with non AesGcmV1"
@@ -1120,10 +1120,10 @@ readDecimalType precision scale buf pos lastFieldId = do
         Just (elemType, identifier) -> case identifier of
             1 -> do
                 scale' <- readInt32FromBuffer buf pos
-                readDecimalType precision scale' buf pos lastFieldId
+                readDecimalType precision scale' buf pos identifier
             2 -> do
                 precision' <- readInt32FromBuffer buf pos
-                readDecimalType precision' scale buf pos lastFieldId
+                readDecimalType precision' scale buf pos identifier
             _ -> error $ "UNKNOWN field ID for DecimalType" ++ show identifier
 
 readTimeType ::
@@ -1136,15 +1136,14 @@ readTimeType ::
 readTimeType isAdjustedToUTC unit buf pos lastFieldId = do
     fieldContents <- readField buf pos lastFieldId
     case fieldContents of
-        Nothing -> return (TimeType isAdjustedToUTC unit)
+        Nothing -> return (TimeType{isAdjustedToUTC = isAdjustedToUTC, unit = unit})
         Just (elemType, identifier) -> case identifier of
             1 -> do
-                -- TODO: Check for empty
                 isAdjustedToUTC' <- (== compactBooleanTrue) <$> readAndAdvance pos buf
-                readTimeType isAdjustedToUTC' unit buf pos lastFieldId
+                readTimeType isAdjustedToUTC' unit buf pos identifier
             2 -> do
                 unit' <- readUnit TIME_UNIT_UNKNOWN buf pos 0
-                readTimeType isAdjustedToUTC unit' buf pos lastFieldId
+                readTimeType isAdjustedToUTC unit' buf pos identifier
             _ -> error $ "UNKNOWN field ID for TimeType" ++ show identifier
 
 readTimestampType ::
@@ -1160,13 +1159,12 @@ readTimestampType isAdjustedToUTC unit buf pos lastFieldId = do
         Nothing -> return (TimestampType isAdjustedToUTC unit)
         Just (elemType, identifier) -> case identifier of
             1 -> do
-                -- TODO: Check for empty
                 isAdjustedToUTC' <- (== compactBooleanTrue) <$> readNoAdvance pos buf
-                readTimestampType False unit buf pos lastFieldId
+                readTimestampType False unit buf pos identifier
             2 -> do
-                _ <- readField buf pos identifier
+                _ <- readField buf pos 0
                 unit' <- readUnit TIME_UNIT_UNKNOWN buf pos 0
-                readTimestampType isAdjustedToUTC unit' buf pos lastFieldId
+                readTimestampType isAdjustedToUTC unit' buf pos identifier
             _ -> error $ "UNKNOWN field ID for TimestampType" ++ show identifier
 
 readUnit :: TimeUnit -> BS.ByteString -> IORef Int -> Int16 -> IO TimeUnit
