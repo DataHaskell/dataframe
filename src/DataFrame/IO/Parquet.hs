@@ -2,10 +2,7 @@
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE TypeApplications #-}
 
-module DataFrame.IO.Parquet (
-    readParquet,
-    readParquetFiles,
-) where
+module DataFrame.IO.Parquet where
 
 import Control.Monad
 import Data.Bits
