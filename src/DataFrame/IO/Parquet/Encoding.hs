@@ -30,19 +30,24 @@ unpackBitPacked bw count bs
                 BS.concatMap
                     (\b -> BS.map (\i -> (b `shiftR` fromIntegral i) .&. 1) (BS.pack [0 .. 7]))
                     chunk
-            toN = fst . BS.foldl' (\(a, i) b -> (a .|. (b `shiftL` i), i + 1)) (0, 0)
+            toN :: BS.ByteString -> Word32
+            toN =
+                fst
+                    . BS.foldl'
+                        (\(a, i) b -> (a .|. (fromIntegral b `shiftL` i), i + 1))
+                        (0 :: Word32, 0 :: Int)
 
-            extractValues :: Int -> BS.ByteString -> BS.ByteString
+            extractValues :: Int -> BS.ByteString -> [Word32]
             extractValues n bitsLeft
-                | BS.null bitsLeft = BS.empty
-                | n <= 0 = BS.empty
-                | BS.length bitsLeft < bw = BS.empty
+                | BS.null bitsLeft = []
+                | n <= 0 = []
+                | BS.length bitsLeft < bw = []
                 | otherwise =
                     let (this, bitsLeft') = BS.splitAt bw bitsLeft
-                     in BS.cons (toN this) (extractValues (n - 1) bitsLeft')
+                     in toN this : extractValues (n - 1) bitsLeft'
 
             vals = extractValues count bits
-         in (map fromIntegral (BS.unpack vals), rest)
+         in (vals, rest)
 
 decodeRLEBitPackedHybrid ::
     Int -> Int -> BS.ByteString -> ([Word32], BS.ByteString)

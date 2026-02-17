@@ -61,6 +61,83 @@ allTypesPlain =
             (unsafePerformIO (D.readParquet "./tests/data/alltypes_plain.parquet"))
         )
 
+allTypesTinyPagesDimensions :: Test
+allTypesTinyPagesDimensions =
+    TestCase
+        ( assertEqual
+            "allTypesTinyPages last few"
+            (7300, 13)
+            ( unsafePerformIO
+                (fmap D.dimensions (D.readParquet "./tests/data/alltypes_tiny_pages.parquet"))
+            )
+        )
+
+tinyPagesLast10 :: D.DataFrame
+tinyPagesLast10 =
+    D.fromNamedColumns
+        [ ("id", D.fromList @Int32 (reverse [6174 .. 6183]))
+        , ("bool_col", D.fromList @Bool (Prelude.take 10 (cycle [False, True])))
+        , ("tinyint_col", D.fromList @Int32 [3, 2, 1, 0, 9, 8, 7, 6, 5, 4])
+        , ("smallint_col", D.fromList @Int32 [3, 2, 1, 0, 9, 8, 7, 6, 5, 4])
+        , ("int_col", D.fromList @Int32 [3, 2, 1, 0, 9, 8, 7, 6, 5, 4])
+        , ("bigint_col", D.fromList @Int64 [30, 20, 10, 0, 90, 80, 70, 60, 50, 40])
+        ,
+            ( "float_col"
+            , D.fromList @Float [3.3, 2.2, 1.1, 0, 9.9, 8.8, 7.7, 6.6, 5.5, 4.4]
+            )
+        ,
+            ( "date_string_col"
+            , D.fromList @Text
+                [ "09/11/10"
+                , "09/11/10"
+                , "09/11/10"
+                , "09/11/10"
+                , "09/10/10"
+                , "09/10/10"
+                , "09/10/10"
+                , "09/10/10"
+                , "09/10/10"
+                , "09/10/10"
+                ]
+            )
+        ,
+            ( "string_col"
+            , D.fromList @Text ["3", "2", "1", "0", "9", "8", "7", "6", "5", "4"]
+            )
+        ,
+            ( "timestamp_col"
+            , D.fromList @UTCTime
+                [ UTCTime (fromGregorian 2010 9 10) (secondsToDiffTime 85384)
+                , UTCTime (fromGregorian 2010 9 10) (secondsToDiffTime 85324)
+                , UTCTime (fromGregorian 2010 9 10) (secondsToDiffTime 85264)
+                , UTCTime (fromGregorian 2010 9 10) (secondsToDiffTime 85204)
+                , UTCTime (fromGregorian 2010 9 9) (secondsToDiffTime 85144)
+                , UTCTime (fromGregorian 2010 9 9) (secondsToDiffTime 85084)
+                , UTCTime (fromGregorian 2010 9 9) (secondsToDiffTime 85024)
+                , UTCTime (fromGregorian 2010 9 9) (secondsToDiffTime 84964)
+                , UTCTime (fromGregorian 2010 9 9) (secondsToDiffTime 84904)
+                , UTCTime (fromGregorian 2010 9 9) (secondsToDiffTime 84844)
+                ]
+            )
+        , ("year", D.fromList @Int32 (replicate 10 2010))
+        , ("month", D.fromList @Int32 (replicate 10 9))
+        ]
+
+allTypesTinyPagesLastFew :: Test
+allTypesTinyPagesLastFew =
+    TestCase
+        ( assertEqual
+            "allTypesTinyPages dimensions"
+            tinyPagesLast10
+            ( unsafePerformIO
+                -- Excluding doubles because they are weird to compare.
+                ( fmap
+                    (D.takeLast 10 . D.exclude ["double_col"])
+                    (D.readParquet "./tests/data/alltypes_tiny_pages.parquet")
+                )
+            )
+        )
+
 allTypesPlainSnappy :: Test
 allTypesPlainSnappy =
     TestCase
@@ -537,7 +614,12 @@ mtCars =
             (unsafePerformIO (D.readParquet "./tests/data/mtcars.parquet"))
         )
 
--- Uncomment to run parquet tests.
--- Currently commented because they don't run with github CI
 tests :: [Test]
-tests = [allTypesPlain, allTypesPlainSnappy, allTypesDictionary, mtCars]
+tests =
+    [ allTypesPlain
+    , allTypesPlainSnappy
+    , allTypesDictionary
+    , mtCars
+    , allTypesTinyPagesLastFew
+    , allTypesTinyPagesDimensions
+    ]
