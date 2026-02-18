@@ -4,7 +4,7 @@
 module DataFrame.IO.Parquet.Page where
 
 import qualified Codec.Compression.GZip as GZip
-import Codec.Compression.Zstd.Streaming
+import qualified Codec.Compression.Zstd.Streaming as Zstd
 import Data.Bits
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as LB
@@ -38,10 +38,19 @@ readPage c columnBytes =
 
             fullData <- case c of
                 ZSTD -> do
-                    Consume dFunc <- decompress
-                    Consume dFunc' <- dFunc compressed
-                    Done res <- dFunc' BS.empty
-                    pure res
+                    result <- Zstd.decompress
+                    drainZstd result compressed []
+                  where
+                    drainZstd (Zstd.Consume f) input acc = do
+                        result <- f input
+                        drainZstd result BS.empty acc
+                    drainZstd (Zstd.Produce chunk next) _ acc = do
+                        result <- next
+                        drainZstd result BS.empty (acc <> [chunk])
+                    drainZstd (Zstd.Done final) _ acc =
+                        pure $ BS.concat (acc <> [final])
+                    drainZstd (Zstd.Error msg msg2) _ _ =
+                        error ("ZSTD error: " ++ msg ++ " " ++ msg2)
                 SNAPPY -> case Snappy.decompress compressed of
                     Left e -> error (show e)
                     Right res -> pure res

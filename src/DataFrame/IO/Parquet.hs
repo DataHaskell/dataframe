@@ -49,6 +49,7 @@ readParquet path = do
     let columnNames = map fst columnPaths
 
     colMap <- newIORef (M.empty :: M.Map T.Text DI.Column)
+    lTypeMap <- newIORef (M.empty :: M.Map T.Text LogicalType)
 
     contents <- BSO.readFile path
 
@@ -109,11 +110,14 @@ readParquet path = do
                     lType
 
             modifyIORef colMap (M.insertWith DI.concatColumnsEither colName column)
+            modifyIORef lTypeMap (M.insert colName lType)
 
     finalColMap <- readIORef colMap
+    finalLTypeMap <- readIORef lTypeMap
     let orderedColumns =
             map
-                (\name -> (name, finalColMap M.! name))
+                ( \name -> (name, applyLogicalType (finalLTypeMap M.! name) $ finalColMap M.! name)
+                )
                 (filter (`M.member` finalColMap) columnNames)
 
     pure $ DI.fromNamedColumns orderedColumns
@@ -214,10 +218,10 @@ processColumnPages (maxDef, maxRep) pages pType _ maybeTypeLength lType = do
                                  in pure (toMaybeBool maxDef defLvls vals)
                             PINT32 ->
                                 let (vals, _) = readNInt32 nPresent afterLvls
-                                 in pure (applyLogicalType lType $ toMaybeInt32 maxDef defLvls vals)
+                                 in pure (toMaybeInt32 maxDef defLvls vals)
                             PINT64 ->
                                 let (vals, _) = readNInt64 nPresent afterLvls
-                                 in pure (applyLogicalType lType $ toMaybeInt64 maxDef defLvls vals)
+                                 in pure (toMaybeInt64 maxDef defLvls vals)
                             PINT96 ->
                                 let (vals, _) = readNInt96Times nPresent afterLvls
                                  in pure (toMaybeUTCTime maxDef defLvls vals)
@@ -266,10 +270,10 @@ processColumnPages (maxDef, maxRep) pages pType _ maybeTypeLength lType = do
                                  in pure (toMaybeBool maxDef defLvls vals)
                             PINT32 ->
                                 let (vals, _) = readNInt32 nPresent afterLvls
-                                 in pure (applyLogicalType lType $ toMaybeInt32 maxDef defLvls vals)
+                                 in pure (toMaybeInt32 maxDef defLvls vals)
                             PINT64 ->
                                 let (vals, _) = readNInt64 nPresent afterLvls
-                                 in pure (applyLogicalType lType $ toMaybeInt64 maxDef defLvls vals)
+                                 in pure (toMaybeInt64 maxDef defLvls vals)
                             PINT96 ->
                                 let (vals, _) = readNInt96Times nPresent afterLvls
                                  in pure (toMaybeUTCTime maxDef defLvls vals)
