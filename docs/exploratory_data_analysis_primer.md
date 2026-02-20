@@ -62,7 +62,6 @@ Arguably the first thing to do when presented with a datset is check for null va
 ```haskell
 TIO.putStrLn $ D.toMarkdownTable $ D.describeColumns df
 ```
-> ------------------------------------------------------------------------------------  
 > | Column Name<br>Text | # Non-null Values<br>Int | # Null Values<br>Int | Type<br>Text |
 > | --------------------|--------------------------|----------------------|------------- |
 > | total_bedrooms      | 20433                    | 207                  | Maybe Double |
