@@ -1,20 +1,20 @@
-{-# LANGUAGE ExplicitNamespaces  #-}
-{-# LANGUAGE FlexibleContexts    #-}
-{-# LANGUAGE GADTs               #-}
-{-# LANGUAGE InstanceSigs        #-}
-{-# LANGUAGE RankNTypes          #-}
+{-# LANGUAGE ExplicitNamespaces #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE GADTs #-}
+{-# LANGUAGE InstanceSigs #-}
+{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE TupleSections       #-}
+{-# LANGUAGE TupleSections #-}
 
 module DataFrame.Monad where
 
-import           DataFrame                     (DataFrame)
-import qualified DataFrame                     as D
-import           DataFrame.Internal.Column     (Columnable)
-import           DataFrame.Internal.Expression (Expr (..))
+import DataFrame (DataFrame)
+import qualified DataFrame as D
+import DataFrame.Internal.Column (Columnable)
+import DataFrame.Internal.Expression (Expr (..))
 
-import qualified Data.Text                     as T
-import           System.Random
+import qualified Data.Text as T
+import System.Random
 
 -- A re-implementation of the state monad.
 -- `mtl` might be too heavy a dependency just to get

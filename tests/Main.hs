@@ -5140,6 +5140,9 @@ main = do
             (quickCheckWithResult stdArgs)
             Operations.Subset.tests
     monadRes <- mapM (quickCheckWithResult stdArgs) Monad.tests
-    if failures result > 0 || errors result > 0 || not (all isSuccessful propRes) || not (all isSuccessful monadRes)
+    if failures result > 0
+        || errors result > 0
+        || not (all isSuccessful propRes)
+        || not (all isSuccessful monadRes)
         then Exit.exitFailure
         else Exit.exitSuccess

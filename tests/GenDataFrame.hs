@@ -1,15 +1,15 @@
-{-# LANGUAGE GADTs            #-}
+{-# LANGUAGE GADTs #-}
 {-# LANGUAGE TypeApplications #-}
 
 module GenDataFrame where
 
-import qualified Data.Map                     as M
-import qualified Data.Text                    as T
-import qualified Data.Vector                  as V
-import qualified Data.Vector.Unboxed          as VU
-import           DataFrame.Internal.Column
-import           DataFrame.Internal.DataFrame
-import           Test.QuickCheck
+import qualified Data.Map as M
+import qualified Data.Text as T
+import qualified Data.Vector as V
+import qualified Data.Vector.Unboxed as VU
+import DataFrame.Internal.Column
+import DataFrame.Internal.DataFrame
+import Test.QuickCheck
 
 genColumn :: Int -> Gen Column
 genColumn len =
