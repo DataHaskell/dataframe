@@ -50,6 +50,10 @@ You can contribute in many ways:
    * To test a change in the REPL run:
       * `./script/repl.sh`
       * Then in the terminal run `:script dataframe.ghci`
+5. **Documentation**
+   If you change the API please make sure to regenerate the docs using the files in `./docs/base_scripts`.
+   You generate them by running [scripths](https://github.com/DataHaskell/scripths):
+   `scripths ./docs/base_scripts/exploratory_data_analysis_primer.md > ./docs/exploratory_data_analysis_primer.md`.
 
 ## Documentation
 

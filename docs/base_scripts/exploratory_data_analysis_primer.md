@@ -25,7 +25,6 @@ Univariate non-graphical analysis should give us a sense of the distribution of 
 
 For categorical data the best univariate non-graphical analysis is a tabulation of the frequency of each category.
 
-
 ```haskell
 -- cabal: build-depends: dataframe, text
 -- cabal: default-extensions: TemplateHaskell, TypeApplications, OverloadedStrings
@@ -36,12 +35,6 @@ df <- D.readCsv "../dataframe/data/housing.csv"
 
 TIO.putStrLn $ D.toMarkdownTable $ D.frequencies "ocean_proximity" df
 ```
-> ----------------------------------------------------------------------------------------------------------  
-> | Statistic<br>Text | <1H OCEAN<br>Any | INLAND<br>Any | ISLAND<br>Any | NEAR BAY<br>Any | NEAR OCEAN<br>Any |
-> | ------------------|------------------|---------------|---------------|-----------------|------------------ |
-> | Count             | 9136             | 6551          | 5             | 2290            | 2658              |
-> | Percentage (%)    | 44.26%           | 31.74%        | 0.02%         | 11.09%          | 12.88%            |
-
 
 We can also plot similar tables for non-categorical data with a small value set e.g shoe sizes.
 
@@ -59,24 +52,9 @@ We can calculate sample statistics from the data such as the sample mean, sample
 ### Missing data
 Arguably the first thing to do when presented with a datset is check for null values.
 
-
 ```haskell
 TIO.putStrLn $ D.toMarkdownTable $ D.describeColumns df
 ```
-> ------------------------------------------------------------------------------------  
-> | Column Name<br>Text | # Non-null Values<br>Int | # Null Values<br>Int | Type<br>Text |
-> | --------------------|--------------------------|----------------------|------------- |
-> | total_bedrooms      | 20433                    | 207                  | Maybe Double |
-> | ocean_proximity     | 20640                    | 0                    | Text         |
-> | median_house_value  | 20640                    | 0                    | Double       |
-> | median_income       | 20640                    | 0                    | Double       |
-> | households          | 20640                    | 0                    | Double       |
-> | population          | 20640                    | 0                    | Double       |
-> | total_rooms         | 20640                    | 0                    | Double       |
-> | housing_median_age  | 20640                    | 0                    | Double       |
-> | latitude            | 20640                    | 0                    | Double       |
-> | longitude           | 20640                    | 0                    | Double       |
-
 
 It seems we have most of the data except some missing total bedrooms. Dealing with nulls is a separate topic that requires intimate knowledge of the data. So for this initial pass we'll leave out the total_bedrooms variable.
 
@@ -85,7 +63,6 @@ The central tendency of a distribution describes a "typical" value of that distr
 
 For a given column calculating the mean and median is fairly straightfoward and shown below.
 
-
 ```haskell
 import qualified DataFrame.Functions as F
 
@@ -93,9 +70,6 @@ D.mean (F.col @Double "housing_median_age") df
 
 D.median (F.col @Double "housing_median_age") df
 ```
-> 28.639486434108527
-> 29.0
-
 
 Note: You need to pass the expression for the column into these functions not the column name so the program knows that you are actually calling `mean` or `median` on a column containing numbers.
 
@@ -107,7 +81,6 @@ We start by looking at mean absolute deviation since it's the simplest measure o
 
 In the housing dataset it'll tell how "typical" our typical home price is.
 
-
 ```haskell
 import DataFrame ((|>))
 
@@ -118,20 +91,6 @@ TIO.putStrLn $ D.toMarkdownTable $
       |> D.select ["median_house_value", "deviation"]
       |> D.take 10
 ```
-> --------------------------------------------------  
-> | median_house_value<br>Double | deviation<br>Double |
-> | -----------------------------|-------------------- |
-> | 452600.0                     | 245744.18309108526  |
-> | 358500.0                     | 151644.18309108526  |
-> | 352100.0                     | 145244.18309108526  |
-> | 341300.0                     | 134444.18309108526  |
-> | 342200.0                     | 135344.18309108526  |
-> | 269700.0                     | 62844.18309108526   |
-> | 299200.0                     | 92344.18309108526   |
-> | 241400.0                     | 34544.18309108526   |
-> | 226700.0                     | 19844.18309108526   |
-> | 261100.0                     | 54244.18309108526   |
-
 
 The first part (`:declareColumns df`) creates typed references to our columns that we can use in expressions. This command gets the types from a snapshot of the schema.
 
@@ -141,14 +100,11 @@ This gives us a list of the deviations.
 
 From the small sample it does seem like there are some wild deviations. The first one is greater than the mean! How typical is this? Well to answer that we take the average of all these values.
 
-
 ```haskell
 df |> D.derive "deviation" (abs (median_house_value - (F.mean median_house_value)))
    |> D.select ["median_house_value", "deviation"]
    |> D.mean (F.col @Double "deviation")
 ```
-> 91170.43994367118
-
 
 Getting the mean of the deviations was as simple as tacking `D.mean "deviation"` to the end of our existing pipeline. Composability is a big strength of Haskell code.
 
@@ -158,7 +114,6 @@ What if we give more weight to the further deviations?
 
 ### Standard deviation
 That's what standard deviation aims to do. Standard deviation considers the spread of outliers. Instead of calculating the absolute difference of each observation from the mean we calculate the square of the difference. This has the effect of exaggerating further outliers.
-
 
 ```haskell
 withDeviation = df |> D.derive "deviation" (abs (median_house_value - (F.mean median_house_value)))
@@ -176,18 +131,13 @@ n = fromIntegral (fst (D.dimensions df) - 1)
 
 sqrt (sumOfSqureDifferences / n)
 ```
-> 2765.8049483764235
-
 The standard deviation being larger than the mean absolute deviation means we do have some outliers. However, since the difference is fairly small we can conclude that there aren't very many outliers in our dataset.
 
 We can calculate the standard deviation in one line as follows:
 
-
 ```haskell
 D.standardDeviation (F.col @Double "median_house_value") df
 ```
-> 115395.61587441359
-
 
 ## Interquartile range (IQR)
 A quantile is a value of the distribution such that n% of values in the distribution are smaller than that value. A quartile is a division of the data into four quantiles. So the 1st quantile is a value such that 25% of values are smaller than it. The median is the second quartile. And the third quartile is a value such that 75% of values are smaller than that value. The IQR is the difference between the 3rd and 1st quartiles. It measures how close to middle the middle 50% of values are.
@@ -196,12 +146,9 @@ The IQR is a more robust measure of spread than the variance or standard deviati
 
 For our dataset:
 
-
 ```haskell
 D.interQuartileRange (F.col @Double "median_house_value") df
 ```
-> 145125.0
-
 
 This is larger than the standard deviation but not by much. This means that outliers don't have a significant influence on the distribution and most values are close to typical.
 
@@ -210,12 +157,9 @@ Variance is the square of the standard deviation. It is much more sensitive to o
 
 In our example it's a very large number:
 
-
-```haskell
+``` haskell
 D.variance (F.col @Double "median_house_value") df
 ```
-> 1.3316148163035213e10
-
 
 The variance is more useful when comparing different datasets. If the variance of house prices in Minnesota was lower than California this would mean there were much fewer really cheap and really expensive house in Minnesota.
 
@@ -228,12 +172,9 @@ The intuition behind why a positive skew is left shifted follows from the formul
 
 A skewness score between -0.5 and 0.5 means the data has little skew. A score between -0.5 and -1 or 0.5 and 1 means the data has moderate skew. A skewness greater than 1 or less than -1 means the data is heavily skewed.
 
-
 ```haskell
 D.skewness (F.col @Double "median_house_value") df
 ```
-> 0.977668529406543
-
 So the median house value is moderately skewed to the left. That is, there are more houses that are cheaper than the mean values and a tail of expensive outliers. Having lived in California, I can confirm that this data reflects reality.
 
 
@@ -241,24 +182,9 @@ So the median house value is moderately skewed to the left. That is, there are m
 
 We can get all these statistics with a single command:
 
-
 ```haskell
 TIO.putStrLn $ D.toMarkdownTable $ D.summarize df
 ```
-> -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------  
-> | Statistic<br>Text | longitude<br>Double | latitude<br>Double | housing_median_age<br>Double | total_rooms<br>Double | total_bedrooms<br>Double | population<br>Double | households<br>Double | median_income<br>Double | median_house_value<br>Double |
-> | ------------------|---------------------|--------------------|------------------------------|-----------------------|--------------------------|----------------------|----------------------|-------------------------|----------------------------- |
-> | Count             | 20640.0             | 20640.0            | 20640.0                      | 20640.0               | 20433.0                  | 20640.0              | 20640.0              | 20640.0                 | 20640.0                      |
-> | Mean              | -119.57             | 35.63              | 28.64                        | 2635.76               | 537.87                   | 1425.48              | 499.54               | 3.87                    | 206855.82                    |
-> | Minimum           | -124.35             | 32.54              | 1.0                          | 2.0                   | 1.0                      | 3.0                  | 1.0                  | 0.5                     | 14999.0                      |
-> | 25%               | -121.8              | 33.93              | 18.0                         | 1447.75               | 296.0                    | 787.0                | 280.0                | 2.56                    | 119600.0                     |
-> | Median            | -118.49             | 34.26              | 29.0                         | 2127.0                | 435.0                    | 1166.0               | 409.0                | 3.53                    | 179700.0                     |
-> | 75%               | -118.01             | 37.71              | 37.0                         | 3148.0                | 647.0                    | 1725.0               | 605.0                | 4.74                    | 264725.0                     |
-> | Max               | -114.31             | 41.95              | 52.0                         | 39320.0               | 6445.0                   | 35682.0              | 6082.0               | 15.0                    | 500001.0                     |
-> | StdDev            | 2.0                 | 2.14               | 12.59                        | 2181.62               | 421.39                   | 1132.46              | 382.33               | 1.9                     | 115395.62                    |
-> | IQR               | 3.79                | 3.78               | 19.0                         | 1700.25               | 351.0                    | 938.0                | 325.0                | 2.18                    | 145125.0                     |
-> | Skewness          | -0.3                | 0.47               | 6.0e-2                       | 4.15                  | 3.46                     | 4.94                 | 3.41                 | 1.65                    | 0.98                         |
-
 
 As a recap we'll go over what this tells us about the data:
 * median_house_value: house prices tend to be close to the median but there are some pretty expensive houses.
@@ -280,34 +206,8 @@ In this section, we'll next look at some techniques for visualizing univariate d
 Histograms are bar plots where each bar represents the frequency (count) or propotion (count / total) of cases for a
 range of value. Going back to our california housing dataset, we can plot a histogram of house prices:
 
-
 ```haskell
 D.plotHistogram "median_house_value" df
 ```
-> 1501.0│                ▁▁██                                        
->       │              ▂▂████                                        
->       │        ██  ▂▂████████                                      
->       │        ██▅▅██████████                                      
->       │        ██████████████                                      
->       │        ██████████████  ▄▄                                ▁▁
->       │      ▄▄██████████████  ██                                ██
->       │      ████████████████▂▂██▆▆                              ██
->       │      ██████████████████████                              ██
->       │      ██████████████████████                              ██
->  750.5│    ██████████████████████████▆▆                          ██
->       │    ████████████████████████████▂▂                        ██
->       │    ██████████████████████████████                        ██
->       │    ██████████████████████████████                        ██
->       │    ██████████████████████████████▅▅  ▅▅██                ██
->       │    ████████████████████████████████▇▇████▁▁              ██
->       │    ████████████████████████████████████████▁▁            ██
->       │    ██████████████████████████████████████████▆▆▂▂  ▁▁    ██
->       │  ▄▄██████████████████████████████████████████████▇▇██▂▂▁▁██
->    0.0│▂▂██████████████████████████████████████████████████████████
->       └────────────────────────────────────────────────────────────
->        1.5e4                         2.6e5                        5.0e5
->
-> ⣿ count
-
 
 From the histogram above we can already tell things like whether or not there are outliers, the central tendency of the data, and the spread.
