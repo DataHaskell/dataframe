@@ -36,7 +36,6 @@ df <- D.readCsv "../dataframe/data/housing.csv"
 
 TIO.putStrLn $ D.toMarkdownTable $ D.frequencies "ocean_proximity" df
 ```
-> ----------------------------------------------------------------------------------------------------------  
 > | Statistic<br>Text | <1H OCEAN<br>Any | INLAND<br>Any | ISLAND<br>Any | NEAR BAY<br>Any | NEAR OCEAN<br>Any |
 > | ------------------|------------------|---------------|---------------|-----------------|------------------ |
 > | Count             | 9136             | 6551          | 5             | 2290            | 2658              |
@@ -118,7 +117,6 @@ TIO.putStrLn $ D.toMarkdownTable $
       |> D.select ["median_house_value", "deviation"]
       |> D.take 10
 ```
-> --------------------------------------------------  
 > | median_house_value<br>Double | deviation<br>Double |
 > | -----------------------------|-------------------- |
 > | 452600.0                     | 245744.18309108526  |
@@ -244,8 +242,7 @@ We can get all these statistics with a single command:
 
 ```haskell
 TIO.putStrLn $ D.toMarkdownTable $ D.summarize df
-```
-> -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------  
+```  
 > | Statistic<br>Text | longitude<br>Double | latitude<br>Double | housing_median_age<br>Double | total_rooms<br>Double | total_bedrooms<br>Double | population<br>Double | households<br>Double | median_income<br>Double | median_house_value<br>Double |
 > | ------------------|---------------------|--------------------|------------------------------|-----------------------|--------------------------|----------------------|----------------------|-------------------------|----------------------------- |
 > | Count             | 20640.0             | 20640.0            | 20640.0                      | 20640.0               | 20433.0                  | 20640.0              | 20640.0              | 20640.0                 | 20640.0                      |
