@@ -53,6 +53,12 @@ groupBy names df
                 (T.pack $ show $ names L.\\ columnNames df)
                 "groupBy"
                 (columnNames df)
+    | nRows df == 0 =
+        Grouped
+            df
+            names
+            VU.empty
+            (VU.fromList [0])
     | otherwise =
         Grouped
             df

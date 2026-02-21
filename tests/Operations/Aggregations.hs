@@ -133,6 +133,24 @@ reduceAggregationOfUnaggregatedBinaryOp =
             )
         )
 
+aggregationOnNoRows :: Test
+aggregationOnNoRows =
+    TestCase
+        ( assertEqual
+            "Aggregation on DataFrame with no rows"
+            ( D.fromNamedColumns
+                [ ("test1", DI.fromList ([] :: [Int]))
+                , ("sum(test2)", DI.fromList ([] :: [Int]))
+                ]
+            )
+            ( testData
+                & D.drop 12
+                & D.groupBy ["test1"]
+                & D.aggregate
+                    [F.sum (F.col @Int "test2") `as` "sum(test2)"]
+            )
+        )
+
 tests :: [Test]
 tests =
     [ TestLabel "foldAggregation" foldAggregation
@@ -149,4 +167,7 @@ tests =
     , TestLabel
         "reduceAggregationOfUnaggregatedBinaryOp"
         reduceAggregationOfUnaggregatedBinaryOp
+    , TestLabel
+        "aggregationOnNoRows"
+        aggregationOnNoRows
     ]
