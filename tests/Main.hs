@@ -18,6 +18,7 @@ import Test.HUnit
 import Test.QuickCheck
 
 import qualified Functions
+import qualified Monad
 import qualified Operations.Aggregations
 import qualified Operations.Apply
 import qualified Operations.Core
@@ -5138,6 +5139,10 @@ main = do
         mapM
             (quickCheckWithResult stdArgs)
             Operations.Subset.tests
-    if failures result > 0 || errors result > 0 || not (all isSuccessful propRes)
+    monadRes <- mapM (quickCheckWithResult stdArgs) Monad.tests
+    if failures result > 0
+        || errors result > 0
+        || not (all isSuccessful propRes)
+        || not (all isSuccessful monadRes)
         then Exit.exitFailure
         else Exit.exitSuccess

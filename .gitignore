@@ -28,3 +28,4 @@ bin/
 coverage-html
 .DS_Store
 flake.lock
+tags

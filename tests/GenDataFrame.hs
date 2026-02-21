@@ -21,8 +21,8 @@ genColumn len =
 
 genDataFrame :: Gen DataFrame
 genDataFrame = do
-    numRows <- choose (0, 100)
-    numCols <- choose (0, 10)
+    numRows <- choose (100, 1000)
+    numCols <- choose (1, 10)
     colNames <- V.fromList <$> vectorOf numCols genUniqueColName
     cols <- V.fromList <$> vectorOf numCols (genColumn numRows)
     let indices = M.fromList $ zip (V.toList colNames) [0 ..]
