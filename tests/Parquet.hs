@@ -3,6 +3,7 @@
 
 module Parquet where
 
+import Assertions (assertExpectException)
 import qualified DataFrame as D
 import qualified DataFrame.Functions as F
 
@@ -184,6 +185,73 @@ allTypesDictionary =
             "allTypesPlainSnappy"
             (D.filter (F.col @Int32 "id") (`elem` [0, 1]) allTypes)
             (unsafePerformIO (D.readParquet "./tests/data/alltypes_dictionary.parquet"))
+        )
+
+selectedColumnsWithOpts :: Test
+selectedColumnsWithOpts =
+    TestCase
+        ( assertEqual
+            "selectedColumnsWithOpts"
+            (D.select ["id", "bool_col"] allTypes)
+            ( unsafePerformIO
+                ( D.readParquetWithOpts
+                    (D.defaultParquetReadOptions{D.selectedColumns = Just ["id", "bool_col"]})
+                    "./tests/data/alltypes_plain.parquet"
+                )
+            )
+        )
+
+rowRangeWithOpts :: Test
+rowRangeWithOpts =
+    TestCase
+        ( assertEqual
+            "rowRangeWithOpts"
+            (D.range (2, 5) allTypes)
+            ( unsafePerformIO
+                ( D.readParquetWithOpts
+                    (D.defaultParquetReadOptions{D.rowRange = Just (2, 5)})
+                    "./tests/data/alltypes_plain.parquet"
+                )
+            )
+        )
+
+timestampPolicyCoerceToDayWithOpts :: Test
+timestampPolicyCoerceToDayWithOpts =
+    TestCase
+        ( assertEqual
+            "timestampPolicyCoerceToDayWithOpts"
+            ( D.fromNamedColumns
+                [ ( "timestamp_col"
+                  , D.fromList
+                        [ fromGregorian 2009 3 1 :: Day
+                        , fromGregorian 2009 3 1
+                        ]
+                  )
+                ]
+            )
+            ( unsafePerformIO
+                ( D.readParquetWithOpts
+                    ( D.defaultParquetReadOptions
+                        { D.selectedColumns = Just ["timestamp_col"]
+                        , D.timestampPolicy = D.CoerceTimestampToDay
+                        , D.rowRange = Just (0, 2)
+                        }
+                    )
+                    "./tests/data/alltypes_plain.parquet"
+                )
+            )
+        )
+
+missingSelectedColumnWithOpts :: Test
+missingSelectedColumnWithOpts =
+    TestCase
+        ( assertExpectException
+            "missingSelectedColumnWithOpts"
+            "Column not found"
+            ( D.readParquetWithOpts
+                (D.defaultParquetReadOptions{D.selectedColumns = Just ["does_not_exist"]})
+                "./tests/data/alltypes_plain.parquet"
+            )
         )
 
 transactions :: D.DataFrame
@@ -819,6 +887,10 @@ tests =
     [ allTypesPlain
     , allTypesPlainSnappy
     , allTypesDictionary
+    , selectedColumnsWithOpts
+    , rowRangeWithOpts
+    , timestampPolicyCoerceToDayWithOpts
+    , missingSelectedColumnWithOpts
     , mtCars
     , allTypesTinyPagesLastFew
     , allTypesTinyPagesDimensions

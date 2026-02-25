@@ -7,6 +7,7 @@
 module DataFrame.IO.Parquet where
 
 import Control.Monad
+import Control.Exception (throw)
 import Data.Bits
 import qualified Data.ByteString as BSO
 import Data.Either
@@ -14,15 +15,18 @@ import Data.IORef
 import Data.Int
 import qualified Data.List as L
 import qualified Data.Map as M
+import qualified Data.Set as S
 import qualified Data.Text as T
 import Data.Text.Encoding
 import Data.Time
 import Data.Time.Clock.POSIX (posixSecondsToUTCTime)
 import Data.Word
+import DataFrame.Errors (DataFrameException (ColumnNotFoundException))
 import qualified DataFrame.Internal.Column as DI
 import DataFrame.Internal.DataFrame (DataFrame)
 import qualified DataFrame.Operations.Core as DI
 import DataFrame.Operations.Merge ()
+import qualified DataFrame.Operations.Subset as DS
 import System.FilePath.Glob (glob)
 
 import DataFrame.IO.Parquet.Dictionary
@@ -35,6 +39,26 @@ import System.Directory (doesDirectoryExist)
 import qualified Data.Vector.Unboxed as VU
 import System.FilePath ((</>))
 
+data ParquetTimestampPolicy
+    = PreserveTimestampPrecision
+    | CoerceTimestampToDay
+    deriving (Eq, Show)
+
+data ParquetReadOptions = ParquetReadOptions
+    { selectedColumns :: Maybe [T.Text]
+    , timestampPolicy :: ParquetTimestampPolicy
+    , rowRange :: Maybe (Int, Int)
+    }
+    deriving (Eq, Show)
+
+defaultParquetReadOptions :: ParquetReadOptions
+defaultParquetReadOptions =
+    ParquetReadOptions
+        { selectedColumns = Nothing
+        , timestampPolicy = PreserveTimestampPrecision
+        , rowRange = Nothing
+        }
+
 {- | Read a parquet file from path and load it into a dataframe.
 
 ==== __Example__
@@ -43,10 +67,36 @@ ghci> D.readParquet ".\/data\/mtcars.parquet"
 @
 -}
 readParquet :: FilePath -> IO DataFrame
-readParquet path = do
+readParquet = readParquetWithOpts defaultParquetReadOptions
+
+readParquetWithOpts :: ParquetReadOptions -> FilePath -> IO DataFrame
+readParquetWithOpts opts path = do
     fileMetadata <- readMetadataFromPath path
     let columnPaths = getColumnPaths (drop 1 $ schema fileMetadata)
     let columnNames = map fst columnPaths
+    let leafNames = map (last . T.splitOn ".") columnNames
+    let availableSelectedColumns = L.nub (columnNames ++ leafNames)
+    let selectedColumnSet = S.fromList <$> selectedColumns opts
+    let shouldReadColumn colName colPath =
+            case selectedColumnSet of
+                Nothing -> True
+                Just selected ->
+                    let fullPath = T.intercalate "." (map T.pack colPath)
+                     in colName `S.member` selected || fullPath `S.member` selected
+
+    case selectedColumns opts of
+        Nothing -> pure ()
+        Just requested ->
+            let missing = requested L.\\ availableSelectedColumns
+             in unless
+                    (L.null missing)
+                    ( throw
+                        ( ColumnNotFoundException
+                            (T.pack $ show missing)
+                            "readParquetWithOpts"
+                            availableSelectedColumns
+                        )
+                    )
 
     colMap <- newIORef (M.empty :: M.Map T.Text DI.Column)
     lTypeMap <- newIORef (M.empty :: M.Map T.Text LogicalType)
@@ -77,53 +127,59 @@ readParquet path = do
                         then T.pack $ "col_" ++ show colIdx
                         else T.pack $ last colPath
 
-            let colDataPageOffset = columnDataPageOffset metadata
-            let colDictionaryPageOffset = columnDictionaryPageOffset metadata
-            let colStart =
-                    if colDictionaryPageOffset > 0 && colDataPageOffset > colDictionaryPageOffset
-                        then colDictionaryPageOffset
-                        else colDataPageOffset
-            let colLength = columnTotalCompressedSize metadata
+            when (shouldReadColumn colName colPath) $ do
+                let colDataPageOffset = columnDataPageOffset metadata
+                let colDictionaryPageOffset = columnDictionaryPageOffset metadata
+                let colStart =
+                        if colDictionaryPageOffset > 0 && colDataPageOffset > colDictionaryPageOffset
+                            then colDictionaryPageOffset
+                            else colDataPageOffset
+                let colLength = columnTotalCompressedSize metadata
 
-            let columnBytes = BSO.take (fromIntegral colLength) (BSO.drop (fromIntegral colStart) contents)
+                let columnBytes = BSO.take (fromIntegral colLength) (BSO.drop (fromIntegral colStart) contents)
 
-            pages <- readAllPages (columnCodec metadata) columnBytes
+                pages <- readAllPages (columnCodec metadata) columnBytes
 
-            let maybeTypeLength =
-                    if columnType metadata == PFIXED_LEN_BYTE_ARRAY
-                        then getTypeLength colPath
-                        else Nothing
+                let maybeTypeLength =
+                        if columnType metadata == PFIXED_LEN_BYTE_ARRAY
+                            then getTypeLength colPath
+                            else Nothing
 
-            let primaryEncoding = maybe EPLAIN fst (L.uncons (columnEncodings metadata))
+                let primaryEncoding = maybe EPLAIN fst (L.uncons (columnEncodings metadata))
 
-            let schemaTail = drop 1 (schema fileMetadata)
-            let colPath = columnPathInSchema (columnMetaData colChunk)
-            let (maxDef, maxRep) = levelsForPath schemaTail colPath
-            let lType = logicalType (schemaTail !! colIdx)
-            column <-
-                processColumnPages
-                    (maxDef, maxRep)
-                    pages
-                    (columnType metadata)
-                    primaryEncoding
-                    maybeTypeLength
-                    lType
+                let schemaTail = drop 1 (schema fileMetadata)
+                let (maxDef, maxRep) = levelsForPath schemaTail colPath
+                let lType = logicalType (schemaTail !! colIdx)
+                column <-
+                    processColumnPages
+                        (maxDef, maxRep)
+                        pages
+                        (columnType metadata)
+                        primaryEncoding
+                        maybeTypeLength
+                        lType
 
-            modifyIORef colMap (M.insertWith DI.concatColumnsEither colName column)
-            modifyIORef lTypeMap (M.insert colName lType)
+                modifyIORef colMap (M.insertWith DI.concatColumnsEither colName column)
+                modifyIORef lTypeMap (M.insert colName lType)
 
     finalColMap <- readIORef colMap
     finalLTypeMap <- readIORef lTypeMap
     let orderedColumns =
             map
-                ( \name -> (name, applyLogicalType (finalLTypeMap M.! name) $ finalColMap M.! name)
+                ( \name ->
+                    ( name
+                    , applyLogicalTypeWithOptions opts (finalLTypeMap M.! name) $ finalColMap M.! name
+                    )
                 )
                 (filter (`M.member` finalColMap) columnNames)
 
-    pure $ DI.fromNamedColumns orderedColumns
+    pure $ applyRowRange opts (DI.fromNamedColumns orderedColumns)
 
 readParquetFiles :: FilePath -> IO DataFrame
-readParquetFiles path = do
+readParquetFiles = readParquetFilesWithOpts defaultParquetReadOptions
+
+readParquetFilesWithOpts :: ParquetReadOptions -> FilePath -> IO DataFrame
+readParquetFilesWithOpts opts path = do
     isDir <- doesDirectoryExist path
 
     let pat = if isDir then path </> "*" else path
@@ -137,8 +193,14 @@ readParquetFiles path = do
             error $
                 "readParquetFiles: no parquet files found for " ++ path
         _ -> do
-            dfs <- mapM readParquet files
-            pure (mconcat dfs)
+            let optsWithoutRowRange = opts{rowRange = Nothing}
+            dfs <- mapM (readParquetWithOpts optsWithoutRowRange) files
+            pure (applyRowRange opts (mconcat dfs))
+
+applyRowRange :: ParquetReadOptions -> DataFrame -> DataFrame
+applyRowRange opts df = case rowRange opts of
+    Nothing -> df
+    Just (start, end) -> DS.range (start, end) df
 
 readMetadataFromPath :: FilePath -> IO FileMetadata
 readMetadataFromPath path = do
@@ -309,13 +371,12 @@ processColumnPages (maxDef, maxRep) pages pType _ maybeTypeLength lType = do
             pure $
                 L.foldl' (\l r -> fromRight (error "concat failed") (DI.concatColumns l r)) c cs
 
-applyLogicalType :: LogicalType -> DI.Column -> DI.Column
-applyLogicalType (TimestampType isUTC unit) col =
-    fromRight col $
-        DI.mapColumn
-            (microsecondsToUTCTime . (* (1_000_000 `div` unitDivisor unit)))
-            col
-applyLogicalType (DecimalType precision scale) col
+applyLogicalTypeWithOptions :: ParquetReadOptions -> LogicalType -> DI.Column -> DI.Column
+applyLogicalTypeWithOptions opts (TimestampType _ unit) col =
+    case timestampPolicy opts of
+        PreserveTimestampPrecision -> asUTCTime unit col
+        CoerceTimestampToDay -> asDay unit col
+applyLogicalTypeWithOptions _ (DecimalType precision scale) col
     | precision <= 9 = case DI.toVector @Int32 @VU.Vector col of
         Right xs ->
             DI.fromUnboxedVector $
@@ -327,7 +388,44 @@ applyLogicalType (DecimalType precision scale) col
                 VU.map (\raw -> fromIntegral @Int64 @Double raw / 10 ^ scale) xs
         Left _ -> col
     | otherwise = col
-applyLogicalType _ col = col
+applyLogicalTypeWithOptions opts _ col =
+    case timestampPolicy opts of
+        CoerceTimestampToDay -> coerceUTCTimeColumnToDay col
+        PreserveTimestampPrecision -> col
+
+applyLogicalType :: LogicalType -> DI.Column -> DI.Column
+applyLogicalType = applyLogicalTypeWithOptions defaultParquetReadOptions
+
+asUTCTime :: TimeUnit -> DI.Column -> DI.Column
+asUTCTime unit col = case DI.mapColumn (timestampValueToUTCTime unit) col of
+    Right out -> out
+    Left _ -> case DI.mapColumn (fmap (timestampValueToUTCTime unit) :: Maybe Int64 -> Maybe UTCTime) col of
+        Right out -> out
+        Left _ -> col
+
+asDay :: TimeUnit -> DI.Column -> DI.Column
+asDay unit col = case DI.mapColumn (utctDay . timestampValueToUTCTime unit) col of
+    Right out -> out
+    Left _ -> case DI.mapColumn (fmap (utctDay . timestampValueToUTCTime unit) :: Maybe Int64 -> Maybe Day) col of
+        Right out -> out
+        Left _ -> coerceUTCTimeColumnToDay col
+
+coerceUTCTimeColumnToDay :: DI.Column -> DI.Column
+coerceUTCTimeColumnToDay col = case DI.mapColumn utctDay col of
+    Right out -> out
+    Left _ -> case DI.mapColumn (fmap utctDay :: Maybe UTCTime -> Maybe Day) col of
+        Right out -> out
+        Left _ -> col
+
+timestampValueToUTCTime :: TimeUnit -> Int64 -> UTCTime
+timestampValueToUTCTime MILLISECONDS value =
+    posixSecondsToUTCTime (fromIntegral value / 1_000)
+timestampValueToUTCTime MICROSECONDS value =
+    posixSecondsToUTCTime (fromIntegral value / 1_000_000)
+timestampValueToUTCTime NANOSECONDS value =
+    posixSecondsToUTCTime (fromIntegral value / 1_000_000_000)
+timestampValueToUTCTime TIME_UNIT_UNKNOWN value =
+    posixSecondsToUTCTime (fromIntegral value)
 
 microsecondsToUTCTime :: Int64 -> UTCTime
 microsecondsToUTCTime us =
