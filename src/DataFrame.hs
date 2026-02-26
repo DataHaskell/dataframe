@@ -255,7 +255,6 @@ import DataFrame.IO.CSV as CSV (
  )
 import DataFrame.IO.Parquet as Parquet (
     ParquetReadOptions (..),
-    ParquetTimestampPolicy (..),
     defaultParquetReadOptions,
     readParquet,
     readParquetFiles,

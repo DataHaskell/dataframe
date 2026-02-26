@@ -206,39 +206,82 @@ rowRangeWithOpts =
     TestCase
         ( assertEqual
             "rowRangeWithOpts"
-            (D.range (2, 5) allTypes)
+            (3, 11)
+            ( unsafePerformIO
+                ( D.dimensions
+                    <$> D.readParquetWithOpts
+                        (D.defaultParquetReadOptions{D.rowRange = Just (2, 5)})
+                        "./tests/data/alltypes_plain.parquet"
+                )
+            )
+        )
+
+predicateWithOpts :: Test
+predicateWithOpts =
+    TestCase
+        ( assertEqual
+            "predicateWithOpts"
+            (D.fromNamedColumns [("id", D.fromList [6 :: Int32, 7])])
             ( unsafePerformIO
                 ( D.readParquetWithOpts
-                    (D.defaultParquetReadOptions{D.rowRange = Just (2, 5)})
+                    ( D.defaultParquetReadOptions
+                        { D.selectedColumns = Just ["id"]
+                        , D.predicate =
+                            Just
+                                ( F.geq
+                                    (F.col @Int32 "id")
+                                    (F.lit (6 :: Int32))
+                                )
+                        }
+                    )
                     "./tests/data/alltypes_plain.parquet"
                 )
             )
         )
 
-timestampPolicyCoerceToDayWithOpts :: Test
-timestampPolicyCoerceToDayWithOpts =
+predicateUsesNonSelectedColumnWithOpts :: Test
+predicateUsesNonSelectedColumnWithOpts =
     TestCase
         ( assertEqual
-            "timestampPolicyCoerceToDayWithOpts"
-            ( D.fromNamedColumns
-                [
-                    ( "timestamp_col"
-                    , D.fromList
-                        [ fromGregorian 2009 3 1 :: Day
-                        , fromGregorian 2009 3 1
-                        ]
-                    )
-                ]
-            )
+            "predicateUsesNonSelectedColumnWithOpts"
+            (D.fromNamedColumns [("bool_col", D.fromList [True, False])])
             ( unsafePerformIO
                 ( D.readParquetWithOpts
                     ( D.defaultParquetReadOptions
-                        { D.selectedColumns = Just ["timestamp_col"]
-                        , D.timestampPolicy = D.CoerceTimestampToDay
-                        , D.rowRange = Just (0, 2)
+                        { D.selectedColumns = Just ["bool_col"]
+                        , D.predicate =
+                            Just
+                                ( F.geq
+                                    (F.col @Int32 "id")
+                                    (F.lit (6 :: Int32))
+                                )
                         }
                     )
                     "./tests/data/alltypes_plain.parquet"
+                )
+            )
+        )
+
+predicateWithOptsAcrossFiles :: Test
+predicateWithOptsAcrossFiles =
+    TestCase
+        ( assertEqual
+            "predicateWithOptsAcrossFiles"
+            (4, 1)
+            ( unsafePerformIO
+                ( D.dimensions
+                    <$> D.readParquetFilesWithOpts
+                        ( D.defaultParquetReadOptions
+                            { D.selectedColumns = Just ["id"]
+                            , D.predicate =
+                                Just
+                                    ( F.geq
+                                        (F.col @Int32 "id")
+                                        (F.lit (6 :: Int32))
+                                    )
+                            }
+                        )
+                        "./tests/data/alltypes_plain*.parquet"
                 )
             )
         )
@@ -890,7 +933,9 @@ tests =
     , allTypesDictionary
     , selectedColumnsWithOpts
     , rowRangeWithOpts
-    , timestampPolicyCoerceToDayWithOpts
+    , predicateWithOpts
+    , predicateUsesNonSelectedColumnWithOpts
+    , predicateWithOptsAcrossFiles
     , missingSelectedColumnWithOpts
     , mtCars
     , allTypesTinyPagesLastFew

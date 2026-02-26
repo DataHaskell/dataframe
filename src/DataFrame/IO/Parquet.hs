@@ -24,6 +24,7 @@ import Data.Word
 import DataFrame.Errors (DataFrameException (ColumnNotFoundException))
 import qualified DataFrame.Internal.Column as DI
 import DataFrame.Internal.DataFrame (DataFrame)
+import DataFrame.Internal.Expression (Expr, getColumns)
 import qualified DataFrame.Operations.Core as DI
 import DataFrame.Operations.Merge ()
 import qualified DataFrame.Operations.Subset as DS
@@ -39,14 +40,9 @@ import System.Directory (doesDirectoryExist)
 import qualified Data.Vector.Unboxed as VU
 import System.FilePath ((</>))
 
-data ParquetTimestampPolicy
-    = PreserveTimestampPrecision
-    | CoerceTimestampToDay
-    deriving (Eq, Show)
-
 data ParquetReadOptions = ParquetReadOptions
     { selectedColumns :: Maybe [T.Text]
-    , timestampPolicy :: ParquetTimestampPolicy
+    , predicate :: Maybe (Expr Bool)
     , rowRange :: Maybe (Int, Int)
     }
     deriving (Eq, Show)
@@ -55,7 +51,7 @@ defaultParquetReadOptions :: ParquetReadOptions
 defaultParquetReadOptions =
     ParquetReadOptions
         { selectedColumns = Nothing
-        , timestampPolicy = PreserveTimestampPrecision
+        , predicate = Nothing
         , rowRange = Nothing
         }
 
@@ -75,16 +71,18 @@ readParquetWithOpts opts path = do
     let columnPaths = getColumnPaths (drop 1 $ schema fileMetadata)
     let columnNames = map fst columnPaths
     let leafNames = map (last . T.splitOn ".") columnNames
-    let availableSelectedColumns = L.nub (columnNames ++ leafNames)
-    let selectedColumnSet = S.fromList <$> selectedColumns opts
-    let shouldReadColumn colName colPath =
+    let availableSelectedColumns = L.nub leafNames
+    let predicateColumns = maybe [] (L.nub . getColumns) (predicate opts)
+    let selectedColumnsForRead = case selectedColumns opts of
+            Nothing -> Nothing
+            Just selected -> Just (L.nub (selected ++ predicateColumns))
+    let selectedColumnSet = S.fromList <$> selectedColumnsForRead
+    let shouldReadColumn colName _ =
             case selectedColumnSet of
                 Nothing -> True
-                Just selected ->
-                    let fullPath = T.intercalate "." (map T.pack colPath)
-                     in colName `S.member` selected || fullPath `S.member` selected
+                Just selected -> colName `S.member` selected
 
-    case selectedColumns opts of
+    case selectedColumnsForRead of
         Nothing -> pure ()
         Just requested ->
             let missing = requested L.\\ availableSelectedColumns
@@ -168,12 +166,12 @@ readParquetWithOpts opts path = do
             map
                 ( \name ->
                     ( name
-                    , applyLogicalTypeWithOptions opts (finalLTypeMap M.! name) $ finalColMap M.! name
+                    , applyLogicalType (finalLTypeMap M.! name) $ finalColMap M.! name
                     )
                 )
                 (filter (`M.member` finalColMap) columnNames)
 
-    pure $ applyRowRange opts (DI.fromNamedColumns orderedColumns)
+    pure $ applyReadOptions opts (DI.fromNamedColumns orderedColumns)
 
 readParquetFiles :: FilePath -> IO DataFrame
 readParquetFiles = readParquetFilesWithOpts defaultParquetReadOptions
@@ -198,9 +196,22 @@ readParquetFilesWithOpts opts path = do
             pure (applyRowRange opts (mconcat dfs))
 
 applyRowRange :: ParquetReadOptions -> DataFrame -> DataFrame
-applyRowRange opts df = case rowRange opts of
-    Nothing -> df
-    Just (start, end) -> DS.range (start, end) df
+applyRowRange opts df =
+    maybe df (`DS.range` df) (rowRange opts)
+
+applySelectedColumns :: ParquetReadOptions -> DataFrame -> DataFrame
+applySelectedColumns opts df =
+    maybe df (`DS.select` df) (selectedColumns opts)
+
+applyPredicate :: ParquetReadOptions -> DataFrame -> DataFrame
+applyPredicate opts df =
+    maybe df (`DS.filterWhere` df) (predicate opts)
+
+applyReadOptions :: ParquetReadOptions -> DataFrame -> DataFrame
+applyReadOptions opts =
+    applyRowRange opts
+        . applySelectedColumns opts
+        . applyPredicate opts
 
 readMetadataFromPath :: FilePath -> IO FileMetadata
 readMetadataFromPath path = do
@@ -371,13 +382,13 @@ processColumnPages (maxDef, maxRep) pages pType _ maybeTypeLength lType = do
             pure $
                 L.foldl' (\l r -> fromRight (error "concat failed") (DI.concatColumns l r)) c cs
 
-applyLogicalTypeWithOptions ::
-    ParquetReadOptions -> LogicalType -> DI.Column -> DI.Column
-applyLogicalTypeWithOptions opts (TimestampType _ unit) col =
-    case timestampPolicy opts of
-        PreserveTimestampPrecision -> asUTCTime unit col
-        CoerceTimestampToDay -> asDay unit col
-applyLogicalTypeWithOptions _ (DecimalType precision scale) col
+applyLogicalType :: LogicalType -> DI.Column -> DI.Column
+applyLogicalType (TimestampType _ unit) col =
+    fromRight col $
+        DI.mapColumn
+            (microsecondsToUTCTime . (* (1_000_000 `div` unitDivisor unit)))
+            col
+applyLogicalType (DecimalType precision scale) col
     | precision <= 9 = case DI.toVector @Int32 @VU.Vector col of
         Right xs ->
             DI.fromUnboxedVector $
@@ -389,48 +400,7 @@ applyLogicalTypeWithOptions _ (DecimalType precision scale) col
                 VU.map (\raw -> fromIntegral @Int64 @Double raw / 10 ^ scale) xs
         Left _ -> col
     | otherwise = col
-applyLogicalTypeWithOptions opts _ col =
-    case timestampPolicy opts of
-        CoerceTimestampToDay -> coerceUTCTimeColumnToDay col
-        PreserveTimestampPrecision -> col
-
-applyLogicalType :: LogicalType -> DI.Column -> DI.Column
-applyLogicalType = applyLogicalTypeWithOptions defaultParquetReadOptions
-
-asUTCTime :: TimeUnit -> DI.Column -> DI.Column
-asUTCTime unit col = case DI.mapColumn (timestampValueToUTCTime unit) col of
-    Right out -> out
-    Left _ -> case DI.mapColumn
-        (fmap (timestampValueToUTCTime unit) :: Maybe Int64 -> Maybe UTCTime)
-        col of
-        Right out -> out
-        Left _ -> col
-
-asDay :: TimeUnit -> DI.Column -> DI.Column
-asDay unit col = case DI.mapColumn (utctDay . timestampValueToUTCTime unit) col of
-    Right out -> out
-    Left _ -> case DI.mapColumn
-        (fmap (utctDay . timestampValueToUTCTime unit) :: Maybe Int64 -> Maybe Day)
-        col of
-        Right out -> out
-        Left _ -> coerceUTCTimeColumnToDay col
-
-coerceUTCTimeColumnToDay :: DI.Column -> DI.Column
-coerceUTCTimeColumnToDay col = case DI.mapColumn utctDay col of
-    Right out -> out
-    Left _ -> case DI.mapColumn (fmap utctDay :: Maybe UTCTime -> Maybe Day) col of
-        Right out -> out
-        Left _ -> col
-
-timestampValueToUTCTime :: TimeUnit -> Int64 -> UTCTime
-timestampValueToUTCTime MILLISECONDS value =
-    posixSecondsToUTCTime (fromIntegral value / 1_000)
-timestampValueToUTCTime MICROSECONDS value =
-    posixSecondsToUTCTime (fromIntegral value / 1_000_000)
-timestampValueToUTCTime NANOSECONDS value =
-    posixSecondsToUTCTime (fromIntegral value / 1_000_000_000)
-timestampValueToUTCTime TIME_UNIT_UNKNOWN value =
-    posixSecondsToUTCTime (fromIntegral value)
+applyLogicalType _ col = col
 
 microsecondsToUTCTime :: Int64 -> UTCTime
 microsecondsToUTCTime us =
