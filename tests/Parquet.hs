@@ -221,12 +221,13 @@ timestampPolicyCoerceToDayWithOpts =
         ( assertEqual
             "timestampPolicyCoerceToDayWithOpts"
             ( D.fromNamedColumns
-                [ ( "timestamp_col"
-                  , D.fromList
+                [
+                    ( "timestamp_col"
+                    , D.fromList
                         [ fromGregorian 2009 3 1 :: Day
                         , fromGregorian 2009 3 1
                         ]
-                  )
+                    )
                 ]
             )
             ( unsafePerformIO

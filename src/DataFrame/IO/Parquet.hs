@@ -6,8 +6,8 @@
 
 module DataFrame.IO.Parquet where
 
-import Control.Monad
 import Control.Exception (throw)
+import Control.Monad
 import Data.Bits
 import qualified Data.ByteString as BSO
 import Data.Either
@@ -371,7 +371,8 @@ processColumnPages (maxDef, maxRep) pages pType _ maybeTypeLength lType = do
             pure $
                 L.foldl' (\l r -> fromRight (error "concat failed") (DI.concatColumns l r)) c cs
 
-applyLogicalTypeWithOptions :: ParquetReadOptions -> LogicalType -> DI.Column -> DI.Column
+applyLogicalTypeWithOptions ::
+    ParquetReadOptions -> LogicalType -> DI.Column -> DI.Column
 applyLogicalTypeWithOptions opts (TimestampType _ unit) col =
     case timestampPolicy opts of
         PreserveTimestampPrecision -> asUTCTime unit col
@@ -399,14 +400,18 @@ applyLogicalType = applyLogicalTypeWithOptions defaultParquetReadOptions
 asUTCTime :: TimeUnit -> DI.Column -> DI.Column
 asUTCTime unit col = case DI.mapColumn (timestampValueToUTCTime unit) col of
     Right out -> out
-    Left _ -> case DI.mapColumn (fmap (timestampValueToUTCTime unit) :: Maybe Int64 -> Maybe UTCTime) col of
+    Left _ -> case DI.mapColumn
+        (fmap (timestampValueToUTCTime unit) :: Maybe Int64 -> Maybe UTCTime)
+        col of
         Right out -> out
         Left _ -> col
 
 asDay :: TimeUnit -> DI.Column -> DI.Column
 asDay unit col = case DI.mapColumn (utctDay . timestampValueToUTCTime unit) col of
     Right out -> out
-    Left _ -> case DI.mapColumn (fmap (utctDay . timestampValueToUTCTime unit) :: Maybe Int64 -> Maybe Day) col of
+    Left _ -> case DI.mapColumn
+        (fmap (utctDay . timestampValueToUTCTime unit) :: Maybe Int64 -> Maybe Day)
+        col of
         Right out -> out
         Left _ -> coerceUTCTimeColumnToDay col
 
