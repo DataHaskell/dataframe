@@ -29,6 +29,17 @@ shuffleShuffles =
                 (initialNumbers == shuffledNumbers)
             )
 
+shufflePreservesColumnNames :: Test
+shufflePreservesColumnNames =
+    let gen = mkStdGen 837
+        shuffled = shuffle gen testDataFrame
+     in TestCase
+            ( assertEqual
+                "Column names are unchanged"
+                (D.columnNames shuffled)
+                (D.columnNames testDataFrame)
+            )
+
 -- Test that un-shuffling restores the original dataframe
 -- which is known to be sorted in this case
 shuffleOnlyShuffles :: Test
