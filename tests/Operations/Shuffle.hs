@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeApplications #-}
 
-module Operations.Permutation where
+module Operations.Shuffle where
 
 import qualified DataFrame as D
 
