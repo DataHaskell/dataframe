@@ -29,6 +29,7 @@ import qualified Operations.InsertColumn
 import qualified Operations.Join
 import qualified Operations.Merge
 import qualified Operations.ReadCsv
+import qualified Operations.Shuffle
 import qualified Operations.Sort
 import qualified Operations.Statistics
 import qualified Operations.Subset
@@ -5120,6 +5121,7 @@ tests =
             ++ Operations.Join.tests
             ++ Operations.Merge.tests
             ++ Operations.ReadCsv.tests
+            ++ Operations.Shuffle.tests
             ++ Operations.Sort.tests
             ++ Operations.Statistics.tests
             ++ Operations.Take.tests

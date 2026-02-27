@@ -1,0 +1,72 @@
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TypeApplications #-}
+
+module Operations.Permutation where
+
+import qualified DataFrame as D
+
+import DataFrame.Operations.Permutation (shuffle)
+import System.Random (mkStdGen)
+import Test.HUnit (Test (..), assertEqual)
+
+testDataFrame :: D.DataFrame
+testDataFrame =
+    D.fromNamedColumns
+        [ ("numbers", D.fromList @Int [1 .. 26])
+        ]
+
+-- Test that shuffling does anything at all
+shuffleShuffles :: Test
+shuffleShuffles =
+    let gen = mkStdGen 1234
+        shuffled = shuffle gen testDataFrame
+        initialNumbers = D.extractNumericColumn "numbers" testDataFrame
+        shuffledNumbers = D.extractNumericColumn "numbers" shuffled
+     in TestCase
+            ( assertEqual
+                "Shuffled column unequal to initial column"
+                False
+                (initialNumbers == shuffledNumbers)
+            )
+
+-- Test that un-shuffling restores the original dataframe
+-- which is known to be sorted in this case
+shuffleOnlyShuffles :: Test
+shuffleOnlyShuffles =
+    let gen = mkStdGen 1234
+        shuffled = shuffle gen testDataFrame
+        sortedShuffled = D.sortBy [D.Desc (D.col @Int "numbers")] shuffled
+     in TestCase
+            (assertEqual "sort recovers initial numbers" testDataFrame sortedShuffled)
+
+-- Test that shuffling isn't doing anything sneaky with summoning
+-- random numbers somehow
+shuffleSameSeedIsSameShuffle :: Test
+shuffleSameSeedIsSameShuffle =
+    let gen = mkStdGen 1234
+        shuffled1 = shuffle gen testDataFrame
+        shuffled2 = shuffle gen testDataFrame
+     in TestCase
+            (assertEqual "shuffle with same seed gives same result" shuffled1 shuffled2)
+
+-- Test that different seeds give different results
+shuffleDifferentSeedIsDifferent :: Test
+shuffleDifferentSeedIsDifferent =
+    let gen1 = mkStdGen 1234
+        gen2 = mkStdGen 4321
+        shuffled1 = shuffle gen1 testDataFrame
+        shuffled2 = shuffle gen2 testDataFrame
+     in TestCase
+            ( assertEqual
+                "shuffle with different seeds gives different results"
+                False
+                (shuffled1 == shuffled2)
+            )
+
+tests :: [Test]
+tests =
+    [ TestLabel "shuffleShuffles" shuffleShuffles
+    , TestLabel "shuffleOnlyShuffles" shuffleOnlyShuffles
+    , TestLabel "shuffleSameSeedIsSameShuffle" shuffleSameSeedIsSameShuffle
+    , TestLabel "shuffleDifferentSeedIsDifferent" shuffleDifferentSeedIsDifferent
+    ]

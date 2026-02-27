@@ -199,6 +199,7 @@ test-suite tests
                    Operations.Join,
                    Operations.Merge,
                    Operations.ReadCsv,
+                   Operations.Shuffle,
                    Operations.Sort,
                    Operations.Subset,
                    Operations.Statistics,
