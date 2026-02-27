@@ -46,7 +46,7 @@ shuffleOnlyShuffles :: Test
 shuffleOnlyShuffles =
     let gen = mkStdGen 1234
         shuffled = shuffle gen testDataFrame
-        sortedShuffled = D.sortBy [D.Desc (D.col @Int "numbers")] shuffled
+        sortedShuffled = D.sortBy [D.Asc (D.col @Int "numbers")] shuffled
      in TestCase
             (assertEqual "sort recovers initial numbers" testDataFrame sortedShuffled)
 
