@@ -42,8 +42,8 @@ shufflePreservesColumnNames =
 
 -- Test that un-shuffling restores the original dataframe
 -- which is known to be sorted in this case
-shuffleOnlyShuffles :: Test
-shuffleOnlyShuffles =
+shufflePreservesData :: Test
+shufflePreservesData =
     let gen = mkStdGen 1234
         shuffled = shuffle gen testDataFrame
         sortedShuffled = D.sortBy [D.Asc (D.col @Int "numbers")] shuffled
@@ -77,7 +77,8 @@ shuffleDifferentSeedIsDifferent =
 tests :: [Test]
 tests =
     [ TestLabel "shuffleShuffles" shuffleShuffles
-    , TestLabel "shuffleOnlyShuffles" shuffleOnlyShuffles
+    , TestLabel "shufflePreservesData" shufflePreservesData
+    , TestLabel "shufflePreservesColumnNames" shufflePreservesColumnNames
     , TestLabel "shuffleSameSeedIsSameShuffle" shuffleSameSeedIsSameShuffle
     , TestLabel "shuffleDifferentSeedIsDifferent" shuffleDifferentSeedIsDifferent
     ]
