@@ -18,6 +18,7 @@ import DataFrame.Internal.Expression
 import DataFrame.Internal.Row
 import DataFrame.Operations.Core
 import System.Random
+import System.Random.Shuffle (shuffle')
 
 -- | Sort order taken as a parameter by the 'sortBy' function.
 data SortOrder where
@@ -75,4 +76,4 @@ shuffle pureGen df =
         df{columns = V.map (atIndicesStable indexes) (columns df)}
 
 shuffledIndices :: (RandomGen g) => g -> Int -> VU.Vector Int
-shuffledIndices pureGen k = VU.fromList (fst (uniformShuffleList [0 .. (k - 1)] pureGen))
+shuffledIndices pureGen k = VU.fromList (shuffle' [0 .. (k - 1)] k pureGen)
