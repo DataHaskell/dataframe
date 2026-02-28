@@ -23,6 +23,7 @@ module DataFrame.Typed.Schema (
     RenameInSchema,
     RenameManyInSchema,
     Append,
+    Snoc,
     Reverse,
     ColumnNames,
     AssertAbsent,
@@ -75,6 +76,11 @@ type family Lookup (name :: Symbol) (cols :: [Type]) :: Type where
     Lookup name '[] =
         TypeError
             ('Text "Column '" ':<>: 'Text name ':<>: 'Text "' not found in schema")
+
+-- | Add type to the end of a list.
+type family Snoc (xs :: [k]) (x :: k) :: [k] where
+    Snoc '[]       x = '[x]
+    Snoc (y ': ys) x = y ': Snoc ys x
 
 -- | Check whether a column name exists in a schema (type-level Bool).
 type family HasName (name :: Symbol) (cols :: [Type]) :: Bool where
