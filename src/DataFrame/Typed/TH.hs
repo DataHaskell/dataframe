@@ -20,7 +20,6 @@ import qualified Data.Map as M
 import qualified Data.Text as T
 
 import Language.Haskell.TH
-import Language.Haskell.TH.Syntax (Lift (..))
 
 import qualified DataFrame.IO.CSV as D
 import qualified DataFrame.Internal.Column as C

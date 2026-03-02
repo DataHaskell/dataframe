@@ -83,7 +83,6 @@ module DataFrame.Typed.Expr (
     desc,
 ) where
 
-import Data.Kind (Type)
 import Data.Proxy (Proxy (..))
 import Data.String (IsString (..))
 import qualified Data.Text as T
@@ -100,7 +99,7 @@ import DataFrame.Internal.Expression (
     UnaryOp (..),
  )
 import DataFrame.Typed.Schema (AssertPresent, Lookup)
-import DataFrame.Typed.Types (Column, TExpr (..), TSortOrder (..))
+import DataFrame.Typed.Types (TExpr (..), TSortOrder (..))
 
 -------------------------------------------------------------------------------
 -- Column reference — the core type-safe construction point

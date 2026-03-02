@@ -130,6 +130,7 @@ module DataFrame.Typed (
 
     -- * Schema-modifying operations
     derive,
+    impute,
     select,
     exclude,
     rename,
@@ -174,6 +175,7 @@ module DataFrame.Typed (
     ExcludeSchema,
     RenameInSchema,
     RemoveColumn,
+    Impute,
     Append,
     Reverse,
     StripAllMaybe,
@@ -212,7 +214,6 @@ import DataFrame.Typed.Schema
 import DataFrame.Typed.TH (deriveSchema, deriveSchemaFromCsvFile)
 import DataFrame.Typed.Types (
     Column,
-    TExpr (..),
     TSortOrder (..),
     These (..),
     TypedDataFrame,

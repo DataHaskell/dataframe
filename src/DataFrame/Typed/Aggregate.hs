@@ -28,7 +28,7 @@ import GHC.TypeLits (KnownSymbol, Symbol, symbolVal)
 
 import DataFrame.Internal.Column (Columnable)
 import qualified DataFrame.Internal.DataFrame as D
-import DataFrame.Internal.Expression (Expr, NamedExpr, UExpr (..))
+import DataFrame.Internal.Expression (NamedExpr)
 import qualified DataFrame.Operations.Aggregation as DA
 
 import DataFrame.Typed.Freeze (unsafeFreeze)

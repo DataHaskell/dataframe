@@ -15,11 +15,8 @@ module DataFrame.Typed.Freeze (
     unsafeFreeze,
 ) where
 
-import Data.Kind (Type)
-import qualified Data.Map as M
-import Data.Proxy (Proxy (..))
 import qualified Data.Text as T
-import Type.Reflection (SomeTypeRep, someTypeRep)
+import Type.Reflection (SomeTypeRep)
 
 import qualified DataFrame.Internal.Column as C
 import qualified DataFrame.Internal.DataFrame as D

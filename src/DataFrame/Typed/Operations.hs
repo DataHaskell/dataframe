@@ -30,6 +30,7 @@ module DataFrame.Typed.Operations (
 
     -- * Schema-modifying operations
     derive,
+    impute,
     select,
     exclude,
     rename,
@@ -54,7 +55,6 @@ module DataFrame.Typed.Operations (
     (|>),
 ) where
 
-import qualified Data.Foldable as F
 import Data.Function ((&))
 import Data.Proxy (Proxy (..))
 import qualified Data.Text as T
@@ -63,9 +63,9 @@ import GHC.TypeLits (KnownSymbol, Symbol, symbolVal)
 import System.Random (RandomGen)
 import Prelude hiding (drop, filter, take)
 
+import qualified DataFrame.Functions as DF
 import DataFrame.Internal.Column (Columnable)
 import qualified DataFrame.Internal.Column as C
-import DataFrame.Internal.Expression (Expr (..))
 import qualified DataFrame.Operations.Aggregation as DA
 import qualified DataFrame.Operations.Core as D
 import DataFrame.Operations.Merge ()
@@ -75,7 +75,7 @@ import qualified DataFrame.Operations.Transformations as D
 
 -- Semigroup instance
 
-import DataFrame.Typed.Freeze (thaw, unsafeFreeze)
+import DataFrame.Typed.Freeze (unsafeFreeze)
 import DataFrame.Typed.Schema
 import DataFrame.Typed.Types (TExpr (..), TSortOrder (..), TypedDataFrame (..))
 import qualified DataFrame.Typed.Types as T
@@ -219,6 +219,20 @@ derive ::
     TypedDataFrame cols ->
     TypedDataFrame (Snoc cols (T.Column name a))
 derive (TExpr expr) (TDF df) = unsafeFreeze (D.derive colName expr df)
+  where
+    colName = T.pack (symbolVal (Proxy @name))
+
+impute ::
+    forall name a cols.
+    ( KnownSymbol name
+    , Columnable a
+    ) =>
+    a ->
+    TypedDataFrame cols ->
+    TypedDataFrame (Impute name cols)
+impute value (TDF df) =
+    unsafeFreeze
+        (D.derive colName (DF.fromMaybe value (DF.col @(Maybe a) colName)) df)
   where
     colName = T.pack (symbolVal (Proxy @name))
 

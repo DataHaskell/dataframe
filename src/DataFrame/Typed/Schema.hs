@@ -18,6 +18,7 @@ module DataFrame.Typed.Schema (
     Lookup,
     HasName,
     RemoveColumn,
+    Impute,
     SubsetSchema,
     ExcludeSchema,
     RenameInSchema,
@@ -60,9 +61,10 @@ import Data.Proxy (Proxy (..))
 import qualified Data.Text as T
 import Data.These (These)
 import GHC.TypeLits
-import Type.Reflection (SomeTypeRep, Typeable, someTypeRep, typeRep)
+import Type.Reflection (SomeTypeRep, Typeable, someTypeRep)
 
 import DataFrame.Internal.Column (Columnable)
+import DataFrame.Internal.Types (If)
 import DataFrame.Typed.Types (Column)
 
 -------------------------------------------------------------------------------
@@ -76,6 +78,14 @@ type family Lookup (name :: Symbol) (cols :: [Type]) :: Type where
     Lookup name '[] =
         TypeError
             ('Text "Column '" ':<>: 'Text name ':<>: 'Text "' not found in schema")
+
+type family Impute (name :: Symbol) (cols :: [Type]) :: [Type] where
+    Impute name (Column name (Maybe a) ': rest) = Column name a ': rest
+    Impute name (Column name _ ': rest) =
+        TypeError
+            ('Text "Column '" ':<>: 'Text name ':<>: 'Text "' is not of kind Maybe *")
+    Impute name (col ': rest) = col ': Impute name rest
+    Impute name '[] = '[]
 
 -- | Add type to the end of a list.
 type family Snoc (xs :: [k]) (x :: k) :: [k] where
@@ -107,11 +117,6 @@ type family ExcludeSchema (names :: [Symbol]) (cols :: [Type]) :: [Type] where
             (IsElem n names)
             (ExcludeSchema names rest)
             (Column n a ': ExcludeSchema names rest)
-
--- | Type-level if
-type family If (b :: Bool) (t :: k) (f :: k) :: k where
-    If 'True t _ = t
-    If 'False _ f = f
 
 -- | Type-level elem for Symbols
 type family IsElem (x :: Symbol) (xs :: [Symbol]) :: Bool where

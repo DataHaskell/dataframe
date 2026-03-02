@@ -15,16 +15,11 @@ module DataFrame.Typed.Join (
     fullOuterJoin,
 ) where
 
-import Data.Proxy (Proxy (..))
-import qualified Data.Text as T
-import GHC.TypeLits (KnownSymbol, Symbol, symbolVal)
+import GHC.TypeLits (Symbol)
 
-import DataFrame.Internal.Column (Columnable)
-import qualified DataFrame.Internal.DataFrame as D
-import qualified DataFrame.Operations.Core as D
 import qualified DataFrame.Operations.Join as DJ
 
-import DataFrame.Typed.Freeze (thaw, unsafeFreeze)
+import DataFrame.Typed.Freeze (unsafeFreeze)
 import DataFrame.Typed.Schema
 import DataFrame.Typed.Types (TypedDataFrame (..))
 
