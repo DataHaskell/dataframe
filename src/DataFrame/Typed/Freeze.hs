@@ -54,10 +54,6 @@ Used internally after delegation where the library guarantees schema correctness
 unsafeFreeze :: D.DataFrame -> TypedDataFrame cols
 unsafeFreeze = TDF
 
--------------------------------------------------------------------------------
--- Internal validation
--------------------------------------------------------------------------------
-
 validateSchema ::
     forall cols.
     (KnownSchema cols) =>

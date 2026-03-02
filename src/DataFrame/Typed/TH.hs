@@ -53,10 +53,6 @@ deriveSchemaFromCsvFile typeName path = do
     df <- liftIO (D.readCsv path)
     deriveSchema typeName df
 
--------------------------------------------------------------------------------
--- Internal helpers
--------------------------------------------------------------------------------
-
 getSchemaInfo :: D.DataFrame -> [(T.Text, String)]
 getSchemaInfo df =
     let orderedNames =

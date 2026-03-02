@@ -68,8 +68,8 @@ module DataFrame.Typed (
     col,
     lit,
     ifThenElse,
-    tlift,
-    tlift2,
+    lift,
+    lift2,
 
     -- * Comparison operators
     (.==.),
@@ -82,15 +82,15 @@ module DataFrame.Typed (
     -- * Logical operators
     (.&&.),
     (.||.),
-    tnot,
+    DataFrame.Typed.Expr.not,
 
     -- * Aggregation expression combinators
-    tsum,
-    tmean,
-    tcount,
-    tminimum,
-    tmaximum,
-    tcollect,
+    DataFrame.Typed.Expr.sum,
+    mean,
+    count,
+    DataFrame.Typed.Expr.minimum,
+    DataFrame.Typed.Expr.maximum,
+    collect,
 
     -- * Typed sort orders
     TSortOrder (..),

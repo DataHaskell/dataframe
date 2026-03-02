@@ -51,8 +51,8 @@ module DataFrame.Typed.Expr (
     ifThenElse,
 
     -- * Unary / binary lifting
-    tlift,
-    tlift2,
+    lift,
+    lift2,
 
     -- * Comparison operators
     (.==.),
@@ -65,15 +65,15 @@ module DataFrame.Typed.Expr (
     -- * Logical operators
     (.&&.),
     (.||.),
-    tnot,
+    DataFrame.Typed.Expr.not,
 
     -- * Aggregation combinators
-    tsum,
-    tmean,
-    tcount,
-    tminimum,
-    tmaximum,
-    tcollect,
+    sum,
+    mean,
+    count,
+    minimum,
+    maximum,
+    collect,
 
     -- * Named expression helper
     as,
@@ -98,12 +98,10 @@ import DataFrame.Internal.Expression (
     UExpr (..),
     UnaryOp (..),
  )
+import DataFrame.Internal.Statistics
 import DataFrame.Typed.Schema (AssertPresent, Lookup)
 import DataFrame.Typed.Types (TExpr (..), TSortOrder (..))
-
--------------------------------------------------------------------------------
--- Column reference — the core type-safe construction point
--------------------------------------------------------------------------------
+import Prelude hiding (maximum, minimum, sum)
 
 {- | Create a typed column reference. This is the key type-safety entry point.
 
@@ -181,19 +179,15 @@ instance (IsString a, Columnable a) => IsString (TExpr cols a) where
 -------------------------------------------------------------------------------
 
 -- | Lift a unary function into a typed expression.
-tlift ::
+lift ::
     (Columnable a, Columnable b) => (a -> b) -> TExpr cols a -> TExpr cols b
-tlift f (TExpr e) = TExpr (Unary (MkUnaryOp f "unaryUdf" Nothing) e)
+lift f (TExpr e) = TExpr (Unary (MkUnaryOp f "unaryUdf" Nothing) e)
 
 -- | Lift a binary function into typed expressions.
-tlift2 ::
+lift2 ::
     (Columnable a, Columnable b, Columnable c) =>
     (a -> b -> c) -> TExpr cols a -> TExpr cols b -> TExpr cols c
-tlift2 f (TExpr a) (TExpr b) = TExpr (Binary (MkBinaryOp f "binaryUdf" Nothing False 0) a b)
-
--------------------------------------------------------------------------------
--- Comparison operators
--------------------------------------------------------------------------------
+lift2 f (TExpr a) (TExpr b) = TExpr (Binary (MkBinaryOp f "binaryUdf" Nothing False 0) a b)
 
 infixl 4 .==., ./=., .<., .<=., .>=., .>.
 infixr 3 .&&.
@@ -229,35 +223,30 @@ infixr 2 .||.
 (.||.) :: TExpr cols Bool -> TExpr cols Bool -> TExpr cols Bool
 (.||.) (TExpr a) (TExpr b) = TExpr (Binary (MkBinaryOp (||) "or" (Just "||") True 2) a b)
 
-tnot :: TExpr cols Bool -> TExpr cols Bool
-tnot (TExpr e) = TExpr (Unary (MkUnaryOp not "not" (Just "!")) e)
+not :: TExpr cols Bool -> TExpr cols Bool
+not (TExpr e) = TExpr (Unary (MkUnaryOp Prelude.not "not" (Just "!")) e)
 
 -------------------------------------------------------------------------------
 -- Aggregation combinators
 -------------------------------------------------------------------------------
 
-tsum :: (Columnable a, Num a) => TExpr cols a -> TExpr cols a
-tsum (TExpr e) = TExpr (Agg (FoldAgg "sum" Nothing (+)) e)
+sum :: (Columnable a, Num a) => TExpr cols a -> TExpr cols a
+sum (TExpr e) = TExpr (Agg (FoldAgg "sum" Nothing (+)) e)
 
-tmean :: (Columnable a, Real a, VU.Unbox a) => TExpr cols a -> TExpr cols Double
-tmean (TExpr e) = TExpr (Agg (CollectAgg "mean" mean') e)
-  where
-    mean' v =
-        let s = VU.foldl' (\acc x -> acc + realToFrac x) (0 :: Double) v
-            n = VU.length v
-         in if n == 0 then 0 else s / fromIntegral n
+mean :: (Columnable a, Real a, VU.Unbox a) => TExpr cols a -> TExpr cols Double
+mean (TExpr e) = TExpr (Agg (CollectAgg "mean" mean') e)
 
-tcount :: (Columnable a) => TExpr cols a -> TExpr cols Int
-tcount (TExpr e) = TExpr (Agg (FoldAgg "count" (Just 0) (\acc _ -> acc + 1)) e)
+count :: (Columnable a) => TExpr cols a -> TExpr cols Int
+count (TExpr e) = TExpr (Agg (FoldAgg "count" (Just 0) (\acc _ -> acc + 1)) e)
 
-tminimum :: (Columnable a, Ord a) => TExpr cols a -> TExpr cols a
-tminimum (TExpr e) = TExpr (Agg (FoldAgg "minimum" Nothing min) e)
+minimum :: (Columnable a, Ord a) => TExpr cols a -> TExpr cols a
+minimum (TExpr e) = TExpr (Agg (FoldAgg "minimum" Nothing min) e)
 
-tmaximum :: (Columnable a, Ord a) => TExpr cols a -> TExpr cols a
-tmaximum (TExpr e) = TExpr (Agg (FoldAgg "maximum" Nothing max) e)
+maximum :: (Columnable a, Ord a) => TExpr cols a -> TExpr cols a
+maximum (TExpr e) = TExpr (Agg (FoldAgg "maximum" Nothing max) e)
 
-tcollect :: (Columnable a) => TExpr cols a -> TExpr cols [a]
-tcollect (TExpr e) = TExpr (Agg (FoldAgg "collect" (Just []) (flip (:))) e)
+collect :: (Columnable a) => TExpr cols a -> TExpr cols [a]
+collect (TExpr e) = TExpr (Agg (FoldAgg "collect" (Just []) (flip (:))) e)
 
 -------------------------------------------------------------------------------
 -- Named expression helper
@@ -266,10 +255,6 @@ tcollect (TExpr e) = TExpr (Agg (FoldAgg "collect" (Just []) (flip (:))) e)
 -- | Create a 'NamedExpr' for use with 'aggregateUntyped'.
 as :: (Columnable a) => TExpr cols a -> T.Text -> NamedExpr
 as (TExpr e) name = (name, UExpr e)
-
--------------------------------------------------------------------------------
--- Sort helpers
--------------------------------------------------------------------------------
 
 -- | Create an ascending sort order from a typed expression.
 asc :: (Columnable a) => TExpr cols a -> TSortOrder cols

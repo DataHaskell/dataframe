@@ -67,10 +67,6 @@ import DataFrame.Internal.Column (Columnable)
 import DataFrame.Internal.Types (If)
 import DataFrame.Typed.Types (Column)
 
--------------------------------------------------------------------------------
--- Core type families
--------------------------------------------------------------------------------
-
 -- | Look up the element type of a column by name.
 type family Lookup (name :: Symbol) (cols :: [Type]) :: Type where
     Lookup name (Column name a ': _) = a
@@ -79,6 +75,7 @@ type family Lookup (name :: Symbol) (cols :: [Type]) :: Type where
         TypeError
             ('Text "Column '" ':<>: 'Text name ':<>: 'Text "' not found in schema")
 
+-- | Unwrap a Maybe from a type after we impute values.
 type family Impute (name :: Symbol) (cols :: [Type]) :: [Type] where
     Impute name (Column name (Maybe a) ': rest) = Column name a ': rest
     Impute name (Column name _ ': rest) =
@@ -186,10 +183,6 @@ type family
         TypeError
             ('Text "Column '" ':<>: 'Text name ':<>: 'Text "' not found in schema")
 
--------------------------------------------------------------------------------
--- Maybe-stripping families
--------------------------------------------------------------------------------
-
 {- | Strip 'Maybe' from all columns. Used by 'filterAllJust'.
 
 @Column "x" (Maybe Double)@ becomes @Column "x" Double@.
@@ -212,10 +205,6 @@ type family StripMaybeAt (name :: Symbol) (cols :: [Type]) :: [Type] where
     StripMaybeAt name '[] =
         TypeError
             ('Text "Column '" ':<>: 'Text name ':<>: 'Text "' not found in schema")
-
--------------------------------------------------------------------------------
--- Join schema families
--------------------------------------------------------------------------------
 
 -- | Extract column names that appear in both schemas.
 type family SharedNames (left :: [Type]) (right :: [Type]) :: [Symbol] where
@@ -324,10 +313,6 @@ type family GroupKeyColumns (keys :: [Symbol]) (cols :: [Type]) :: [Type] where
             (Column n a ': GroupKeyColumns keys rest)
             (GroupKeyColumns keys rest)
 
--------------------------------------------------------------------------------
--- KnownSchema class
--------------------------------------------------------------------------------
-
 -- | Provides runtime evidence of a schema: a list of (name, TypeRep) pairs.
 class KnownSchema (cols :: [Type]) where
     schemaEvidence :: [(T.Text, SomeTypeRep)]
@@ -342,10 +327,6 @@ instance
     schemaEvidence =
         (T.pack (symbolVal (Proxy @name)), someTypeRep (Proxy @a))
             : schemaEvidence @rest
-
--------------------------------------------------------------------------------
--- AllKnownSymbol helper
--------------------------------------------------------------------------------
 
 -- | A class that provides a list of 'Text' values for a type-level list of Symbols.
 class AllKnownSymbol (names :: [Symbol]) where

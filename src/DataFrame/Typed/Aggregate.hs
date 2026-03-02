@@ -79,7 +79,7 @@ Result schema = grouping key columns ++ aggregated columns (in declaration order
 
 @
 result = aggregate
-    (agg \@\"total\" (tsum salary) $ agg \@\"count\" (tcount salary) $ aggNil)
+    (agg \@\"total\" (tsum (col @"salary")) $ agg \@\"count\" (tcount (col @"salary") $ aggNil)
     (groupBy \@'[\"dept\"] employees)
 -- result :: TDF '[Column \"dept\" Text, Column \"total\" Double, Column \"count\" Int]
 @
