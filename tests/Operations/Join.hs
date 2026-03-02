@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeApplications #-}
 
@@ -8,6 +9,7 @@ import Data.These
 import qualified DataFrame as D
 import qualified DataFrame.Functions as F
 import DataFrame.Operations.Join
+import qualified DataFrame.Typed as DT
 import Test.HUnit
 
 df1 :: D.DataFrame
@@ -64,6 +66,54 @@ testRightJoin =
                 ]
             )
             (D.sortBy [D.Asc (F.col @Text "key")] (rightJoin ["key"] df2 df1))
+        )
+
+tdf1 :: DT.TypedDataFrame [DT.Column "key" Text, DT.Column "A" Text]
+tdf1 = either (error . show) id (DT.freezeWithError df1)
+
+tdf2 :: DT.TypedDataFrame [DT.Column "key" Text, DT.Column "B" Text]
+tdf2 = either (error . show) id (DT.freezeWithError df2)
+
+testInnerJoinTyped :: Test
+testInnerJoinTyped =
+    TestCase
+        ( assertEqual
+            "Test typed inner join with single key"
+            ( D.fromNamedColumns
+                [ ("key", D.fromList ["K0" :: Text, "K1", "K2"])
+                , ("A", D.fromList ["A0" :: Text, "A1", "A2"])
+                , ("B", D.fromList ["B0" :: Text, "B1", "B2"])
+                ]
+            )
+            (DT.thaw $ DT.sortBy [DT.asc (DT.col @"key")] (DT.innerJoin @'["key"] tdf1 tdf2))
+        )
+
+testLeftJoinTyped :: Test
+testLeftJoinTyped =
+    TestCase
+        ( assertEqual
+            "Test typed left join with single key"
+            ( D.fromNamedColumns
+                [ ("key", D.fromList ["K0" :: Text, "K1", "K2", "K3", "K4", "K5"])
+                , ("A", D.fromList ["A0" :: Text, "A1", "A2", "A3", "A4", "A5"])
+                , ("B", D.fromList [Just "B0", Just "B1" :: Maybe Text, Just "B2"])
+                ]
+            )
+            (DT.thaw $ DT.sortBy [DT.asc (DT.col @"key")] (DT.leftJoin @'["key"] tdf1 tdf2))
+        )
+
+testRightJoinTyped :: Test
+testRightJoinTyped =
+    TestCase
+        ( assertEqual
+            "Test typed right join with single key"
+            ( D.fromNamedColumns
+                [ ("key", D.fromList ["K0" :: Text, "K1", "K2"])
+                , ("A", D.fromList [Just "A0" :: Maybe Text, Just "A1", Just "A2"])
+                , ("B", D.fromList ["B0" :: Text, "B1", "B2"])
+                ]
+            )
+            (DT.thaw $ DT.sortBy [DT.asc (DT.col @"key")] (DT.rightJoin @'["key"] tdf1 tdf2))
         )
 
 staffDf :: D.DataFrame
@@ -206,8 +256,11 @@ testOuterJoinWithCollisions =
 tests :: [Test]
 tests =
     [ TestLabel "innerJoin" testInnerJoin
+    , TestLabel "testInnerJoinTyped" testInnerJoinTyped
     , TestLabel "leftJoin" testLeftJoin
+    , TestLabel "testLeftJoinTyped" testLeftJoinTyped
     , TestLabel "rightJoin" testRightJoin
+    , TestLabel "testRightJoinTyped" testRightJoinTyped
     , TestLabel "fullOuterJoin" testFullOuterJoin
     , TestLabel "innerJoinWithCollisions" testInnerJoinWithCollisions
     , TestLabel "leftJoinWithCollisions" testLeftJoinWithCollisions

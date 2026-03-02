@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
@@ -10,6 +11,7 @@ import qualified DataFrame as D
 import qualified DataFrame.Functions as F
 import qualified DataFrame.Internal.Column as DI
 import qualified DataFrame.Internal.DataFrame as DI
+import qualified DataFrame.Typed as DT
 
 import Test.HUnit
 
@@ -44,7 +46,33 @@ deriveWAI =
             )
         )
 
+deriveWAITyped :: Test
+deriveWAITyped =
+    TestCase
+        ( assertEqual
+            "typed derive works with column expression"
+            (zipWith (\n c -> show n ++ [c]) [1 .. 26] ['a' .. 'z'])
+            ( DT.columnAsList @"test4" $
+                DT.derive
+                    @"test4"
+                    ( DT.lift2
+                        (++)
+                        (DT.lift show (DT.col @"test1"))
+                        (DT.lift (: ([] :: [Char])) (DT.col @"test3"))
+                    )
+                    ( either
+                        (error . show)
+                        id
+                        ( DT.freezeWithError
+                            @[DT.Column "test1" Int, DT.Column "test2" String, DT.Column "test3" Char]
+                            testData
+                        )
+                    )
+            )
+        )
+
 tests :: [Test]
 tests =
     [ TestLabel "deriveWAI" deriveWAI
+    , TestLabel "deriveWAITyped" deriveWAITyped
     ]
