@@ -215,7 +215,9 @@ derive ::
     , Columnable a
     , AssertAbsent name cols
     ) =>
-    TExpr cols a -> TypedDataFrame cols -> TypedDataFrame (Snoc cols (T.Column name a))
+    TExpr cols a ->
+    TypedDataFrame cols ->
+    TypedDataFrame (Snoc cols (T.Column name a))
 derive (TExpr expr) (TDF df) = unsafeFreeze (D.derive colName expr df)
   where
     colName = T.pack (symbolVal (Proxy @name))

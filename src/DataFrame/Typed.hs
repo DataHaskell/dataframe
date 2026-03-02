@@ -165,6 +165,7 @@ module DataFrame.Typed (
 
     -- * Template Haskell
     deriveSchema,
+    deriveSchemaFromCsvFile,
 
     -- * Schema type families (for advanced use)
     Lookup,
@@ -208,7 +209,7 @@ import DataFrame.Typed.Freeze (freeze, freezeWithError, thaw, unsafeFreeze)
 import DataFrame.Typed.Join (fullOuterJoin, innerJoin, leftJoin, rightJoin)
 import DataFrame.Typed.Operations
 import DataFrame.Typed.Schema
-import DataFrame.Typed.TH (deriveSchema)
+import DataFrame.Typed.TH (deriveSchema, deriveSchemaFromCsvFile)
 import DataFrame.Typed.Types (
     Column,
     TExpr (..),

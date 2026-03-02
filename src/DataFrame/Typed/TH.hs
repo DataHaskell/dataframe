@@ -7,12 +7,14 @@
 module DataFrame.Typed.TH (
     -- * Schema inference
     deriveSchema,
+    deriveSchemaFromCsvFile,
 
     -- * Re-export for TH splices
     TypedDataFrame,
     Column,
 ) where
 
+import Control.Monad.IO.Class
 import qualified Data.List as L
 import qualified Data.Map as M
 import qualified Data.Text as T
@@ -20,6 +22,7 @@ import qualified Data.Text as T
 import Language.Haskell.TH
 import Language.Haskell.TH.Syntax (Lift (..))
 
+import qualified DataFrame.IO.CSV as D
 import qualified DataFrame.Internal.Column as C
 import qualified DataFrame.Internal.DataFrame as D
 import DataFrame.Typed.Types (Column, TypedDataFrame)
@@ -45,6 +48,11 @@ deriveSchema typeName df = do
     let schemaType = foldr (\t acc -> PromotedConsT `AppT` t `AppT` acc) PromotedNilT colTypes
     let synName = mkName typeName
     pure [TySynD synName [] schemaType]
+
+deriveSchemaFromCsvFile :: String -> String -> DecsQ
+deriveSchemaFromCsvFile typeName path = do
+    df <- liftIO (D.readCsv path)
+    deriveSchema typeName df
 
 -------------------------------------------------------------------------------
 -- Internal helpers

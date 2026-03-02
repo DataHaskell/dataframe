@@ -79,7 +79,7 @@ type family Lookup (name :: Symbol) (cols :: [Type]) :: Type where
 
 -- | Add type to the end of a list.
 type family Snoc (xs :: [k]) (x :: k) :: [k] where
-    Snoc '[]       x = '[x]
+    Snoc '[] x = '[x]
     Snoc (y ': ys) x = y ': Snoc ys x
 
 -- | Check whether a column name exists in a schema (type-level Bool).
