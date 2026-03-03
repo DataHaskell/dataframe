@@ -52,8 +52,9 @@ Column selection for @selectedColumns@ uses leaf column names only.
 -}
 data ParquetReadOptions = ParquetReadOptions
     { selectedColumns :: Maybe [T.Text]
-    -- ^ Columns to keep in the final dataframe. If set, only these columns are returned.
-    -- Predicate-referenced columns are read automatically when needed and projected out after filtering.
+    {- ^ Columns to keep in the final dataframe. If set, only these columns are returned.
+    Predicate-referenced columns are read automatically when needed and projected out after filtering.
+    -}
     , predicate :: Maybe (Expr Bool)
     -- ^ Optional row filter expression applied before projection.
     , rowRange :: Maybe (Int, Int)

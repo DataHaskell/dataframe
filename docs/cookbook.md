@@ -40,12 +40,13 @@ For this question we will use the data in `./data/city.csv`.
 Query all columns for a city with the ID 1661.
 
 ### Solution
+
 ```haskell
 dataframe> df |> D.filterWhere (id .== 1661)
 -----------------------------------------------------
   id  |  name  | country_code | district | population
 ------|--------|--------------|----------|-----------
- Int  |  Text  |     Text     |   Text   |    Int    
+ Int  |  Text  |     Text     |   Text   |    Int
 ------|--------|--------------|----------|-----------
  1661 | Sayama | JPN          | Saitama  | 162472
 ```
@@ -57,28 +58,31 @@ For this question we will use the data in `./data/city.csv`.
 Query all columns of every Japanese city. The `country_code` for Japan is "JPN".
 
 ### Solution
+
 ```haskell
 dataframe> df |> D.filterWhere (country_code .== "JPN")
 --------------------------------------------------------
   id  |   name   | country_code | district  | population
 ------|----------|--------------|-----------|-----------
- Int  |   Text   |     Text     |   Text    |    Int    
+ Int  |   Text   |     Text     |   Text    |    Int
 ------|----------|--------------|-----------|-----------
- 1613 | Neyagawa | JPN          | Osaka     | 257315    
- 1630 | Ageo     | JPN          | Saitama   | 209442    
- 1661 | Sayama   | JPN          | Saitama   | 162472    
- 1681 | Omuta    | JPN          | Fukuoka   | 142889    
+ 1613 | Neyagawa | JPN          | Osaka     | 257315
+ 1630 | Ageo     | JPN          | Saitama   | 209442
+ 1661 | Sayama   | JPN          | Saitama   | 162472
+ 1681 | Omuta    | JPN          | Fukuoka   | 142889
  1739 | Tokuyama | JPN          | Yamaguchi | 107078
 ```
 
 ### Combining Conditions
 
 Often you'll need to filter on multiple conditions simultaneously. You can combine boolean expressions using logical operators:
+
 - `.&&` for AND (both conditions must be true)
 - `.||` for OR (either condition can be true)
 - `.>`, `.>=`, `.<`, `.<=` for comparisons
 
 For example, to find cities with large populations in a specific country:
+
 ```haskell
 df |> D.filterWhere ((population .> 100000) .&& (country_code .== "USA"))
 ```
@@ -88,10 +92,12 @@ df |> D.filterWhere ((population .> 100000) .&& (country_code .== "USA"))
 For this question we will use the data in `./data/city.csv`.
 
 Query all columns for all American cities in city dataframe with:
-* populations larger than 100000, and
-* the CountryCode for America is "USA".
+
+- populations larger than 100000, and
+- the CountryCode for America is "USA".
 
 ### Solution
+
 ```haskell
 dataframe> D.readCsv "./data/country.csv"
 dataframe> :declareColumns df
@@ -99,12 +105,12 @@ dataframe> df |> D.filterWhere ((population .> 100000) .&& (country_code .== "US
 --------------------------------------------------------------
   id  |     name      | country_code |  district  | population
 ------|---------------|--------------|------------|-----------
- Int  |     Text      |     Text     |    Text    |    Int    
+ Int  |     Text      |     Text     |    Text    |    Int
 ------|---------------|--------------|------------|-----------
- 3878 | Scottsdale    | USA          | Arizona    | 202705    
- 3965 | Corona        | USA          | California | 124966    
- 3973 | Concord       | USA          | California | 121780    
- 3977 | Cedar Rapids  | USA          | Iowa       | 120758    
+ 3878 | Scottsdale    | USA          | Arizona    | 202705
+ 3965 | Corona        | USA          | California | 124966
+ 3973 | Concord       | USA          | California | 121780
+ 3977 | Cedar Rapids  | USA          | Iowa       | 120758
  3982 | Coral Springs | USA          | Florida    | 117549
 ```
 
@@ -125,17 +131,18 @@ For this question we will use the data in `./data/city.csv`.
 Show the first 5 rows of the dataframe.
 
 ### Solution
+
 ```haskell
 dataframe> df |> D.take 5
 ----------------------------------------------------------------
  id  |       name       | country_code |     district      | population
 -----|------------------|--------------|-------------------|-----------
- Int |       Text       |     Text     |       Text        |    Int    
+ Int |       Text       |     Text     |       Text        |    Int
 -----|------------------|--------------|-------------------|-----------
- 6   | Rotterdam        | NLD          | Zuid-Holland      | 593321    
- 19  | Zaanstad         | NLD          | Noord-Holland     | 135621    
- 214 | Porto Alegre     | BRA          | Rio Grande do Sul | 1314032   
- 397 | Lauro de Freitas | BRA          | Bahia             | 109236    
+ 6   | Rotterdam        | NLD          | Zuid-Holland      | 593321
+ 19  | Zaanstad         | NLD          | Noord-Holland     | 135621
+ 214 | Porto Alegre     | BRA          | Rio Grande do Sul | 1314032
+ 397 | Lauro de Freitas | BRA          | Bahia             | 109236
  547 | Dobric           | BGR          | Varna             | 100399
 ```
 
@@ -156,16 +163,17 @@ For this question we will use the data in `./data/city.csv`.
 Get the first 5 names of the city names.
 
 ### Solution
+
 ```haskell
 dataframe> df |> D.select [F.name name] |> D.take 5
 -----------------
-       name      
+       name
 -----------------
-       Text      
+       Text
 -----------------
- Rotterdam       
- Zaanstad        
- Porto Alegre    
+ Rotterdam
+ Zaanstad
+ Porto Alegre
  Lauro de Freitas
  Dobric
 ```
@@ -187,17 +195,18 @@ For this question we will use the data in `./data/city.csv`.
 Query the names of all the Japanese cities and show only the first 5 results.
 
 ### Solution
+
 ```haskell
 dataframe> df |> D.filterWhere (country_code .== "JPN") |> D.select [F.name name] |> D.take 5
 ---------
-   name  
+   name
 ---------
-   Text  
+   Text
 ---------
  Neyagawa
- Ageo    
- Sayama  
- Omuta   
+ Ageo
+ Sayama
+ Omuta
  Tokuyama
 ```
 
@@ -208,18 +217,19 @@ For this question we will use the data in `./data/station.csv`.
 Show the first five city and state rows.
 
 ### Solution
+
 ```haskell
 dataframe> df |> D.select [F.name city, F.name state] |> D.take 5
 ---------------------
      city     | state
 --------------|------
-     Text     | Text 
+     Text     | Text
 --------------|------
- Kissee Mills | MO   
- Loma Mar     | CA   
- Sandy Hook   | CT   
- Tipton       | IN   
- Arlington    | CO 
+ Kissee Mills | MO
+ Loma Mar     | CA
+ Sandy Hook   | CT
+ Tipton       | IN
+ Arlington    | CO
 ```
 
 ## Removing Duplicates
@@ -239,32 +249,33 @@ For this question we will use the data in `./data/station.csv`.
 Query a list of city names for cities that have an even ID number. Show the results in any order, but exclude duplicates from the answer.
 
 ### Solution
+
 ```haskell
-dataframe> df |> D.filterWhere (F.lift even id) |> D.select [F.name city] |> D.distinct 
+dataframe> df |> D.filterWhere (F.lift even id) |> D.select [F.name city] |> D.distinct
 ----------------------
-         city         
+         city
 ----------------------
-         Text         
+         Text
 ----------------------
- Rockton              
- Forest Lakes         
- Yellow Pine          
- Mosca                
- Rocheport            
- Millville            
+ Rockton
+ Forest Lakes
+ Yellow Pine
+ Mosca
+ Rocheport
+ Millville
 ...
- Lee                  
- Elm Grove            
- Orange City          
- Baker                
+ Lee
+ Elm Grove
+ Orange City
+ Baker
  Clutier
 ```
 
 ## Sorting and Combining Results
 
 Sometimes you need to sort data and then combine results from multiple queries. The `sortBy` function orders rows by specified columns. Much like SQL, you can specify multiple columns to
-order by. The results are ordered by the first column, with ties broken by the next column 
-respectively. 
+order by. The results are ordered by the first column, with ties broken by the next column
+respectively.
 
 You can also can use the `<>` operator to concatenate dataframes vertically (similar to SQL's UNION).
 
@@ -273,7 +284,7 @@ You can also can use the `<>` operator to concatenate dataframes vertically (sim
 df |> D.sortBy [D.Asc age]
 -- 1. Sort by descending age
 -- 2. Within those who have the same age, sort by alphabetical order of name.
-df |> D.sortBy [D.Asc age, D.Desc name]  
+df |> D.sortBy [D.Asc age, D.Desc name]
 ```
 
 You can also derive new columns using `derive` to compute values based on existing columns:
@@ -354,6 +365,7 @@ dataframe> :declareColumns df0
 ```
 
 `ParquetReadOptions` currently supports:
+
 - `selectedColumns`
 - `predicate`
 - `rowRange`
@@ -365,6 +377,7 @@ Options are applied in this order: predicate filtering, column projection, then 
 Read only the `mpg`, `cyl`, and `wt` columns.
 
 ### Solution
+
 ```haskell
 dataframe> D.readParquetWithOpts
 dataframe|   (D.defaultParquetReadOptions{D.selectedColumns = Just ["mpg", "cyl", "wt"]})
@@ -376,6 +389,7 @@ dataframe|   "./data/mtcars.parquet"
 Read rows `5` to `10` (start inclusive, end exclusive).
 
 ### Solution
+
 ```haskell
 dataframe> D.readParquetWithOpts
 dataframe|   (D.defaultParquetReadOptions{D.rowRange = Just (5, 10)})
@@ -387,6 +401,7 @@ dataframe|   "./data/mtcars.parquet"
 Read rows where `cyl >= 6`, but return only the `mpg` column.
 
 ### Solution
+
 ```haskell
 dataframe> D.readParquetWithOpts
 dataframe|   ( D.defaultParquetReadOptions
@@ -402,6 +417,7 @@ When `selectedColumns` is set, columns referenced by `predicate` are automatical
 ## Summary
 
 You've now learned the fundamental operations for working with dataframes in Haskell:
+
 - **Filtering** with `filterWhere` to select rows based on conditions
 - **Selecting** with `select` to choose specific columns
 - **Limiting** with `take` to control output size

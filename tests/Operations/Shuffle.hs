@@ -81,7 +81,7 @@ shuffleDoesNotAddOrDropIndices :: Test
 shuffleDoesNotAddOrDropIndices =
     let
         gen = mkStdGen 42
-        actual = (Set.fromList [0 .. 10])
+        actual = Set.fromList [0 .. 10]
         computedVector = shuffledIndices gen 11
         computed = (Set.fromList $ VU.toList $ shuffledIndices gen 11)
      in
