@@ -106,6 +106,8 @@ __I/O__
   * @D.writeCsv :: FilePath -> DataFrame -> IO ()@
   * @D.readParquet :: FilePath -> IO DataFrame@
   * @D.readParquetWithOpts :: ParquetReadOptions -> FilePath -> IO DataFrame@
+  * @D.readParquetFiles :: FilePath -> IO DataFrame@
+  * @D.readParquetFilesWithOpts :: ParquetReadOptions -> FilePath -> IO DataFrame@
 
 __Exploration__
 

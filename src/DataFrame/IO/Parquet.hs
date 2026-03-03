@@ -40,13 +40,39 @@ import System.Directory (doesDirectoryExist)
 import qualified Data.Vector.Unboxed as VU
 import System.FilePath ((</>))
 
+{- | Options for reading Parquet data.
+
+These options are applied in this order:
+
+1. predicate filtering
+2. column projection
+3. row range
+
+Column selection for @selectedColumns@ uses leaf column names only.
+-}
 data ParquetReadOptions = ParquetReadOptions
     { selectedColumns :: Maybe [T.Text]
+    -- ^ Columns to keep in the final dataframe. If set, only these columns are returned.
+    -- Predicate-referenced columns are read automatically when needed and projected out after filtering.
     , predicate :: Maybe (Expr Bool)
+    -- ^ Optional row filter expression applied before projection.
     , rowRange :: Maybe (Int, Int)
+    -- ^ Optional row slice @(start, end)@ with start-inclusive/end-exclusive semantics.
     }
     deriving (Eq, Show)
 
+{- | Default Parquet read options.
+
+Equivalent to:
+
+@
+ParquetReadOptions
+    { selectedColumns = Nothing
+    , predicate = Nothing
+    , rowRange = Nothing
+    }
+@
+-}
 defaultParquetReadOptions :: ParquetReadOptions
 defaultParquetReadOptions =
     ParquetReadOptions
@@ -65,6 +91,18 @@ ghci> D.readParquet ".\/data\/mtcars.parquet"
 readParquet :: FilePath -> IO DataFrame
 readParquet = readParquetWithOpts defaultParquetReadOptions
 
+{- | Read a Parquet file using explicit read options.
+
+==== __Example__
+@
+ghci> D.readParquetWithOpts
+ghci|   (D.defaultParquetReadOptions{D.selectedColumns = Just ["id"], D.rowRange = Just (0, 10)})
+ghci|   "./tests/data/alltypes_plain.parquet"
+@
+
+When @selectedColumns@ is set and @predicate@ references other columns, those predicate columns
+are auto-included for decoding, then projected back to the requested output columns.
+-}
 readParquetWithOpts :: ParquetReadOptions -> FilePath -> IO DataFrame
 readParquetWithOpts opts path = do
     fileMetadata <- readMetadataFromPath path
@@ -173,9 +211,27 @@ readParquetWithOpts opts path = do
 
     pure $ applyReadOptions opts (DI.fromNamedColumns orderedColumns)
 
+{- | Read Parquet files from a directory or glob path.
+
+This is equivalent to calling 'readParquetFilesWithOpts' with 'defaultParquetReadOptions'.
+-}
 readParquetFiles :: FilePath -> IO DataFrame
 readParquetFiles = readParquetFilesWithOpts defaultParquetReadOptions
 
+{- | Read multiple Parquet files (directory or glob) using explicit options.
+
+If @path@ is a directory, all non-directory entries are read.
+If @path@ is a glob, matching files are read.
+
+For multi-file reads, @rowRange@ is applied once after concatenation (global range semantics).
+
+==== __Example__
+@
+ghci> D.readParquetFilesWithOpts
+ghci|   (D.defaultParquetReadOptions{D.selectedColumns = Just ["id"], D.rowRange = Just (0, 5)})
+ghci|   "./tests/data/alltypes_plain*.parquet"
+@
+-}
 readParquetFilesWithOpts :: ParquetReadOptions -> FilePath -> IO DataFrame
 readParquetFilesWithOpts opts path = do
     isDir <- doesDirectoryExist path

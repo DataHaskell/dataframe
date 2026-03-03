@@ -342,6 +342,63 @@ dataframe> df |> D.select [F.name city] |> D.filterWhere (F.lift (\c -> any (`T.
  Odin
 ```
 
+## Reading Parquet with Options
+
+Parquet reads can be configured so you only load the columns and rows you need. This is useful when files are wide or when you want to filter data at read-time.
+
+For this section we will use `./data/mtcars.parquet`.
+
+```haskell
+dataframe> df0 <- D.readParquet "./data/mtcars.parquet"
+dataframe> :declareColumns df0
+```
+
+`ParquetReadOptions` currently supports:
+- `selectedColumns`
+- `predicate`
+- `rowRange`
+
+Options are applied in this order: predicate filtering, column projection, then row range.
+
+**Exercise 11: Parquet projection**
+
+Read only the `mpg`, `cyl`, and `wt` columns.
+
+### Solution
+```haskell
+dataframe> D.readParquetWithOpts
+dataframe|   (D.defaultParquetReadOptions{D.selectedColumns = Just ["mpg", "cyl", "wt"]})
+dataframe|   "./data/mtcars.parquet"
+```
+
+**Exercise 12: Row range**
+
+Read rows `5` to `10` (start inclusive, end exclusive).
+
+### Solution
+```haskell
+dataframe> D.readParquetWithOpts
+dataframe|   (D.defaultParquetReadOptions{D.rowRange = Just (5, 10)})
+dataframe|   "./data/mtcars.parquet"
+```
+
+**Exercise 13: Predicate and projection**
+
+Read rows where `cyl >= 6`, but return only the `mpg` column.
+
+### Solution
+```haskell
+dataframe> D.readParquetWithOpts
+dataframe|   ( D.defaultParquetReadOptions
+dataframe|       { D.selectedColumns = Just ["mpg"]
+dataframe|       , D.predicate = Just (cyl .>= 6)
+dataframe|       }
+dataframe|   )
+dataframe|   "./data/mtcars.parquet"
+```
+
+When `selectedColumns` is set, columns referenced by `predicate` are automatically read as needed, then projected back to the requested output columns.
+
 ## Summary
 
 You've now learned the fundamental operations for working with dataframes in Haskell:
@@ -351,5 +408,6 @@ You've now learned the fundamental operations for working with dataframes in Has
 - **Removing duplicates** with `distinct`
 - **Sorting** with `sortBy` and combining results with `<>`
 - **Applying custom functions** with `F.lift` for sophisticated data manipulation
+- **Reading Parquet with options** using `readParquetWithOpts` for projection, predicate filtering, and row ranges
 
 These building blocks can be composed together to answer complex data analysis questions in a clear, functional style.
