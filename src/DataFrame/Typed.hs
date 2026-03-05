@@ -192,9 +192,6 @@ module DataFrame.Typed (
     -- * Constraints
     KnownSchema (..),
     AllKnownSymbol (..),
-
-    -- * Pipe operator
-    (|>),
 ) where
 
 import Prelude hiding (drop, filter, take)

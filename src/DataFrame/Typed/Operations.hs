@@ -50,10 +50,8 @@ module DataFrame.Typed.Operations (
 
     -- * Vertical merge
     append,
-
 ) where
 
-import Data.Function ((&))
 import Data.Proxy (Proxy (..))
 import qualified Data.Text as T
 import qualified Data.Vector as V
