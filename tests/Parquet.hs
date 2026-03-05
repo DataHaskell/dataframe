@@ -187,6 +187,18 @@ allTypesDictionary =
             (unsafePerformIO (D.readParquet "./tests/data/alltypes_dictionary.parquet"))
         )
 
+brotliLargeStringMapLoads :: Test
+brotliLargeStringMapLoads =
+    TestCase $
+        assertBool
+            "large_string_map.brotli.parquet should load"
+            ( unsafePerformIO
+                ( do
+                    df <- D.readParquet "./tests/data/large_string_map.brotli.parquet"
+                    pure (D.dimensions df /= (0, 0))
+                )
+            )
+
 selectedColumnsWithOpts :: Test
 selectedColumnsWithOpts =
     TestCase
@@ -931,6 +943,7 @@ tests =
     [ allTypesPlain
     , allTypesPlainSnappy
     , allTypesDictionary
+    , brotliLargeStringMapLoads
     , selectedColumnsWithOpts
     , rowRangeWithOpts
     , predicateWithOpts

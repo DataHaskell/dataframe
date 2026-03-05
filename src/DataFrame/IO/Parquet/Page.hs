@@ -3,6 +3,7 @@
 
 module DataFrame.IO.Parquet.Page where
 
+import qualified Codec.Compression.Brotli as Brotli
 import qualified Codec.Compression.GZip as GZip
 import qualified Codec.Compression.Zstd.Streaming as Zstd
 import Data.Bits
@@ -15,6 +16,7 @@ import DataFrame.IO.Parquet.Thrift
 import DataFrame.IO.Parquet.Types
 import GHC.Float
 import qualified Snappy
+import Control.Monad (when)
 
 isDataPage :: Page -> Bool
 isDataPage page = case pageTypeHeader (pageHeader page) of
@@ -36,27 +38,87 @@ readPage c columnBytes =
 
             let compressed = BS.take (fromIntegral $ compressedPageSize hdr) rem
 
-            fullData <- case c of
-                ZSTD -> do
-                    result <- Zstd.decompress
-                    drainZstd result compressed []
-                  where
-                    drainZstd (Zstd.Consume f) input acc = do
-                        result <- f input
-                        drainZstd result BS.empty acc
-                    drainZstd (Zstd.Produce chunk next) _ acc = do
-                        result <- next
-                        drainZstd result BS.empty (acc <> [chunk])
-                    drainZstd (Zstd.Done final) _ acc =
-                        pure $ BS.concat (acc <> [final])
-                    drainZstd (Zstd.Error msg msg2) _ _ =
-                        error ("ZSTD error: " ++ msg ++ " " ++ msg2)
-                SNAPPY -> case Snappy.decompress compressed of
-                    Left e -> error (show e)
-                    Right res -> pure res
-                UNCOMPRESSED -> pure compressed
-                GZIP -> pure (LB.toStrict (GZip.decompress (BS.fromStrict compressed)))
-                other -> error ("Unsupported compression type: " ++ show other)
+            fullData <- case pageTypeHeader hdr of
+                DataPageHeaderV2{..} -> do
+                    let { repLen = fromIntegral repetitionLevelByteLength
+                        ; defLen = fromIntegral definitionLevelByteLength
+                        ; prefixLen = repLen + defLen
+                        }
+
+                    when (prefixLen > BS.length compressed) $
+                        error $
+                            "readPage: DataPageHeaderV2 prefixLen (" ++ show prefixLen
+                                ++ ") > compressedPageSize (" ++ show (BS.length compressed) ++ ")"
+
+                    let { prefix = BS.take prefixLen compressed
+                        ; body   = BS.drop prefixLen compressed
+                        }
+
+                    body' <-
+                        if dataPageHeaderV2IsCompressed
+                            then case c of
+                                ZSTD -> do
+                                    result <- Zstd.decompress
+                                    drainZstd result body []
+                                  where
+                                    drainZstd (Zstd.Consume f) input acc = do
+                                        result <- f input
+                                        drainZstd result BS.empty acc
+                                    drainZstd (Zstd.Produce chunk next) _ acc = do
+                                        result <- next
+                                        drainZstd result BS.empty (acc <> [chunk])
+                                    drainZstd (Zstd.Done final) _ acc =
+                                        pure $ BS.concat (acc <> [final])
+                                    drainZstd (Zstd.Error msg msg2) _ _ =
+                                        error ("ZSTD error: " ++ msg ++ " " ++ msg2)
+
+                                SNAPPY -> case Snappy.decompress body of
+                                    Left e -> error (show e)
+                                    Right res -> pure res
+
+                                UNCOMPRESSED -> pure body
+
+                                GZIP ->
+                                    pure (LB.toStrict (GZip.decompress (LB.fromStrict body)))
+
+                                BROTLI ->
+                                    pure (LB.toStrict (Brotli.decompress (LB.fromStrict body)))
+
+                                other -> error ("Unsupported compression type: " ++ show other)
+                            else
+                                pure body
+
+                    pure (prefix <> body')
+
+                _ -> case c of
+                    ZSTD -> do
+                        result <- Zstd.decompress
+                        drainZstd result compressed []
+                      where
+                        drainZstd (Zstd.Consume f) input acc = do
+                            result <- f input
+                            drainZstd result BS.empty acc
+                        drainZstd (Zstd.Produce chunk next) _ acc = do
+                            result <- next
+                            drainZstd result BS.empty (acc <> [chunk])
+                        drainZstd (Zstd.Done final) _ acc =
+                            pure $ BS.concat (acc <> [final])
+                        drainZstd (Zstd.Error msg msg2) _ _ =
+                            error ("ZSTD error: " ++ msg ++ " " ++ msg2)
+
+                    SNAPPY -> case Snappy.decompress compressed of
+                        Left e -> error (show e)
+                        Right res -> pure res
+
+                    UNCOMPRESSED -> pure compressed
+
+                    GZIP ->
+                        pure (LB.toStrict (GZip.decompress (LB.fromStrict compressed)))
+
+                    BROTLI ->
+                        pure (LB.toStrict (Brotli.decompress (LB.fromStrict compressed)))
+
+                    other -> error ("Unsupported compression type: " ++ show other)
             pure
                 ( Just $ Page hdr fullData
                 , BS.drop (fromIntegral $ compressedPageSize hdr) rem

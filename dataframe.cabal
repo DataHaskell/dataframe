@@ -125,6 +125,7 @@ library
                       unordered-containers >= 0.1 && < 1,
                       vector ^>= 0.13,
                       vector-algorithms ^>= 0.9,
+                      brotli >= 0.0 && < 1,
                       zlib >= 0.5 && < 1,
                       zstd >= 0.1.2.0 && < 0.2,
                       mmap >= 0.5.8 && < 0.6,
