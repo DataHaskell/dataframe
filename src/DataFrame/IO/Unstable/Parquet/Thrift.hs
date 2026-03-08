@@ -9,6 +9,7 @@ import Data.ByteString (ByteString)
 import GHC.Generics (Generic)
 import Pinch (Field, Enumeration, Pinchable (..))
 import qualified Pinch
+import GHC.TypeLits (KnownNat)
 
 -- Primitive Parquet Types
 -- https://github.com/apache/parquet-format/blob/master/src/main/thrift/parquet.thrift#L32
@@ -543,3 +544,6 @@ data FileMetadata
   } deriving (Eq, Show, Generic)
 
 instance Pinchable FileMetadata
+
+unField :: KnownNat n => Field n a -> a
+unField (Pinch.Field a) = a
