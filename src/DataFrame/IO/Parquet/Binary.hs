@@ -3,6 +3,7 @@
 module DataFrame.IO.Parquet.Binary where
 
 import Control.Monad
+import Control.Exception (bracketOnError)
 import Data.Bits
 import qualified Data.ByteString as BS
 import Data.Char
@@ -146,16 +147,21 @@ readByteString' :: BS.ByteString -> Int64 -> IO BS.ByteString
 readByteString' buf size =
     fillByteStringByWord8 (fromIntegral size) ((`readSingleByte` buf) . fromIntegral)
 
--- | Allocate a fix-sized buffer, repeat the action on each index.
+-- | Allocate a fixed-size buffer, repeat the action on each index.
 -- Fill it into the buffer to get a ByteString.
 fillByteStringByWord8 :: Int -> (Int -> IO Word8) -> IO BS.ByteString
-fillByteStringByWord8 size getChar = do
-    p <- Foreign.mallocBytes size :: IO (Foreign.Ptr Word8)
-    fill 0 p
-    BSU.unsafePackCStringFinalizer p size (Foreign.free p)
+fillByteStringByWord8 size getByte = do
+    bracketOnError
+        (Foreign.mallocBytes size :: IO (Foreign.Ptr Word8))
+        Foreign.free
+        -- ^ ensures p is freed if (IO Word8) throws.
+        (\p -> do
+            fill 0 p
+            BSU.unsafePackCStringFinalizer p size (Foreign.free p)
+        )
     where fill i p
             | i >= size = pure ()
-            | otherwise = getChar i >>= Foreign.pokeByteOff p i >> fill (i+1) p
+            | otherwise = getByte i >>= Foreign.pokeByteOff p i >> fill (i+1) p
 {-# INLINE fillByteStringByWord8 #-}
 
 readSingleByte :: Int64 -> BS.ByteString -> IO Word8
