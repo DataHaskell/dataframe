@@ -11,47 +11,30 @@ import Data.Char
 import Data.IORef
 import Data.Int
 import Data.Word
+import qualified DataFrame.Internal.Binary as Binary
 import qualified Foreign.Marshal.Alloc as Foreign
 import qualified Foreign.Ptr as Foreign
 import qualified Foreign.Storable as Foreign
 
 littleEndianWord32 :: BS.ByteString -> Word32
-littleEndianWord32 bytes
-    | BS.length bytes >= 4 =
-        foldr
-            (.|.)
-            0
-            ( zipWith
-                (\b i -> fromIntegral b `shiftL` i)
-                (BS.unpack $ BS.take 4 bytes)
-                [0, 8, 16, 24]
-            )
-    | otherwise =
-        littleEndianWord32 (BS.take 4 $ bytes `BS.append` BS.pack [0, 0, 0, 0])
+littleEndianWord32 = Binary.littleEndianWord32
+{-# INLINE littleEndianWord32 #-}
 
 littleEndianWord64 :: BS.ByteString -> Word64
-littleEndianWord64 bytes =
-    foldr
-        (.|.)
-        0
-        ( zipWith
-            (\b i -> fromIntegral b `shiftL` i)
-            (BS.unpack $ BS.take 8 bytes)
-            [0, 8 ..]
-        )
+littleEndianWord64 = Binary.littleEndianWord64
+{-# INLINE littleEndianWord64 #-}
 
 littleEndianInt32 :: BS.ByteString -> Int32
-littleEndianInt32 = fromIntegral . littleEndianWord32
+littleEndianInt32 = Binary.littleEndianInt32
+{-# INLINE littleEndianInt32 #-}
 
 word64ToLittleEndian :: Word64 -> BS.ByteString
-word64ToLittleEndian w =
-    BS.map
-        (\i -> fromIntegral (w `shiftR` fromIntegral i))
-        (BS.pack [0, 8, 16, 24, 32, 40, 48, 56])
+word64ToLittleEndian = Binary.word64ToLittleEndian
+{-# INLINE word64ToLittleEndian #-}
 
 word32ToLittleEndian :: Word32 -> BS.ByteString
-word32ToLittleEndian w =
-    BS.map (\i -> fromIntegral (w `shiftR` fromIntegral i)) (BS.pack [0, 8, 16, 24])
+word32ToLittleEndian = Binary.word32ToLittleEndian
+{-# INLINE word32ToLittleEndian #-}
 
 readUVarInt :: BS.ByteString -> (Word64, BS.ByteString)
 readUVarInt xs = loop xs 0 0 0

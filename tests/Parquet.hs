@@ -7,9 +7,17 @@ import Assertions (assertExpectException)
 import qualified DataFrame as D
 import qualified DataFrame.Functions as F
 
+import qualified Data.ByteString as BS
 import Data.Int
 import Data.Text (Text)
 import Data.Time
+import Data.Word
+import DataFrame.IO.Parquet.Binary (
+    littleEndianWord32,
+    littleEndianWord64,
+    word32ToLittleEndian,
+    word64ToLittleEndian,
+ )
 import GHC.IO (unsafePerformIO)
 import Test.HUnit
 
@@ -926,6 +934,66 @@ mtCars =
             (unsafePerformIO (D.readParquet "./tests/data/mtcars.parquet"))
         )
 
+littleEndianWord64KnownPattern :: Test
+littleEndianWord64KnownPattern =
+    TestCase
+        ( assertEqual
+            "littleEndianWord64KnownPattern"
+            (0x1122334455667788 :: Word64)
+            ( littleEndianWord64
+                (BS.pack [0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11])
+            )
+        )
+
+littleEndianWord32KnownPattern :: Test
+littleEndianWord32KnownPattern =
+    TestCase
+        ( assertEqual
+            "littleEndianWord32KnownPattern"
+            (0x11223344 :: Word32)
+            (littleEndianWord32 (BS.pack [0x44, 0x33, 0x22, 0x11]))
+        )
+
+littleEndianWord64ShortInputPadsZeroes :: Test
+littleEndianWord64ShortInputPadsZeroes =
+    TestCase
+        ( assertEqual
+            "littleEndianWord64ShortInputPadsZeroes"
+            (0x00CCBBAA :: Word64)
+            (littleEndianWord64 (BS.pack [0xAA, 0xBB, 0xCC]))
+        )
+
+littleEndianWord32ShortInputPadsZeroes :: Test
+littleEndianWord32ShortInputPadsZeroes =
+    TestCase
+        ( assertEqual
+            "littleEndianWord32ShortInputPadsZeroes"
+            (0x0000BEEF :: Word32)
+            (littleEndianWord32 (BS.pack [0xEF, 0xBE]))
+        )
+
+littleEndianWord64RoundTrip :: Test
+littleEndianWord64RoundTrip =
+    TestCase
+        ( assertEqual
+            "littleEndianWord64RoundTrip"
+            value
+            (littleEndianWord64 (word64ToLittleEndian value))
+        )
+  where
+    value = 0x1122334455667788 :: Word64
+
+littleEndianWord32RoundTrip :: Test
+littleEndianWord32RoundTrip =
+    TestCase
+        ( assertEqual
+            "littleEndianWord32RoundTrip"
+            value
+            (littleEndianWord32 (word32ToLittleEndian value))
+        )
+  where
+    value = 0xA1B2C3D4 :: Word32
+
 -- ---------------------------------------------------------------------------
 -- Group 1: Plain variant
 -- ---------------------------------------------------------------------------
@@ -1626,6 +1694,12 @@ tests =
     , allTypesTinyPagesLastFew
     , allTypesTinyPagesDimensions
     , transactionsTest
+    , littleEndianWord64KnownPattern
+    , littleEndianWord32KnownPattern
+    , littleEndianWord64ShortInputPadsZeroes
+    , littleEndianWord32ShortInputPadsZeroes
+    , littleEndianWord64RoundTrip
+    , littleEndianWord32RoundTrip
     , -- Group 1
       allTypesTinyPagesPlain
     , -- Group 2: compression codecs

@@ -8,7 +8,6 @@ module DataFrame.IO.Parquet where
 
 import Control.Exception (throw)
 import Control.Monad
-import Data.Bits
 import qualified Data.ByteString as BSO
 import Data.Either
 import Data.IORef
@@ -20,8 +19,8 @@ import qualified Data.Text as T
 import Data.Text.Encoding
 import Data.Time
 import Data.Time.Clock.POSIX (posixSecondsToUTCTime)
-import Data.Word
 import DataFrame.Errors (DataFrameException (ColumnNotFoundException))
+import DataFrame.Internal.Binary (littleEndianWord32)
 import qualified DataFrame.Internal.Column as DI
 import DataFrame.Internal.DataFrame (DataFrame)
 import DataFrame.Internal.Expression (Expr, getColumns)
@@ -334,13 +333,9 @@ readMetadataSizeFromFooter :: BSO.ByteString -> (Int, BSO.ByteString)
 readMetadataSizeFromFooter contents =
     let
         footerOffSet = BSO.length contents - 8
-        sizeBytes =
-            map
-                (fromIntegral @Word8 @Int32 . BSO.index contents)
-                [footerOffSet .. footerOffSet + 3]
-        size = fromIntegral $ L.foldl' (.|.) 0 $ zipWith shift sizeBytes [0, 8, 16, 24]
-        magicStringBytes = map (BSO.index contents) [footerOffSet + 4 .. footerOffSet + 7]
-        magicString = BSO.pack magicStringBytes
+        footer = BSO.drop footerOffSet contents
+        size = fromIntegral (littleEndianWord32 footer)
+        magicString = BSO.take 4 (BSO.drop 4 footer)
      in
         (size, magicString)
 

@@ -54,6 +54,7 @@ import Data.Bits (setBit, shiftL, testBit, (.|.))
 import Data.Maybe (fromMaybe, isJust)
 import Data.Type.Equality (TestEquality (testEquality), type (:~:) (Refl))
 import Data.Word (Word16, Word32, Word64, Word8)
+import qualified DataFrame.Internal.Binary as Binary
 import DataFrame.Internal.Column (Column (..))
 import DataFrame.Internal.DataFrame (DataFrame (..))
 import Foreign (ForeignPtr, castForeignPtr, plusForeignPtr, sizeOf)
@@ -362,37 +363,12 @@ readWord16LE bs off
 readWord32LE :: BS.ByteString -> Int -> ParseResult Word32
 readWord32LE bs off
     | off + 4 > BS.length bs = Left "unexpected end of input"
-    | otherwise =
-        let b0 = fromIntegral (BSU.unsafeIndex bs off) :: Word32
-            b1 = fromIntegral (BSU.unsafeIndex bs (off + 1)) :: Word32
-            b2 = fromIntegral (BSU.unsafeIndex bs (off + 2)) :: Word32
-            b3 = fromIntegral (BSU.unsafeIndex bs (off + 3)) :: Word32
-         in Right
-                (off + 4, b0 .|. (b1 `shiftL` 8) .|. (b2 `shiftL` 16) .|. (b3 `shiftL` 24))
+    | otherwise = Right (off + 4, Binary.littleEndianWord32 (BS.drop off bs))
 
 readWord64LE :: BS.ByteString -> Int -> ParseResult Word64
 readWord64LE bs off
     | off + 8 > BS.length bs = Left "unexpected end of input"
-    | otherwise =
-        let b0 = fromIntegral (BSU.unsafeIndex bs off) :: Word64
-            b1 = fromIntegral (BSU.unsafeIndex bs (off + 1)) :: Word64
-            b2 = fromIntegral (BSU.unsafeIndex bs (off + 2)) :: Word64
-            b3 = fromIntegral (BSU.unsafeIndex bs (off + 3)) :: Word64
-            b4 = fromIntegral (BSU.unsafeIndex bs (off + 4)) :: Word64
-            b5 = fromIntegral (BSU.unsafeIndex bs (off + 5)) :: Word64
-            b6 = fromIntegral (BSU.unsafeIndex bs (off + 6)) :: Word64
-            b7 = fromIntegral (BSU.unsafeIndex bs (off + 7)) :: Word64
-         in Right
-                ( off + 8
-                , b0
-                    .|. (b1 `shiftL` 8)
-                    .|. (b2 `shiftL` 16)
-                    .|. (b3 `shiftL` 24)
-                    .|. (b4 `shiftL` 32)
-                    .|. (b5 `shiftL` 40)
-                    .|. (b6 `shiftL` 48)
-                    .|. (b7 `shiftL` 56)
-                )
+    | otherwise = Right (off + 8, Binary.littleEndianWord64 (BS.drop off bs))
 
 -- | Read @n@ consecutive Word32LE values starting at offset @off@.
 readWord32Array :: BS.ByteString -> Int -> Int -> Either String [Word32]
@@ -401,11 +377,7 @@ readWord32Array bs off n
     | otherwise =
         Right
             [ let i = off + k * 4
-                  b0 = fromIntegral (BSU.unsafeIndex bs i) :: Word32
-                  b1 = fromIntegral (BSU.unsafeIndex bs (i + 1)) :: Word32
-                  b2 = fromIntegral (BSU.unsafeIndex bs (i + 2)) :: Word32
-                  b3 = fromIntegral (BSU.unsafeIndex bs (i + 3)) :: Word32
-               in b0 .|. (b1 `shiftL` 8) .|. (b2 `shiftL` 16) .|. (b3 `shiftL` 24)
+               in Binary.littleEndianWord32 (BS.drop i bs)
             | k <- [0 .. n - 1]
             ]
 
