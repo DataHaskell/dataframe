@@ -5,10 +5,10 @@ import Data.Int
 import Data.List
 import qualified Data.Text as T
 
-import DataFrame.IO.Parquet.Binary
 import DataFrame.IO.Parquet.Encoding
 import DataFrame.IO.Parquet.Thrift
 import DataFrame.IO.Parquet.Types
+import DataFrame.Internal.Binary (littleEndianWord32)
 
 readLevelsV1 ::
     Int -> Int -> Int -> BS.ByteString -> ([Int], [Int], BS.ByteString)

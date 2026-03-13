@@ -14,6 +14,11 @@ import qualified Data.Vector.Unboxed as VU
 import DataFrame.IO.Parquet.Binary
 import DataFrame.IO.Parquet.Thrift
 import DataFrame.IO.Parquet.Types
+import DataFrame.Internal.Binary (
+    littleEndianInt32,
+    littleEndianWord32,
+    littleEndianWord64,
+ )
 import GHC.Float
 import qualified Snappy
 

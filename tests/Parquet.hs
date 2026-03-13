@@ -12,7 +12,7 @@ import Data.Int
 import Data.Text (Text)
 import Data.Time
 import Data.Word
-import DataFrame.IO.Parquet.Binary (
+import DataFrame.Internal.Binary (
     littleEndianWord32,
     littleEndianWord64,
     word32ToLittleEndian,

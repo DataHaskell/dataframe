@@ -6,7 +6,12 @@ import qualified Data.ByteString as BS
 import Data.Time
 import Data.Word
 
-import DataFrame.IO.Parquet.Binary
+import DataFrame.Internal.Binary (
+    littleEndianWord32,
+    littleEndianWord64,
+    word32ToLittleEndian,
+    word64ToLittleEndian,
+ )
 
 int96ToUTCTime :: BS.ByteString -> UTCTime
 int96ToUTCTime bytes

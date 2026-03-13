@@ -17,11 +17,15 @@ import Data.Time
 import qualified Data.Vector as V
 import qualified Data.Vector.Mutable as VM
 import qualified Data.Vector.Unboxed as VU
-import DataFrame.IO.Parquet.Binary
 import DataFrame.IO.Parquet.Encoding
 import DataFrame.IO.Parquet.Levels
 import DataFrame.IO.Parquet.Time
 import DataFrame.IO.Parquet.Types
+import DataFrame.Internal.Binary (
+    littleEndianInt32,
+    littleEndianWord32,
+    littleEndianWord64,
+ )
 import qualified DataFrame.Internal.Column as DI
 import GHC.Float
 

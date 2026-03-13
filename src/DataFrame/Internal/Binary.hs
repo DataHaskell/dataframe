@@ -79,7 +79,7 @@ word32ToLittleEndian w =
 
 byteAtOrZero :: Int -> BS.ByteString -> Int -> Word8
 byteAtOrZero len bytes i
-    | i < len = BS.index bytes i
+    | i >= 0 && i < len = BS.index bytes i
     | otherwise = 0
 {-# INLINE byteAtOrZero #-}
 

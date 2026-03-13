@@ -11,30 +11,9 @@ import Data.Char
 import Data.IORef
 import Data.Int
 import Data.Word
-import qualified DataFrame.Internal.Binary as Binary
 import qualified Foreign.Marshal.Alloc as Foreign
 import qualified Foreign.Ptr as Foreign
 import qualified Foreign.Storable as Foreign
-
-littleEndianWord32 :: BS.ByteString -> Word32
-littleEndianWord32 = Binary.littleEndianWord32
-{-# INLINE littleEndianWord32 #-}
-
-littleEndianWord64 :: BS.ByteString -> Word64
-littleEndianWord64 = Binary.littleEndianWord64
-{-# INLINE littleEndianWord64 #-}
-
-littleEndianInt32 :: BS.ByteString -> Int32
-littleEndianInt32 = Binary.littleEndianInt32
-{-# INLINE littleEndianInt32 #-}
-
-word64ToLittleEndian :: Word64 -> BS.ByteString
-word64ToLittleEndian = Binary.word64ToLittleEndian
-{-# INLINE word64ToLittleEndian #-}
-
-word32ToLittleEndian :: Word32 -> BS.ByteString
-word32ToLittleEndian = Binary.word32ToLittleEndian
-{-# INLINE word32ToLittleEndian #-}
 
 readUVarInt :: BS.ByteString -> (Word64, BS.ByteString)
 readUVarInt xs = loop xs 0 0 0

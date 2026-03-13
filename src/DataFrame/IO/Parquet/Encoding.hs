@@ -8,7 +8,8 @@ import qualified Data.ByteString.Unsafe as BSU
 import Data.List (foldl')
 import qualified Data.Vector.Unboxed as VU
 import Data.Word
-import DataFrame.IO.Parquet.Binary
+import DataFrame.IO.Parquet.Binary (readUVarInt)
+import DataFrame.Internal.Binary (littleEndianWord32)
 
 ceilLog2 :: Int -> Int
 ceilLog2 x
