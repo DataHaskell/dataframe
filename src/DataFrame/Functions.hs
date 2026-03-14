@@ -98,6 +98,21 @@ lift2Decorated f name rep comm prec =
             }
         )
 
+{- | Lenient numeric / text coercion.  Looks up column @name@, coerces its
+type to @a@, and substitutes @def@ for any @Nothing@ values if the source
+column is optional.  For non-nullable sources @def@ is unused.
+-}
+cast :: forall a. (Columnable a) => a -> T.Text -> Expr a
+cast def name = Cast name def
+
+{- | Lenient coercion for assertedly non-nullable columns.
+Substitutes @error@ for @Nothing@, so it will crash at evaluation time if
+any @Nothing@ is actually encountered.  For non-nullable and
+fully-populated nullable columns no cost is paid.
+-}
+unsafeCast :: forall a. (Columnable a) => T.Text -> Expr a
+unsafeCast name = Cast name (error "unsafeCast: unexpected Nothing in column")
+
 toDouble :: (Columnable a, Real a) => Expr a -> Expr Double
 toDouble =
     Unary

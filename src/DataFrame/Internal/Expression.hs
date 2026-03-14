@@ -56,6 +56,7 @@ data AggStrategy a b where
 
 data Expr a where
     Col :: (Columnable a) => T.Text -> Expr a
+    Cast :: (Columnable a) => T.Text -> a -> Expr a
     Lit :: (Columnable a) => a -> Expr a
     Unary ::
         (Columnable a, Columnable b) => UnaryOp b a -> Expr b -> Expr a
@@ -228,6 +229,7 @@ instance (Floating a, Columnable a) => Floating (Expr a) where
 instance (Show a) => Show (Expr a) where
     show :: forall a. (Show a) => Expr a -> String
     show (Col name) = "(col @" ++ show (typeRep @a) ++ " " ++ show name ++ ")"
+    show (Cast name def) = "(cast @" ++ show (typeRep @a) ++ " " ++ show def ++ " " ++ show name ++ ")"
     show (Lit value) = "(lit (" ++ show value ++ "))"
     show (If cond l r) = "(ifThenElse " ++ show cond ++ " " ++ show l ++ " " ++ show r ++ ")"
     show (Unary op value) = "(" ++ T.unpack (unaryName op) ++ " " ++ show value ++ ")"
@@ -239,6 +241,7 @@ instance (Show a) => Show (Expr a) where
 normalize :: (Eq a, Ord a, Show a, Typeable a) => Expr a -> Expr a
 normalize expr = case expr of
     Col name -> Col name
+    Cast name def -> Cast name def
     Lit val -> Lit val
     If cond th el -> If (normalize cond) (normalize th) (normalize el)
     Unary op e -> Unary op (normalize e)
@@ -261,6 +264,7 @@ compareExpr e1 e2 = compare (exprKey e1) (exprKey e2)
   where
     exprKey :: Expr a -> String
     exprKey (Col name) = "0:" ++ T.unpack name
+    exprKey (Cast name _) = "0C:" ++ T.unpack name
     exprKey (Lit val) = "1:" ++ show val
     exprKey (If c t e) = "2:" ++ exprKey c ++ exprKey t ++ exprKey e
     exprKey (Unary op e) = "3:" ++ T.unpack (unaryName op) ++ exprKey e
@@ -278,6 +282,7 @@ instance (Eq a, Columnable a) => Eq (Expr a) where
             Nothing -> False
         eqNormalized :: Expr a -> Expr a -> Bool
         eqNormalized (Col n1) (Col n2) = n1 == n2
+        eqNormalized (Cast n1 d1) (Cast n2 d2) = n1 == n2 && d1 == d2
         eqNormalized (Lit v1) (Lit v2) = v1 == v2
         eqNormalized (If c1 t1 e1) (If c2 t2 e2) =
             c1 == c2 && t1 `exprEq` t2 && e1 `exprEq` e2
@@ -295,6 +300,7 @@ instance (Ord a, Columnable a) => Ord (Expr a) where
     compare :: Expr a -> Expr a -> Ordering
     compare e1 e2 = case (e1, e2) of
         (Col n1, Col n2) -> compare n1 n2
+        (Cast n1 d1, Cast n2 d2) -> compare n1 n2 <> compare d1 d2
         (Lit v1, Lit v2) -> compare v1 v2
         (If c1 t1 e1', If c2 t2 e2') ->
             compare c1 c2 <> exprComp t1 t2 <> exprComp e1' e2'
@@ -307,6 +313,8 @@ instance (Ord a, Columnable a) => Ord (Expr a) where
         -- Different constructors - compare by priority
         (Col _, _) -> LT
         (_, Col _) -> GT
+        (Cast _ _, _) -> LT
+        (_, Cast _ _) -> GT
         (Lit _, _) -> LT
         (_, Lit _) -> GT
         (Unary{}, _) -> LT
@@ -334,6 +342,7 @@ replaceExpr new old expr = case testEquality (typeRep @b) (typeRep @c) of
   where
     replace' = case expr of
         (Col _) -> expr
+        (Cast _ _) -> expr
         (Lit _) -> expr
         (If cond l r) ->
             If (replaceExpr new old cond) (replaceExpr new old l) (replaceExpr new old r)
@@ -343,6 +352,7 @@ replaceExpr new old expr = case testEquality (typeRep @b) (typeRep @c) of
 
 eSize :: Expr a -> Int
 eSize (Col _) = 1
+eSize (Cast _ _) = 1
 eSize (Lit _) = 1
 eSize (If c l r) = 1 + eSize c + eSize l + eSize r
 eSize (Unary _ e) = 1 + eSize e
@@ -351,6 +361,7 @@ eSize (Agg strategy expr) = eSize expr + 1
 
 getColumns :: Expr a -> [T.Text]
 getColumns (Col cName) = [cName]
+getColumns (Cast name _) = [name]
 getColumns expr@(Lit _) = []
 getColumns (If cond l r) = getColumns cond <> getColumns l <> getColumns r
 getColumns (Unary op value) = getColumns value
@@ -366,6 +377,7 @@ prettyPrint = go 0 0
     go :: Int -> Int -> Expr a -> String
     go depth prec expr = case expr of
         Col name -> T.unpack name
+        Cast name _ -> T.unpack name
         Lit value -> show value
         If cond t e ->
             let inner =

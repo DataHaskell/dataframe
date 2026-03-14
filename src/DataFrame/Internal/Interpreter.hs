@@ -231,6 +231,141 @@ numGroups :: GroupedDataFrame -> Int
 numGroups gdf = VU.length (offsets gdf) - 1
 
 -------------------------------------------------------------------------------
+-- promoteColumn: numeric / text coercion for Cast
+-------------------------------------------------------------------------------
+
+{- | Coerce a column to type @a@, using @def@ for Nothing in Optional columns.
+Numeric coercion handles Double, Float, and Int targets via the singleton
+dispatch for floating and integral types.  Text columns (String / T.Text) are
+parsed via 'reads'; parse failures substitute @def@.  Any other mismatch
+returns 'Left TypeMismatchException'.
+-}
+promoteColumn ::
+    forall a. (Columnable a) => a -> Column -> Either DataFrameException Column
+promoteColumn def col
+    | hasElemType @a col = Right col
+    | otherwise =
+        case testEquality (typeRep @a) (typeRep @Double) of
+            Just Refl -> promoteToDouble def col
+            Nothing ->
+                case testEquality (typeRep @a) (typeRep @Float) of
+                    Just Refl -> promoteToFloat def col
+                    Nothing ->
+                        case testEquality (typeRep @a) (typeRep @Int) of
+                            Just Refl -> promoteToInt def col
+                            Nothing -> tryParse @a def col
+
+promoteToDouble :: Double -> Column -> Either DataFrameException Column
+promoteToDouble def col = case col of
+    UnboxedColumn (v :: VU.Vector b) ->
+        case sFloating @b of
+            STrue -> Right $ fromUnboxedVector @Double (VU.map (realToFrac :: b -> Double) v)
+            SFalse -> case sIntegral @b of
+                STrue -> Right $ fromUnboxedVector @Double (VU.map (fromIntegral :: b -> Double) v)
+                SFalse -> castMismatch @b @Double
+    OptionalColumn (v :: V.Vector (Maybe b)) ->
+        case sFloating @b of
+            STrue ->
+                Right $
+                    fromUnboxedVector @Double
+                        (VG.convert $ V.map (maybe def (realToFrac :: b -> Double)) v)
+            SFalse -> case sIntegral @b of
+                STrue ->
+                    Right $
+                        fromUnboxedVector @Double
+                            (VG.convert $ V.map (maybe def (fromIntegral :: b -> Double)) v)
+                SFalse -> tryParse @Double def col
+    BoxedColumn _ -> tryParse @Double def col
+
+promoteToFloat :: Float -> Column -> Either DataFrameException Column
+promoteToFloat def col = case col of
+    UnboxedColumn (v :: VU.Vector b) ->
+        case sFloating @b of
+            STrue -> Right $ fromUnboxedVector @Float (VU.map (realToFrac :: b -> Float) v)
+            SFalse -> case sIntegral @b of
+                STrue -> Right $ fromUnboxedVector @Float (VU.map (fromIntegral :: b -> Float) v)
+                SFalse -> castMismatch @b @Float
+    OptionalColumn (v :: V.Vector (Maybe b)) ->
+        case sFloating @b of
+            STrue ->
+                Right $
+                    fromUnboxedVector @Float
+                        (VG.convert $ V.map (maybe def (realToFrac :: b -> Float)) v)
+            SFalse -> case sIntegral @b of
+                STrue ->
+                    Right $
+                        fromUnboxedVector @Float
+                            (VG.convert $ V.map (maybe def (fromIntegral :: b -> Float)) v)
+                SFalse -> tryParse @Float def col
+    BoxedColumn _ -> tryParse @Float def col
+
+promoteToInt :: Int -> Column -> Either DataFrameException Column
+promoteToInt def col = case col of
+    UnboxedColumn (v :: VU.Vector b) ->
+        case sFloating @b of
+            STrue ->
+                Right $
+                    fromUnboxedVector @Int
+                        (VU.map (round . (realToFrac :: b -> Double)) v)
+            SFalse -> case sIntegral @b of
+                STrue -> Right $ fromUnboxedVector @Int (VU.map (fromIntegral :: b -> Int) v)
+                SFalse -> castMismatch @b @Int
+    OptionalColumn (v :: V.Vector (Maybe b)) ->
+        case sFloating @b of
+            STrue ->
+                Right $
+                    fromUnboxedVector @Int
+                        (VG.convert $ V.map (maybe def (round . (realToFrac :: b -> Double))) v)
+            SFalse -> case sIntegral @b of
+                STrue ->
+                    Right $
+                        fromUnboxedVector @Int
+                            (VG.convert $ V.map (maybe def (fromIntegral :: b -> Int)) v)
+                SFalse -> tryParse @Int def col
+    BoxedColumn _ -> tryParse @Int def col
+
+tryParse ::
+    forall a. (Columnable a) => a -> Column -> Either DataFrameException Column
+tryParse def col = case col of
+    BoxedColumn (v :: V.Vector b) ->
+        case testEquality (typeRep @b) (typeRep @String) of
+            Just Refl -> Right $ fromVector @a $ V.map (parseValue def) v
+            Nothing ->
+                case testEquality (typeRep @b) (typeRep @T.Text) of
+                    Just Refl -> Right $ fromVector @a $ V.map (parseValue def . T.unpack) v
+                    Nothing -> castMismatch @b @a
+    OptionalColumn (v :: V.Vector (Maybe b)) ->
+        case testEquality (typeRep @b) (typeRep @String) of
+            Just Refl -> Right $ fromVector @a $ V.map (maybe def (parseValue def)) v
+            Nothing ->
+                case testEquality (typeRep @b) (typeRep @T.Text) of
+                    Just Refl ->
+                        Right $
+                            fromVector @a $
+                                V.map (maybe def (parseValue def . T.unpack)) v
+                    Nothing -> castMismatch @b @a
+    UnboxedColumn (_ :: VU.Vector b) -> castMismatch @b @a
+
+parseValue :: (Read a) => a -> String -> a
+parseValue def s = case reads s of
+    [(x, "")] -> x
+    _ -> def
+
+castMismatch ::
+    forall src tgt.
+    (Typeable src, Typeable tgt) =>
+    Either DataFrameException Column
+castMismatch =
+    Left $
+        TypeMismatchException
+            MkTypeErrorContext
+                { userType = Right (typeRep @tgt)
+                , expectedType = Right (typeRep @src)
+                , callingFunctionName = Just "cast"
+                , errorColumnName = Nothing
+                }
+
+-------------------------------------------------------------------------------
 -- eval: the unified interpreter
 -------------------------------------------------------------------------------
 
@@ -264,6 +399,26 @@ eval (GroupCtx gdf) (Col name) =
                 ( Group
                     (sliceGroups c (offsets gdf) (valueIndices gdf))
                 )
+-- Cast -------------------------------------------------------------------
+
+eval (FlatCtx df) (Cast name def) =
+    case getColumn name df of
+        Nothing ->
+            Left $
+                ColumnNotFoundException name "" (M.keys $ columnIndices df)
+        Just c -> Flat <$> promoteColumn @a def c
+eval (GroupCtx gdf) (Cast name def) =
+    case getColumn name (fullDataframe gdf) of
+        Nothing ->
+            Left $
+                ColumnNotFoundException
+                    name
+                    ""
+                    (M.keys $ columnIndices $ fullDataframe gdf)
+        Just c -> do
+            promoted <- promoteColumn @a def c
+            Right $ Group (sliceGroups promoted (offsets gdf) (valueIndices gdf))
+
 -- Unary ------------------------------------------------------------------
 
 eval ctx expr@(Unary (op :: UnaryOp b a) inner) = addContext expr $ do
