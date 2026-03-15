@@ -16,7 +16,7 @@ data ParquetType
     | PBYTE_ARRAY
     | PFIXED_LEN_BYTE_ARRAY
     | PARQUET_TYPE_UNKNOWN
-    deriving (Show, Eq)
+    deriving (Show, Eq, Enum)
 
 parquetTypeFromInt :: Int32 -> ParquetType
 parquetTypeFromInt 0 = PBOOLEAN

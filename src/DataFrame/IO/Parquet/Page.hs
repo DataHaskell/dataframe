@@ -33,6 +33,29 @@ isDictionaryPage page = case pageTypeHeader (pageHeader page) of
     DictionaryPageHeader{..} -> True
     _ -> False
 
+decompressData :: CompressionCodec -> BS.ByteString -> IO BS.ByteString
+decompressData codec compressed = case codec of
+    ZSTD -> do
+        result <- Zstd.decompress
+        drainZstd result compressed []
+      where
+        drainZstd (Zstd.Consume f) input acc = do
+            result <- f input
+            drainZstd result BS.empty acc
+        drainZstd (Zstd.Produce chunk next) _ acc = do
+            result <- next
+            drainZstd result BS.empty (chunk : acc)
+        drainZstd (Zstd.Done final) _ acc =
+            pure $ BS.concat (reverse (final : acc))
+        drainZstd (Zstd.Error msg msg2) _ _ =
+            error ("ZSTD error: " ++ msg ++ " " ++ msg2)
+    SNAPPY -> case Snappy.decompress compressed of
+        Left e -> error (show e)
+        Right res -> pure res
+    UNCOMPRESSED -> pure compressed
+    GZIP -> pure (LB.toStrict (GZip.decompress (BS.fromStrict compressed)))
+    other -> error ("Unsupported compression type: " ++ show other)
+
 readPage :: CompressionCodec -> BS.ByteString -> IO (Maybe Page, BS.ByteString)
 readPage c columnBytes =
     if BS.null columnBytes
@@ -42,27 +65,8 @@ readPage c columnBytes =
 
             let compressed = BS.take (fromIntegral $ compressedPageSize hdr) rem
 
-            fullData <- case c of
-                ZSTD -> do
-                    result <- Zstd.decompress
-                    drainZstd result compressed []
-                  where
-                    drainZstd (Zstd.Consume f) input acc = do
-                        result <- f input
-                        drainZstd result BS.empty acc
-                    drainZstd (Zstd.Produce chunk next) _ acc = do
-                        result <- next
-                        drainZstd result BS.empty (chunk : acc)
-                    drainZstd (Zstd.Done final) _ acc =
-                        pure $ BS.concat (reverse (final : acc))
-                    drainZstd (Zstd.Error msg msg2) _ _ =
-                        error ("ZSTD error: " ++ msg ++ " " ++ msg2)
-                SNAPPY -> case Snappy.decompress compressed of
-                    Left e -> error (show e)
-                    Right res -> pure res
-                UNCOMPRESSED -> pure compressed
-                GZIP -> pure (LB.toStrict (GZip.decompress (BS.fromStrict compressed)))
-                other -> error ("Unsupported compression type: " ++ show other)
+            fullData <- decompressData c compressed
+            
             pure
                 ( Just $ Page hdr fullData
                 , BS.drop (fromIntegral $ compressedPageSize hdr) rem

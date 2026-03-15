@@ -18,6 +18,7 @@ import System.IO.MMap (
     Mode (ReadOnly),
     mmapFileForeignPtr,
  )
+import Control.Monad.IO.Class (MonadIO(..))
 
 uncurry_ :: (a -> b -> c -> d) -> (a, b, c) -> d
 uncurry_ f (a, b, c) = f a b c
@@ -52,6 +53,9 @@ instance Monad (ReaderIO r) where
     (ReaderIO ma) >>= f = ReaderIO $ \r -> do
         a <- ma r
         runReaderIO (f a) r
+
+instance MonadIO (ReaderIO r) where
+    liftIO io = ReaderIO $ const io
 
 type LocalFile = ReaderIO Handle
 

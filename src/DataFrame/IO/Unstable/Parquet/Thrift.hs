@@ -10,6 +10,8 @@ import GHC.Generics (Generic)
 import Pinch (Field, Enumeration, Pinchable (..))
 import qualified Pinch
 import GHC.TypeLits (KnownNat)
+import DataFrame.IO.Parquet.Types (ParquetEncoding(..))
+import qualified DataFrame.IO.Parquet.Types
 
 -- Primitive Parquet Types
 -- https://github.com/apache/parquet-format/blob/master/src/main/thrift/parquet.thrift#L32
@@ -25,6 +27,16 @@ data ThriftType = BOOLEAN (Enumeration 0)
 
 instance Pinchable ThriftType
 
+pinchThriftTypeToParquetType :: ThriftType -> DataFrame.IO.Parquet.Types.ParquetType
+pinchThriftTypeToParquetType (BOOLEAN _) = DataFrame.IO.Parquet.Types.PBOOLEAN
+pinchThriftTypeToParquetType (INT32 _) = DataFrame.IO.Parquet.Types.PINT32
+pinchThriftTypeToParquetType (INT64 _) = DataFrame.IO.Parquet.Types.PINT64
+pinchThriftTypeToParquetType (INT96 _) = DataFrame.IO.Parquet.Types.PINT96
+pinchThriftTypeToParquetType (FLOAT _) = DataFrame.IO.Parquet.Types.PFLOAT
+pinchThriftTypeToParquetType (DOUBLE _) = DataFrame.IO.Parquet.Types.PDOUBLE
+pinchThriftTypeToParquetType (BYTE_ARRAY _) = DataFrame.IO.Parquet.Types.PBYTE_ARRAY
+pinchThriftTypeToParquetType (PFIXED_LEN_BYTE_ARRAY _) = DataFrame.IO.Parquet.Types.PFIXED_LEN_BYTE_ARRAY
+
 -- https://github.com/apache/parquet-format/blob/master/src/main/thrift/parquet.thrift#L183
 data FieldRepetitionType = REQUIRED (Enumeration 0)
                          | OPTIONAL (Enumeration 1)
@@ -35,15 +47,26 @@ instance Pinchable FieldRepetitionType
 
 -- https://github.com/apache/parquet-format/blob/master/src/main/thrift/parquet.thrift#L203
 data Encoding = PLAIN (Enumeration 0)
-              | PLAIN_DICTIONARY (Enumeration 2)
-              | RLE (Enumeration 3)
-              | BIT_PACKED (Enumeration 4)
-              | DELTA_BINARY_PACKED (Enumeration 5)
-              | DELTA_LENGTH_BYTE_ARRAY (Enumeration 6)
-              | DELTA_BYTE_ARRAY (Enumeration 7)
-              | RLE_DICTIONARY (Enumeration 8)
-              | BYTE_STREAM_SPLIT (Enumeration 9)
+              | PLAIN_DICTIONARY (Enumeration 1)
+              | RLE (Enumeration 2)
+              | BIT_PACKED (Enumeration 3)
+              | DELTA_BINARY_PACKED (Enumeration 4)
+              | DELTA_LENGTH_BYTE_ARRAY (Enumeration 5)
+              | DELTA_BYTE_ARRAY (Enumeration 6)
+              | RLE_DICTIONARY (Enumeration 7)
+              | BYTE_STREAM_SPLIT (Enumeration 8)
               deriving (Eq, Show, Generic)
+
+parquetEncodingFromPinch :: Encoding -> ParquetEncoding
+parquetEncodingFromPinch (PLAIN _) = EPLAIN
+parquetEncodingFromPinch (PLAIN_DICTIONARY _) = EPLAIN_DICTIONARY
+parquetEncodingFromPinch (RLE _) = ERLE
+parquetEncodingFromPinch (BIT_PACKED _) = EBIT_PACKED
+parquetEncodingFromPinch (DELTA_BINARY_PACKED _) = EDELTA_BINARY_PACKED
+parquetEncodingFromPinch (DELTA_LENGTH_BYTE_ARRAY _) = EDELTA_LENGTH_BYTE_ARRAY
+parquetEncodingFromPinch (DELTA_BYTE_ARRAY _) = EDELTA_BYTE_ARRAY
+parquetEncodingFromPinch (RLE_DICTIONARY _) = ERLE_DICTIONARY
+parquetEncodingFromPinch (BYTE_STREAM_SPLIT _) = EBYTE_STREAM_SPLIT
 
 instance Pinchable Encoding
 
@@ -59,6 +82,17 @@ data CompressionCodec = UNCOMPRESSED (Enumeration 0)
                       deriving (Eq, Show, Generic)
 
 instance Pinchable CompressionCodec
+
+pinchCompressionToParquetCompression :: CompressionCodec -> DataFrame.IO.Parquet.Types.CompressionCodec
+pinchCompressionToParquetCompression (UNCOMPRESSED _) = DataFrame.IO.Parquet.Types.UNCOMPRESSED
+pinchCompressionToParquetCompression (SNAPPY _) = DataFrame.IO.Parquet.Types.SNAPPY
+pinchCompressionToParquetCompression (GZIP _) = DataFrame.IO.Parquet.Types.GZIP
+pinchCompressionToParquetCompression (LZO _) = DataFrame.IO.Parquet.Types.LZO
+pinchCompressionToParquetCompression (BROTLI _) = DataFrame.IO.Parquet.Types.BROTLI
+pinchCompressionToParquetCompression (LZ4 _) = DataFrame.IO.Parquet.Types.LZ4
+pinchCompressionToParquetCompression (ZSTD _) = DataFrame.IO.Parquet.Types.ZSTD
+pinchCompressionToParquetCompression (LZ4_RAW _) = DataFrame.IO.Parquet.Types.LZ4_RAW
+pinchCompressionToParquetCompression _ = DataFrame.IO.Parquet.Types.COMPRESSION_CODEC_UNKNOWN
 
 -- https://github.com/apache/parquet-format/blob/master/src/main/thrift/parquet.thrift#L261
 data PageType = DATA_PAGE (Enumeration 0)
@@ -231,6 +265,45 @@ data LogicalType = LT_STRING    (Field 1 StringType)
                  deriving (Eq, Show, Generic)
 
 instance Pinchable LogicalType
+
+pinchLogicalTypeToLogicalType :: LogicalType -> DataFrame.IO.Parquet.Types.LogicalType
+pinchLogicalTypeToLogicalType (LT_STRING _) = DataFrame.IO.Parquet.Types.STRING_TYPE
+pinchLogicalTypeToLogicalType (LT_MAP _) = DataFrame.IO.Parquet.Types.MAP_TYPE
+pinchLogicalTypeToLogicalType (LT_LIST _) = DataFrame.IO.Parquet.Types.LIST_TYPE
+pinchLogicalTypeToLogicalType (LT_ENUM _) = DataFrame.IO.Parquet.Types.ENUM_TYPE
+pinchLogicalTypeToLogicalType (LT_DECIMAL dt') = 
+  let dt = unField dt'
+      scale = unField $ decimal_scale dt
+      precision = unField $ decimal_precision dt
+  in DataFrame.IO.Parquet.Types.DecimalType {DataFrame.IO.Parquet.Types.decimalTypePrecision = precision, DataFrame.IO.Parquet.Types.decimalTypeScale = scale}
+pinchLogicalTypeToLogicalType (LT_DATE _) = DataFrame.IO.Parquet.Types.DATE_TYPE
+pinchLogicalTypeToLogicalType (LT_TIME tt') = 
+  let tt = unField tt'
+      isAdjustedToUTC = unField $ time_isAdjustedToUTC tt
+      unit = case unField $ time_unit tt of
+        MILLIS _ -> DataFrame.IO.Parquet.Types.MILLISECONDS
+        MICROS _ -> DataFrame.IO.Parquet.Types.MICROSECONDS
+        NANOS _ -> DataFrame.IO.Parquet.Types.NANOSECONDS
+  in DataFrame.IO.Parquet.Types.TimeType {DataFrame.IO.Parquet.Types.isAdjustedToUTC = isAdjustedToUTC, DataFrame.IO.Parquet.Types.unit = unit}
+pinchLogicalTypeToLogicalType (LT_TIMESTAMP ts') = 
+  let ts = unField ts'
+      isAdjustedToUTC = unField $ timestamp_isAdjustedToUTC ts
+      unit = case unField $ timestamp_unit ts of
+        MILLIS _ -> DataFrame.IO.Parquet.Types.MILLISECONDS
+        MICROS _ -> DataFrame.IO.Parquet.Types.MICROSECONDS
+        NANOS _ -> DataFrame.IO.Parquet.Types.NANOSECONDS
+  in DataFrame.IO.Parquet.Types.TimestampType {DataFrame.IO.Parquet.Types.isAdjustedToUTC = isAdjustedToUTC, DataFrame.IO.Parquet.Types.unit = unit}
+pinchLogicalTypeToLogicalType (LT_INTEGER it') = 
+  let it = unField it'
+      bitWidth = unField $ int_bitWidth it
+      isSigned = unField $ int_isSigned it
+  in DataFrame.IO.Parquet.Types.IntType {DataFrame.IO.Parquet.Types.bitWidth = bitWidth, DataFrame.IO.Parquet.Types.intIsSigned = isSigned}
+pinchLogicalTypeToLogicalType (LT_NULL _) = DataFrame.IO.Parquet.Types.LOGICAL_TYPE_UNKNOWN
+pinchLogicalTypeToLogicalType (LT_JSON _) = DataFrame.IO.Parquet.Types.JSON_TYPE
+pinchLogicalTypeToLogicalType (LT_BSON _) = DataFrame.IO.Parquet.Types.BSON_TYPE
+pinchLogicalTypeToLogicalType (LT_UUID _) = DataFrame.IO.Parquet.Types.UUID_TYPE
+pinchLogicalTypeToLogicalType (LT_FLOAT16 _) = DataFrame.IO.Parquet.Types.FLOAT16_TYPE
+pinchLogicalTypeToLogicalType (LT_VARIANT _) = DataFrame.IO.Parquet.Types.LOGICAL_TYPE_UNKNOWN
 
 -- https://github.com/apache/parquet-format/blob/master/src/main/thrift/parquet.thrift#L270
 data ConvertedType = UTF8 (Enumeration 0)
