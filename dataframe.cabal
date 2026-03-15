@@ -91,6 +91,7 @@ library
                     DataFrame.IO.Parquet.Compression,
                     DataFrame.IO.Parquet.Encoding,
                     DataFrame.IO.Parquet.Page,
+                    DataFrame.IO.Parquet.Seeking,
                     DataFrame.IO.Parquet.Time,
                     DataFrame.IO.Parquet.Types,
                     DataFrame.Lazy.IO.CSV,
@@ -143,6 +144,8 @@ library
                       stm >= 2.5 && < 3,
                       filepath >= 1.4 && < 2,
                       Glob >= 0.10 && < 1,
+                      streamly-core,
+                      streamly-bytestring,
 
     hs-source-dirs:   src
     c-sources:        cbits/process_csv.c

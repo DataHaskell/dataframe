@@ -62,7 +62,7 @@ readAndAdvance :: IORef Int -> BS.ByteString -> IO Word8
 readAndAdvance bufferPos buffer = do
     pos <- readIORef bufferPos
     let b = BS.index buffer pos
-    modifyIORef bufferPos (+ 1)
+    modifyIORef' bufferPos (+ 1)
     return b
 
 readVarIntFromBuffer :: (Integral a) => BS.ByteString -> IORef Int -> IO a

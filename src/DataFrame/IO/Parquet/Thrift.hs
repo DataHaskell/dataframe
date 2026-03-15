@@ -21,6 +21,7 @@ import qualified Data.Vector as V
 import qualified Data.Vector.Unboxed as VU
 import Data.Word
 import DataFrame.IO.Parquet.Binary
+import DataFrame.IO.Parquet.Seeking
 import DataFrame.IO.Parquet.Types
 import qualified DataFrame.Internal.Column as DI
 import DataFrame.Internal.DataFrame (DataFrame, unsafeGetColumn)
@@ -329,6 +330,17 @@ skipList buf pos = do
     let elemType = toTType sizeAndType
     replicateM_ sizeOnly (skipFieldData elemType buf pos)
 
+{- | This avoids reading entire bytestring at once: it uses the seekable handle
+     seeks it to the end of the file to read the metadata
+-}
+readMetadataByHandleMetaSize :: FileBufferedOrSeekable -> Int -> IO FileMetadata
+readMetadataByHandleMetaSize sh metaSize = do
+    let lastFieldId = 0
+    bs <- readLastBytes (fromIntegral $ metaSize + footerSize) sh
+    bufferPos <- newIORef 0
+    readFileMetaData defaultMetadata bs bufferPos lastFieldId
+
+-- | metadata starts from (L - 8 - meta_size) to L - 8 - 1.
 readMetadata :: BS.ByteString -> Int -> IO FileMetadata
 readMetadata contents size = do
     let metadataStartPos = BS.length contents - footerSize - size
