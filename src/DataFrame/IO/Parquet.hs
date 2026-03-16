@@ -62,10 +62,6 @@ data ParquetReadOptions = ParquetReadOptions
     -- ^ Optional row filter expression applied before projection.
     , rowRange :: Maybe (Int, Int)
     -- ^ Optional row slice @(start, end)@ with start-inclusive/end-exclusive semantics.
-    , forceNonSeekable :: Maybe Bool
-    {- ^ Force reader to buffer entire file in memory, even if it is seekable.
-    For internal testing only, to test the fallback path.
-    -}
     }
     deriving (Eq, Show)
 
@@ -87,7 +83,6 @@ defaultParquetReadOptions =
         { selectedColumns = Nothing
         , predicate = Nothing
         , rowRange = Nothing
-        , forceNonSeekable = Nothing
         }
 
 -- Public API --------------------------------------------------------------
@@ -137,7 +132,12 @@ cleanColPath nodes path = go nodes path False
                     p : go (sChildren n) ps False
 
 readParquetWithOpts :: ParquetReadOptions -> FilePath -> IO DataFrame
-readParquetWithOpts opts path = withFileBufferedOrSeekable (forceNonSeekable opts) path ReadMode $ \file -> do
+readParquetWithOpts = _readParquetWithOpts Nothing
+
+-- | Internal function to pass testing parameters
+_readParquetWithOpts ::
+    ForceNonSeekable -> ParquetReadOptions -> FilePath -> IO DataFrame
+_readParquetWithOpts extraConfig opts path = withFileBufferedOrSeekable extraConfig path ReadMode $ \file -> do
     fileMetadata <- readMetadataFromHandle file
     let columnPaths = getColumnPaths (drop 1 $ schema fileMetadata)
     let columnNames = map fst columnPaths

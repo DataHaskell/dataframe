@@ -6,6 +6,7 @@ module Parquet where
 import Assertions (assertExpectException)
 import qualified DataFrame as D
 import qualified DataFrame.Functions as F
+import qualified DataFrame.IO.Parquet as DP
 
 import qualified Data.ByteString as BS
 import Data.Int
@@ -20,12 +21,6 @@ import DataFrame.Internal.Binary (
  )
 import GHC.IO (unsafePerformIO)
 import Test.HUnit
-
--- | For fallback path testing
-readParquetNonSeekable :: FilePath -> IO D.DataFrame
-readParquetNonSeekable =
-    D.readParquetWithOpts
-        (D.defaultParquetReadOptions{D.forceNonSeekable = Just True})
 
 allTypes :: D.DataFrame
 allTypes =
@@ -71,7 +66,7 @@ testBothReadParquetPaths :: ((FilePath -> IO D.DataFrame) -> Test) -> Test
 testBothReadParquetPaths test =
     TestList
         [ test D.readParquet
-        , test readParquetNonSeekable
+        , test (DP._readParquetWithOpts (Just True) D.defaultParquetReadOptions)
         ]
 
 allTypesPlain :: Test

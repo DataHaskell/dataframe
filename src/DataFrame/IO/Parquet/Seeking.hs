@@ -8,6 +8,7 @@ module DataFrame.IO.Parquet.Seeking (
     SeekableHandle (getSeekableHandle),
     SeekMode (..),
     FileBufferedOrSeekable (..),
+    ForceNonSeekable,
     advanceBytes,
     mkFileBufferedOrSeekable,
     mkSeekableHandle,
