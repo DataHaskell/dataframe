@@ -34,23 +34,14 @@ import Streamly.Data.Unfold (Unfold)
 import qualified Streamly.Internal.Data.Unfold as Unfold
 import Control.Monad.IO.Class (MonadIO(..))
 import DataFrame.IO.Unstable.Parquet.PageParser (parsePage)
-import DataFrame.Internal.Column (Columnable)
+import DataFrame.Internal.Column (Column)
 import Data.List (transpose)
 import Data.Maybe (fromMaybe, fromJust)
-import Type.Reflection (Typeable)
 import Pinch (decodeWithLeftovers)
 
 readParquet filepath = IO.withFile filepath IO.ReadMode $ \handle -> do
   fileMetadata <- runReaderIO parseFileMetadata handle
   print fileMetadata
-
-data ColumnStream r where
-  ColumnStream :: forall a r. (Columnable a) => Stream r a -> ColumnStream r
-
-doTheThing :: (RandomAccess r, MonadIO r) => r [ColumnStream r]
-doTheThing = do
-  metadata <- parseFileMetadata
-  return (parseColumns metadata)
 
 parseFileMetadata ::
     (RandomAccess r) => r FileMetadata
@@ -67,7 +58,7 @@ parseFileMetadata = do
             sizes = map (fromIntegral . BS.index footer) [0 .. 3]
          in foldl' (.|.) 0 $ zipWith shiftL sizes [0, 8 .. 24]
 
-parseColumns :: (RandomAccess r, MonadIO r) => FileMetadata -> [ColumnStream r]
+parseColumns :: (RandomAccess r, MonadIO r) => FileMetadata -> [Stream r Column]
 parseColumns metadata = 
   let columnDescriptions = generateColumnDescriptions $ unField $ schema metadata
       colChunks = columnChunks metadata
@@ -84,9 +75,8 @@ parseColumns metadata =
     columnChunks :: (RandomAccess r) => FileMetadata -> [Stream r ColumnChunk]
     columnChunks = map (Stream.fromList) . transpose . map (unField . rg_columns) . unField . row_groups
     
-    parse :: (RandomAccess r, MonadIO r) => Stream r ColumnChunk -> ColumnDescription -> ColumnStream r
-    parse columnChunkStream description = ColumnStream $ 
-      Stream.unfoldEach (parsePage description) $ Stream.unfoldEach parseColumnChunk columnChunkStream 
+    parse :: (RandomAccess r, MonadIO r) => Stream r ColumnChunk -> ColumnDescription -> Stream r Column
+    parse columnChunkStream description =  Stream.unfoldEach (parseColumnChunk description) columnChunkStream 
 
 data ColumnChunkState
   = ColumnChunkState
@@ -96,8 +86,8 @@ data ColumnChunkState
   , parquetType :: !Int
   }
 
-parseColumnChunk :: (RandomAccess r, MonadIO r) => Unfold r ColumnChunk (BS.ByteString, PageHeader, CompressionCodec, Maybe DictVals, Int)
-parseColumnChunk = Unfold.Unfold step inject
+parseColumnChunk :: (RandomAccess r, MonadIO r) => ColumnDescription -> Unfold r ColumnChunk Column
+parseColumnChunk description = Unfold.Unfold step inject
   where
     inject :: (RandomAccess r) => ColumnChunk -> r ColumnChunkState
     inject columnChunk = do
@@ -113,7 +103,7 @@ parseColumnChunk = Unfold.Unfold step inject
       rawBytes <- readBytes range
       return $ ColumnChunkState rawBytes c Nothing pType
 
-    step :: (RandomAccess r, MonadIO r) => ColumnChunkState -> r (Unfold.Step ColumnChunkState (BS.ByteString, PageHeader, CompressionCodec, Maybe DictVals, Int))
+    step :: (RandomAccess r, MonadIO r) => ColumnChunkState -> r (Unfold.Step ColumnChunkState Column)
     step (ColumnChunkState remaining c dict pType) = do
       if BS.null remaining
         then return Unfold.Stop
@@ -139,7 +129,8 @@ parseColumnChunk = Unfold.Unfold step inject
                 step (ColumnChunkState rest c (Just newDict) pType)
               Nothing -> do
                 -- It's a data page. Yield it.
-                return $ Unfold.Yield (uncompressedData, header, c, dict, pType) (ColumnChunkState rest c dict pType)
+                column <- parsePage description (uncompressedData, header, c, dict, pType)
+                return $ Unfold.Yield column (ColumnChunkState rest c dict pType)
 
 parsePageHeader :: BS.ByteString -> Either String (BS.ByteString, PageHeader)
 parsePageHeader bytes = case decodeWithLeftovers Pinch.compactProtocol bytes of
