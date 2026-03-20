@@ -59,7 +59,9 @@ allTypesPlain =
         ( assertEqual
             "allTypesPlain"
             allTypes
-            (unsafePerformIO (D.readParquetUnstableUnstable "./tests/data/alltypes_plain.parquet"))
+            ( unsafePerformIO
+                (D.readParquetUnstableUnstable "./tests/data/alltypes_plain.parquet")
+            )
         )
 
 allTypesTinyPagesDimensions :: Test
@@ -69,7 +71,10 @@ allTypesTinyPagesDimensions =
             "allTypesTinyPages last few"
             (7300, 13)
             ( unsafePerformIO
-                (fmap D.dimensions (D.readParquetUnstableUnstable "./tests/data/alltypes_tiny_pages.parquet"))
+                ( fmap
+                    D.dimensions
+                    (D.readParquetUnstableUnstable "./tests/data/alltypes_tiny_pages.parquet")
+                )
             )
         )
 
@@ -175,7 +180,9 @@ allTypesPlainSnappy =
         ( assertEqual
             "allTypesPlainSnappy"
             (D.filter (F.col @Int32 "id") (`elem` [6, 7]) allTypes)
-            (unsafePerformIO (D.readParquetUnstableUnstable "./tests/data/alltypes_plain.snappy.parquet"))
+            ( unsafePerformIO
+                (D.readParquetUnstableUnstable "./tests/data/alltypes_plain.snappy.parquet")
+            )
         )
 
 allTypesDictionary :: Test
@@ -184,7 +191,9 @@ allTypesDictionary =
         ( assertEqual
             "allTypesPlainSnappy"
             (D.filter (F.col @Int32 "id") (`elem` [0, 1]) allTypes)
-            (unsafePerformIO (D.readParquetUnstableUnstable "./tests/data/alltypes_dictionary.parquet"))
+            ( unsafePerformIO
+                (D.readParquetUnstableUnstable "./tests/data/alltypes_dictionary.parquet")
+            )
         )
 
 selectedColumnsWithOpts :: Test
@@ -465,7 +474,9 @@ transactionsTest =
         ( assertEqual
             "transactions"
             transactions
-            (unsafePerformIO (D.readParquetUnstableUnstable "./tests/data/transactions.parquet"))
+            ( unsafePerformIO
+                (D.readParquetUnstableUnstable "./tests/data/transactions.parquet")
+            )
         )
 
 mtCarsDataset :: D.DataFrame
@@ -963,7 +974,9 @@ hadoopLz4CompressedLarger =
         ( assertExpectException
             "hadoopLz4CompressedLarger"
             "LZ4"
-            (D.readParquetUnstableUnstable "./tests/data/hadoop_lz4_compressed_larger.parquet")
+            ( D.readParquetUnstableUnstable
+                "./tests/data/hadoop_lz4_compressed_larger.parquet"
+            )
         )
 
 nonHadoopLz4Compressed :: Test
@@ -1039,7 +1052,9 @@ deltaEncodingOptionalColumn =
         ( assertExpectException
             "deltaEncodingOptionalColumn"
             "EDELTA_BINARY_PACKED"
-            (D.readParquetUnstableUnstable "./tests/data/delta_encoding_optional_column.parquet")
+            ( D.readParquetUnstableUnstable
+                "./tests/data/delta_encoding_optional_column.parquet"
+            )
         )
 
 deltaEncodingRequiredColumn :: Test
@@ -1048,7 +1063,9 @@ deltaEncodingRequiredColumn =
         ( assertExpectException
             "deltaEncodingRequiredColumn"
             "EDELTA_BINARY_PACKED"
-            (D.readParquetUnstableUnstable "./tests/data/delta_encoding_required_column.parquet")
+            ( D.readParquetUnstableUnstable
+                "./tests/data/delta_encoding_required_column.parquet"
+            )
         )
 
 deltaLengthByteArray :: Test
@@ -1097,7 +1114,9 @@ datapageV2EmptyDatapage =
         ( assertExpectException
             "datapageV2EmptyDatapage"
             "UnexpectedEOF"
-            (D.readParquetUnstableUnstable "./tests/data/datapage_v2_empty_datapage.snappy.parquet")
+            ( D.readParquetUnstableUnstable
+                "./tests/data/datapage_v2_empty_datapage.snappy.parquet"
+            )
         )
 
 pageV2EmptyCompressed :: Test
@@ -1122,7 +1141,9 @@ datapageV1UncompressedChecksum =
             ( unsafePerformIO
                 ( fmap
                     D.dimensions
-                    (D.readParquetUnstableUnstable "./tests/data/datapage_v1-uncompressed-checksum.parquet")
+                    ( D.readParquetUnstableUnstable
+                        "./tests/data/datapage_v1-uncompressed-checksum.parquet"
+                    )
                 )
             )
         )
@@ -1136,7 +1157,9 @@ datapageV1SnappyChecksum =
             ( unsafePerformIO
                 ( fmap
                     D.dimensions
-                    (D.readParquetUnstableUnstable "./tests/data/datapage_v1-snappy-compressed-checksum.parquet")
+                    ( D.readParquetUnstableUnstable
+                        "./tests/data/datapage_v1-snappy-compressed-checksum.parquet"
+                    )
                 )
             )
         )
@@ -1150,7 +1173,9 @@ plainDictUncompressedChecksum =
             ( unsafePerformIO
                 ( fmap
                     D.dimensions
-                    (D.readParquetUnstableUnstable "./tests/data/plain-dict-uncompressed-checksum.parquet")
+                    ( D.readParquetUnstableUnstable
+                        "./tests/data/plain-dict-uncompressed-checksum.parquet"
+                    )
                 )
             )
         )
@@ -1178,7 +1203,9 @@ datapageV1CorruptChecksum =
             ( unsafePerformIO
                 ( fmap
                     D.dimensions
-                    (D.readParquetUnstableUnstable "./tests/data/datapage_v1-corrupt-checksum.parquet")
+                    ( D.readParquetUnstableUnstable
+                        "./tests/data/datapage_v1-corrupt-checksum.parquet"
+                    )
                 )
             )
         )
@@ -1192,7 +1219,9 @@ rleDictUncompressedCorruptChecksum =
             ( unsafePerformIO
                 ( fmap
                     D.dimensions
-                    (D.readParquetUnstableUnstable "./tests/data/rle-dict-uncompressed-corrupt-checksum.parquet")
+                    ( D.readParquetUnstableUnstable
+                        "./tests/data/rle-dict-uncompressed-corrupt-checksum.parquet"
+                    )
                 )
             )
         )
@@ -1208,7 +1237,10 @@ nullsSnappy =
             "nullsSnappy"
             (8, 1)
             ( unsafePerformIO
-                (fmap D.dimensions (D.readParquetUnstableUnstable "./tests/data/nulls.snappy.parquet"))
+                ( fmap
+                    D.dimensions
+                    (D.readParquetUnstableUnstable "./tests/data/nulls.snappy.parquet")
+                )
             )
         )
 
@@ -1219,7 +1251,10 @@ int32WithNullPages =
             "int32WithNullPages"
             (1000, 1)
             ( unsafePerformIO
-                (fmap D.dimensions (D.readParquetUnstableUnstable "./tests/data/int32_with_null_pages.parquet"))
+                ( fmap
+                    D.dimensions
+                    (D.readParquetUnstableUnstable "./tests/data/int32_with_null_pages.parquet")
+                )
             )
         )
 
@@ -1230,7 +1265,10 @@ nullableImpala =
             "nullableImpala"
             (7, 13)
             ( unsafePerformIO
-                (fmap D.dimensions (D.readParquetUnstableUnstable "./tests/data/nullable.impala.parquet"))
+                ( fmap
+                    D.dimensions
+                    (D.readParquetUnstableUnstable "./tests/data/nullable.impala.parquet")
+                )
             )
         )
 
@@ -1241,7 +1279,10 @@ nonnullableImpala =
             "nonnullableImpala"
             (1, 13)
             ( unsafePerformIO
-                (fmap D.dimensions (D.readParquetUnstableUnstable "./tests/data/nonnullable.impala.parquet"))
+                ( fmap
+                    D.dimensions
+                    (D.readParquetUnstableUnstable "./tests/data/nonnullable.impala.parquet")
+                )
             )
         )
 
@@ -1252,7 +1293,10 @@ singleNan =
             "singleNan"
             (1, 1)
             ( unsafePerformIO
-                (fmap D.dimensions (D.readParquetUnstableUnstable "./tests/data/single_nan.parquet"))
+                ( fmap
+                    D.dimensions
+                    (D.readParquetUnstableUnstable "./tests/data/single_nan.parquet")
+                )
             )
         )
 
@@ -1263,7 +1307,10 @@ nanInStats =
             "nanInStats"
             (2, 1)
             ( unsafePerformIO
-                (fmap D.dimensions (D.readParquetUnstableUnstable "./tests/data/nan_in_stats.parquet"))
+                ( fmap
+                    D.dimensions
+                    (D.readParquetUnstableUnstable "./tests/data/nan_in_stats.parquet")
+                )
             )
         )
 
@@ -1278,7 +1325,10 @@ int32Decimal =
             "int32Decimal"
             (24, 1)
             ( unsafePerformIO
-                (fmap D.dimensions (D.readParquetUnstableUnstable "./tests/data/int32_decimal.parquet"))
+                ( fmap
+                    D.dimensions
+                    (D.readParquetUnstableUnstable "./tests/data/int32_decimal.parquet")
+                )
             )
         )
 
@@ -1289,7 +1339,10 @@ int64Decimal =
             "int64Decimal"
             (24, 1)
             ( unsafePerformIO
-                (fmap D.dimensions (D.readParquetUnstableUnstable "./tests/data/int64_decimal.parquet"))
+                ( fmap
+                    D.dimensions
+                    (D.readParquetUnstableUnstable "./tests/data/int64_decimal.parquet")
+                )
             )
         )
 
@@ -1300,7 +1353,10 @@ byteArrayDecimal =
             "byteArrayDecimal"
             (24, 1)
             ( unsafePerformIO
-                (fmap D.dimensions (D.readParquetUnstableUnstable "./tests/data/byte_array_decimal.parquet"))
+                ( fmap
+                    D.dimensions
+                    (D.readParquetUnstableUnstable "./tests/data/byte_array_decimal.parquet")
+                )
             )
         )
 
@@ -1371,7 +1427,10 @@ int96FromSpark =
             "int96FromSpark"
             (6, 1)
             ( unsafePerformIO
-                (fmap D.dimensions (D.readParquetUnstableUnstable "./tests/data/int96_from_spark.parquet"))
+                ( fmap
+                    D.dimensions
+                    (D.readParquetUnstableUnstable "./tests/data/int96_from_spark.parquet")
+                )
             )
         )
 
@@ -1385,7 +1444,9 @@ columnChunkKeyValueMetadata =
         ( assertExpectException
             "columnChunkKeyValueMetadata"
             "Unknown page header field"
-            (D.readParquetUnstableUnstable "./tests/data/column_chunk_key_value_metadata.parquet")
+            ( D.readParquetUnstableUnstable
+                "./tests/data/column_chunk_key_value_metadata.parquet"
+            )
         )
 
 dataIndexBloomEncodingStats :: Test
@@ -1397,7 +1458,9 @@ dataIndexBloomEncodingStats =
             ( unsafePerformIO
                 ( fmap
                     D.dimensions
-                    (D.readParquetUnstableUnstable "./tests/data/data_index_bloom_encoding_stats.parquet")
+                    ( D.readParquetUnstableUnstable
+                        "./tests/data/data_index_bloom_encoding_stats.parquet"
+                    )
                 )
             )
         )
@@ -1411,7 +1474,9 @@ dataIndexBloomEncodingWithLength =
             ( unsafePerformIO
                 ( fmap
                     D.dimensions
-                    (D.readParquetUnstableUnstable "./tests/data/data_index_bloom_encoding_with_length.parquet")
+                    ( D.readParquetUnstableUnstable
+                        "./tests/data/data_index_bloom_encoding_with_length.parquet"
+                    )
                 )
             )
         )
@@ -1423,7 +1488,10 @@ sortColumns =
             "sortColumns"
             (3, 2)
             ( unsafePerformIO
-                (fmap D.dimensions (D.readParquetUnstableUnstable "./tests/data/sort_columns.parquet"))
+                ( fmap
+                    D.dimensions
+                    (D.readParquetUnstableUnstable "./tests/data/sort_columns.parquet")
+                )
             )
         )
 
@@ -1455,7 +1523,9 @@ byteStreamSplitExtendedGzip =
         ( assertExpectException
             "byteStreamSplitExtendedGzip"
             "FIXED_LEN_BYTE_ARRAY"
-            (D.readParquetUnstableUnstable "./tests/data/byte_stream_split_extended.gzip.parquet")
+            ( D.readParquetUnstableUnstable
+                "./tests/data/byte_stream_split_extended.gzip.parquet"
+            )
         )
 
 float16NonzerosAndNans :: Test
@@ -1483,7 +1553,10 @@ nestedListsSnappy =
             "nestedListsSnappy"
             (3, 2)
             ( unsafePerformIO
-                (fmap D.dimensions (D.readParquetUnstableUnstable "./tests/data/nested_lists.snappy.parquet"))
+                ( fmap
+                    D.dimensions
+                    (D.readParquetUnstableUnstable "./tests/data/nested_lists.snappy.parquet")
+                )
             )
         )
 
@@ -1494,7 +1567,10 @@ nestedMapsSnappy =
             "nestedMapsSnappy"
             (6, 5)
             ( unsafePerformIO
-                (fmap D.dimensions (D.readParquetUnstableUnstable "./tests/data/nested_maps.snappy.parquet"))
+                ( fmap
+                    D.dimensions
+                    (D.readParquetUnstableUnstable "./tests/data/nested_maps.snappy.parquet")
+                )
             )
         )
 
@@ -1505,7 +1581,10 @@ nestedStructsRust =
             "nestedStructsRust"
             (1, 216)
             ( unsafePerformIO
-                (fmap D.dimensions (D.readParquetUnstableUnstable "./tests/data/nested_structs.rust.parquet"))
+                ( fmap
+                    D.dimensions
+                    (D.readParquetUnstableUnstable "./tests/data/nested_structs.rust.parquet")
+                )
             )
         )
 
@@ -1516,7 +1595,10 @@ listColumns =
             "listColumns"
             (3, 2)
             ( unsafePerformIO
-                (fmap D.dimensions (D.readParquetUnstableUnstable "./tests/data/list_columns.parquet"))
+                ( fmap
+                    D.dimensions
+                    (D.readParquetUnstableUnstable "./tests/data/list_columns.parquet")
+                )
             )
         )
 
@@ -1527,7 +1609,10 @@ oldListStructure =
             "oldListStructure"
             (1, 1)
             ( unsafePerformIO
-                (fmap D.dimensions (D.readParquetUnstableUnstable "./tests/data/old_list_structure.parquet"))
+                ( fmap
+                    D.dimensions
+                    (D.readParquetUnstableUnstable "./tests/data/old_list_structure.parquet")
+                )
             )
         )
 
@@ -1538,7 +1623,10 @@ nullList =
             "nullList"
             (1, 1)
             ( unsafePerformIO
-                (fmap D.dimensions (D.readParquetUnstableUnstable "./tests/data/null_list.parquet"))
+                ( fmap
+                    D.dimensions
+                    (D.readParquetUnstableUnstable "./tests/data/null_list.parquet")
+                )
             )
         )
 
@@ -1549,7 +1637,10 @@ mapNoValue =
             "mapNoValue"
             (3, 4)
             ( unsafePerformIO
-                (fmap D.dimensions (D.readParquetUnstableUnstable "./tests/data/map_no_value.parquet"))
+                ( fmap
+                    D.dimensions
+                    (D.readParquetUnstableUnstable "./tests/data/map_no_value.parquet")
+                )
             )
         )
 
@@ -1560,7 +1651,10 @@ incorrectMapSchema =
             "incorrectMapSchema"
             (1, 2)
             ( unsafePerformIO
-                (fmap D.dimensions (D.readParquetUnstableUnstable "./tests/data/incorrect_map_schema.parquet"))
+                ( fmap
+                    D.dimensions
+                    (D.readParquetUnstableUnstable "./tests/data/incorrect_map_schema.parquet")
+                )
             )
         )
 
@@ -1571,7 +1665,10 @@ repeatedNoAnnotation =
             "repeatedNoAnnotation"
             (6, 3)
             ( unsafePerformIO
-                (fmap D.dimensions (D.readParquetUnstableUnstable "./tests/data/repeated_no_annotation.parquet"))
+                ( fmap
+                    D.dimensions
+                    (D.readParquetUnstableUnstable "./tests/data/repeated_no_annotation.parquet")
+                )
             )
         )
 
