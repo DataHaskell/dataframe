@@ -1,8 +1,6 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
-{-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE TypeApplications #-}
 
 module DataFrame.IO.Unstable.Parquet.PageParser (parsePage) where
 
@@ -25,7 +23,7 @@ parsePage description (PageDescription pageBytes header _ dictValsM pType') = do
         maxRep = fromIntegral $ maxRepetitionLevel description
         -- We do not have type lengths threaded effectively for Fixed Len yet, assume Nothing for now
         -- unless handled correctly.
-        logicalType = fmap pinchLogicalTypeToLogicalType $ colLogicalType description
+        logicalType = pinchLogicalTypeToLogicalType <$> colLogicalType description
         maybeTypeLen = Nothing
         pType = parquetTypeFromInt . fromIntegral $ pType'
 

@@ -2,7 +2,6 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE OverloadedRecordDot #-}
-{-# LANGUAGE TypeApplications #-}
 
 module DataFrame.IO.Unstable.Parquet (readParquetUnstable) where
 
@@ -10,9 +9,9 @@ import Control.Monad.IO.Class (MonadIO (..))
 import Data.Bits (Bits (shiftL), (.|.))
 import qualified Data.ByteString as BS
 import Data.Functor ((<&>))
-import Data.List (transpose)
+import Data.List (foldl', transpose)
 import qualified Data.Map as Map
-import Data.Maybe (fromJust, fromMaybe)
+import Data.Maybe (fromJust, fromMaybe, isNothing)
 import Data.Text (Text)
 import qualified Data.Vector as Vector
 import DataFrame.IO.Parquet.Dictionary (readDictVals)
@@ -69,10 +68,10 @@ parseParquet = do
             map (unField . name)
                 . filter
                     ( \se ->
-                        unField se.num_children == Nothing
+                        (isNothing $ unField $ num_children se)
                             || unField se.num_children == Just 0
                     )
-                $ (unField metadata.schema)
+                $ unField metadata.schema
         columnIndices = Map.fromList $ zip columnNames [0 ..]
         dataframeDimensions = (vectorLength, length columnStreams)
     return $ DataFrame columns columnIndices dataframeDimensions Map.empty
@@ -110,7 +109,7 @@ parseColumns metadata =
   where
     columnChunks :: (RandomAccess r) => FileMetadata -> [Stream r ColumnChunk]
     columnChunks =
-        map (Stream.fromList)
+        map Stream.fromList
             . transpose
             . map (unField . rg_columns)
             . unField
