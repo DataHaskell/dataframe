@@ -14,7 +14,11 @@ import Control.Monad.IO.Class (MonadIO (..))
 import qualified Data.ByteString as BS
 import Data.Int (Int32)
 import Data.Maybe (fromMaybe)
-import DataFrame.IO.Parquet.Types (DictVals, ParquetType (..), parquetTypeFromInt)
+import DataFrame.IO.Parquet.Types (
+    DictVals,
+    ParquetType (..),
+    parquetTypeFromInt,
+ )
 import DataFrame.IO.Unstable.Parquet.Thrift (
     CompressionCodec,
     ConvertedType (..),
