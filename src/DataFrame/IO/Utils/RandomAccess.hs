@@ -2,6 +2,7 @@
 
 module DataFrame.IO.Utils.RandomAccess where
 
+import Control.Monad.IO.Class (MonadIO (..))
 import Data.ByteString (ByteString, hGet)
 import Data.ByteString.Internal (ByteString (PS))
 import Data.Functor ((<&>))
@@ -18,7 +19,6 @@ import System.IO.MMap (
     Mode (ReadOnly),
     mmapFileForeignPtr,
  )
-import Control.Monad.IO.Class (MonadIO(..))
 
 uncurry_ :: (a -> b -> c -> d) -> (a, b, c) -> d
 uncurry_ f (a, b, c) = f a b c

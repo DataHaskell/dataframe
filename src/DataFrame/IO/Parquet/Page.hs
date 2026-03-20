@@ -66,7 +66,7 @@ readPage c columnBytes =
             let compressed = BS.take (fromIntegral $ compressedPageSize hdr) rem
 
             fullData <- decompressData c compressed
-            
+
             pure
                 ( Just $ Page hdr fullData
                 , BS.drop (fromIntegral $ compressedPageSize hdr) rem

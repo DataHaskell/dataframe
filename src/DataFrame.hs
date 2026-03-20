@@ -274,7 +274,7 @@ import DataFrame.IO.Unstable.CSV as UnstableCSV (
     readTsvUnstable,
  )
 import DataFrame.IO.Unstable.Parquet as UnstableParquet (
-  readParquetUnstable
+    readParquetUnstable,
  )
 import DataFrame.Internal.Column as Column (
     Column,
