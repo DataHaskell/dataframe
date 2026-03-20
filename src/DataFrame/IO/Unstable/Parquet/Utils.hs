@@ -5,19 +5,38 @@ module DataFrame.IO.Unstable.Parquet.Utils
   ( ParquetType(..)
   , parquetTypeFromInt
   , ColumnDescription(..)
+  , PageDescription(..)
   , generateColumnDescriptions
+  , foldColumns
   ) where
 
 import Data.Int (Int32)
 import DataFrame.IO.Parquet.Types ( ParquetType (..), parquetTypeFromInt)
 import DataFrame.IO.Unstable.Parquet.Thrift
   ( SchemaElement(..)
+  , PageHeader
+  , CompressionCodec
   , FieldRepetitionType(..)
   , LogicalType(..)
   , ConvertedType(..)
   , unField
   )
+import DataFrame.IO.Parquet.Types (DictVals)
+import DataFrame.IO.Utils.RandomAccess (RandomAccess)
 import Data.Maybe (fromMaybe)
+import Control.Monad.IO.Class (MonadIO(..))
+import qualified Data.ByteString as BS
+import Streamly.Data.Stream (Stream)
+import qualified Streamly.Data.Stream as Stream
+import qualified Streamly.Data.Fold as Fold
+import DataFrame.Internal.Column (
+  Column(..),
+  MutableColumn(..),
+  newMutableColumn,
+  copyIntoMutableColumn,
+  freezeMutableColumn,
+  columnLength
+  )
 
 data ColumnDescription = ColumnDescription
   { colElementType     :: !ParquetType
@@ -26,6 +45,15 @@ data ColumnDescription = ColumnDescription
   , colLogicalType     :: !(Maybe LogicalType)
   , colConvertedType   :: !(Maybe ConvertedType)
   } deriving (Show, Eq)
+
+data PageDescription 
+  = PageDescription
+  { rawBytes :: BS.ByteString
+  , header   :: PageHeader
+  , codec    :: CompressionCodec
+  , dictionary :: Maybe DictVals
+  , parquetType :: Int
+  } deriving (Eq, Show)
 
 -- | How much each repetition type contributes to def/rep levels.
 --   REQUIRED contributes nothing; OPTIONAL adds a def level;
@@ -53,7 +81,7 @@ buildChildren 0 xs = ([], xs)
 buildChildren n xs =
   let (child,  rest')  = buildForest xs        -- one subtree
       (children, rest'') = buildChildren (n-1) rest'
-  in (take 1 child ++ children, rest'')       -- safe: buildForest >=1 result
+  in (take 1 child <> children, rest'')       -- safe: buildForest >=1 result
 
 -- | Recursively collect leaf ColumnDescriptions, threading
 --   accumulated def/rep levels down the path.
@@ -78,3 +106,22 @@ generateColumnDescriptions []       = []
 generateColumnDescriptions (_:rest) =            -- drop schema root
   let (forest, _) = buildForest rest
   in concatMap (collectLeaves 0 0) forest
+
+foldColumns :: (RandomAccess r, MonadIO r) => Int -> Stream r Column -> r Column
+foldColumns size stream = do 
+  chunk <- Stream.uncons stream
+  case chunk of
+    Nothing -> error "Empty Column Stream"
+    Just (initialChunk, _) -> do
+      foldStream <- foldStreamM initialChunk
+      (mutableColumn, _) <- Stream.fold foldStream stream
+      liftIO $ freezeMutableColumn mutableColumn
+  where
+    foldStreamM :: (RandomAccess r, MonadIO r) => Column -> r (Fold.Fold r Column (MutableColumn, Int))
+    foldStreamM initialChunk = do
+      mutableColumn <- liftIO $ newMutableColumn size initialChunk 
+      return $ Fold.foldlM' f (pure (mutableColumn, 0))
+    f :: (RandomAccess r, MonadIO r) => (MutableColumn, Int) -> Column -> r (MutableColumn, Int)
+    f (accumulator, offset) columnChunk = do
+      liftIO $ copyIntoMutableColumn accumulator offset columnChunk
+      return (accumulator, offset + columnLength columnChunk)

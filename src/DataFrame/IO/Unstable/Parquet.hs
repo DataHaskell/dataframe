@@ -5,22 +5,29 @@
 {-# LANGUAGE ExplicitForAll #-}
 {-# LANGUAGE GADTs #-}
 
-module DataFrame.IO.Unstable.Parquet (readParquet) where
+module DataFrame.IO.Unstable.Parquet (readParquetUnstable) where
 
 import DataFrame.IO.Utils.RandomAccess (RandomAccess (..), ReaderIO (runReaderIO), Range (Range))
 import qualified System.IO as IO
 import DataFrame.IO.Unstable.Parquet.Thrift (
   FileMetadata (..),
+  SchemaElement (..),
   ColumnChunk (..),
   RowGroup (..),
   ColumnMetaData(..),
   PageHeader(..),
   DictionaryPageHeader(..),
   CompressionCodec(..),
-  unField, pinchCompressionToParquetCompression
-  , pinchThriftTypeToParquetType
+  unField,
+  pinchCompressionToParquetCompression,
+  pinchThriftTypeToParquetType, SchemaElement (num_children)
   )
-import DataFrame.IO.Unstable.Parquet.Utils (ColumnDescription, generateColumnDescriptions)
+import DataFrame.IO.Unstable.Parquet.Utils (
+  ColumnDescription,
+  generateColumnDescriptions,
+  PageDescription (PageDescription),
+  foldColumns,
+  )
 import DataFrame.IO.Parquet.Types (DictVals)
 import DataFrame.IO.Parquet.Dictionary (readDictVals)
 import DataFrame.IO.Parquet.Page (decompressData)
@@ -38,10 +45,33 @@ import DataFrame.Internal.Column (Column)
 import Data.List (transpose)
 import Data.Maybe (fromMaybe, fromJust)
 import Pinch (decodeWithLeftovers)
+import DataFrame.Internal.DataFrame (DataFrame (..))
+import qualified Data.Vector as Vector
+import qualified Data.Map as Map
+import Data.Text (Text)
 
-readParquet filepath = IO.withFile filepath IO.ReadMode $ \handle -> do
-  fileMetadata <- runReaderIO parseFileMetadata handle
-  print fileMetadata
+readParquetUnstable :: FilePath -> IO DataFrame
+readParquetUnstable filepath = IO.withFile filepath IO.ReadMode $ \handle -> do
+  runReaderIO parseParquet handle
+
+
+parseParquet :: (RandomAccess r, MonadIO r) => r DataFrame
+parseParquet = do
+  metadata <- parseFileMetadata
+  let vectorLength = fromIntegral . unField $ metadata.num_rows :: Int
+      columnStreams = parseColumns metadata
+  columnList <- mapM (foldColumns vectorLength) columnStreams
+  let columns = Vector.fromListN (length columnList) columnList
+      columnNames :: [Text]
+      columnNames = map (unField . name)
+                  . filter (\se ->
+                      unField se.num_children == Nothing
+                      || unField se.num_children == Just 0)
+                  $ (unField metadata.schema)
+      columnIndices = Map.fromList $ zip columnNames [0..]
+      dataframeDimensions = (vectorLength, length columnStreams)
+  return $ DataFrame columns columnIndices dataframeDimensions Map.empty
+
 
 parseFileMetadata ::
     (RandomAccess r) => r FileMetadata
@@ -96,15 +126,15 @@ parseColumnChunk description = Unfold.Unfold step inject
           dictOffset = fromMaybe dataOffset (unField $ cmd_dictionary_page_offset columnMetadata)
           startOffset = min dataOffset dictOffset
           compressedSize = unField $ cmd_total_compressed_size columnMetadata
-          c = unField $ cmd_codec columnMetadata
-          pType =  fromEnum $ pinchThriftTypeToParquetType (unField $ cmd_type columnMetadata)
+          chunkCodec = unField $ cmd_codec columnMetadata
+          parquetType =  fromEnum $ pinchThriftTypeToParquetType (unField $ cmd_type columnMetadata)
           range = Range (fromIntegral startOffset) (fromIntegral compressedSize)
      
       rawBytes <- readBytes range
-      return $ ColumnChunkState rawBytes c Nothing pType
+      return $ ColumnChunkState rawBytes chunkCodec Nothing parquetType
 
     step :: (RandomAccess r, MonadIO r) => ColumnChunkState -> r (Unfold.Step ColumnChunkState Column)
-    step (ColumnChunkState remaining c dict pType) = do
+    step (ColumnChunkState remaining chunkCodec dict parquetType) = do
       if BS.null remaining
         then return Unfold.Stop
         else case parsePageHeader remaining of
@@ -112,7 +142,7 @@ parseColumnChunk description = Unfold.Unfold step inject
           Right (remainder, header) -> do
             let compressedPageSize = fromIntegral $ unField $ ph_compressed_page_size header
                 (pageData, rest) = BS.splitAt compressedPageSize remainder
-            uncompressedData <- liftIO $ decompressData (pinchCompressionToParquetCompression c) pageData
+            uncompressedData <- liftIO $ decompressData (pinchCompressionToParquetCompression chunkCodec) pageData
             
             case unField $ ph_dictionary_page_header header of
               Just dictHeader -> do
@@ -125,12 +155,14 @@ parseColumnChunk description = Unfold.Unfold step inject
                    https://github.com/apache/parquet-format/blob/master/src/main/thrift/parquet.thrift#L698C1-L712C2
                 -}
                 let numValues = fromIntegral $ unField $ diph_num_values dictHeader
-                    newDict = readDictVals (toEnum pType) uncompressedData (Just numValues)
-                step (ColumnChunkState rest c (Just newDict) pType)
+                    newDict = readDictVals (toEnum parquetType) uncompressedData (Just numValues)
+                step (ColumnChunkState rest chunkCodec (Just newDict) parquetType)
               Nothing -> do
                 -- It's a data page. Yield it.
-                column <- parsePage description (uncompressedData, header, c, dict, pType)
-                return $ Unfold.Yield column (ColumnChunkState rest c dict pType)
+                column <- parsePage
+                            description
+                            (PageDescription uncompressedData header chunkCodec dict parquetType)
+                return $ Unfold.Yield column (ColumnChunkState rest chunkCodec dict parquetType)
 
 parsePageHeader :: BS.ByteString -> Either String (BS.ByteString, PageHeader)
 parsePageHeader bytes = case decodeWithLeftovers Pinch.compactProtocol bytes of

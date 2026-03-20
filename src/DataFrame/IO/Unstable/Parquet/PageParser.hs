@@ -6,18 +6,17 @@
 
 module DataFrame.IO.Unstable.Parquet.PageParser (parsePage) where
 
-import qualified Data.ByteString as BS
 import DataFrame.IO.Unstable.Parquet.Thrift
-import DataFrame.IO.Unstable.Parquet.Utils (ColumnDescription(..))
+import DataFrame.IO.Unstable.Parquet.Utils (ColumnDescription(..), PageDescription(..))
 import DataFrame.IO.Parquet (decodePageData, applyLogicalType)
 import DataFrame.IO.Parquet.Levels (readLevelsV1, readLevelsV2)
-import DataFrame.IO.Parquet.Types (DictVals, parquetTypeFromInt)
+import DataFrame.IO.Parquet.Types (parquetTypeFromInt)
 import DataFrame.Internal.Column (Column)
 import DataFrame.IO.Utils.RandomAccess (RandomAccess)
 import Control.Monad.IO.Class (MonadIO(liftIO))
 
-parsePage :: (RandomAccess r, MonadIO r) => ColumnDescription -> (BS.ByteString, PageHeader, CompressionCodec, Maybe DictVals, Int) -> r Column
-parsePage description (pageBytes, header, _codec, dictValsM, pType') = do
+parsePage :: (RandomAccess r, MonadIO r) => ColumnDescription -> PageDescription -> r Column
+parsePage description (PageDescription pageBytes header _ dictValsM pType') = do
       let maxDef = fromIntegral $ maxDefinitionLevel description
           maxRep = fromIntegral $ maxRepetitionLevel description
           -- We do not have type lengths threaded effectively for Fixed Len yet, assume Nothing for now

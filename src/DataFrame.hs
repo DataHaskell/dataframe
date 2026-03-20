@@ -218,6 +218,7 @@ module DataFrame (
     module CSV,
     module UnstableCSV,
     module Parquet,
+    module UnstableParquet,
 
     -- * Type conversion
     module Typing,
@@ -271,6 +272,9 @@ import DataFrame.IO.Unstable.CSV as UnstableCSV (
     fastReadTsvUnstable,
     readCsvUnstable,
     readTsvUnstable,
+ )
+import DataFrame.IO.Unstable.Parquet as UnstableParquet (
+  readParquetUnstable
  )
 import DataFrame.Internal.Column as Column (
     Column,
