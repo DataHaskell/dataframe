@@ -153,7 +153,7 @@ library
                       http-conduit    >= 2.3 && < 3,
                       streamly-core,
                       streamly-bytestring,
-                      pinch >= 0.5.1.0 && < 0.5.2.0 ,
+                      pinch >= 0.5.1.0 && <= 0.5.2.0 ,
                       streamly-core >= 0.3.0, 
 
     hs-source-dirs:   src
