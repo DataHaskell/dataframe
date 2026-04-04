@@ -130,17 +130,18 @@ foldColumns size stream = do
     chunk <- Stream.uncons stream
     case chunk of
         Nothing -> error "Empty Column Stream"
-        Just (initialChunk, _) -> do
-            foldStream <- foldStreamM initialChunk
-            (mutableColumn, _) <- Stream.fold foldStream stream
+        Just (initialChunk, stream') -> do
+            mutableColumn <- liftIO $ newMutableColumn size initialChunk
+            liftIO $ copyIntoMutableColumn mutableColumn 0 initialChunk
+            foldStream <- foldStreamM (mutableColumn, columnLength initialChunk)
+            (mutableColumn, _) <- Stream.fold foldStream stream'
             liftIO $ freezeMutableColumn mutableColumn
   where
     foldStreamM ::
         (RandomAccess r, MonadIO r) =>
-        Column -> r (Fold.Fold r Column (MutableColumn, Int))
-    foldStreamM initialChunk = do
-        mutableColumn <- liftIO $ newMutableColumn size initialChunk
-        return $ Fold.foldlM' f (pure (mutableColumn, 0))
+        (MutableColumn, Int) -> r (Fold.Fold r Column (MutableColumn, Int))
+    foldStreamM (mutableColumn, offset) = do
+        return $ Fold.foldlM' f (pure (mutableColumn, offset))
     f ::
         (RandomAccess r, MonadIO r) =>
         (MutableColumn, Int) -> Column -> r (MutableColumn, Int)
