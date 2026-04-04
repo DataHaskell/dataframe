@@ -10,7 +10,6 @@ import qualified Data.Vector.Storable as VS
 import Data.Word (Word8)
 import Foreign (castForeignPtr)
 import System.IO (
-    Handle,
     SeekMode (AbsoluteSeek, SeekFromEnd),
     hFileSize,
     hSeek,
@@ -19,14 +18,19 @@ import System.IO.MMap (
     Mode (ReadOnly),
     mmapFileForeignPtr,
  )
+import DataFrame.IO.Parquet.Seeking (
+    FileBufferedOrSeekable,
+    fSeek,
+    fGet, readLastBytes,
+  )
 
-uncurry_ :: (a -> b -> c -> d) -> (a, b, c) -> d
-uncurry_ f (a, b, c) = f a b c
+uncurry3 :: (a -> b -> c -> d) -> (a, b, c) -> d
+uncurry3 f (a, b, c) = f a b c
 
 mmapFileVector :: FilePath -> IO (VS.Vector Word8)
 mmapFileVector filepath =
     mmapFileForeignPtr filepath ReadOnly Nothing
-        <&> uncurry_ VS.unsafeFromForeignPtr
+        <&> uncurry3 VS.unsafeFromForeignPtr
 
 data Range = Range {offset :: !Integer, length :: !Int} deriving (Eq, Show)
 
@@ -57,18 +61,13 @@ instance Monad (ReaderIO r) where
 instance MonadIO (ReaderIO r) where
     liftIO io = ReaderIO $ const io
 
-type LocalFile = ReaderIO Handle
+type LocalFile = ReaderIO FileBufferedOrSeekable
 
 instance RandomAccess LocalFile where
     readBytes (Range offset length) = ReaderIO $ \handle -> do
-        hSeek handle AbsoluteSeek offset
-        hGet handle length
-    readSuffix n = ReaderIO $ \handle -> do
-        hGet handle n
-        nMax <- hFileSize handle
-        let n' = min (fromIntegral nMax) n
-        hSeek handle SeekFromEnd (negate $ fromIntegral n')
-        hGet handle n'
+        fSeek handle AbsoluteSeek offset
+        fGet handle length
+    readSuffix n = ReaderIO (readLastBytes $ fromIntegral n)
 
 type MMappedFile = ReaderIO (VS.Vector Word8)
 
