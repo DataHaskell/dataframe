@@ -2,6 +2,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE IncoherentInstances #-}
 {-# LANGUAGE InstanceSigs #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
@@ -504,7 +505,8 @@ whenBothPresent f = lift2Decorated (\l r -> f <$> l <*> r) "whenBothPresent" Not
 
 recode ::
     forall a b.
-    (Columnable a, Columnable b) => [(a, b)] -> Expr a -> Expr (Maybe b)
+    (Columnable a, Columnable b, Show (a, b)) =>
+    [(a, b)] -> Expr a -> Expr (Maybe b)
 recode mapping =
     Unary
         ( MkUnaryOp
@@ -523,7 +525,7 @@ recodeWithCondition fallback ((cond, value) : rest) expr = ifThenElse (cond expr
 
 recodeWithDefault ::
     forall a b.
-    (Columnable a, Columnable b) => b -> [(a, b)] -> Expr a -> Expr b
+    (Columnable a, Columnable b, Show (a, b)) => b -> [(a, b)] -> Expr a -> Expr b
 recodeWithDefault d mapping =
     Unary
         ( MkUnaryOp
