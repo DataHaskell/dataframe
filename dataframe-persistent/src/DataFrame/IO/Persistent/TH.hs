@@ -14,20 +14,16 @@ module DataFrame.IO.Persistent.TH (
     derivePersistentDataFrame,
 ) where
 
-import Control.Monad (forM, when)
-import Data.List (foldl')
-import Data.Text (Text)
+import Control.Monad (forM)
+import Data.Char
 import qualified Data.Text as T
 import qualified Data.Vector as V
 import DataFrame.Functions (col)
 import DataFrame.IO.Persistent
-import qualified DataFrame.Internal.Column as DFCol
 import DataFrame.Internal.Expression
 import Database.Persist
-import Database.Persist.Sql (fromSqlKey)
-import Database.Persist.TH
 import Language.Haskell.TH
-import Language.Haskell.TH.Syntax (Lift, lift)
+import Language.Haskell.TH.Syntax (lift)
 
 import Debug.Trace (trace)
 

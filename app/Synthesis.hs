@@ -1,53 +1,51 @@
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE NumericUnderscores #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeApplications #-}
-
-import qualified Data.Text as T
-import qualified DataFrame as D
-import qualified DataFrame.Functions as F
+{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE TypeOperators #-}
 
 import Data.Char
+import qualified Data.Text as T
+import qualified DataFrame as D
 import DataFrame.DecisionTree
-import DataFrame.Operators hiding (name)
-
+import qualified DataFrame.Functions as F
+import DataFrame.Operators
+import qualified DataFrame.Typed as DT
 import System.Random
 
-$(F.declareColumnsFromCsvFile "./data/titanic/train.csv")
+$( DT.deriveSchemaFromCsvFileWith
+    D.defaultReadOptions{D.safeRead = D.MaybeRead}
+    "TrainSchema"
+    "./data/titanic/train.csv"
+ )
+$( DT.deriveSchemaFromCsvFileWith
+    D.defaultReadOptions{D.safeRead = D.MaybeRead}
+    "TestSchema"
+    "./data/titanic/test.csv"
+ )
+
+-- Survived is Maybe Int (safeRead = MaybeRead); prediction is Int (model output).
+type RawPredSchema =
+    '[DT.Column "Survived" (Maybe Int), DT.Column "prediction" Int]
+
+prediction :: D.Expr Int
+prediction = F.col @Int "prediction"
 
 main :: IO ()
 main = do
-    train <- D.readCsv "./data/titanic/train.csv"
-    test <- D.readCsv "./data/titanic/test.csv"
+    rawTrain <- D.readCsv "./data/titanic/train.csv"
+    rawTest <- D.readCsv "./data/titanic/test.csv"
 
-    -- Apply the same transformations to training and test.
-    let combined =
-            (train <> test)
-                |> D.deriveMany
-                    [ "Ticket" .= F.lift (T.filter isAlpha) ticket
-                    , "Name" .= F.match "\\s*([A-Za-z]+)\\." name
-                    , "Cabin" .= F.whenPresent (T.take 1) cabin
-                    ]
-                |> D.renameMany
-                    [ (F.name name, "title")
-                    , (F.name cabin, "cabin_prefix")
-                    , (F.name pclass, "passenger_class")
-                    , (F.name sibsp, "number_of_siblings_and_spouses")
-                    , (F.name parch, "number_of_parents_and_children")
-                    ]
-    print combined
+    train <-
+        maybe (fail "train.csv schema mismatch") pure (DT.freeze @TrainSchema rawTrain)
+    test <-
+        maybe (fail "test.csv schema mismatch") pure (DT.freeze @TestSchema rawTest)
 
-    let (train', validation) =
-            D.take
-                (D.nRows train)
-                combined
-                |> D.filterJust (F.name survived)
-                |> D.randomSplit (mkStdGen 4232) 0.7
-        -- Split the test out again.
-        test' =
-            D.drop
-                (D.nRows train)
-                combined
+    let (trainDf, validDf) =
+            D.randomSplit (mkStdGen 4232) 0.7 (DT.thaw (clean train))
+        testDf = DT.thaw (clean test)
 
         model =
             fitDecisionTree
@@ -61,70 +59,84 @@ main = do
                             { complexityPenalty = 0.1
                             , maxExprDepth = 3
                             , disallowedCombinations =
-                                [ (F.name age, F.name fare)
+                                [ ("Age", "Fare")
                                 , ("passenger_class", "number_of_siblings_and_spouses")
                                 , ("passenger_class", "number_of_parents_and_children")
                                 ]
                             }
                     }
                 )
-                survived -- Label to predict
-                ( train'
-                    |> D.exclude [F.name passengerid]
-                )
+                (F.fromMaybe 0 (F.col @(Maybe Int) "Survived"))
+                (trainDf |> D.exclude ["PassengerId"])
 
     print model
 
     putStrLn "Training accuracy: "
-    print $
-        computeAccuracy
-            (train' |> D.derive (F.name prediction) model)
+    print $ computeAccuracy (trainDf |> D.derive (F.name prediction) model)
 
     putStrLn "Validation accuracy: "
-    print $
-        computeAccuracy
-            ( validation
-                |> D.derive (F.name prediction) model
-            )
+    print $ computeAccuracy (validDf |> D.derive (F.name prediction) model)
 
-    let predictions = D.derive (F.name survived) model test'
     D.writeCsv
         "./predictions.csv"
-        (predictions |> D.select [F.name passengerid, F.name survived])
+        ( testDf
+            |> D.derive "Survived" model
+            |> D.select ["PassengerId", "Survived"]
+        )
 
-prediction :: D.Expr Int
-prediction = F.col @Int "prediction"
+clean ::
+    ( DT.AssertPresent "Ticket" cols
+    , DT.SafeLookup "Ticket" cols ~ Maybe T.Text
+    , DT.AssertPresent "Name" cols
+    , DT.SafeLookup "Name" cols ~ Maybe T.Text
+    , DT.AssertPresent "Cabin" cols
+    , DT.SafeLookup "Cabin" cols ~ Maybe T.Text
+    ) =>
+    DT.TypedDataFrame cols ->
+    DT.TypedDataFrame
+        ( DT.RenameManyInSchema
+            '[ '("Name", "title")
+             , '("Cabin", "cabin_prefix")
+             , '("Pclass", "passenger_class")
+             , '("SibSp", "number_of_siblings_and_spouses")
+             , '("Parch", "number_of_parents_and_children")
+             ]
+            cols
+        )
+clean tdf =
+    tdf
+        |> DT.replaceColumn @"Ticket" (DT.nullLift (T.filter isAlpha) (DT.col @"Ticket"))
+        |> DT.replaceColumn @"Name" (DT.nullLift extractTitle (DT.col @"Name"))
+        |> DT.replaceColumn @"Cabin" (DT.nullLift (T.take 1) (DT.col @"Cabin"))
+        |> DT.renameMany
+            @'[ '("Name", "title")
+              , '("Cabin", "cabin_prefix")
+              , '("Pclass", "passenger_class")
+              , '("SibSp", "number_of_siblings_and_spouses")
+              , '("Parch", "number_of_parents_and_children")
+              ]
 
+-- | Extract title (e.g. "Mr", "Mrs") from a full Titanic passenger name.
+extractTitle :: T.Text -> T.Text
+extractTitle fullName =
+    case filter (T.isSuffixOf ".") (T.words fullName) of
+        (w : _) -> T.dropEnd 1 w
+        [] -> ""
+
+{- | Compute binary classification accuracy from a DataFrame containing
+  "Survived" and "prediction" columns.
+-}
 computeAccuracy :: D.DataFrame -> Double
 computeAccuracy df =
-    let
-        tp =
-            fromIntegral $
-                D.nRows
-                    ( D.filterWhere
-                        (survived .== F.lit (1 :: Int) .&& prediction .== F.lit (1 :: Int))
-                        df
-                    )
-        tn =
-            fromIntegral $
-                D.nRows
-                    ( D.filterWhere
-                        (survived .== F.lit (0 :: Int) .&& prediction .== F.lit (0 :: Int))
-                        df
-                    )
-        fp =
-            fromIntegral $
-                D.nRows
-                    ( D.filterWhere
-                        (survived .== F.lit (0 :: Int) .&& prediction .== F.lit (1 :: Int))
-                        df
-                    )
-        fn =
-            fromIntegral $
-                D.nRows
-                    ( D.filterWhere
-                        (survived .== F.lit (1 :: Int) .&& prediction .== F.lit (0 :: Int))
-                        df
-                    )
-     in
-        (tp + tn) / (tp + tn + fp + fn)
+    let tdf =
+            DT.impute @"Survived" 0 $
+                DT.unsafeFreeze @RawPredSchema $
+                    df |> D.select ["Survived", "prediction"]
+        survived = DT.col @"Survived"
+        predCol = DT.col @"prediction"
+        count expr = fromIntegral (DT.nRows (DT.filterWhere expr tdf))
+        tp = count ((survived DT..==. DT.lit 1) DT..&&. (predCol DT..==. DT.lit 1))
+        tn = count ((survived DT..==. DT.lit 0) DT..&&. (predCol DT..==. DT.lit 0))
+        fp = count ((survived DT..==. DT.lit 0) DT..&&. (predCol DT..==. DT.lit 1))
+        fn = count ((survived DT..==. DT.lit 1) DT..&&. (predCol DT..==. DT.lit 0))
+     in (tp + tn) / (tp + tn + fp + fn)

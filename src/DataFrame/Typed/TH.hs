@@ -8,6 +8,7 @@ module DataFrame.Typed.TH (
     -- * Schema inference
     deriveSchema,
     deriveSchemaFromCsvFile,
+    deriveSchemaFromCsvFileWith,
 
     -- * Re-export for TH splices
     TypedDataFrame,
@@ -49,8 +50,11 @@ deriveSchema typeName df = do
     pure [TySynD synName [] schemaType]
 
 deriveSchemaFromCsvFile :: String -> String -> DecsQ
-deriveSchemaFromCsvFile typeName path = do
-    df <- liftIO (D.readCsv path)
+deriveSchemaFromCsvFile = deriveSchemaFromCsvFileWith D.defaultReadOptions
+
+deriveSchemaFromCsvFileWith :: D.ReadOptions -> String -> String -> DecsQ
+deriveSchemaFromCsvFileWith opts typeName path = do
+    df <- liftIO (D.readSeparated opts path)
     deriveSchema typeName df
 
 getSchemaInfo :: D.DataFrame -> [(T.Text, String)]

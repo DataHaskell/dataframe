@@ -34,7 +34,7 @@ import qualified Data.Text.IO as TIO
 
 df <- D.readCsv "../dataframe/data/housing.csv" 
 
-TIO.putStrLn $ D.toMarkdownTable $ D.frequencies "ocean_proximity" df
+TIO.putStrLn $ D.toMarkdown $ D.frequencies "ocean_proximity" df
 
 ```
 
@@ -62,7 +62,7 @@ Arguably the first thing to do when presented with a datset is check for null va
 
 
 ```haskell
-TIO.putStrLn $ D.toMarkdownTable $ D.describeColumns df
+TIO.putStrLn $ D.toMarkdown $ D.describeColumns df
 
 ```
 
@@ -117,7 +117,7 @@ import DataFrame ((|>))
 
 $(F.declareColumns df)
 
-TIO.putStrLn $ D.toMarkdownTable $ 
+TIO.putStrLn $ D.toMarkdown $ 
    df |> D.derive "deviation" (abs (median_house_value - (F.mean median_house_value)))
       |> D.select ["median_house_value", "deviation"]
       |> D.take 10
@@ -260,7 +260,7 @@ We can get all these statistics with a single command:
 
 
 ```haskell
-TIO.putStrLn $ D.toMarkdownTable $ D.summarize df
+TIO.putStrLn $ D.toMarkdown $ D.summarize df
 
 ```
 

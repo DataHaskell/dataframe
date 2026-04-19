@@ -40,7 +40,7 @@ applyBoxedToUnboxed =
     TestCase
         ( assertEqual
             "Boxed apply unboxed when result is unboxed"
-            (Just $ DI.UnboxedColumn (VU.fromList (replicate 26 (1 :: Int))))
+            (Just $ DI.UnboxedColumn Nothing (VU.fromList (replicate 26 (1 :: Int))))
             (DI.getColumn "test2" $ D.apply @String (const (1 :: Int)) "test2" testData)
         )
 
@@ -49,7 +49,7 @@ applyBoxedToBoxed =
     TestCase
         ( assertEqual
             "Boxed apply remains in boxed vector"
-            (Just $ DI.BoxedColumn (V.fromList (replicate 26 (1 :: Integer))))
+            (Just $ DI.BoxedColumn Nothing (V.fromList (replicate 26 (1 :: Integer))))
             (DI.getColumn "test2" $ D.apply @String (const (1 :: Integer)) "test2" testData)
         )
 
@@ -89,7 +89,7 @@ applyManyOnlyGivenFields =
                 ( map (,D.fromList $ replicate 26 (1 :: Integer)) ["test4", "test6"]
                     ++
                     -- All other fields should have their original values.
-                    filter (\(name, col) -> name /= "test4" && name /= "test6") values
+                    filter (\(name, _col) -> name /= "test4" && name /= "test6") values
                 )
             )
             ( D.applyMany @Char
@@ -204,6 +204,7 @@ applyWhereWAI =
             "applyWhere works as intended"
             ( Just $
                 DI.UnboxedColumn
+                    Nothing
                     (VU.fromList (zipWith ($) (cycle [id, (+ 1)]) [(1 :: Int) .. 26]))
             )
             ( D.getColumn "test5" $
@@ -223,7 +224,7 @@ imputeHappyPath =
     TestCase
         ( assertEqual
             "impute fills Nothing with the given value"
-            (Just $ DI.UnboxedColumn (VU.fromList [1 :: Int, 0, 3]))
+            (Just $ DI.UnboxedColumn Nothing (VU.fromList [1 :: Int, 0, 3]))
             (DI.getColumn "opt" $ impute (F.col @(Maybe Int) "opt") 0 imputeData)
         )
 

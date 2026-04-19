@@ -66,7 +66,7 @@ weather = D.fromNamedColumns
     , ("Low Temperature (C)",      D.fromList [14, 13, 13, 13, 14, 15, 15 :: Double])
     ]
 
-TIO.putStrLn $ D.toMarkdownTable weather
+TIO.putStrLn $ D.toMarkdown weather
 ```
 
 `fromNamedColumns` takes a list of `(name, column)` pairs. For data without column names there is `fromUnnamedColumns`, which assigns numeric names automatically.
@@ -78,7 +78,7 @@ weatherUnnamed = D.fromUnnamedColumns
     , D.fromList [14, 13, 13, 13, 14, 15, 15 :: Double]
     ]
 
-TIO.putStrLn $ D.toMarkdownTable weatherUnnamed
+TIO.putStrLn $ D.toMarkdown weatherUnnamed
 ```
 
 Numeric column names are fine for a quick sanity-check, but always give your columns descriptive names before doing real analysis.
@@ -90,7 +90,7 @@ Most data lives in files. CSV (comma-separated values) is the most common format
 ```haskell
 housing <- D.readCsv "../data/housing.csv"
 
-TIO.putStrLn $ D.toMarkdownTable (D.take 5 housing)
+TIO.putStrLn $ D.toMarkdown (D.take 5 housing)
 ```
 
 `take n df` keeps the first `n` rows. It is the quickest way to eyeball a fresh dataset.
@@ -127,17 +127,17 @@ Three functions cover most of this ground:
 ### take and takeLast
 
 ```haskell
-TIO.putStrLn $ D.toMarkdownTable (D.take 10 housing)
+TIO.putStrLn $ D.toMarkdown (D.take 10 housing)
 ```
 
 ```haskell
-TIO.putStrLn $ D.toMarkdownTable (D.takeLast 5 housing)
+TIO.putStrLn $ D.toMarkdown (D.takeLast 5 housing)
 ```
 
 ### describeColumns
 
 ```haskell
-TIO.putStrLn $ D.toMarkdownTable (D.describeColumns housing)
+TIO.putStrLn $ D.toMarkdown (D.describeColumns housing)
 ```
 
 `describeColumns` tells you the name, type, number of non-null values, number of nulls, and number of unique values for every column. It is the first thing to run on any new dataset.
@@ -145,7 +145,7 @@ TIO.putStrLn $ D.toMarkdownTable (D.describeColumns housing)
 ### summarize
 
 ```haskell
-TIO.putStrLn $ D.toMarkdownTable (D.summarize housing)
+TIO.putStrLn $ D.toMarkdown (D.summarize housing)
 ```
 
 `summarize` shows the mean, min, 25th percentile, median, 75th percentile, max, standard deviation, IQR, and skewness for every numeric column in one table.
@@ -189,7 +189,7 @@ messy = D.fromNamedColumns
     , ("rate",  D.fromList [Just 3.0, Nothing, Nothing, Just 3.0 :: Maybe Double])
     ]
 
-TIO.putStrLn $ D.toMarkdownTable messy
+TIO.putStrLn $ D.toMarkdown messy
 ```
 
 #### Filtering by nulls
@@ -197,13 +197,13 @@ TIO.putStrLn $ D.toMarkdownTable messy
 `filterJust col df` drops all rows where `col` is `Nothing` and unwraps the `Maybe`:
 
 ```haskell
-TIO.putStrLn $ D.toMarkdownTable (D.filterJust "id" messy)
+TIO.putStrLn $ D.toMarkdown (D.filterJust "id" messy)
 ```
 
 `filterAllJust df` keeps only rows where *every* column is non-null:
 
 ```haskell
-TIO.putStrLn $ D.toMarkdownTable (D.filterAllJust messy)
+TIO.putStrLn $ D.toMarkdown (D.filterAllJust messy)
 ```
 
 The companions `filterNothing` and `filterAllNothing` do the opposite — they let you inspect the bad rows.
@@ -213,7 +213,7 @@ The companions `filterNothing` and `filterAllNothing` do the opposite — they l
 `impute expr default df` fills every `Nothing` in a column with a given value:
 
 ```haskell
-TIO.putStrLn $ D.toMarkdownTable
+TIO.putStrLn $ D.toMarkdown
     (D.impute (F.col @(Maybe Int) "id") 0 messy)
 ```
 
@@ -229,7 +229,7 @@ Notice the `@(Maybe Int)` type annotation — it tells the imputer what type the
 `imputeWith` fills nulls with the result of an aggregation, e.g. the column mean:
 
 ```haskell
-TIO.putStrLn $ D.toMarkdownTable $ D.take 10
+TIO.putStrLn $ D.toMarkdown $ D.take 10
     (D.imputeWith F.mean (F.col @(Maybe Double) "total_bedrooms") housing)
 ```
 
@@ -243,7 +243,7 @@ dupData = D.fromNamedColumns
     , ("k2", D.fromList [1, 1, 2, 3, 3, 4, 4 :: Int])
     ]
 
-TIO.putStrLn $ D.toMarkdownTable (D.distinct dupData)
+TIO.putStrLn $ D.toMarkdown (D.distinct dupData)
 ```
 
 ### Opting into stronger type safety
@@ -254,7 +254,7 @@ After `$(F.declareColumns df)` any imputation or filter expression is checked at
 $(F.declareColumns housing)
 
 -- Compile-time checked — 'total_bedrooms' must exist and be Maybe Double:
-TIO.putStrLn $ D.toMarkdownTable $ D.take 10
+TIO.putStrLn $ D.toMarkdown $ D.take 10
     (D.imputeWith F.mean total_bedrooms housing)
 ```
 
@@ -273,7 +273,7 @@ meat = D.fromNamedColumns
     , ("ounces", D.fromList measurements)
     ]
 
-TIO.putStrLn $ D.toMarkdownTable meat
+TIO.putStrLn $ D.toMarkdown meat
 ```
 
 ### Adding derived columns
@@ -281,7 +281,7 @@ TIO.putStrLn $ D.toMarkdownTable meat
 `derive name expr df` adds a new column computed from an expression.
 
 ```haskell
-TIO.putStrLn $ D.toMarkdownTable
+TIO.putStrLn $ D.toMarkdown
     (D.derive "kilograms" (F.col @Double "ounces" * 0.03) meat)
 ```
 
@@ -301,7 +301,7 @@ roomsPerHousehold = D.derive "rooms_per_household"
     (F.col @Double "total_rooms" / F.col @Double "households")
     housing
 
-TIO.putStrLn $ D.toMarkdownTable (D.take 5 roomsPerHousehold)
+TIO.putStrLn $ D.toMarkdown (D.take 5 roomsPerHousehold)
 ```
 
 ### Lifting custom functions
@@ -320,7 +320,7 @@ meatToAnimal "honey ham"   = "pig"
 meatToAnimal "nova lox"    = "salmon"
 meatToAnimal _             = "unknown"
 
-TIO.putStrLn $ D.toMarkdownTable
+TIO.putStrLn $ D.toMarkdown
     (D.derive "animal" (F.lift meatToAnimal (F.col @Text "food")) meat)
 ```
 
@@ -331,7 +331,7 @@ TIO.putStrLn $ D.toMarkdownTable
 ```haskell
 animalMapping = [("bacon","pig"),("pulled pork","pig"),("pastrami","cow"),("corned beef","cow"),("honey ham","pig"),("nova lox","salmon")]
 
-TIO.putStrLn $ D.toMarkdownTable
+TIO.putStrLn $ D.toMarkdown
     (D.derive "animal2" (F.recode animalMapping (F.col @Text "food")) meat)
 ```
 
@@ -343,7 +343,7 @@ After `$(F.declareColumns meat)`, column references are checked at compile time:
 $(F.declareColumns meat)
 
 -- Using declared column bindings — compiler catches typos and type mismatches:
-TIO.putStrLn $ D.toMarkdownTable
+TIO.putStrLn $ D.toMarkdown
     (D.derive "kilograms" (ounces * 0.03) meat)
 ```
 
@@ -366,13 +366,13 @@ $(F.declareColumnsFromCsvWithOpts (D.defaultReadOptions{D.typeSpec = D.InferFrom
 housing <- D.readCsv "../data/housing.csv"
 
 pipelined = execFrameM housing $ do
-    isExpensive       <- deriveM "is_expensive"        (median_house_value .>= 500000)
+    isExpensive       <- deriveM "is_expensive"        (median_house_value .>=. 500000)
     roomsPerHousehold <- deriveM "rooms_per_household" (total_rooms / households)
     meanBeds          <- inspectM (D.meanMaybe total_bedrooms)
     totalBedrooms     <- imputeM  total_bedrooms meanBeds
-    filterWhereM (isExpensive .&& roomsPerHousehold .>= 7 .&& totalBedrooms .>= 200)
+    filterWhereM (isExpensive .&&. roomsPerHousehold .>=. 7 .&&. totalBedrooms .>=. 200)
 
-TIO.putStrLn $ D.toMarkdownTable $ D.take 5 pipelined
+TIO.putStrLn $ D.toMarkdown $ D.take 5 pipelined
 ```
 
 `$(F.declareColumnsFromCsvFile path)` generates compile-time column bindings by reading the CSV header at splice time — no live dataframe needs to be in scope, unlike `$(F.declareColumns df)` which requires a bound frame.
@@ -383,7 +383,7 @@ Inside the `do`-block, `<-` binds the typed `Expr` returned by each step; those 
 
 ```haskell
 ((isExp, bedrooms), housingEnriched) = runFrameM housing $ do
-    isExp    <- deriveM "is_expensive" (median_house_value .>= 500000)
+    isExp    <- deriveM "is_expensive" (median_house_value .>=. 500000)
     meanBeds <- inspectM (D.meanMaybe total_bedrooms)
     bedrooms <- imputeM  total_bedrooms meanBeds
     pure (isExp, bedrooms)
@@ -412,7 +412,7 @@ You have already seen `D.readCsv`. Under the hood it calls `readCsvWithOpts` wit
 ```haskell
 housingFull <- D.readCsv "../data/housing.csv"
 
-TIO.putStrLn $ D.toMarkdownTable (D.take 3 housingFull)
+TIO.putStrLn $ D.toMarkdown (D.take 3 housingFull)
 ```
 
 ### TSV files
@@ -421,7 +421,7 @@ Tab-separated files work exactly like CSV:
 
 ```haskell
 -- housingTsv <- D.readTsv "data/housing.tsv"
--- TIO.putStrLn $ D.toMarkdownTable (D.take 3 housingTsv)
+-- TIO.putStrLn $ D.toMarkdown (D.take 3 housingTsv)
 ```
 
 ### Custom separators and options
@@ -470,7 +470,7 @@ Parquet is a columnar binary format common in data engineering pipelines:
 
 ```haskell
 -- parquetDf <- D.readParquet "data/housing.parquet"
--- TIO.putStrLn $ D.toMarkdownTable (D.take 5 parquetDf)
+-- TIO.putStrLn $ D.toMarkdown (D.take 5 parquetDf)
 ```
 
 For a directory of Parquet shards (e.g. from a Spark job):
@@ -484,7 +484,7 @@ For a directory of Parquet shards (e.g. from a Spark job):
 Always run `describeColumns` on freshly loaded data to confirm types and check for unexpected nulls:
 
 ```haskell
-TIO.putStrLn $ D.toMarkdownTable (D.describeColumns housingFull)
+TIO.putStrLn $ D.toMarkdown (D.describeColumns housingFull)
 ```
 
 ### Opting into stronger type safety
@@ -495,7 +495,7 @@ After loading, use `F.cast` to produce a column expression with the exact type y
 -- Retype a text column to Double, converting unparseable values to Nothing:
 withIncomeCast = D.derive "income_cast" (F.cast @Double "median_income") housingFull
 
-TIO.putStrLn $ D.toMarkdownTable (D.take 5 withIncomeCast)
+TIO.putStrLn $ D.toMarkdown (D.take 5 withIncomeCast)
 ```
 
 ### Streaming large files with DataFrame.Lazy
@@ -529,13 +529,13 @@ Build and run a lazy pipeline:
 ```haskell
 lazyQuery =
     L.scanCsv housingSchema "../data/housing.csv"
-        |> L.filter (F.col @Double "median_house_value" .>= 300000)
+        |> L.filter (F.col @Double "median_house_value" .>=. 300000)
         |> L.select ["longitude","latitude","median_house_value","ocean_proximity"]
         |> L.take 10
 
 lazyResult <- L.runDataFrame lazyQuery
 
-TIO.putStrLn $ D.toMarkdownTable lazyResult
+TIO.putStrLn $ D.toMarkdown lazyResult
 ```
 
 Key API:
@@ -576,7 +576,7 @@ messyNums = D.fromNamedColumns
 
 withCast = D.derive "as_double" (F.cast @Double "raw") messyNums
 
-TIO.putStrLn $ D.toMarkdownTable withCast
+TIO.putStrLn $ D.toMarkdown withCast
 ```
 
 #### Cast with default — fill bad values
@@ -584,7 +584,7 @@ TIO.putStrLn $ D.toMarkdownTable withCast
 ```haskell
 withDefault = D.derive "as_double" (F.castWithDefault 0.0 "raw") messyNums
 
-TIO.putStrLn $ D.toMarkdownTable withDefault
+TIO.putStrLn $ D.toMarkdown withDefault
 ```
 
 #### castEither — audit bad rows
@@ -594,7 +594,7 @@ TIO.putStrLn $ D.toMarkdownTable withDefault
 ```haskell
 withAudit = D.derive "audit" (F.castEither @Double "raw") messyNums
 
-TIO.putStrLn $ D.toMarkdownTable withAudit
+TIO.putStrLn $ D.toMarkdown withAudit
 ```
 
 Haskell forces you to handle the `Left` case before you can use the values downstream — making data quality issues visible at the type level.
@@ -613,7 +613,7 @@ emails = D.fromNamedColumns
 
 emailParts = D.derive "parts" (F.splitOn "@" (F.col @T.Text "email")) emails
 
-TIO.putStrLn $ D.toMarkdownTable emailParts
+TIO.putStrLn $ D.toMarkdown emailParts
 ```
 
 #### match
@@ -623,7 +623,7 @@ TIO.putStrLn $ D.toMarkdownTable emailParts
 ```haskell
 domains = D.derive "domain" (F.match "[a-z]+\\.[a-z]+" (F.col @T.Text "email")) emails
 
-TIO.putStrLn $ D.toMarkdownTable domains
+TIO.putStrLn $ D.toMarkdown domains
 ```
 
 #### matchAll
@@ -633,7 +633,7 @@ TIO.putStrLn $ D.toMarkdownTable domains
 ```haskell
 withWords = D.derive "words" (F.matchAll "[a-z]+" (F.col @T.Text "email")) emails
 
-TIO.putStrLn $ D.toMarkdownTable withWords
+TIO.putStrLn $ D.toMarkdown withWords
 ```
 
 ### Date operations
@@ -652,7 +652,7 @@ events = D.fromNamedColumns
 
 withDates = D.derive "date" (F.parseDate @Day "%Y-%m-%d" (F.col @T.Text "date_text")) events
 
-TIO.putStrLn $ D.toMarkdownTable withDates
+TIO.putStrLn $ D.toMarkdown withDates
 ```
 
 #### daysBetween
@@ -672,7 +672,7 @@ TIO.putStrLn $ D.toMarkdownTable withDates
 $(F.declareColumns withAudit)
 
 -- 'audit' is Expr (Either Text Double) — you must handle Left before using it as a number
-TIO.putStrLn $ D.toMarkdownTable (D.take 5 withAudit)
+TIO.putStrLn $ D.toMarkdown (D.take 5 withAudit)
 ```
 
 ---
@@ -691,7 +691,7 @@ secondHalf = D.range (5, 10) housing
 
 combined = firstHalf <> secondHalf
 
-TIO.putStrLn $ D.toMarkdownTable combined
+TIO.putStrLn $ D.toMarkdown combined
 ```
 
 To stack a list of frames:
@@ -701,7 +701,7 @@ chunks = map (\i -> D.range (i, i+3) housing) [0, 4, 8]
 
 stacked = mconcat chunks
 
-TIO.putStrLn $ D.toMarkdownTable stacked
+TIO.putStrLn $ D.toMarkdown stacked
 ```
 
 ### Horizontal concatenation with |||
@@ -714,7 +714,7 @@ rightCols = D.select ["median_house_value","ocean_proximity"] housing
 
 sideBy = leftCols ||| rightCols
 
-TIO.putStrLn $ D.toMarkdownTable (D.take 5 sideBy)
+TIO.putStrLn $ D.toMarkdown (D.take 5 sideBy)
 ```
 
 ### SQL-style joins
@@ -740,7 +740,7 @@ orders = D.fromNamedColumns
 ```haskell
 innerResult = D.innerJoin ["customer_id"] customers orders
 
-TIO.putStrLn $ D.toMarkdownTable innerResult
+TIO.putStrLn $ D.toMarkdown innerResult
 ```
 
 Dave (id=4) has no orders; customer 5 has no customer record. Neither appears in an inner join.
@@ -750,7 +750,7 @@ Dave (id=4) has no orders; customer 5 has no customer record. Neither appears in
 ```haskell
 leftResult = D.leftJoin ["customer_id"] customers orders
 
-TIO.putStrLn $ D.toMarkdownTable leftResult
+TIO.putStrLn $ D.toMarkdown leftResult
 ```
 
 Dave appears with `Nothing` for order columns.
@@ -760,7 +760,7 @@ Dave appears with `Nothing` for order columns.
 ```haskell
 rightResult = D.rightJoin ["customer_id"] customers orders
 
-TIO.putStrLn $ D.toMarkdownTable rightResult
+TIO.putStrLn $ D.toMarkdown rightResult
 ```
 
 The orphan order (customer_id=5) appears with `Nothing` for customer columns.
@@ -770,7 +770,7 @@ The orphan order (customer_id=5) appears with `Nothing` for customer columns.
 ```haskell
 outerResult = D.fullOuterJoin ["customer_id"] customers orders
 
-TIO.putStrLn $ D.toMarkdownTable outerResult
+TIO.putStrLn $ D.toMarkdown outerResult
 ```
 
 All rows from both sides appear; unmatched rows get `Nothing` in the other side's columns.
@@ -780,12 +780,12 @@ All rows from both sides appear; unmatched rows get `Nothing` in the other side'
 #### select and exclude
 
 ```haskell
-TIO.putStrLn $ D.toMarkdownTable
+TIO.putStrLn $ D.toMarkdown
     (D.select ["longitude","latitude","median_house_value"] (D.take 5 housing))
 ```
 
 ```haskell
-TIO.putStrLn $ D.toMarkdownTable
+TIO.putStrLn $ D.toMarkdown
     (D.exclude ["longitude","latitude"] (D.take 5 housing))
 ```
 
@@ -799,13 +799,13 @@ renamedHousing = D.renameMany
     , ("median_income",      "income")
     ] housing
 
-TIO.putStrLn $ D.toMarkdownTable (D.take 3 renamedHousing)
+TIO.putStrLn $ D.toMarkdown (D.take 3 renamedHousing)
 ```
 
 #### sortBy
 
 ```haskell
-TIO.putStrLn $ D.toMarkdownTable
+TIO.putStrLn $ D.toMarkdown
     (D.take 5 (D.sortBy D.Descending ["median_house_value"] housing))
 ```
 
@@ -814,7 +814,7 @@ TIO.putStrLn $ D.toMarkdownTable
 `D.range (start, end) df` slices rows from index `start` (inclusive) to `end` (exclusive):
 
 ```haskell
-TIO.putStrLn $ D.toMarkdownTable (D.range (10, 15) housing)
+TIO.putStrLn $ D.toMarkdown (D.range (10, 15) housing)
 ```
 
 ### Opting into stronger type safety
@@ -828,7 +828,7 @@ $(F.declareColumns innerResult)
 -- Typos or type mismatches become compile errors, not runtime surprises.
 enriched = D.derive "total_with_tax" (amount * 1.1) innerResult
 
-TIO.putStrLn $ D.toMarkdownTable enriched
+TIO.putStrLn $ D.toMarkdown enriched
 ```
 
 ---
@@ -967,7 +967,7 @@ summary = D.aggregate
     , F.minimum (F.col @Double "median_house_value") `as` "min_value"
     ] grouped
 
-TIO.putStrLn $ D.toMarkdownTable summary
+TIO.putStrLn $ D.toMarkdown summary
 ```
 
 ### Full aggregation function menu
@@ -1004,7 +1004,7 @@ meatSummary = D.aggregate
     , F.mean  ounces                 `as` "mean_oz"
     ] meatGrouped
 
-TIO.putStrLn $ D.toMarkdownTable meatSummary
+TIO.putStrLn $ D.toMarkdown meatSummary
 ```
 
 ### Value counts with frequencies
@@ -1012,7 +1012,7 @@ TIO.putStrLn $ D.toMarkdownTable meatSummary
 `D.frequencies expr df` returns a frequency table — row counts and percentages for each unique value:
 
 ```haskell
-TIO.putStrLn $ D.toMarkdownTable (D.frequencies (F.col @T.Text "ocean_proximity") housing)
+TIO.putStrLn $ D.toMarkdown (D.frequencies (F.col @T.Text "ocean_proximity") housing)
 ```
 
 ### Pearson correlation
@@ -1034,7 +1034,7 @@ withShare = D.derive "pct_of_total"
     (F.toDouble (F.col @Int "count") / F.lit totalRows * F.lit 100.0)
     summary
 
-TIO.putStrLn $ D.toMarkdownTable withShare
+TIO.putStrLn $ D.toMarkdown withShare
 ```
 
 ### Z-score normalisation pipeline
@@ -1047,7 +1047,7 @@ incomeByProx = D.aggregate
     , F.stddev (F.col @Double "median_income") `as` "stddev_income"
     ] (D.groupBy ["ocean_proximity"] housing)
 
-TIO.putStrLn $ D.toMarkdownTable incomeByProx
+TIO.putStrLn $ D.toMarkdown incomeByProx
 ```
 
 ### Opting into stronger type safety
@@ -1060,7 +1060,7 @@ $(F.declareColumns summary)
 -- All aggregated columns are now typed. mean_value :: Expr Double etc.
 ranked = D.sortBy D.Descending [F.name mean_value] summary
 
-TIO.putStrLn $ D.toMarkdownTable ranked
+TIO.putStrLn $ D.toMarkdown ranked
 ```
 
 A type-level mistake on an aggregated column — say, treating `count` (an `Int`) as a `Double` — is caught immediately by the compiler rather than silently producing wrong numbers at runtime.
@@ -1122,7 +1122,7 @@ typedResult = thousing
     |> DT.derive @"rooms_per_household"    (DT.col @"total_rooms" / DT.col @"households")
     |> DT.derive @"bedrooms_per_household" (DT.col @"total_bedrooms" / DT.col @"households")
 
-TIO.putStrLn $ D.toMarkdownTable (DT.thaw typedResult)
+TIO.putStrLn $ D.toMarkdown (DT.thaw typedResult)
 ```
 
 `DT.impute @"colName" defaultValue` fills `Nothing` values in a nullable column; like `derive`, it updates the schema type (the column becomes non-optional after imputation).
@@ -1134,7 +1134,7 @@ typedGrouped = thousing
     |> DT.groupBy @'["ocean_proximity"]
     |> DT.aggregate (DT.agg @"count" (DT.count (DT.col @"median_house_value")) DT.aggNil)
 
-TIO.putStrLn $ D.toMarkdownTable (DT.thaw typedGrouped)
+TIO.putStrLn $ D.toMarkdown (DT.thaw typedGrouped)
 ```
 
 `DT.groupBy @'["col1","col2"]` takes a type-level list of column names (note the leading `'` for a promoted list). The aggregation spec is built with `DT.agg @"resultCol" aggregationExpr rest` and terminated with `DT.aggNil`.

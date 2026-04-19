@@ -33,7 +33,7 @@ import qualified Data.Text.IO as TIO
 
 df <- D.readCsv "../dataframe/data/housing.csv" 
 
-TIO.putStrLn $ D.toMarkdownTable $ D.frequencies "ocean_proximity" df
+TIO.putStrLn $ D.toMarkdown $ D.frequencies "ocean_proximity" df
 ```
 
 We can also plot similar tables for non-categorical data with a small value set e.g shoe sizes.
@@ -53,7 +53,7 @@ We can calculate sample statistics from the data such as the sample mean, sample
 Arguably the first thing to do when presented with a datset is check for null values.
 
 ```haskell
-TIO.putStrLn $ D.toMarkdownTable $ D.describeColumns df
+TIO.putStrLn $ D.toMarkdown $ D.describeColumns df
 ```
 
 It seems we have most of the data except some missing total bedrooms. Dealing with nulls is a separate topic that requires intimate knowledge of the data. So for this initial pass we'll leave out the total_bedrooms variable.
@@ -86,7 +86,7 @@ import DataFrame ((|>))
 
 $(F.declareColumns df)
 
-TIO.putStrLn $ D.toMarkdownTable $ 
+TIO.putStrLn $ D.toMarkdown $ 
    df |> D.derive "deviation" (abs (median_house_value - (F.mean median_house_value)))
       |> D.select ["median_house_value", "deviation"]
       |> D.take 10
@@ -183,7 +183,7 @@ So the median house value is moderately skewed to the left. That is, there are m
 We can get all these statistics with a single command:
 
 ```haskell
-TIO.putStrLn $ D.toMarkdownTable $ D.summarize df
+TIO.putStrLn $ D.toMarkdown $ D.summarize df
 ```
 
 As a recap we'll go over what this tells us about the data:

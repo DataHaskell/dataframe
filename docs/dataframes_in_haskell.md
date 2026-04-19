@@ -349,7 +349,7 @@ The API favors **consistency, small primitives, and composition**. Names mirror 
 
 **Core principles**
 
-* **Composable:** `df |> filter (col "b" .== 1) |> derive "a2" (col "a" + 2) |> sortBy Asc ["e"] |> take 10`  
+* **Composable:** `df |> filter (col "b" .==. 1) |> derive "a2" (col "a" + 2) |> sortBy Asc ["e"] |> take 10`  
 * **Column/row symmetry:** columns are first-class; row logic expressed via the DSL.  
 * **Declarative & explicit:** minimal magic; predictable behavior despite dynamic inputs.
 

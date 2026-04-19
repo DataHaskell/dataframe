@@ -328,7 +328,7 @@ replaceColumn ::
     forall name a cols.
     ( KnownSymbol name
     , Columnable a
-    , a ~ Lookup name cols
+    , a ~ SafeLookup name cols
     , AssertPresent name cols
     ) =>
     TExpr cols a -> TypedDataFrame cols -> TypedDataFrame cols

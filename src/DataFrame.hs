@@ -216,7 +216,6 @@ module DataFrame (
 
     -- * I/O
     module CSV,
-    module UnstableCSV,
     module Parquet,
     module UnstableParquet,
 
@@ -252,6 +251,8 @@ import DataFrame.IO.CSV as CSV (
     ReadOptions (..),
     TypeSpec (..),
     defaultReadOptions,
+    fromCsv,
+    fromCsvBytes,
     readCsv,
     readCsvWithOpts,
     readSeparated,
@@ -267,12 +268,6 @@ import DataFrame.IO.Parquet as Parquet (
     readParquetFilesWithOpts,
     readParquetWithOpts,
  )
-import DataFrame.IO.Unstable.CSV as UnstableCSV (
-    fastReadCsvUnstable,
-    fastReadTsvUnstable,
-    readCsvUnstable,
-    readTsvUnstable,
- )
 import DataFrame.IO.Unstable.Parquet as UnstableParquet (
     readParquetUnstable,
  )
@@ -284,6 +279,7 @@ import DataFrame.Internal.Column as Column (
     hasElemType,
     hasMissing,
     isNumeric,
+    mkRandom,
     toList,
     toVector,
  )
@@ -292,7 +288,11 @@ import DataFrame.Internal.DataFrame as Dataframe (
     GroupedDataFrame,
     empty,
     null,
-    toMarkdownTable,
+    toCsv,
+    toCsv',
+    toMarkdown,
+    toMarkdown',
+    toSeparated,
  )
 import DataFrame.Internal.Expression as Expression (Expr, prettyPrint)
 import DataFrame.Internal.Row as Row (
@@ -316,10 +316,16 @@ import DataFrame.Operations.Aggregation as Aggregation (
 import DataFrame.Operations.Core as Core hiding (
     ColumnInfo (..),
     nulls,
-    partiallyParsed,
     renameSafe,
  )
-import DataFrame.Operations.Join as Join
+import DataFrame.Operations.Join as Join (
+    JoinType (..),
+    fullOuterJoin,
+    innerJoin,
+    join,
+    leftJoin,
+    rightJoin,
+ )
 import DataFrame.Operations.Merge as Merge
 import DataFrame.Operations.Permutation as Permutation (
     SortOrder (..),
@@ -372,6 +378,24 @@ import DataFrame.Operations.Subset as Subset (
     take,
     takeLast,
  )
-import DataFrame.Operations.Transformations as Transformations
-import DataFrame.Operations.Typing as Typing
+import DataFrame.Operations.Transformations as Transformations (
+    apply,
+    applyAtIndex,
+    applyDouble,
+    applyInt,
+    applyMany,
+    applyWhere,
+    derive,
+    deriveMany,
+    deriveWithExpr,
+    impute,
+    safeApply,
+ )
+import DataFrame.Operations.Typing as Typing (
+    ParseOptions (..),
+    SafeReadMode (..),
+    defaultParseOptions,
+    effectiveSafeRead,
+    parseDefaults,
+ )
 import DataFrame.Operators as Operators

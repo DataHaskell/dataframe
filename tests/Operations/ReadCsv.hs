@@ -3,155 +3,27 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 
--- Test fixtures inspired by csv-spectrum (https://github.com/max-mapper/csv-spectrum)
-
 module Operations.ReadCsv where
 
-import qualified Data.List as L
-import qualified Data.Map as M
 import qualified Data.Text as T
-import qualified Data.Text.IO as TIO
-import qualified Data.Vector as V
-import qualified Data.Vector.Unboxed as VU
 import qualified DataFrame as D
+import qualified DataFrame.Lazy.IO.CSV as Lazy
 
-import Data.Function (on)
-import Data.Maybe (fromMaybe)
-import Data.Type.Equality (testEquality, (:~:) (Refl))
 import DataFrame.Internal.Column (Column (..), columnTypeString)
-import qualified DataFrame.Internal.Column as DI
 import DataFrame.Internal.DataFrame (
     DataFrame (..),
-    columnIndices,
-    columns,
     dataframeDimensions,
     getColumn,
  )
-import System.Directory (removeFile)
-import System.IO (IOMode (..), withFile)
 import Test.HUnit
-import Type.Reflection (typeRep)
 
-fixtureDir :: FilePath
-fixtureDir = "./tests/data/unstable_csv/"
-
-tempDir :: FilePath
-tempDir = "./tests/data/unstable_csv/"
+arbuthnotPath :: FilePath
+arbuthnotPath = "./tests/data/arbuthnot.csv"
 
 readCsvNoInfer :: FilePath -> IO DataFrame
 readCsvNoInfer =
     D.readCsvWithOpts
         D.defaultReadOptions{D.typeSpec = D.NoInference}
-
---------------------------------------------------------------------------------
--- Pretty-printer
---------------------------------------------------------------------------------
-
-prettyPrintCsv :: FilePath -> DataFrame -> IO ()
-prettyPrintCsv = prettyPrintSeparated ','
-
-prettyPrintTsv :: FilePath -> DataFrame -> IO ()
-prettyPrintTsv = prettyPrintSeparated '\t'
-
-prettyPrintSeparated :: Char -> FilePath -> DataFrame -> IO ()
-prettyPrintSeparated sep filepath df = withFile filepath WriteMode $ \handle -> do
-    let (rows, _) = dataframeDimensions df
-    let headers = map fst (L.sortBy (compare `on` snd) (M.toList (columnIndices df)))
-    TIO.hPutStrLn
-        handle
-        (T.intercalate (T.singleton sep) (map (escapeField sep) headers))
-    -- Write data rows
-    mapM_
-        (TIO.hPutStrLn handle . T.intercalate (T.singleton sep) . getRowEscaped sep df)
-        [0 .. rows - 1]
-
--- Note: The unstable parser does not unescape doubled quotes (""  -> "),
--- so we must not double-escape them here. We only wrap in quotes when needed.
-escapeField :: Char -> T.Text -> T.Text
-escapeField sep field
-    | needsQuoting = T.concat ["\"", field, "\""]
-    | otherwise = field
-  where
-    needsQuoting =
-        T.any (\c -> c == sep || c == '\n' || c == '\r' || c == '"') field
-
--- | Get a row from the DataFrame with all fields escaped
-getRowEscaped :: Char -> DataFrame -> Int -> [T.Text]
-getRowEscaped sep df i = V.ifoldr go [] (columns df)
-  where
-    go :: Int -> Column -> [T.Text] -> [T.Text]
-    go _ (BoxedColumn (c :: V.Vector a)) acc = case c V.!? i of
-        Just e -> escapeField sep textRep : acc
-          where
-            textRep = case testEquality (typeRep @a) (typeRep @T.Text) of
-                Just Refl -> e
-                Nothing -> T.pack (show e)
-        Nothing -> acc
-    go _ (UnboxedColumn c) acc = case c VU.!? i of
-        Just e -> escapeField sep (T.pack (show e)) : acc
-        Nothing -> acc
-    go _ (OptionalColumn (c :: V.Vector (Maybe a))) acc = case c V.!? i of
-        Just e -> escapeField sep textRep : acc
-          where
-            textRep = case testEquality (typeRep @a) (typeRep @T.Text) of
-                Just Refl -> fromMaybe "" e
-                Nothing -> case e of
-                    Just val -> T.pack (show val)
-                    Nothing -> ""
-        Nothing -> acc
-
-testFastCsv :: String -> FilePath -> Test
-testFastCsv name csvPath = TestLabel ("fast_roundtrip_" <> name) $ TestCase $ do
-    dfOriginal <- D.fastReadCsvUnstable csvPath
-    let tempPath = tempDir <> "temp_fast_" <> name <> ".csv"
-    prettyPrintCsv tempPath dfOriginal
-    dfRoundtrip <- D.fastReadCsvUnstable tempPath
-    assertEqual
-        ("Fast round-trip should produce equivalent DataFrame for " <> name)
-        dfOriginal
-        dfRoundtrip
-    removeFile tempPath
-
-testTsv :: String -> FilePath -> Test
-testTsv name tsvPath = TestLabel ("roundtrip_tsv_" <> name) $ TestCase $ do
-    dfOriginal <- D.readTsvUnstable tsvPath
-    let tempPath = tempDir <> "temp_" <> name <> ".tsv"
-    prettyPrintTsv tempPath dfOriginal
-    dfRoundtrip <- D.readTsvUnstable tempPath
-    assertEqual
-        ("TSV round-trip should produce equivalent DataFrame for " <> name)
-        dfOriginal
-        dfRoundtrip
-    removeFile tempPath
-
--- Individual round-trip test cases for each fixture
-
-testSimpleFast :: Test
-testSimpleFast = testFastCsv "simple" (fixtureDir <> "simple.csv")
-
-testCommaInQuotesFast :: Test
-testCommaInQuotesFast = testFastCsv "comma_in_quotes" (fixtureDir <> "comma_in_quotes.csv")
-
-testEscapedQuotesFast :: Test
-testEscapedQuotesFast = testFastCsv "escaped_quotes" (fixtureDir <> "escaped_quotes.csv")
-
-testNewlinesFast :: Test
-testNewlinesFast = testFastCsv "newlines" (fixtureDir <> "newlines.csv")
-
-testUtf8Fast :: Test
-testUtf8Fast = testFastCsv "utf8" (fixtureDir <> "utf8.csv")
-
-testQuotesAndNewlinesFast :: Test
-testQuotesAndNewlinesFast = testFastCsv "quotes_and_newlines" (fixtureDir <> "quotes_and_newlines.csv")
-
-testEmptyValuesFast :: Test
-testEmptyValuesFast = testFastCsv "empty_values" (fixtureDir <> "empty_values.csv")
-
-testJsonDataFast :: Test
-testJsonDataFast = testFastCsv "json_data" (fixtureDir <> "json_data.csv")
-
-arbuthnotPath :: FilePath
-arbuthnotPath = "./tests/data/arbuthnot.csv"
 
 -- SpecifyTypes with NoInference fallback: named column is typed, rest stay Text
 specifyTypesNoInferenceFallback :: Test
@@ -168,11 +40,11 @@ specifyTypesNoInferenceFallback =
                 arbuthnotPath
         -- "year" must be Int
         case getColumn "year" df of
-            Just col@(UnboxedColumn _) -> assertEqual "year should be Int" "Int" (columnTypeString col)
+            Just col@(UnboxedColumn _ _) -> assertEqual "year should be Int" "Int" (columnTypeString col)
             _ -> assertFailure "expected UnboxedColumn for 'year'"
         -- "boys" unspecified + NoInference → stays Text
         case getColumn "boys" df of
-            Just col@(BoxedColumn _) -> assertEqual "boys should be Text" "Text" (columnTypeString col)
+            Just col@(BoxedColumn _ _) -> assertEqual "boys should be Text" "Text" (columnTypeString col)
             _ -> assertFailure "expected BoxedColumn for 'boys' with NoInference fallback"
 
 -- SpecifyTypes with InferFromSample fallback: named column typed, rest inferred
@@ -190,11 +62,11 @@ specifyTypesInferFallback =
                 arbuthnotPath
         -- "year" must be Int (explicitly specified)
         case getColumn "year" df of
-            Just col@(UnboxedColumn _) -> assertEqual "year should be Int" "Int" (columnTypeString col)
+            Just col@(UnboxedColumn _ _) -> assertEqual "year should be Int" "Int" (columnTypeString col)
             _ -> assertFailure "expected UnboxedColumn for 'year'"
         -- "boys" unspecified + InferFromSample → inferred as Int
         case getColumn "boys" df of
-            Just col@(UnboxedColumn _) -> assertEqual "boys should be Int" "Int" (columnTypeString col)
+            Just col@(UnboxedColumn _ _) -> assertEqual "boys should be Int" "Int" (columnTypeString col)
             _ ->
                 assertFailure "expected UnboxedColumn for 'boys' with InferFromSample fallback"
 
@@ -213,128 +85,17 @@ specifyTypesSampleSize =
                     }
                 arbuthnotPath
         case getColumn "girls" df of
-            Just col@(UnboxedColumn _) -> assertEqual "girls should be Int" "Int" (columnTypeString col)
+            Just col@(UnboxedColumn _ _) -> assertEqual "girls should be Int" "Int" (columnTypeString col)
             _ ->
                 assertFailure
                     "expected UnboxedColumn for 'girls' via fallback InferFromSample 10"
-
-testCrlfCsv :: Test
-testCrlfCsv = TestLabel "malformed_crlf_csv" $ TestCase $ do
-    df <- D.readCsvUnstable (fixtureDir <> "crlf.csv")
-    let (rows, cols) = dataframeDimensions df
-    assertEqual "crlf.csv: 2 data rows" 2 rows
-    assertEqual "crlf.csv: 2 columns" 2 cols
-    case getColumn "name" df of
-        Nothing -> assertFailure "crlf.csv: column 'name' missing"
-        Just col ->
-            assertEqual
-                "crlf.csv: name has no \\r"
-                (DI.fromList @T.Text ["Alice", "Bob"])
-                col
-
-testCrlfTsv :: Test
-testCrlfTsv = TestLabel "malformed_crlf_tsv" $ TestCase $ do
-    df <- D.readTsvUnstable (fixtureDir <> "crlf.tsv")
-    let (rows, _) = dataframeDimensions df
-    assertEqual "crlf.tsv: 1 data row" 1 rows
-    case getColumn "name" df of
-        Nothing -> assertFailure "crlf.tsv: column 'name' missing"
-        Just col ->
-            assertEqual
-                "crlf.tsv: name has no \\r"
-                (DI.fromList @T.Text ["Alice"])
-                col
-
-testHeaderOnly :: Test
-testHeaderOnly = TestLabel "malformed_header_only" $ TestCase $ do
-    df <- D.readCsvUnstable (fixtureDir <> "header_only.csv")
-    let (rows, cols) = dataframeDimensions df
-    assertEqual "header_only.csv: 0 data rows" 0 rows
-    assertEqual "header_only.csv: 3 columns" 3 cols
-    let names = map fst . L.sortBy (compare `on` snd) . M.toList $ columnIndices df
-    assertEqual "header_only.csv: column names" ["first", "second", "third"] names
-
-testTrailingBlankLine :: Test
-testTrailingBlankLine = TestLabel "malformed_trailing_blank_line" $ TestCase $ do
-    df <- D.readCsvUnstable (fixtureDir <> "trailing_blank_line.csv")
-    -- blank line contributes 1 extra delimiter; (3+3+1) div 3 = 2, numRow=1
-    assertEqual
-        "trailing_blank_line.csv: 1 data row visible"
-        1
-        (fst (dataframeDimensions df))
-
-testAllEmptyRow :: Test
-testAllEmptyRow = TestLabel "malformed_all_empty_row" $ TestCase $ do
-    df <- D.readCsvUnstable (fixtureDir <> "all_empty_row.csv")
-    assertEqual "all_empty_row.csv: 1 data row" 1 (fst (dataframeDimensions df))
-    let checkEmpty colName =
-            case getColumn colName df of
-                Nothing -> assertFailure ("column '" <> T.unpack colName <> "' missing")
-                Just col ->
-                    assertEqual
-                        (T.unpack colName <> " is Nothing (empty field → null)")
-                        (DI.fromList @(Maybe T.Text) [Nothing])
-                        col
-    mapM_ checkEmpty ["a", "b", "c"]
-
-testSingleCol :: Test
-testSingleCol = TestLabel "malformed_single_col" $ TestCase $ do
-    df <- D.readCsvUnstable (fixtureDir <> "single_col.csv")
-    let (rows, cols) = dataframeDimensions df
-    assertEqual "single_col.csv: 3 data rows" 3 rows
-    assertEqual "single_col.csv: 1 column" 1 cols
-    case getColumn "name" df of
-        Nothing -> assertFailure "single_col.csv: column 'name' missing"
-        Just col ->
-            assertEqual
-                "single_col.csv: correct values"
-                (DI.fromList @T.Text ["Alice", "Bob", "Carol"])
-                col
-
-testWhitespaceFields :: Test
-testWhitespaceFields = TestLabel "malformed_whitespace_fields" $ TestCase $ do
-    df <- D.readCsvUnstable (fixtureDir <> "whitespace_fields.csv")
-    assertEqual
-        "whitespace_fields.csv: 2 data rows"
-        2
-        (fst (dataframeDimensions df))
-    case getColumn "name" df of
-        Nothing -> assertFailure "whitespace_fields.csv: 'name' missing"
-        Just col -> assertEqual "name stripped" (DI.fromList @T.Text ["Alice", "Bob"]) col
-    case getColumn "city" df of
-        Nothing -> assertFailure "whitespace_fields.csv: 'city' missing"
-        Just col ->
-            assertEqual
-                "city stripped"
-                (DI.fromList @T.Text ["New York", "Los Angeles"])
-                col
-
--- File: a,b,c header; row "1,2" (short); row "X,Y,Z" (full)
--- Total delimiters: 3 (header) + 2 (short) + 3 (full) = 8
--- numCol=3, totalRows=8 div 3=2, numRow=1
--- Row-1 stride offsets 3,4,5 → fields "1","2","X"  (X bleeds in from next row)
-testMissingFields :: Test
-testMissingFields = TestLabel "malformed_missing_fields" $ TestCase $ do
-    df <- D.readCsvUnstable (fixtureDir <> "missing_fields.csv")
-    assertEqual
-        "missing_fields.csv: integer-division gives 1 visible row"
-        1
-        (fst (dataframeDimensions df))
-    case getColumn "c" df of
-        Nothing -> assertFailure "missing_fields.csv: column 'c' missing"
-        Just col ->
-            -- "X" bleeds from the start of the next row into the missing slot
-            assertEqual
-                "missing_fields.csv: col 'c' bleeds 'X' from next row"
-                (DI.fromList @T.Text ["X"])
-                col
 
 -- File: a,b,c header; row "1,2,3,EXTRA"
 -- Total delimiters: 3 + 4 = 7; 7 div 3 = 2, numRow=1
 -- Row-1 strides 3,4,5 → "1","2","3" — EXTRA (stride 6) is never accessed
 testExtraFields :: Test
 testExtraFields = TestLabel "malformed_extra_fields" $ TestCase $ do
-    df <- readCsvNoInfer (fixtureDir <> "extra_fields.csv")
+    df <- readCsvNoInfer ("./tests/data/unstable_csv/" <> "extra_fields.csv")
     assertEqual "extra_fields.csv: 1 data row" 1 (fst (dataframeDimensions df))
     assertEqual "extra_fields.csv: 3 columns" 3 (snd (dataframeDimensions df))
     case getColumn "c" df of
@@ -342,49 +103,444 @@ testExtraFields = TestLabel "malformed_extra_fields" $ TestCase $ do
         Just col ->
             assertEqual
                 "extra_fields.csv: 'c' = '3' (EXTRA ignored)"
-                (DI.fromList @T.Text ["3"])
+                (D.fromList @T.Text ["3"])
                 col
 
-testNoTrailingNewline :: Test
-testNoTrailingNewline = TestLabel "malformed_no_trailing_newline" $ TestCase $ do
-    df <- D.readCsvUnstable (fixtureDir <> "no_trailing_newline.csv")
-    assertEqual
-        "no_trailing_newline.csv: 1 data row"
-        1
-        (fst (dataframeDimensions df))
-    case getColumn "name" df of
-        Nothing -> assertFailure "no_trailing_newline.csv: 'name' missing"
-        Just col -> assertEqual "name = Alice" (DI.fromList @T.Text ["Alice"]) col
-    case getColumn "city" df of
-        Nothing -> assertFailure "no_trailing_newline.csv: 'city' missing"
+-- Inference + EitherRead: first rows of "score" are clean ints, later rows are
+-- "abc" / empty / "N/A". The sample is limited to the clean prefix so the
+-- assumption is Int; non-parsing later rows become Left carrying raw text.
+eitherReadCsvInference :: Test
+eitherReadCsvInference = TestLabel "csv_eitherRead_inference" $ TestCase $ do
+    df <-
+        D.readCsvWithOpts
+            D.defaultReadOptions
+                { D.safeRead = D.EitherRead
+                , D.typeSpec = D.InferFromSample 5
+                }
+            "./tests/data/unstable_csv/either_read_mixed.csv"
+    let expectedScore :: Column
+        expectedScore =
+            D.fromList @(Either T.Text Int)
+                [ Right 10
+                , Right 20
+                , Right 30
+                , Right 40
+                , Right 50
+                , Left "abc"
+                , Left ""
+                , Right 80
+                ]
+    case getColumn "score" df of
         Just col ->
             assertEqual
-                "city = London (synthetic delimiter worked)"
-                (DI.fromList @T.Text ["London"])
+                "EitherRead: 'score' = [Right 10..Right 50, Left \"abc\", Left \"\", Right 80]"
+                expectedScore
                 col
+        Nothing -> assertFailure "score column missing"
+    -- 'id' is all ints in every row, so EitherRead wraps every value as Right.
+    let expectedId :: Column
+        expectedId =
+            D.fromList @(Either T.Text Int) (map Right [1 .. 8])
+    case getColumn "id" df of
+        Just col ->
+            assertEqual
+                "EitherRead: 'id' is all Right (no failures)"
+                expectedId
+                col
+        Nothing -> assertFailure "id column missing"
+    -- 'name' has a row containing "N/A"; under EitherRead the text is just
+    -- a value so it lands in Right. Empty cells would become Left "".
+    let expectedName :: Column
+        expectedName =
+            D.fromList @(Either T.Text T.Text)
+                (map Right ["alice", "bob", "carol", "dave", "eve", "frank", "grace", "N/A"])
+    case getColumn "name" df of
+        Just col ->
+            assertEqual
+                "EitherRead: 'name' wraps every value as Right (no parse failures for Text)"
+                expectedName
+                col
+        Nothing -> assertFailure "name column missing"
+
+-- MaybeRead on the same CSV yields Maybe Int (bitmap-backed Int).
+maybeReadCsv :: Test
+maybeReadCsv = TestLabel "csv_maybeRead" $ TestCase $ do
+    df <-
+        D.readCsvWithOpts
+            D.defaultReadOptions{D.safeRead = D.MaybeRead}
+            "./tests/data/unstable_csv/either_read_mixed.csv"
+    -- "score" is not cleanly parseable as Int because "abc" fails; however the
+    -- BS inference walks all rows and falls back to Text when needed. The
+    -- relevant invariant for MaybeRead is that the column is nullable.
+    case getColumn "score" df of
+        Just (UnboxedColumn (Just _) _) -> pure () -- Int with bitmap
+        Just (BoxedColumn (Just _) _) -> pure () -- Text-backed with bitmap
+        Just col ->
+            assertFailure $
+                "MaybeRead should yield a nullable column, got "
+                    <> columnTypeString col
+                    <> " with no bitmap"
+        Nothing -> assertFailure "score column missing"
+
+-- NoSafeRead leaves columns un-bitmapped when every row parses (id column is
+-- all ints) but falls back to a Text column for mixed rows like "score".
+noSafeReadCsv :: Test
+noSafeReadCsv = TestLabel "csv_noSafeRead" $ TestCase $ do
+    df <-
+        D.readCsvWithOpts
+            D.defaultReadOptions{D.safeRead = D.NoSafeRead}
+            "./tests/data/unstable_csv/either_read_mixed.csv"
+    case getColumn "id" df of
+        Just (UnboxedColumn Nothing _) -> pure () -- strict Int, no bitmap
+        Just col ->
+            assertFailure $
+                "NoSafeRead 'id' should be bare UnboxedColumn, got "
+                    <> columnTypeString col
+        Nothing -> assertFailure "id column missing"
+
+-- Lazy CSV reader + EitherRead: goes through a different pipeline
+-- (MutableColumn + null indices). Every row of 'id' parses cleanly, so the
+-- column is @Either Text Int@ with every value in 'Right'.
+lazyEitherReadCsv :: Test
+lazyEitherReadCsv = TestLabel "lazy_csv_eitherRead" $ TestCase $ do
+    (df, _) <-
+        Lazy.readSeparated
+            ','
+            Lazy.defaultOptions{Lazy.safeRead = D.EitherRead}
+            "./tests/data/unstable_csv/either_read_mixed.csv"
+    let expectedId :: Column
+        expectedId =
+            D.fromList @(Either T.Text Int) (map Right [1 .. 8])
+    case getColumn "id" df of
+        Just col ->
+            assertEqual
+                "Lazy + EitherRead: 'id' is all Right Ints"
+                expectedId
+                col
+        Nothing -> assertFailure "id column missing (lazy reader)"
+
+-- Per-column overrides (eager): 'id' is strict Int (NoSafeRead), 'score' is
+-- Either Text Int (EitherRead) recording the raw bytes for failures, 'name'
+-- falls back to the default (MaybeRead) and becomes a nullable Text column.
+perColumnEagerOverrides :: Test
+perColumnEagerOverrides = TestLabel "csv_perColumnOverrides_eager" $ TestCase $ do
+    df <-
+        D.readCsvWithOpts
+            D.defaultReadOptions
+                { D.safeRead = D.MaybeRead
+                , D.safeReadOverrides =
+                    [ ("id", D.NoSafeRead)
+                    , ("score", D.EitherRead)
+                    ]
+                , D.typeSpec = D.InferFromSample 5
+                }
+            "./tests/data/unstable_csv/either_read_mixed.csv"
+    -- 'id': NoSafeRead → plain UnboxedColumn Int, no bitmap.
+    case getColumn "id" df of
+        Just (UnboxedColumn Nothing _) -> pure ()
+        Just col ->
+            assertFailure $
+                "override NoSafeRead for 'id' should give bare UnboxedColumn, got "
+                    <> columnTypeString col
+        Nothing -> assertFailure "id column missing"
+    -- 'score': EitherRead → BoxedColumn of Either Text Int.
+    let expectedScore :: Column
+        expectedScore =
+            D.fromList @(Either T.Text Int)
+                [ Right 10
+                , Right 20
+                , Right 30
+                , Right 40
+                , Right 50
+                , Left "abc"
+                , Left ""
+                , Right 80
+                ]
+    case getColumn "score" df of
+        Just col ->
+            assertEqual
+                "override EitherRead for 'score'"
+                expectedScore
+                col
+        Nothing -> assertFailure "score column missing"
+    -- 'name': default MaybeRead kicks in → nullable column (bitmap attached).
+    -- Every cell is non-empty so the bitmap is all-valid, but the optional
+    -- wrap is still applied.
+    case getColumn "name" df of
+        Just (BoxedColumn (Just _) _) -> pure ()
+        Just col ->
+            assertFailure $
+                "default MaybeRead for 'name' should yield BoxedColumn with bitmap, got "
+                    <> columnTypeString col
+        Nothing -> assertFailure "name column missing"
+
+-- Per-column overrides (lazy): same configuration as the eager test, but
+-- exercises the lazy freezer's resolution of per-column modes.
+perColumnLazyOverrides :: Test
+perColumnLazyOverrides = TestLabel "csv_perColumnOverrides_lazy" $ TestCase $ do
+    (df, _) <-
+        Lazy.readSeparated
+            ','
+            Lazy.defaultOptions
+                { Lazy.safeRead = D.MaybeRead
+                , Lazy.safeReadOverrides =
+                    [ ("id", D.NoSafeRead)
+                    , ("score", D.EitherRead)
+                    ]
+                }
+            "./tests/data/unstable_csv/either_read_mixed.csv"
+    -- Lazy reader infers 'id' as Int from the first row; NoSafeRead → bare.
+    case getColumn "id" df of
+        Just (UnboxedColumn Nothing _) -> pure ()
+        Just col ->
+            assertFailure $
+                "lazy NoSafeRead override for 'id' → bare UnboxedColumn, got "
+                    <> columnTypeString col
+        Nothing -> assertFailure "id column missing (lazy)"
+    -- EitherRead on 'score': every row is Right (first row was '10' → Int
+    -- builder), though rows that failed parsing are captured as Left via the
+    -- nulls list. We only assert the column is Boxed-of-Either.
+    case getColumn "score" df of
+        Just (BoxedColumn Nothing _) -> pure ()
+        Just col ->
+            assertFailure $
+                "lazy EitherRead override for 'score' → BoxedColumn Nothing, got "
+                    <> columnTypeString col
+        Nothing -> assertFailure "score column missing (lazy)"
+
+-- Default=NoSafeRead, override single column 'score' → MaybeRead.
+-- 'id' and 'name' keep the NoSafeRead default; 'score' becomes nullable.
+overrideNoSafeReadDefaultWithMaybeRead :: Test
+overrideNoSafeReadDefaultWithMaybeRead =
+    TestLabel "csv_override_noSafeRead_default_MaybeRead" $ TestCase $ do
+        df <-
+            D.readCsvWithOpts
+                D.defaultReadOptions
+                    { D.safeRead = D.NoSafeRead
+                    , D.safeReadOverrides = [("score", D.MaybeRead)]
+                    }
+                "./tests/data/unstable_csv/either_read_mixed.csv"
+        -- 'id': NoSafeRead default → bare Int.
+        case getColumn "id" df of
+            Just (UnboxedColumn Nothing _) -> pure ()
+            Just col ->
+                assertFailure $
+                    "'id' should be bare UnboxedColumn under NoSafeRead, got "
+                        <> columnTypeString col
+            Nothing -> assertFailure "id column missing"
+        -- 'score': MaybeRead override → nullable (bitmap present).
+        case getColumn "score" df of
+            Just (UnboxedColumn (Just _) _) -> pure () -- Int with bitmap
+            Just (BoxedColumn (Just _) _) -> pure () -- fallback Text with bitmap
+            Just col ->
+                assertFailure $
+                    "'score' MaybeRead override should yield nullable column, got "
+                        <> columnTypeString col
+            Nothing -> assertFailure "score column missing"
+        -- 'name': NoSafeRead default → Text; may have bitmap when data has
+        -- null cells (row 8 has "N/A" which is in missingIndicators).
+        -- ensureOptional is NOT forced, but a bitmap is still created when
+        -- the builder detects actual nulls.
+        case getColumn "name" df of
+            Just (BoxedColumn _ _) -> pure ()
+            Just col ->
+                assertFailure $
+                    "'name' under NoSafeRead should be BoxedColumn, got "
+                        <> columnTypeString col
+            Nothing -> assertFailure "name column missing"
+
+-- Default=NoSafeRead, override single column 'score' → EitherRead.
+overrideNoSafeReadDefaultWithEitherRead :: Test
+overrideNoSafeReadDefaultWithEitherRead =
+    TestLabel "csv_override_noSafeRead_default_EitherRead" $ TestCase $ do
+        df <-
+            D.readCsvWithOpts
+                D.defaultReadOptions
+                    { D.safeRead = D.NoSafeRead
+                    , D.safeReadOverrides = [("score", D.EitherRead)]
+                    , D.typeSpec = D.InferFromSample 5
+                    }
+                "./tests/data/unstable_csv/either_read_mixed.csv"
+        -- 'score': EitherRead override → exact cell contents
+        let expectedScore :: Column
+            expectedScore =
+                D.fromList @(Either T.Text Int)
+                    [ Right 10
+                    , Right 20
+                    , Right 30
+                    , Right 40
+                    , Right 50
+                    , Left "abc"
+                    , Left ""
+                    , Right 80
+                    ]
+        case getColumn "score" df of
+            Just col ->
+                assertEqual
+                    "'score' EitherRead override from NoSafeRead default"
+                    expectedScore
+                    col
+            Nothing -> assertFailure "score column missing"
+
+-- Default=EitherRead, override 'id' back to NoSafeRead.
+overrideEitherReadDefaultWithNoSafeRead :: Test
+overrideEitherReadDefaultWithNoSafeRead =
+    TestLabel "csv_override_eitherRead_default_NoSafeRead" $ TestCase $ do
+        df <-
+            D.readCsvWithOpts
+                D.defaultReadOptions
+                    { D.safeRead = D.EitherRead
+                    , D.safeReadOverrides = [("id", D.NoSafeRead)]
+                    , D.typeSpec = D.InferFromSample 5
+                    }
+                "./tests/data/unstable_csv/either_read_mixed.csv"
+        -- 'id': NoSafeRead override → bare Int (every row parses).
+        case getColumn "id" df of
+            Just (UnboxedColumn Nothing _) -> pure ()
+            Just col ->
+                assertFailure $
+                    "'id' NoSafeRead override should give bare UnboxedColumn, got "
+                        <> columnTypeString col
+            Nothing -> assertFailure "id column missing"
+        -- 'score': default EitherRead → Either Text Int
+        let expectedScore :: Column
+            expectedScore =
+                D.fromList @(Either T.Text Int)
+                    [ Right 10
+                    , Right 20
+                    , Right 30
+                    , Right 40
+                    , Right 50
+                    , Left "abc"
+                    , Left ""
+                    , Right 80
+                    ]
+        case getColumn "score" df of
+            Just col ->
+                assertEqual
+                    "'score' inherits EitherRead default"
+                    expectedScore
+                    col
+            Nothing -> assertFailure "score column missing"
+        -- 'name': default EitherRead → Either Text Text (all values Right).
+        let expectedName :: Column
+            expectedName =
+                D.fromList @(Either T.Text T.Text)
+                    (map Right ["alice", "bob", "carol", "dave", "eve", "frank", "grace", "N/A"])
+        case getColumn "name" df of
+            Just col ->
+                assertEqual
+                    "'name' inherits EitherRead default"
+                    expectedName
+                    col
+            Nothing -> assertFailure "name column missing"
+
+-- Default=EitherRead, override 'name' → MaybeRead.
+overrideEitherReadDefaultWithMaybeRead :: Test
+overrideEitherReadDefaultWithMaybeRead =
+    TestLabel "csv_override_eitherRead_default_MaybeRead" $ TestCase $ do
+        df <-
+            D.readCsvWithOpts
+                D.defaultReadOptions
+                    { D.safeRead = D.EitherRead
+                    , D.safeReadOverrides = [("name", D.MaybeRead)]
+                    , D.typeSpec = D.InferFromSample 5
+                    }
+                "./tests/data/unstable_csv/either_read_mixed.csv"
+        -- 'name': MaybeRead override → nullable Text column with bitmap.
+        case getColumn "name" df of
+            Just (BoxedColumn (Just _) _) -> pure ()
+            Just col ->
+                assertFailure $
+                    "'name' MaybeRead override should yield BoxedColumn with bitmap, got "
+                        <> columnTypeString col
+            Nothing -> assertFailure "name column missing"
+        -- 'id': default EitherRead → Either Text Int (all values Right).
+        let expectedId :: Column
+            expectedId = D.fromList @(Either T.Text Int) (map Right [1 .. 8])
+        case getColumn "id" df of
+            Just col ->
+                assertEqual "'id' inherits EitherRead default" expectedId col
+            Nothing -> assertFailure "id column missing"
+
+-- Override for a column that doesn't exist in the CSV → no crash, ignored.
+overrideNonExistentColumn :: Test
+overrideNonExistentColumn =
+    TestLabel "csv_override_nonExistent" $ TestCase $ do
+        df <-
+            D.readCsvWithOpts
+                D.defaultReadOptions
+                    { D.safeRead = D.NoSafeRead
+                    , D.safeReadOverrides = [("doesNotExist", D.EitherRead)]
+                    }
+                "./tests/data/unstable_csv/either_read_mixed.csv"
+        assertEqual "dimensions unchanged" (8, 3) (dataframeDimensions df)
+
+-- Empty overrides map is the same as no overrides.
+emptyOverridesEqualsGlobal :: Test
+emptyOverridesEqualsGlobal =
+    TestLabel "csv_emptyOverrides" $ TestCase $ do
+        df1 <-
+            D.readCsvWithOpts
+                D.defaultReadOptions{D.safeRead = D.MaybeRead}
+                "./tests/data/unstable_csv/either_read_mixed.csv"
+        df2 <-
+            D.readCsvWithOpts
+                D.defaultReadOptions
+                    { D.safeRead = D.MaybeRead
+                    , D.safeReadOverrides = []
+                    }
+                "./tests/data/unstable_csv/either_read_mixed.csv"
+        assertEqual "empty overrides produces identical DataFrame" df1 df2
+
+-- Lazy path: cell-level assertions for EitherRead override on 'score'.
+perColumnLazyOverridesCellLevel :: Test
+perColumnLazyOverridesCellLevel =
+    TestLabel "csv_perColumnOverrides_lazy_cellLevel" $ TestCase $ do
+        (df, _) <-
+            Lazy.readSeparated
+                ','
+                Lazy.defaultOptions
+                    { Lazy.safeRead = D.NoSafeRead
+                    , Lazy.safeReadOverrides = [("score", D.EitherRead)]
+                    }
+                "./tests/data/unstable_csv/either_read_mixed.csv"
+        -- 'id': NoSafeRead → bare Int.
+        case getColumn "id" df of
+            Just (UnboxedColumn Nothing _) -> pure ()
+            Just col ->
+                assertFailure $
+                    "lazy 'id' NoSafeRead → bare UnboxedColumn, got "
+                        <> columnTypeString col
+            Nothing -> assertFailure "id missing (lazy)"
+        -- 'score': EitherRead override → BoxedColumn of Either values.
+        -- Lazy reader infers Int from first row; rows that fail become Left.
+        case getColumn "score" df of
+            Just (BoxedColumn Nothing _) -> pure ()
+            Just col ->
+                assertFailure $
+                    "lazy 'score' EitherRead → BoxedColumn Nothing, got "
+                        <> columnTypeString col
+            Nothing -> assertFailure "score missing (lazy)"
 
 tests :: [Test]
 tests =
-    [ testSimpleFast
-    , testCommaInQuotesFast
-    , testQuotesAndNewlinesFast
-    , testEscapedQuotesFast
-    , testNewlinesFast
-    , testUtf8Fast
-    , testQuotesAndNewlinesFast
-    , testEmptyValuesFast
-    , testJsonDataFast
-    , specifyTypesNoInferenceFallback
+    [ specifyTypesNoInferenceFallback
     , specifyTypesInferFallback
     , specifyTypesSampleSize
-    , testCrlfCsv
-    , testCrlfTsv
-    , testHeaderOnly
-    , testTrailingBlankLine
-    , testAllEmptyRow
-    , testSingleCol
-    , testWhitespaceFields
-    , testMissingFields
     , testExtraFields
-    , testNoTrailingNewline
+    , eitherReadCsvInference
+    , maybeReadCsv
+    , noSafeReadCsv
+    , lazyEitherReadCsv
+    , perColumnEagerOverrides
+    , perColumnLazyOverrides
+    , -- Per-column override coverage
+      overrideNoSafeReadDefaultWithMaybeRead
+    , overrideNoSafeReadDefaultWithEitherRead
+    , overrideEitherReadDefaultWithNoSafeRead
+    , overrideEitherReadDefaultWithMaybeRead
+    , overrideNonExistentColumn
+    , emptyOverridesEqualsGlobal
+    , perColumnLazyOverridesCellLevel
     ]

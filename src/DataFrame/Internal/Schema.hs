@@ -21,7 +21,7 @@ import Type.Reflection (typeRep)
 -- | A runtime tag for a column’s element type.
 data SchemaType where
     -- | Constructor carrying a 'Proxy' of the element type.
-    SType :: (Columnable a) => P.Proxy a -> SchemaType
+    SType :: (Columnable a, Read a) => P.Proxy a -> SchemaType
 
 {- | Show the underlying element type using 'typeRep'.
 
@@ -59,7 +59,7 @@ True
 >>> show (schemaType @Double)
 "Double"
 -}
-schemaType :: forall a. (Columnable a) => SchemaType
+schemaType :: forall a. (Columnable a, Read a) => SchemaType
 schemaType = SType (P.Proxy @a)
 
 {- | Logical schema of a 'DataFrame': a mapping from column names to their

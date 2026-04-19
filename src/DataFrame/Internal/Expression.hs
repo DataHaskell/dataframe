@@ -13,7 +13,6 @@
 
 module DataFrame.Internal.Expression where
 
-import Control.DeepSeq (NFData (..))
 import Data.String
 import qualified Data.Text as T
 import Data.Type.Equality (TestEquality (testEquality), type (:~:) (Refl))
@@ -38,9 +37,6 @@ data BinaryOp a b c = MkBinaryOp
 data MeanAcc = MeanAcc {-# UNPACK #-} !Double {-# UNPACK #-} !Int
     deriving (Show, Eq, Ord, Read)
 
-instance NFData MeanAcc where
-    rnf (MeanAcc _ _) = ()
-
 data AggStrategy a b where
     CollectAgg ::
         (VG.Vector v b, Typeable v) => T.Text -> (v b -> a) -> AggStrategy a b
@@ -57,13 +53,13 @@ data AggStrategy a b where
 data Expr a where
     Col :: (Columnable a) => T.Text -> Expr a
     CastWith ::
-        (Columnable a, Columnable b) =>
+        (Columnable a, Columnable b, Read a) =>
         T.Text ->
         T.Text ->
         (Either String a -> b) ->
         Expr b
     CastExprWith ::
-        (Columnable a, Columnable b, Columnable src) =>
+        (Columnable a, Columnable b, Columnable src, Read a) =>
         T.Text ->
         (Either String a -> b) ->
         Expr src ->
@@ -76,6 +72,7 @@ data Expr a where
         BinaryOp c b a -> Expr c -> Expr b -> Expr a
     If :: (Columnable a) => Expr Bool -> Expr a -> Expr a -> Expr a
     Agg :: (Columnable a, Columnable b) => AggStrategy a b -> Expr b -> Expr a
+    Over :: (Columnable a) => [T.Text] -> Expr a -> Expr a
 
 data UExpr where
     UExpr :: (Columnable a) => Expr a -> UExpr
@@ -238,7 +235,7 @@ instance (Floating a, Columnable a) => Floating (Expr a) where
             (MkUnaryOp{unaryFn = atanh, unaryName = "atanh", unarySymbol = Nothing})
 
 instance (Show a) => Show (Expr a) where
-    show :: forall a. (Show a) => Expr a -> String
+    show :: Expr a -> String
     show (Col name) = "(col @" ++ show (typeRep @a) ++ " " ++ show name ++ ")"
     show (CastWith name tag _) = "(castWith " ++ show tag ++ " " ++ show name ++ ")"
     show (CastExprWith tag _ inner) = "(castExprWith " ++ show tag ++ " " ++ show inner ++ ")"
@@ -249,8 +246,9 @@ instance (Show a) => Show (Expr a) where
     show (Agg (CollectAgg op _) expr) = "(" ++ T.unpack op ++ " " ++ show expr ++ ")"
     show (Agg (FoldAgg op _ _) expr) = "(" ++ T.unpack op ++ " " ++ show expr ++ ")"
     show (Agg (MergeAgg op _ _ _ _) expr) = "(" ++ T.unpack op ++ " " ++ show expr ++ ")"
+    show (Over keys inner) = "(over " ++ show keys ++ " " ++ show inner ++ ")"
 
-normalize :: (Eq a, Ord a, Show a, Typeable a) => Expr a -> Expr a
+normalize :: (Show a, Typeable a) => Expr a -> Expr a
 normalize expr = case expr of
     Col name -> Col name
     CastWith n t f -> CastWith n t f
@@ -270,6 +268,7 @@ normalize expr = case expr of
                             else Binary op n1 n2
         | otherwise -> Binary op (normalize e1) (normalize e2)
     Agg strat e -> Agg strat (normalize e)
+    Over keys inner -> Over keys (normalize inner)
 
 -- Compare expressions for ordering (used in normalization)
 compareExpr :: Expr a -> Expr a -> Ordering
@@ -282,10 +281,14 @@ compareExpr e1 e2 = compare (exprKey e1) (exprKey e2)
     exprKey (Lit val) = "1:" ++ show val
     exprKey (If c t e) = "2:" ++ exprKey c ++ exprKey t ++ exprKey e
     exprKey (Unary op e) = "3:" ++ T.unpack (unaryName op) ++ exprKey e
-    exprKey (Binary op e1 e2) = "4:" ++ T.unpack (binaryName op) ++ exprKey e1 ++ exprKey e2
+    exprKey (Binary op e1' e2') = "4:" ++ T.unpack (binaryName op) ++ exprKey e1' ++ exprKey e2'
     exprKey (Agg (CollectAgg name _) e) = "5:" ++ T.unpack name ++ exprKey e
     exprKey (Agg (FoldAgg name _ _) e) = "5:" ++ T.unpack name ++ exprKey e
     exprKey (Agg (MergeAgg name _ _ _ _) e) = "5:" ++ T.unpack name ++ exprKey e
+    exprKey (Over keys e) = "6:over:" ++ show keys ++ exprKey e
+
+instance (Ord a, Columnable a) => Ord (Expr a) where
+    compare l r = compareExpr (normalize l) (normalize r)
 
 instance (Eq a, Columnable a) => Eq (Expr a) where
     (==) l r = eqNormalized (normalize l) (normalize r)
@@ -309,44 +312,8 @@ instance (Eq a, Columnable a) => Eq (Expr a) where
             n1 == n2 && e1 `exprEq` e2
         eqNormalized (Agg (MergeAgg n1 _ _ _ _) e1) (Agg (MergeAgg n2 _ _ _ _) e2) =
             n1 == n2 && e1 `exprEq` e2
+        eqNormalized (Over k1 e1) (Over k2 e2) = k1 == k2 && e1 `exprEq` e2
         eqNormalized _ _ = False
-
-instance (Ord a, Columnable a) => Ord (Expr a) where
-    compare :: Expr a -> Expr a -> Ordering
-    compare e1 e2 = case (e1, e2) of
-        (Col n1, Col n2) -> compare n1 n2
-        (CastWith n1 t1 _, CastWith n2 t2 _) -> compare n1 n2 <> compare t1 t2
-        (CastExprWith t1 _ _, CastExprWith t2 _ _) -> compare t1 t2
-        (Lit v1, Lit v2) -> compare v1 v2
-        (If c1 t1 e1', If c2 t2 e2') ->
-            compare c1 c2 <> exprComp t1 t2 <> exprComp e1' e2'
-        (Unary op1 e1', Unary op2 e2') -> compare (unaryName op1) (unaryName op2) <> exprComp e1' e2'
-        (Binary op1 a1 b1, Binary op2 a2 b2) ->
-            compare (binaryName op1) (binaryName op2) <> exprComp a1 a2 <> exprComp b1 b2
-        (Agg (CollectAgg n1 _) e1', Agg (CollectAgg n2 _) e2') -> compare n1 n2 <> exprComp e1' e2'
-        (Agg (FoldAgg n1 _ _) e1', Agg (FoldAgg n2 _ _) e2') -> compare n1 n2 <> exprComp e1' e2'
-        (Agg (MergeAgg n1 _ _ _ _) e1', Agg (MergeAgg n2 _ _ _ _) e2') -> compare n1 n2 <> exprComp e1' e2'
-        -- Different constructors - compare by priority
-        (Col _, _) -> LT
-        (_, Col _) -> GT
-        (CastWith{}, _) -> LT
-        (_, CastWith{}) -> GT
-        (CastExprWith{}, _) -> LT
-        (_, CastExprWith{}) -> GT
-        (Lit _, _) -> LT
-        (_, Lit _) -> GT
-        (Unary{}, _) -> LT
-        (_, Unary{}) -> GT
-        (Binary{}, _) -> LT
-        (_, Binary{}) -> GT
-        (If{}, _) -> LT
-        (_, If{}) -> GT
-        (Agg{}, _) -> LT
-
-exprComp :: (Columnable b, Columnable c) => Expr b -> Expr c -> Ordering
-exprComp e1 e2 = case testEquality (typeOf e1) (typeOf e2) of
-    Just Refl -> e1 `compare` e2
-    Nothing -> LT
 
 replaceExpr ::
     forall a b c.
@@ -367,7 +334,8 @@ replaceExpr new old expr = case testEquality (typeRep @b) (typeRep @c) of
             If (replaceExpr new old cond) (replaceExpr new old l) (replaceExpr new old r)
         (Unary op value) -> Unary op (replaceExpr new old value)
         (Binary op l r) -> Binary op (replaceExpr new old l) (replaceExpr new old r)
-        (Agg op expr) -> Agg op (replaceExpr new old expr)
+        (Agg op inner) -> Agg op (replaceExpr new old inner)
+        (Over keys inner) -> Over keys (replaceExpr new old inner)
 
 eSize :: Expr a -> Int
 eSize (Col _) = 1
@@ -377,17 +345,19 @@ eSize (Lit _) = 1
 eSize (If c l r) = 1 + eSize c + eSize l + eSize r
 eSize (Unary _ e) = 1 + eSize e
 eSize (Binary _ l r) = 1 + eSize l + eSize r
-eSize (Agg strategy expr) = eSize expr + 1
+eSize (Agg _strategy expr) = eSize expr + 1
+eSize (Over _ inner) = 1 + eSize inner
 
 getColumns :: Expr a -> [T.Text]
 getColumns (Col cName) = [cName]
 getColumns (CastWith name _ _) = [name]
 getColumns (CastExprWith _ _ e) = getColumns e
-getColumns expr@(Lit _) = []
+getColumns _expr@(Lit _) = []
 getColumns (If cond l r) = getColumns cond <> getColumns l <> getColumns r
-getColumns (Unary op value) = getColumns value
-getColumns (Binary op l r) = getColumns l <> getColumns r
-getColumns (Agg strategy expr) = getColumns expr
+getColumns (Unary _op value) = getColumns value
+getColumns (Binary _op l r) = getColumns l <> getColumns r
+getColumns (Agg _strategy expr) = getColumns expr
+getColumns (Over keys inner) = keys <> getColumns inner
 
 prettyPrint :: Expr a -> String
 prettyPrint = go 0 0
@@ -427,3 +397,4 @@ prettyPrint = go 0 0
         Agg (CollectAgg op _) arg -> T.unpack op ++ "(" ++ go depth 0 arg ++ ")"
         Agg (FoldAgg op _ _) arg -> T.unpack op ++ "(" ++ go depth 0 arg ++ ")"
         Agg (MergeAgg op _ _ _ _) arg -> T.unpack op ++ "(" ++ go depth 0 arg ++ ")"
+        Over keys inner -> go depth 0 inner ++ ".over(" ++ show (map T.unpack keys) ++ ")"

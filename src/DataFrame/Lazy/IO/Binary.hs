@@ -51,11 +51,14 @@ import qualified Data.Vector.Storable as VS
 import qualified Data.Vector.Unboxed as VU
 
 import Data.Bits (setBit, shiftL, testBit, (.|.))
-import Data.Maybe (fromMaybe, isJust)
 import Data.Type.Equality (TestEquality (testEquality), type (:~:) (Refl))
 import Data.Word (Word16, Word32, Word64, Word8)
 import qualified DataFrame.Internal.Binary as Binary
-import DataFrame.Internal.Column (Column (..))
+import DataFrame.Internal.Column (
+    Column (..),
+    bitmapTestBit,
+    buildBitmapFromValid,
+ )
 import DataFrame.Internal.DataFrame (DataFrame (..))
 import Foreign (ForeignPtr, castForeignPtr, plusForeignPtr, sizeOf)
 import System.Directory (getTemporaryDirectory, removeFile)
@@ -110,48 +113,51 @@ buildColumnSchema name col =
     nameLen = fromIntegral (BS.length nameBytes) :: Word16
 
 columnTypeTag :: Column -> Word8
-columnTypeTag (UnboxedColumn (_ :: VU.Vector a)) =
+columnTypeTag (UnboxedColumn Nothing (_ :: VU.Vector a)) =
     case testEquality (typeRep @a) (typeRep @Int) of
         Just Refl -> tagInt
         Nothing -> case testEquality (typeRep @a) (typeRep @Double) of
             Just Refl -> tagDouble
             Nothing -> error "spillToDisk: unsupported UnboxedColumn element type"
-columnTypeTag (BoxedColumn _) = tagText
-columnTypeTag (OptionalColumn (_ :: V.Vector (Maybe a))) =
+columnTypeTag (UnboxedColumn (Just _) (_ :: VU.Vector a)) =
     case testEquality (typeRep @a) (typeRep @Int) of
         Just Refl -> tagMaybeInt
         Nothing -> case testEquality (typeRep @a) (typeRep @Double) of
             Just Refl -> tagMaybeDouble
-            Nothing -> tagMaybeText
+            Nothing -> error "spillToDisk: unsupported nullable UnboxedColumn element type"
+columnTypeTag (BoxedColumn Nothing _) = tagText
+columnTypeTag (BoxedColumn (Just _) _) = tagMaybeText
 
 buildColumnData :: Int -> Column -> BSB.Builder
-buildColumnData _ (UnboxedColumn (v :: VU.Vector a)) =
+buildColumnData _ (UnboxedColumn Nothing (v :: VU.Vector a)) =
     case testEquality (typeRep @a) (typeRep @Int) of
         Just Refl -> buildIntVector v
         Nothing ->
             case testEquality (typeRep @a) (typeRep @Double) of
                 Just Refl -> buildDoubleVector v
                 Nothing -> error "spillToDisk: unsupported UnboxedColumn element type"
-buildColumnData _ (BoxedColumn (v :: V.Vector a)) =
-    case testEquality (typeRep @a) (typeRep @T.Text) of
-        Just Refl -> buildTextVector v
-        Nothing -> error "spillToDisk: unsupported BoxedColumn element type"
-buildColumnData _ (OptionalColumn (v :: V.Vector (Maybe a))) =
+buildColumnData _ (UnboxedColumn (Just bm) (v :: VU.Vector a)) =
     case testEquality (typeRep @a) (typeRep @Int) of
         Just Refl ->
-            buildNullBitmap (V.map isJust v)
-                <> buildIntVector (VU.convert (V.map (fromMaybe 0) v))
+            buildNullBitmap (V.generate (VU.length v) (bitmapTestBit bm))
+                <> buildIntVector v
         Nothing ->
             case testEquality (typeRep @a) (typeRep @Double) of
                 Just Refl ->
-                    buildNullBitmap (V.map isJust v)
-                        <> buildDoubleVector (VU.convert (V.map (fromMaybe 0.0) v))
-                Nothing ->
-                    let showText x = case testEquality (typeRep @a) (typeRep @T.Text) of
-                            Just Refl -> x
-                            Nothing -> T.pack (show x)
-                        texts = V.map (maybe T.empty showText) v
-                     in buildNullBitmap (V.map isJust v) <> buildTextVector texts
+                    buildNullBitmap (V.generate (VU.length v) (bitmapTestBit bm))
+                        <> buildDoubleVector v
+                Nothing -> error "spillToDisk: unsupported nullable UnboxedColumn element type"
+buildColumnData _ (BoxedColumn Nothing (v :: V.Vector a)) =
+    case testEquality (typeRep @a) (typeRep @T.Text) of
+        Just Refl -> buildTextVector v
+        Nothing -> error "spillToDisk: unsupported BoxedColumn element type"
+buildColumnData _ (BoxedColumn (Just bm) (v :: V.Vector a)) =
+    let isValidVec = V.generate (V.length v) (bitmapTestBit bm)
+        showText x = case testEquality (typeRep @a) (typeRep @T.Text) of
+            Just Refl -> x
+            Nothing -> T.pack (show x)
+        texts = V.imap (\i x -> if bitmapTestBit bm i then showText x else T.empty) v
+     in buildNullBitmap isValidVec <> buildTextVector texts
 
 {- | Bulk-encode an Int vector as 8-byte LE values (native layout on LE platforms).
 hPutBuilder flushes synchronously so the underlying ForeignPtr outlives the Builder.
@@ -249,37 +255,28 @@ readColumnData :: BS.ByteString -> Int -> Int -> Word8 -> ParseResult Column
 readColumnData bs off nrows tag
     | tag == tagInt = do
         (off', v) <- readIntColumn bs off nrows
-        return (off', UnboxedColumn v)
+        return (off', UnboxedColumn Nothing v)
     | tag == tagDouble = do
         (off', v) <- readDoubleColumn bs off nrows
-        return (off', UnboxedColumn v)
+        return (off', UnboxedColumn Nothing v)
     | tag == tagText = do
         (off', v) <- readTextColumn bs off nrows
-        return (off', BoxedColumn v)
+        return (off', BoxedColumn Nothing v)
     | tag == tagMaybeInt = do
         (off1, bitmap) <- readNullBitmap bs off nrows
         (off2, v) <- readIntColumn bs off1 nrows
-        let maybes =
-                V.fromList
-                    (zipWith (\valid x -> if valid then Just x else Nothing) bitmap (VU.toList v)) ::
-                    V.Vector (Maybe Int)
-        return (off2, OptionalColumn maybes)
+        let bm = buildBitmapFromValid (VU.fromList (map (\b -> if b then 1 else 0) bitmap))
+        return (off2, UnboxedColumn (Just bm) v)
     | tag == tagMaybeDouble = do
         (off1, bitmap) <- readNullBitmap bs off nrows
         (off2, v) <- readDoubleColumn bs off1 nrows
-        let maybes =
-                V.fromList
-                    (zipWith (\valid x -> if valid then Just x else Nothing) bitmap (VU.toList v)) ::
-                    V.Vector (Maybe Double)
-        return (off2, OptionalColumn maybes)
+        let bm = buildBitmapFromValid (VU.fromList (map (\b -> if b then 1 else 0) bitmap))
+        return (off2, UnboxedColumn (Just bm) v)
     | tag == tagMaybeText = do
         (off1, bitmap) <- readNullBitmap bs off nrows
         (off2, v) <- readTextColumn bs off1 nrows
-        let maybes =
-                V.fromList
-                    (zipWith (\valid x -> if valid then Just x else Nothing) bitmap (V.toList v)) ::
-                    V.Vector (Maybe T.Text)
-        return (off2, OptionalColumn maybes)
+        let bm = buildBitmapFromValid (VU.fromList (map (\b -> if b then 1 else 0) bitmap))
+        return (off2, BoxedColumn (Just bm) v)
     | otherwise = Left ("unknown type tag " <> show tag)
 
 {- | Zero-copy Int column read: reuses the ByteString buffer's ForeignPtr.

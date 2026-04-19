@@ -1,6 +1,7 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeApplications #-}
+{-# OPTIONS_GHC -Wno-x-partial #-}
 
 module DecisionTree where
 
@@ -8,10 +9,13 @@ import qualified DataFrame as D
 import DataFrame.DecisionTree
 import qualified DataFrame.Functions as F
 import qualified DataFrame.Internal.Column as DI
-import DataFrame.Internal.Expression (Expr)
+import DataFrame.Internal.Expression (Expr (..))
+import DataFrame.Internal.Interpreter (interpret)
 import DataFrame.Operators
 
-import Data.List (sort)
+import Data.Function (on)
+import Data.List (maximumBy, sort)
+import qualified Data.Map.Strict as M
 import qualified Data.Text as T
 import qualified Data.Vector as V
 import Test.HUnit
@@ -436,7 +440,7 @@ nullableSepDF =
         [ ("label", DI.fromList (replicate 6 "pos" ++ replicate 6 "neg" :: [T.Text]))
         ,
             ( "x"
-            , DI.OptionalColumn
+            , DI.fromVector
                 ( V.fromList $
                     map (Just . fromIntegral) ([1 .. 6] :: [Int])
                         ++ map (Just . fromIntegral) ([7 .. 12] :: [Int]) ::
@@ -452,7 +456,7 @@ nullsMixedDF =
         [ ("label", DI.fromList (["pos", "pos", "pos", "neg", "neg", "neg"] :: [T.Text]))
         ,
             ( "x"
-            , DI.OptionalColumn
+            , DI.fromVector
                 ( V.fromList
                     [Just 1.0, Nothing, Just 3.0, Just 7.0, Nothing, Just 9.0] ::
                     V.Vector (Maybe Double)
@@ -460,16 +464,16 @@ nullsMixedDF =
             )
         ]
 
--- numericCols picks up OptionalColumn (Maybe Double) as NMaybeDouble.
+-- numericCols picks up DI.fromVector (Maybe Double) as NMaybeDouble.
 numericColsNullableDoubleTest :: Test
 numericColsNullableDoubleTest = TestCase $ do
     let exprs = numericCols nullableSepDF
         hasMD = any (\case NMaybeDouble _ -> True; _ -> False) exprs
     assertBool
-        "numericCols finds NMaybeDouble for OptionalColumn (Maybe Double)"
+        "numericCols finds NMaybeDouble for DI.fromVector (Maybe Double)"
         hasMD
 
--- numericCols picks up OptionalColumn (Maybe Int) as NMaybeDouble (via whenPresent).
+-- numericCols picks up DI.fromVector (Maybe Int) as NMaybeDouble (via whenPresent).
 numericColsNullableIntTest :: Test
 numericColsNullableIntTest = TestCase $ do
     let df =
@@ -477,18 +481,18 @@ numericColsNullableIntTest = TestCase $ do
                 [ ("label", DI.fromList (["pos", "neg"] :: [T.Text]))
                 ,
                     ( "n"
-                    , DI.OptionalColumn (V.fromList [Just (1 :: Int), Just 2] :: V.Vector (Maybe Int))
+                    , DI.fromVector (V.fromList [Just (1 :: Int), Just 2] :: V.Vector (Maybe Int))
                     )
                 ]
         hasMD = any (\case NMaybeDouble _ -> True; _ -> False) (numericCols df)
-    assertBool "numericCols finds NMaybeDouble for OptionalColumn (Maybe Int)" hasMD
+    assertBool "numericCols finds NMaybeDouble for DI.fromVector (Maybe Int)" hasMD
 
--- generateNumericConds is non-empty for a DF with an OptionalColumn (Maybe Double).
+-- generateNumericConds is non-empty for a DF with an DI.fromVector (Maybe Double).
 numericCondsNullableNonEmptyTest :: Test
 numericCondsNullableNonEmptyTest =
     TestCase $
         assertBool
-            "generateNumericConds non-empty for OptionalColumn (Maybe Double)"
+            "generateNumericConds non-empty for DI.fromVector (Maybe Double)"
             (not (null (generateNumericConds defaultTreeConfig nullableSepDF)))
 
 -- Null values evaluate to False for threshold conditions (null rows route right).
@@ -499,7 +503,7 @@ nullValueRoutesFalseTest = TestCase $ do
                 [ ("label", DI.fromList (["A", "B"] :: [T.Text]))
                 ,
                     ( "x"
-                    , DI.OptionalColumn
+                    , DI.fromVector
                         (V.fromList [Nothing, Just (5.0 :: Double)] :: V.Vector (Maybe Double))
                     )
                 ]
@@ -538,14 +542,14 @@ nullableFitWithNullsNoCrashTest = TestCase $ do
         (loss >= 0.0 && loss <= 1.0)
 
 -- numericExprsWithTerms produces cross-column combinations when one col is
--- OptionalColumn (Maybe Double) and another is a plain UnboxedColumn Double.
+-- DI.fromVector (Maybe Double) and another is a plain UnboxedColumn Double.
 numericExprsWithTermsMixedTest :: Test
 numericExprsWithTermsMixedTest = TestCase $ do
     let df =
             D.fromNamedColumns
                 [
                     ( "x"
-                    , DI.OptionalColumn
+                    , DI.fromVector
                         (V.fromList [Just 1.0, Just 2.0, Just 3.0] :: V.Vector (Maybe Double))
                     )
                 , ("y", DI.fromList ([4.0, 5.0, 6.0] :: [Double]))
@@ -558,6 +562,158 @@ numericExprsWithTermsMixedTest = TestCase $ do
     assertBool
         "combined exprs include NMaybeDouble (nullable arithmetic)"
         (any (\case NMaybeDouble _ -> True; _ -> False) exprs)
+
+------------------------------------------------------------------------
+-- Probability tree tests
+------------------------------------------------------------------------
+
+-- probsFromIndices: counts correct on a 3-row slice
+probsFromIndicesBasic :: Test
+probsFromIndicesBasic = TestCase $ do
+    let df =
+            D.fromNamedColumns
+                [ ("label", DI.fromList (["A", "A", "B"] :: [T.Text]))
+                , ("x", DI.fromList ([1.0, 2.0, 3.0] :: [Double]))
+                ]
+        probs = probsFromIndices @T.Text "label" df (V.fromList [0, 1, 2])
+    assertBool "A prob ≈ 2/3" (abs (probs M.! "A" - 2 / 3) < 1e-9)
+    assertBool "B prob ≈ 1/3" (abs (probs M.! "B" - 1 / 3) < 1e-9)
+
+-- probsFromIndices: only a subset of rows counted
+probsFromIndicesSubset :: Test
+probsFromIndicesSubset = TestCase $ do
+    let df =
+            D.fromNamedColumns
+                [ ("label", DI.fromList (["A", "A", "B", "B"] :: [T.Text]))
+                , ("x", DI.fromList ([1.0, 2.0, 3.0, 4.0] :: [Double]))
+                ]
+        probs = probsFromIndices @T.Text "label" df (V.fromList [0, 1])
+    assertEqual "only rows 0,1 → A:1.0" (M.fromList [("A", 1.0)]) probs
+
+-- probsFromIndices: single class → probability 1.0
+probsFromIndicesSingleClass :: Test
+probsFromIndicesSingleClass = TestCase $ do
+    let probs = probsFromIndices @T.Text "label" fixtureDF (V.fromList [0, 2])
+    assertEqual "rows 0,2 both A → A:1.0" (M.fromList [("A", 1.0)]) probs
+
+-- buildProbTree: Leaf preserves distribution
+buildProbTreeLeaf :: Test
+buildProbTreeLeaf = TestCase $ do
+    let df =
+            D.fromNamedColumns
+                [ ("label", DI.fromList (["A", "A", "A"] :: [T.Text]))
+                , ("x", DI.fromList ([1.0, 2.0, 3.0] :: [Double]))
+                ]
+        pt = buildProbTree @T.Text (Leaf "A") "label" df (V.fromList [0, 1, 2])
+    case pt of
+        Leaf m -> assertEqual "pure-A leaf → {A:1.0}" (M.fromList [("A", 1.0)]) m
+        _ -> assertFailure "expected Leaf"
+
+-- buildProbTree: Branch distributes rows to left/right leaves correctly
+buildProbTreeBranch :: Test
+buildProbTreeBranch = TestCase $ do
+    -- splitCond: x <= 2.5 → idx 0,1 go left; idx 2,3 go right
+    -- left  (idx 0,1): labels ["A","B"] → {A:0.5, B:0.5}
+    -- right (idx 2,3): labels ["A","C"] → {A:0.5, C:0.5}
+    let stump = Branch splitCond (Leaf "A") (Leaf "B") :: Tree T.Text
+        pt = buildProbTree @T.Text stump "label" fixtureDF allIndices
+    case pt of
+        Branch _ (Leaf lm) (Leaf rm) -> do
+            assertBool "left leaf has A:0.5" (abs (M.findWithDefault 0 "A" lm - 0.5) < 1e-9)
+            assertBool "left leaf has B:0.5" (abs (M.findWithDefault 0 "B" lm - 0.5) < 1e-9)
+            assertBool
+                "right leaf has A:0.5"
+                (abs (M.findWithDefault 0 "A" rm - 0.5) < 1e-9)
+            assertBool
+                "right leaf has C:0.5"
+                (abs (M.findWithDefault 0 "C" rm - 0.5) < 1e-9)
+        _ -> assertFailure "expected Branch with two Leaves"
+
+-- probExprs: leaf tree produces Lit values
+probExprsLeaf :: Test
+probExprsLeaf = TestCase $ do
+    let pt = Leaf (M.fromList [("A", 0.75), ("B", 0.25)]) :: ProbTree T.Text
+        pe = probExprs pt
+    assertEqual "A expr is Lit 0.75" (Lit 0.75) (pe M.! "A")
+    assertEqual "B expr is Lit 0.25" (Lit 0.25) (pe M.! "B")
+
+-- probExprs: class absent from one leaf gets Lit 0.0 on that side
+probExprsMissingClass :: Test
+probExprsMissingClass = TestCase $ do
+    let pt =
+            Branch
+                splitCond
+                (Leaf (M.fromList [("A", 1.0)]))
+                (Leaf (M.fromList [("B", 1.0)])) ::
+                ProbTree T.Text
+        pe = probExprs pt
+    assertEqual
+        "A expr: If cond (Lit 1.0) (Lit 0.0)"
+        (F.ifThenElse splitCond (Lit 1.0) (Lit 0.0))
+        (pe M.! "A")
+    assertEqual
+        "B expr: If cond (Lit 0.0) (Lit 1.0)"
+        (F.ifThenElse splitCond (Lit 0.0) (Lit 1.0))
+        (pe M.! "B")
+
+-- probExprs: keys equal all classes that appear across any leaf
+probExprsAllClasses :: Test
+probExprsAllClasses = TestCase $ do
+    let pt =
+            Branch
+                splitCond
+                (Leaf (M.fromList [("A", 1.0)]))
+                (Leaf (M.fromList [("B", 0.6), ("C", 0.4)])) ::
+                ProbTree T.Text
+        pe = probExprs pt
+    assertEqual "three classes in result" (sort ["A", "B", "C"]) (sort (M.keys pe))
+
+-- Probabilities sum to 1.0 at every row after applying probExprs
+probsSumToOne :: Test
+probsSumToOne = TestCase $ do
+    let stump = Branch splitCond (Leaf "A") (Leaf "B") :: Tree T.Text
+        pt = buildProbTree @T.Text stump "label" fixtureDF allIndices
+        pe = probExprs pt
+        sumExpr = foldl1 (.+) (M.elems pe)
+    case interpret @Double fixtureDF sumExpr of
+        Left e -> assertFailure (show e)
+        Right (DI.TColumn sumCol) ->
+            case DI.toVector @Double sumCol of
+                Left e2 -> assertFailure (show e2)
+                Right vals ->
+                    mapM_
+                        (\v -> assertBool ("sum ≈ 1.0, got " ++ show v) (abs (v - 1.0) < 1e-9))
+                        (V.toList vals)
+
+-- argmax of probExprs agrees with fitDecisionTree on sepDF
+probArgmaxMatchesClassifier :: Test
+probArgmaxMatchesClassifier = TestCase $ do
+    let cfg = defaultTreeConfig{taoIterations = 5, expressionPairs = 4, minLeafSize = 1}
+        hardExpr = fitDecisionTree @T.Text cfg (Col "label") sepDF
+        pe = fitProbTree @T.Text cfg (Col "label") sepDF
+        indices = [0 .. D.nRows sepDF - 1]
+    case interpret @T.Text sepDF hardExpr of
+        Left e -> assertFailure (show e)
+        Right (DI.TColumn hardCol) ->
+            case DI.toVector @T.Text hardCol of
+                Left e2 -> assertFailure (show e2)
+                Right hardVals -> do
+                    probCols <-
+                        mapM
+                            ( \(cls, expr) -> case interpret @Double sepDF expr of
+                                Left e3 -> assertFailure (show e3) >> return (cls, V.empty)
+                                Right (DI.TColumn col2) -> case DI.toVector @Double col2 of
+                                    Left e4 -> assertFailure (show e4) >> return (cls, V.empty)
+                                    Right v -> return (cls, v)
+                            )
+                            (M.toList pe)
+                    mapM_
+                        ( \i ->
+                            let argmax = fst $ maximumBy (compare `on` (V.! i) . snd) probCols
+                                hard = hardVals V.! i
+                             in assertEqual ("row " ++ show i) hard argmax
+                        )
+                        indices
 
 ------------------------------------------------------------------------
 -- Test list
@@ -596,4 +752,14 @@ tests =
     , TestLabel "nullableFitZeroLoss" nullableFitZeroLossTest
     , TestLabel "nullableFitWithNullsNoCrash" nullableFitWithNullsNoCrashTest
     , TestLabel "numericExprsWithTermsMixed" numericExprsWithTermsMixedTest
+    , TestLabel "probsFromIndicesBasic" probsFromIndicesBasic
+    , TestLabel "probsFromIndicesSubset" probsFromIndicesSubset
+    , TestLabel "probsFromIndicesSingleClass" probsFromIndicesSingleClass
+    , TestLabel "buildProbTreeLeaf" buildProbTreeLeaf
+    , TestLabel "buildProbTreeBranch" buildProbTreeBranch
+    , TestLabel "probExprsLeaf" probExprsLeaf
+    , TestLabel "probExprsMissingClass" probExprsMissingClass
+    , TestLabel "probExprsAllClasses" probExprsAllClasses
+    , TestLabel "probsSumToOne" probsSumToOne
+    , TestLabel "probArgmaxMatchesClassifier" probArgmaxMatchesClassifier
     ]

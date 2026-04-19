@@ -19,10 +19,11 @@ import qualified Data.Text as T
 import Data.Text.Encoding
 import Data.Time
 import Data.Time.Clock.POSIX (posixSecondsToUTCTime)
-import DataFrame.Errors (DataFrameException (ColumnNotFoundException))
+import qualified Data.Vector as V
+import DataFrame.Errors (DataFrameException (ColumnsNotFoundException))
 import DataFrame.Internal.Binary (littleEndianWord32)
 import qualified DataFrame.Internal.Column as DI
-import DataFrame.Internal.DataFrame (DataFrame)
+import DataFrame.Internal.DataFrame (DataFrame, columns)
 import DataFrame.Internal.Expression (Expr, getColumns)
 import qualified DataFrame.Operations.Core as DI
 import DataFrame.Operations.Merge ()
@@ -63,6 +64,7 @@ These options are applied in this order:
 1. predicate filtering
 2. column projection
 3. row range
+4. safe column promotion
 
 Column selection for @selectedColumns@ uses leaf column names only.
 -}
@@ -75,6 +77,8 @@ data ParquetReadOptions = ParquetReadOptions
     -- ^ Optional row filter expression applied before projection.
     , rowRange :: Maybe (Int, Int)
     -- ^ Optional row slice @(start, end)@ with start-inclusive/end-exclusive semantics.
+    , safeColumns :: Bool
+    -- ^ When True, every column is promoted to OptionalColumn after read, regardless of nullability in the schema.
     }
     deriving (Eq, Show)
 
@@ -87,6 +91,7 @@ ParquetReadOptions
     { selectedColumns = Nothing
     , predicate = Nothing
     , rowRange = Nothing
+    , safeColumns = False
     }
 @
 -}
@@ -96,6 +101,7 @@ defaultParquetReadOptions =
         { selectedColumns = Nothing
         , predicate = Nothing
         , rowRange = Nothing
+        , safeColumns = False
         }
 
 -- Public API --------------------------------------------------------------
@@ -179,22 +185,21 @@ _readParquetWithOpts extraConfig opts path = withFileBufferedOrSeekable extraCon
              in unless
                     (L.null missing)
                     ( throw
-                        ( ColumnNotFoundException
-                            (T.pack $ show missing)
+                        ( ColumnsNotFoundException
+                            missing
                             "readParquetWithOpts"
                             availableSelectedColumns
                         )
                     )
 
-    let totalRows = sum (map (fromIntegral . rowGroupNumRows) (rowGroups fileMetadata)) :: Int
-    colMutMap <- newIORef (M.empty :: M.Map T.Text DI.MutableColumn)
-    colOffMap <- newIORef (M.empty :: M.Map T.Text Int)
+    -- Collect per-column chunk lists; concatenate at the end to preserve bitmaps.
+    colListMap <- newIORef (M.empty :: M.Map T.Text [DI.Column])
     lTypeMap <- newIORef (M.empty :: M.Map T.Text LogicalType)
 
     let schemaElements = schema fileMetadata
     let sNodes = parseAll (drop 1 schemaElements)
     let getTypeLength :: [String] -> Maybe Int32
-        getTypeLength path = findTypeLength schemaElements path 0
+        getTypeLength colPath = findTypeLength schemaElements colPath (0 :: Int)
           where
             findTypeLength [] _ _ = Nothing
             findTypeLength (s : ss) targetPath depth
@@ -208,7 +213,7 @@ _readParquetWithOpts extraConfig opts path = withFileBufferedOrSeekable extraCon
             pathToElement _ _ _ = []
 
     forM_ (rowGroups fileMetadata) $ \rowGroup -> do
-        forM_ (zip (rowGroupColumns rowGroup) [0 ..]) $ \(colChunk, colIdx) -> do
+        forM_ (zip (rowGroupColumns rowGroup) [(0 :: Int) ..]) $ \(colChunk, colIdx) -> do
             let metadata = columnMetaData colChunk
             let colPath = columnPathInSchema metadata
             let cleanPath = cleanColPath sNodes colPath
@@ -261,22 +266,13 @@ _readParquetWithOpts extraConfig opts path = withFileBufferedOrSeekable extraCon
                         maybeTypeLength
                         lType
 
-                mutMapSnap <- readIORef colMutMap
-                case M.lookup colFullName mutMapSnap of
-                    Nothing -> do
-                        mc <- DI.newMutableColumn totalRows column
-                        DI.copyIntoMutableColumn mc 0 column
-                        modifyIORef' colMutMap (M.insert colFullName mc)
-                        modifyIORef' colOffMap (M.insert colFullName (DI.columnLength column))
-                    Just mc -> do
-                        off <- (M.! colFullName) <$> readIORef colOffMap
-                        DI.copyIntoMutableColumn mc off column
-                        modifyIORef' colOffMap (M.adjust (+ DI.columnLength column) colFullName)
+                modifyIORef' colListMap (M.insertWith (++) colFullName [column])
                 modifyIORef' lTypeMap (M.insert colFullName lType)
 
-    finalMutMap <- readIORef colMutMap
-    finalColMap <-
-        M.traverseWithKey (\_ mc -> DI.freezeMutableColumn mc) finalMutMap
+    finalListMap <- readIORef colListMap
+    -- Reverse the accumulated lists (they were prepended) and concat columns per-name,
+    -- preserving bitmaps correctly via concatManyColumns.
+    let finalColMap = M.map (DI.concatManyColumns . reverse) finalListMap
     finalLTypeMap <- readIORef lTypeMap
     let orderedColumns =
             map
@@ -349,9 +345,15 @@ applyPredicate :: ParquetReadOptions -> DataFrame -> DataFrame
 applyPredicate opts df =
     maybe df (`DS.filterWhere` df) (predicate opts)
 
+applySafeRead :: ParquetReadOptions -> DataFrame -> DataFrame
+applySafeRead opts df
+    | safeColumns opts = df{columns = V.map DI.ensureOptional (columns df)}
+    | otherwise = df
+
 applyReadOptions :: ParquetReadOptions -> DataFrame -> DataFrame
 applyReadOptions opts =
-    applyRowRange opts
+    applySafeRead opts
+        . applyRowRange opts
         . applySelectedColumns opts
         . applyPredicate opts
 
@@ -432,7 +434,7 @@ processColumnPages ::
     Maybe Int32 ->
     LogicalType ->
     IO DI.Column
-processColumnPages (maxDef, maxRep) pages pType _ maybeTypeLength lType = do
+processColumnPages (maxDef, maxRep) pages pType _ maybeTypeLength _lType = do
     let dictPages = filter isDictionaryPage pages
     let dataPages = filter isDataPage pages
 

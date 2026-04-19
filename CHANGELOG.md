@@ -1,5 +1,59 @@
 # Revision history for dataframe
 
+## 1.1.1.0
+### New features
+* Add `DataFrame.Typed.Lazy` module — a type-safe lazy query pipeline combining compile-time schema tracking with deferred execution.
+* Add `fromCsv` function for parsing a CSV string directly into a DataFrame.
+* Add `DataKinds` extension and `DataFrame.Typed` import to the GHCi file for easier interactive typed dataframe workflows.
+
+### Performance
+* Specialize and inline aggregation functions (`sum`, `mean`, `variance`, `median`, `stddev`, etc.) to avoid expensive numeric conversions at runtime.
+* Remove `Ord` constraint from `Columnable'` and move it to call sites, reducing unnecessary constraint propagation.
+* Replace exponential type-level `If` nesting in typed schema families with linear helper type families, fixing slow compilation times.
+
+### Bug fixes
+* Fix Functions module compilation under GHC 9.10 (#194).
+* Document and test `safeColumns` option in `ParquetReadOptions` (#190).
+
+## 1.1.0.0
+### Breaking changes
+* Remove `OptionalColumn` constructor; fold nullability into `BoxedColumn`/`UnboxedColumn` via bit-packed bitmap.
+* Remove `NFData` instance from `Columnable` constraint.
+
+### New features
+* Add `toCsv` and `toSeparated` for converting a DataFrame to CSV/delimited text without writing to a file.
+* `safeRead` now defaults reading columns to `Maybe a`.
+* Split SIMD CSV reader into a separate `dataframe-fastcsv` package.
+
+### Bug fixes
+* Fix joins for missing key columns (#187).
+* Fix single column not found error when using typed dataframe.
+* Fix Synthesis to use `SafeLookup` constraint.
+* Fix `writeSeparated` ignoring separator parameter (was hardcoded to comma).
+
+### Internal
+* Slice groups now use custom backpermute instead of converting unboxed vectors.
+* Reuse comparison operators in Subset.
+* Refactor `getRowAsText` for readability using pattern guards.
+
+## 1.0.0.1
+* toMarkdownTable is now toMarkdown (mostly used internally)
+* Provide toMarkdown' that outputs string
+* Add associativity to nullable operators
+* Better null dataframe handling/error messages for core operations.
+* Fix some function display names.
+* Examples now build with CI
+
+## 1.0.0.0
+* Fix mappend to respect schema of empty columns.
+* Add cast operators that force column schema
+* Add null aware operators so some operations are easier.
+* Add arrow shim with python example.
+* Add numeric promotion for numeric operations.
+* Add column provenance tracking
+* Add stratified sampling
+* Read files from hugging face
+
 ## 0.7.0.0
 * This release adds A LOT of AI code to the repo (which we'll now pause in favour of refactoring, testing, and completeness for 1.0)
 * The lazy reader now has a custom binary format that it spills to. This almost halved the time it takes to run the 1 billion row challenge. The lazy evaluation now also supports Parquet.

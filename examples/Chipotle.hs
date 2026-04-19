@@ -2,7 +2,7 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeApplications #-}
 
-module Main where
+module Chipotle (run) where
 
 import Data.Maybe
 import qualified Data.Text as T
@@ -19,8 +19,8 @@ $( F.declareColumnsFromCsvWithOpts
     "../data/chipotle.tsv"
  )
 
-main :: IO ()
-main = do
+run :: IO ()
+run = do
     raw <- D.readTsv "../data/chipotle.tsv"
     print $ D.dimensions raw
 
@@ -30,7 +30,7 @@ main = do
     -- Transform the data from a raw string into
     -- respective types (throws error on failure)
     let df = execFrameM raw $ do
-            _ <- deriveM "quantity" (F.ifThenElse (order_id .== 1) (quantity + 2) quantity)
+            _ <- deriveM "quantity" (F.ifThenElse (order_id .==. 1) (quantity + 2) quantity)
             -- Custom parsing: drop dollar sign and parse price as double
             itemPrice <-
                 deriveM
@@ -49,7 +49,7 @@ main = do
         df
             |> D.select [F.name item_name, F.name quantity]
             -- It's more efficient to filter before grouping.
-            |> D.filterWhere (item_name .== "Chicken Burrito")
+            |> D.filterWhere (item_name .==. "Chicken Burrito")
             |> D.groupBy [F.name item_name]
             |> D.aggregate
                 [ "sum" .= F.sum quantity
@@ -62,7 +62,7 @@ main = do
             df
                 |> D.filterWhere
                     ( F.lift (maybe False (T.isInfixOf "Guacamole")) choice_description
-                        .&& (item_name .== "Chicken Bowl")
+                        .&&. (item_name .==. "Chicken Bowl")
                     )
 
     print $ D.take 10 firstOrder

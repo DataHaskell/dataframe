@@ -1,4 +1,6 @@
 {-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE CPP #-}
+{-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE ExplicitNamespaces #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
@@ -44,9 +46,22 @@ import DataFrame.Internal.Interpreter
 import DataFrame.Operations.Core
 import DataFrame.Operations.Merge ()
 import DataFrame.Operations.Transformations (apply)
+import DataFrame.Operators
 import System.Random
 import Type.Reflection
 import Prelude hiding (filter, take)
+
+#if MIN_VERSION_random(1,3,0)
+type SplittableGen g = (SplitGen g, RandomGen g)
+
+splitForStratified :: SplittableGen g => g -> (g, g)
+splitForStratified = splitGen
+#else
+type SplittableGen g = RandomGen g
+
+splitForStratified :: SplittableGen g => g -> (g, g)
+splitForStratified = split
+#endif
 
 -- | O(k * n) Take the first n rows of a DataFrame.
 take :: Int -> DataFrame -> DataFrame
@@ -116,16 +131,39 @@ filter ::
 filter (Col filterColumnName) condition df = case getColumn filterColumnName df of
     Nothing ->
         throw $
-            ColumnNotFoundException filterColumnName "filter" (M.keys $ columnIndices df)
-    Just (BoxedColumn (column :: V.Vector b)) -> filterByVector filterColumnName column condition df
-    Just (OptionalColumn (column :: V.Vector b)) -> filterByVector filterColumnName column condition df
-    Just (UnboxedColumn (column :: VU.Vector b)) -> filterByVector filterColumnName column condition df
+            ColumnsNotFoundException [filterColumnName] "filter" (M.keys $ columnIndices df)
+    Just _col@(BoxedColumn bm (column :: V.Vector b)) ->
+        -- Check direct type match first, then try Maybe b match for nullable columns
+        case testEquality (typeRep @a) (typeRep @b) of
+            Just Refl -> filterByVector filterColumnName column condition df
+            Nothing -> case (bm, typeRep @a) of
+                (Just bm', App tMaybe tInner) -> case eqTypeRep tMaybe (typeRep @Maybe) of
+                    Just HRefl -> case testEquality tInner (typeRep @b) of
+                        Just Refl ->
+                            let maybeVec = V.imap (\i v -> if bitmapTestBit bm' i then Just v else Nothing) column
+                             in filterByVector filterColumnName maybeVec condition df
+                        Nothing -> filterByVector filterColumnName column condition df
+                    Nothing -> filterByVector filterColumnName column condition df
+                _ -> filterByVector filterColumnName column condition df
+    Just _col@(UnboxedColumn bm (column :: VU.Vector b)) ->
+        case testEquality (typeRep @a) (typeRep @b) of
+            Just Refl -> filterByVector filterColumnName column condition df
+            Nothing -> case (bm, typeRep @a) of
+                (Just bm', App tMaybe tInner) -> case eqTypeRep tMaybe (typeRep @Maybe) of
+                    Just HRefl -> case testEquality tInner (typeRep @b) of
+                        Just Refl ->
+                            let maybeVec = V.generate (VU.length column) $ \i ->
+                                    if bitmapTestBit bm' i then Just (VU.unsafeIndex column i) else Nothing
+                             in filterByVector filterColumnName maybeVec condition df
+                        Nothing -> filterByVector filterColumnName column condition df
+                    Nothing -> filterByVector filterColumnName column condition df
+                _ -> filterByVector filterColumnName column condition df
 filter expr condition df =
     let
-        (TColumn col) = case interpret @a df (normalize expr) of
+        (TColumn col') = case interpret @a df (normalize expr) of
             Left e -> throw e
             Right c -> c
-        indexes = case findIndices condition col of
+        indexes = case findIndices condition col' of
             Right ixs -> ixs
             Left e -> throw e
         c' = snd $ dataframeDimensions df
@@ -173,10 +211,10 @@ filterBy = flip filter
 filterWhere :: Expr Bool -> DataFrame -> DataFrame
 filterWhere expr df =
     let
-        (TColumn col) = case interpret @Bool df (normalize expr) of
+        (TColumn col') = case interpret @Bool df (normalize expr) of
             Left e -> throw e
             Right c -> c
-        indexes = case findIndices id col of
+        indexes = case findIndices id col' of
             Right ixs -> ixs
             Left e -> throw e
         c' = snd $ dataframeDimensions df
@@ -191,21 +229,31 @@ filterWhere expr df =
 > filterJust "col" df
 -}
 filterJust :: T.Text -> DataFrame -> DataFrame
-filterJust name df = case getColumn name df of
+filterJust colName df = case getColumn colName df of
     Nothing ->
-        throw $ ColumnNotFoundException name "filterJust" (M.keys $ columnIndices df)
-    Just column@(OptionalColumn (col :: V.Vector (Maybe a))) -> filter (Col @(Maybe a) name) isJust df & apply @(Maybe a) fromJust name
-    Just column -> df
+        throw $
+            ColumnsNotFoundException [colName] "filterJust" (M.keys $ columnIndices df)
+    Just column | hasMissing column -> case column of
+        BoxedColumn (Just _) (_col :: V.Vector a) ->
+            filter (Col @(Maybe a) colName) isJust df & apply @(Maybe a) fromJust colName
+        UnboxedColumn (Just _) (_col :: VU.Vector a) ->
+            filter (Col @(Maybe a) colName) isJust df & apply @(Maybe a) fromJust colName
+        _ -> df
+    Just _ -> df
 
 {- | O(k) returns all rows with `Nothing` in a give column.
 
 > filterNothing "col" df
 -}
 filterNothing :: T.Text -> DataFrame -> DataFrame
-filterNothing name df = case getColumn name df of
+filterNothing colName df = case getColumn colName df of
     Nothing ->
-        throw $ ColumnNotFoundException name "filterNothing" (M.keys $ columnIndices df)
-    Just (OptionalColumn (col :: V.Vector (Maybe a))) -> filter (Col @(Maybe a) name) isNothing df
+        throw $
+            ColumnsNotFoundException [colName] "filterNothing" (M.keys $ columnIndices df)
+    Just column | hasMissing column -> case column of
+        BoxedColumn (Just _) (_col :: V.Vector a) -> filter (Col @(Maybe a) colName) isNothing df
+        UnboxedColumn (Just _) (_col :: VU.Vector a) -> filter (Col @(Maybe a) colName) isNothing df
+        _ -> df
     _ -> df
 
 {- | O(n * k) removes all rows with `Nothing` from the dataframe.
@@ -228,7 +276,7 @@ filterAllNothing df = foldr filterNothing df (columnNames df)
 > cube (10, 5) df
 -}
 cube :: (Int, Int) -> DataFrame -> DataFrame
-cube (length, width) = take length . selectBy [ColumnIndexRange (0, width - 1)]
+cube (len, width) = take len . selectBy [ColumnIndexRange (0, width - 1)]
 
 {- | O(n) Selects a number of columns in a given dataframe.
 
@@ -242,8 +290,8 @@ select cs df
     | L.null cs = empty
     | any (`notElem` columnNames df) cs =
         throw $
-            ColumnNotFoundException
-                (T.pack $ show $ cs L.\\ columnNames df)
+            ColumnsNotFoundException
+                (cs L.\\ columnNames df)
                 "select"
                 (columnNames df)
     | otherwise =
@@ -252,8 +300,8 @@ select cs df
          in result{derivingExpressions = filteredExprs}
   where
     addKeyValue d k = fromMaybe df $ do
-        col <- getColumn k df
-        pure $ insertColumn k col d
+        col' <- getColumn k df
+        pure $ insertColumn k col' d
 
 data SelectionCriteria
     = ColumnProperty (Column -> Bool)
@@ -307,7 +355,7 @@ selectBy xs df = select finalSelection df
   where
     finalSelection = Prelude.filter (`S.member` columnsWithProperties) (columnNames df)
     columnsWithProperties = S.fromList (L.foldl' columnWithProperty [] xs)
-    columnWithProperty acc (ColumnName name) = acc ++ [name]
+    columnWithProperty acc (ColumnName colName) = acc ++ [colName]
     columnWithProperty acc (ColumnNameProperty f) = acc ++ L.filter f (columnNames df)
     columnWithProperty acc (ColumnTextRange (from, to)) =
         acc
@@ -316,9 +364,9 @@ selectBy xs df = select finalSelection df
     columnWithProperty acc (ColumnIndexRange (from, to)) = acc ++ Prelude.take (to - from + 1) (Prelude.drop from (columnNames df))
     columnWithProperty acc (ColumnProperty f) =
         acc
-            ++ map fst (L.filter (\(k, v) -> v `elem` ixs) (M.toAscList (columnIndices df)))
+            ++ map fst (L.filter (\(_k, v) -> v `elem` ixs) (M.toAscList (columnIndices df)))
       where
-        ixs = V.ifoldl' (\acc i c -> if f c then i : acc else acc) [] (columns df)
+        ixs = V.ifoldl' (\acc' i c -> if f c then i : acc' else acc') [] (columns df)
 
 {- | O(n) inverse of select
 
@@ -344,24 +392,13 @@ ghci> D.sample (mkStdGen 137) 0.1 df
 sample :: (RandomGen g) => g -> Double -> DataFrame -> DataFrame
 sample pureGen p df =
     let
-        rand = generateRandomVector pureGen (fst (dataframeDimensions df))
+        rand = mkRandom pureGen (fst (dataframeDimensions df)) (0 :: Double) 1
+        cRand = col @Double "__rand__"
      in
         df
-            & insertUnboxedVector "__rand__" rand
-            & filterWhere
-                ( Binary
-                    ( MkBinaryOp
-                        { binaryFn = (>=)
-                        , binaryName = "geq"
-                        , binarySymbol = Just ">="
-                        , binaryCommutative = False
-                        , binaryPrecedence = 1
-                        }
-                    )
-                    (Col @Double "__rand__")
-                    (Lit (1 - p))
-                )
-            & exclude ["__rand__"]
+            & insertColumn (name cRand) rand
+            & filterWhere (cRand .>=. Lit (1 - p))
+            & exclude [name cRand]
 
 {- | Split a dataset into two. The first in the tuple gets a sample of p (0 <= p <= 1) and the second gets (1 - p). This is useful for creating test and train splits.
 
@@ -376,39 +413,17 @@ randomSplit ::
     (RandomGen g) => g -> Double -> DataFrame -> (DataFrame, DataFrame)
 randomSplit pureGen p df =
     let
-        rand = generateRandomVector pureGen (fst (dataframeDimensions df))
-        withRand = df & insertUnboxedVector "__rand__" rand
+        rand = mkRandom pureGen (fst (dataframeDimensions df)) (0 :: Double) 1
+        cRand = col @Double "__rand__"
+        withRand = df & insertColumn (name cRand) rand
      in
         ( withRand
-            & filterWhere
-                ( Binary
-                    ( MkBinaryOp
-                        { binaryFn = (<=)
-                        , binaryName = "leq"
-                        , binarySymbol = Just "<="
-                        , binaryCommutative = False
-                        , binaryPrecedence = 1
-                        }
-                    )
-                    (Col @Double "__rand__")
-                    (Lit p)
-                )
-            & exclude ["__rand__"]
+            & filterWhere (cRand .<=. Lit p)
+            & exclude [name cRand]
         , withRand
             & filterWhere
-                ( Binary
-                    ( MkBinaryOp
-                        { binaryFn = (>)
-                        , binaryName = "gt"
-                        , binarySymbol = Just ">"
-                        , binaryCommutative = False
-                        , binaryPrecedence = 1
-                        }
-                    )
-                    (Col @Double "__rand__")
-                    (Lit p)
-                )
-            & exclude ["__rand__"]
+                (cRand .>. Lit p)
+            & exclude [name cRand]
         )
 
 {- | Creates n folds of a dataframe.
@@ -423,71 +438,42 @@ ghci> D.kFolds (mkStdGen 137) 5 df
 kFolds :: (RandomGen g) => g -> Int -> DataFrame -> [DataFrame]
 kFolds pureGen folds df =
     let
-        rand = generateRandomVector pureGen (fst (dataframeDimensions df))
-        withRand = df & insertUnboxedVector "__rand__" rand
+        rand = mkRandom pureGen (fst (dataframeDimensions df)) (0 :: Double) 1
+        cRand = col @Double "__rand__"
+        withRand = df & insertColumn (name cRand) rand
         partitionSize = 1 / fromIntegral folds
         singleFold n d =
-            d
-                & filterWhere
-                    ( Binary
-                        ( MkBinaryOp
-                            { binaryFn = (>=)
-                            , binaryName = "geq"
-                            , binarySymbol = Just ">="
-                            , binaryCommutative = False
-                            , binaryPrecedence = 1
-                            }
-                        )
-                        (Col @Double "__rand__")
-                        (Lit (fromIntegral n * partitionSize))
-                    )
+            d & filterWhere (cRand .>=. Lit (fromIntegral n * partitionSize))
         go (-1) _ = []
         go n d =
             let
                 d' = singleFold n d
-                d'' =
-                    d
-                        & filterWhere
-                            ( Binary
-                                ( MkBinaryOp
-                                    { binaryFn = (<)
-                                    , binaryName = "lt"
-                                    , binarySymbol = Just "<"
-                                    , binaryCommutative = False
-                                    , binaryPrecedence = 1
-                                    }
-                                )
-                                (Col @Double "__rand__")
-                                (Lit (fromIntegral n * partitionSize))
-                            )
+                d'' = d & filterWhere (cRand .<. Lit (fromIntegral n * partitionSize))
              in
                 d' : go (n - 1) d''
      in
-        map (exclude ["__rand__"]) (go (folds - 1) withRand)
-
-generateRandomVector :: (RandomGen g) => g -> Int -> VU.Vector Double
-generateRandomVector pureGen k = VU.fromList $ go pureGen k
-  where
-    go g 0 = []
-    go g n =
-        let
-            (v, g') = uniformR (0 :: Double, 1 :: Double) g
-         in
-            v : go g' (n - 1)
+        map (exclude [name cRand]) (go (folds - 1) withRand)
 
 -- | Convert any Column to a vector of Text labels (one per row).
 columnToTextVec :: Column -> V.Vector T.Text
-columnToTextVec (BoxedColumn (col :: V.Vector a)) =
-    case testEquality (typeRep @a) (typeRep @T.Text) of
-        Just Refl -> col
-        Nothing -> V.map (T.pack . show) col
-columnToTextVec (UnboxedColumn col) = V.map (T.pack . show) (V.convert col)
-columnToTextVec (OptionalColumn col) = V.map (T.pack . show) col
+columnToTextVec (BoxedColumn bm (col' :: V.Vector a)) =
+    case bm of
+        Nothing -> case testEquality (typeRep @a) (typeRep @T.Text) of
+            Just Refl -> col'
+            Nothing -> V.map (T.pack . show) col'
+        Just bitmap ->
+            V.imap (\i x -> if bitmapTestBit bitmap i then T.pack (show x) else "null") col'
+columnToTextVec (UnboxedColumn bm col') =
+    case bm of
+        Nothing -> V.map (T.pack . show) (V.convert col')
+        Just bitmap ->
+            V.generate (VU.length col') $ \i ->
+                if bitmapTestBit bitmap i then T.pack (show (col' VU.! i)) else "null"
 
 -- | Build a map from stringified label to row indices.
 groupByIndices :: Column -> M.Map T.Text (VU.Vector Int)
-groupByIndices col =
-    let textVec = columnToTextVec col
+groupByIndices col' =
+    let textVec = columnToTextVec col'
         (grouped, _) =
             V.foldl'
                 (\(!m, !i) key -> (M.insertWith (++) key [i] m, i + 1))
@@ -513,17 +499,17 @@ ghci> D.stratifiedSample (mkStdGen 42) 0.8 "label" df
 -}
 stratifiedSample ::
     forall a g.
-    (SplitGen g, RandomGen g, Columnable a) =>
+    (SplittableGen g, Columnable a) =>
     g -> Double -> Expr a -> DataFrame -> DataFrame
 stratifiedSample gen p strataCol df =
-    let col = case strataCol of
-            Col name -> unsafeGetColumn name df
+    let col' = case strataCol of
+            Col colName -> unsafeGetColumn colName df
             _ -> unwrapTypedColumn (either throw id (interpret @a df strataCol))
-        groups = M.elems (groupByIndices col)
+        groups = M.elems (groupByIndices col')
         go _ [] = mempty
         go g (ixs : rest) =
             let stratum = rowsAtIndices ixs df
-                (g1, g2) = splitGen g
+                (g1, g2) = splitForStratified g
              in sample g1 p stratum <> go g2 rest
      in go gen groups
 
@@ -537,17 +523,17 @@ ghci> D.stratifiedSplit (mkStdGen 42) 0.8 "label" df
 -}
 stratifiedSplit ::
     forall a g.
-    (SplitGen g, RandomGen g, Columnable a) =>
+    (SplittableGen g, Columnable a) =>
     g -> Double -> Expr a -> DataFrame -> (DataFrame, DataFrame)
 stratifiedSplit gen p strataCol df =
-    let col = case strataCol of
-            Col name -> unsafeGetColumn name df
+    let col' = case strataCol of
+            Col colName -> unsafeGetColumn colName df
             _ -> unwrapTypedColumn (either throw id (interpret @a df strataCol))
-        groups = M.elems (groupByIndices col)
+        groups = M.elems (groupByIndices col')
         go _ [] = (mempty, mempty)
         go g (ixs : rest) =
             let stratum = rowsAtIndices ixs df
-                (g1, g2) = splitGen g
+                (g1, g2) = splitForStratified g
                 (tr, va) = randomSplit g1 p stratum
                 (trAcc, vaAcc) = go g2 rest
              in (tr <> trAcc, va <> vaAcc)

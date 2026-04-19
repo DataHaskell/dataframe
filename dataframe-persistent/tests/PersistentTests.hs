@@ -36,7 +36,7 @@ import System.IO.Temp (withSystemTempFile)
 import Test.HUnit
 import UnliftIO.Resource (ResourceT)
 
-import DataFrame.Functions ((.<))
+import DataFrame.Functions ((.<.))
 
 -- Define test entities
 share
@@ -196,7 +196,7 @@ testDataFrameOperations = TestCase $ withTestDb $ do
         assertEqual "Young users count" 2 (nRows youngUsers)
 
         -- Sort operation
-        let sorted = DF.sortBy [DF.Asc "age"] df
+        let sorted = DF.sortBy [DF.Asc (F.col @Int "age")] df
         let ages = DF.columnAsList test_user_age sorted
         assertEqual "Ages sorted" [25, 28, 30, 35] ages
 
@@ -204,7 +204,7 @@ testDataFrameOperations = TestCase $ withTestDb $ do
         let withAgeGroup =
                 DF.derive @Text
                     "age_group"
-                    (F.ifThenElse (test_user_age .< 30) "young" "adult")
+                    (F.ifThenElse (test_user_age .<. 30) "young" "adult")
                     df
         assertEqual "Has age_group column" 5 (length $ DF.columnNames withAgeGroup)
 

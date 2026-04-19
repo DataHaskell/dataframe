@@ -31,7 +31,9 @@ addBoxedColumn =
     TestCase
         ( assertEqual
             "Two columns should be equal"
-            (Just $ DI.BoxedColumn (V.fromList ["Thuba" :: T.Text, "Zodwa", "Themba"]))
+            ( Just $
+                DI.BoxedColumn Nothing (V.fromList ["Thuba" :: T.Text, "Zodwa", "Themba"])
+            )
             ( DI.getColumn "new" $
                 D.insertVector "new" (V.fromList ["Thuba" :: T.Text, "Zodwa", "Themba"]) D.empty
             )
@@ -57,7 +59,7 @@ addUnboxedColumn =
     TestCase
         ( assertEqual
             "Value should be boxed"
-            (Just $ DI.UnboxedColumn (VU.fromList [1 :: Int, 2, 3]))
+            (Just $ DI.UnboxedColumn Nothing (VU.fromList [1 :: Int, 2, 3]))
             (DI.getColumn "new" $ D.insertVector "new" (V.fromList [1 :: Int, 2, 3]) D.empty)
         )
 
@@ -77,7 +79,7 @@ addSmallerColumnBoxed =
         ( assertEqual
             "Missing values should be replaced with Nothing"
             ( Just $
-                DI.OptionalColumn
+                DI.fromVector
                     (V.fromList [Just "a" :: Maybe T.Text, Just "b", Just "c", Nothing, Nothing])
             )
             ( DI.getColumn "newer" $
@@ -92,7 +94,7 @@ addSmallerColumnUnboxed =
         ( assertEqual
             "Missing values should be replaced with Nothing"
             ( Just $
-                DI.OptionalColumn
+                DI.fromVector
                     (V.fromList [Just 1 :: Maybe Int, Just 2, Just 3, Nothing, Nothing])
             )
             ( DI.getColumn "newer" $
@@ -106,7 +108,7 @@ insertColumnWithDefaultFillsWithDefault =
     TestCase
         ( assertEqual
             "Missing values should be replaced with Nothing"
-            (Just $ DI.UnboxedColumn (VU.fromList [1 :: Int, 2, 3, 0, 0]))
+            (Just $ DI.UnboxedColumn Nothing (VU.fromList [1 :: Int, 2, 3, 0, 0]))
             ( DI.getColumn "newer" $
                 D.insertVectorWithDefault 0 "newer" (V.fromList [1 :: Int, 2, 3]) $
                     D.insertVector "new" (V.fromList [1 :: Int, 2, 3, 4, 5]) D.empty
@@ -118,7 +120,7 @@ insertColumnWithDefaultFillsLargerNoop =
     TestCase
         ( assertEqual
             "Lists should be the same size"
-            (Just $ DI.UnboxedColumn (VU.fromList [(6 :: Int) .. 10]))
+            (Just $ DI.UnboxedColumn Nothing (VU.fromList [(6 :: Int) .. 10]))
             ( DI.getColumn "newer" $
                 D.insertVectorWithDefault 0 "newer" (V.fromList [(6 :: Int) .. 10]) $
                     D.insertVector "new" (V.fromList [1 :: Int, 2, 3, 4, 5]) D.empty

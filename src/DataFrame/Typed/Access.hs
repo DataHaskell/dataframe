@@ -21,7 +21,7 @@ import GHC.TypeLits (KnownSymbol, symbolVal)
 import DataFrame.Internal.Column (Columnable)
 import DataFrame.Internal.Expression (Expr (Col))
 import qualified DataFrame.Operations.Core as D
-import DataFrame.Typed.Schema (AssertPresent, Lookup)
+import DataFrame.Typed.Schema (AssertPresent, SafeLookup)
 import DataFrame.Typed.Types (TypedDataFrame (..))
 
 {- | Retrieve a column as a boxed 'Vector', with the type determined by
@@ -30,7 +30,7 @@ the schema. The column must exist (enforced at compile time).
 columnAsVector ::
     forall name cols a.
     ( KnownSymbol name
-    , a ~ Lookup name cols
+    , a ~ SafeLookup name cols
     , Columnable a
     , AssertPresent name cols
     ) =>
@@ -44,7 +44,7 @@ columnAsVector (TDF df) =
 columnAsList ::
     forall name cols a.
     ( KnownSymbol name
-    , a ~ Lookup name cols
+    , a ~ SafeLookup name cols
     , Columnable a
     , AssertPresent name cols
     ) =>

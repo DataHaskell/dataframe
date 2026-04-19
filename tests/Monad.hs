@@ -8,7 +8,8 @@ import System.Random
 import Test.QuickCheck
 import Test.QuickCheck.Monadic
 
-roundToTwoPlaces x = fromIntegral (round (x * 100)) / 100.0
+roundToTwoPlaces :: Double -> Double
+roundToTwoPlaces x = fromIntegral (round (x * 100) :: Int) / 100.0
 
 prop_sampleM :: DataFrame -> Gen (Gen Property)
 prop_sampleM df = monadic' $ do
@@ -23,7 +24,8 @@ prop_sampleM df = monadic' $ do
     let realRate = roundToTwoPlaces $ fromIntegral finalRowCount / fromIntegral rowCount
     let diff = abs $ expectedRate - realRate
     -- calculates the 99.99% confidence interval (quickcheck runs 100 tests, aim for 1/10000)
-    let tolerance = 3.89 * sqrt (expectedRate * (1 - expectedRate) / fromIntegral rowCount)
-    assert (diff <= tolerance)
+    let tolerance' = 3.89 * sqrt (expectedRate * (1 - expectedRate) / fromIntegral rowCount)
+    assert (diff <= tolerance')
 
+tests :: [DataFrame -> Gen (Gen Property)]
 tests = [prop_sampleM]

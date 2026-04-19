@@ -1,0 +1,65 @@
+cabal-version:      2.4
+name:               dataframe-fastcsv
+version:            1.0.0.0
+
+synopsis: SIMD-accelerated CSV reader for the dataframe library.
+
+description: A fast, SIMD-accelerated CSV/TSV reader using memory-mapped I/O
+             and carryless multiplication for quote handling. Supports AVX2
+             (x86-64) and ARM NEON with fallback to a pure Haskell state machine.
+
+bug-reports: https://github.com/mchav/dataframe/issues
+license:            MIT
+license-file:       LICENSE
+author:             Michael Chavinda
+maintainer:         mschavinda@gmail.com
+
+copyright: (c) 2024-2025 Michael Chavinda
+category: Data
+extra-source-files: cbits/process_csv.h
+                    tests/data/unstable_csv/*.csv
+                    tests/data/unstable_csv/*.tsv
+
+common warnings
+    ghc-options:
+        -Wincomplete-patterns
+        -Wincomplete-uni-patterns
+        -Wunused-imports
+        -Wunused-packages
+        -Wunused-local-binds
+
+library
+    import: warnings
+    default-extensions: Strict
+    exposed-modules: DataFrame.IO.CSV.Fast
+    build-depends:    base >= 4 && < 5,
+                      array >= 0.5.4.0 && < 0.6,
+                      bytestring >= 0.11 && < 0.13,
+                      containers >= 0.6.7 && < 0.9,
+                      dataframe ^>= 1.1,
+                      mmap >= 0.5.8 && < 0.6,
+                      parallel >= 3.2.2.0 && < 5,
+                      text >= 2.0 && < 3,
+                      vector ^>= 0.13
+    hs-source-dirs:   src
+    c-sources:        cbits/process_csv.c
+    include-dirs:     cbits
+    includes:         process_csv.h
+    install-includes: process_csv.h
+    default-language: Haskell2010
+
+test-suite tests
+    import: warnings
+    type: exitcode-stdio-1.0
+    main-is: Main.hs
+    other-modules: Operations.ReadCsv
+    build-depends:  base >= 4 && < 5,
+                    containers >= 0.6.7 && < 0.9,
+                    dataframe ^>= 1.1,
+                    dataframe-fastcsv,
+                    directory >= 1.3.0.0 && < 2,
+                    HUnit ^>= 1.6,
+                    text >= 2.0 && < 3,
+                    vector ^>= 0.13
+    hs-source-dirs: tests
+    default-language: Haskell2010

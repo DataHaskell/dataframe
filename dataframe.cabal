@@ -1,6 +1,6 @@
 cabal-version:      2.4
 name:               dataframe
-version:            0.7.0.0
+version:            1.1.1.0
 
 synopsis: A fast, safe, and intuitive DataFrame library.
 
@@ -16,10 +16,12 @@ copyright: (c) 2024-2025 Michael Chavinda
 category: Data
 tested-with: GHC ==9.4.8 || ==9.6.7 || ==9.8.4 || ==9.10.3 || ==9.12.2
 extra-doc-files: CHANGELOG.md README.md
-extra-source-files: cbits/process_csv.h
-                    cbits/arrow_abi.h
+extra-source-files: cbits/arrow_abi.h
                     cbits/dataframe_arrow.h
                     cbits/rts_init.c
+                    tests/data/typing/texts.txt
+                    tests/data/typing/texts_with_empties.txt
+                    tests/data/typing/texts_with_empties_and_nullish.txt
                     data/titanic/*.csv
                     data/sharded/*.parquet
                     tests/data/*.csv
@@ -38,13 +40,8 @@ source-repository head
   location: https://github.com/mchav/dataframe
 
 common warnings
-    -- TODO add more warnings, eventually -Wall
     ghc-options:
-        -Wincomplete-patterns
-        -Wincomplete-uni-patterns
-        -Wunused-imports
-        -Wunused-packages
-        -Wunused-local-binds
+        -Wall
 
 library
     import: warnings
@@ -56,6 +53,7 @@ library
                     DataFrame.Display.Web.Plot,
                     DataFrame.Internal.Types,
                     DataFrame.Internal.Expression,
+                    DataFrame.Internal.Grouping,
                     DataFrame.Internal.Interpreter,
                     DataFrame.Internal.Nullable,
                     DataFrame.Internal.Parsing,
@@ -82,7 +80,6 @@ library
                     DataFrame.Display.Terminal.Plot,
                     DataFrame.IO.CSV,
                     DataFrame.IO.JSON,
-                    DataFrame.IO.Unstable.CSV,
                     DataFrame.IO.Unstable.Parquet.Utils,
                     DataFrame.IO.Unstable.Parquet.Dictionary,
                     DataFrame.IO.Unstable.Parquet.Time,
@@ -121,6 +118,7 @@ library
                     DataFrame.Typed.Aggregate,
                     DataFrame.Typed.TH,
                     DataFrame.Typed.Expr,
+                    DataFrame.Typed.Lazy,
                     DataFrame.Typed
     build-depends:    base >= 4 && <5,
                       deepseq >= 1 && < 2,
@@ -148,22 +146,15 @@ library
                       vector-algorithms ^>= 0.9,
                       zlib >= 0.5 && < 1,
                       zstd >= 0.1.2.0 && < 0.2,
-                      mmap >= 0.5.8 && < 0.6,
-                      parallel >= 3.2.2.0 && < 5,
                       stm >= 2.5 && < 3,
                       filepath >= 1.4 && < 2,
                       Glob >= 0.10 && < 1,
                       http-conduit    >= 2.3 && < 3,
-                      streamly-core,
-                      streamly-bytestring,
                       pinch >= 0.5.1.0 && <= 0.5.2.0 ,
-                      streamly-core >= 0.3.0, 
+                      streamly-core >= 0.2.3 && < 0.4,
+                      streamly-bytestring >= 0.2.0 && < 0.4
 
     hs-source-dirs:   src
-    c-sources:        cbits/process_csv.c
-    include-dirs:     cbits
-    includes:         process_csv.h
-    install-includes: process_csv.h
     default-language: Haskell2010
 
 foreign-library dataframe-arrow
@@ -174,7 +165,7 @@ foreign-library dataframe-arrow
                       DataFrame.IR
     build-depends:
         base        >= 4   && < 5,
-        dataframe   >= 0.7 && < 1,
+        dataframe   ^>= 1.1,
         text        >= 2.0 && < 3,
         aeson       >= 0.11 && < 3,
         bytestring  >= 0.11 && < 0.13,
@@ -191,7 +182,7 @@ executable dataframe-benchmark-example
     import: warnings
     main-is: Benchmark.hs
     build-depends:    base >= 4 && < 5,
-                      dataframe >= 0.5 && < 1,
+                      dataframe ^>= 1.1,
                       random >= 1 && < 2,
                       time >= 1.12 && < 2,
                       vector ^>= 0.13,
@@ -203,7 +194,7 @@ executable synthesis
     import: warnings
     main-is: Synthesis.hs
     build-depends:    base >= 4 && < 5,
-                      dataframe >= 0.5 && < 1,
+                      dataframe ^>= 1.1,
                       random >= 1 && < 2,
                       text >= 2.0 && < 3
     hs-source-dirs:   app
@@ -230,7 +221,7 @@ executable lazy-bench
     build-depends:    base >= 4 && < 5,
                       bytestring >= 0.11 && < 0.13,
                       containers >= 0.6.7 && < 0.9,
-                      dataframe >= 0.5 && < 1,
+                      dataframe ^>= 1.1,
                       directory >= 1.3.0.0 && < 2,
                       random >= 1 && < 2,
                       text >= 2.0 && < 3,
@@ -247,7 +238,7 @@ benchmark dataframe-benchmark
     build-depends: base >= 4 && < 5,
                    criterion >= 1 && < 2,
                    process >= 1.6 && < 2,
-                   dataframe >= 0.5 && < 1,
+                   dataframe ^>= 1.1,
                    random >= 1 && < 2,
     default-language: Haskell2010
     ghc-options:
@@ -264,6 +255,7 @@ test-suite tests
                    Functions,
                    GenDataFrame,
                    Internal.Parsing,
+                   IO.CSV,
                    IO.JSON,
                    Operations.Aggregations,
                    Operations.Apply,
@@ -277,6 +269,8 @@ test-suite tests
                    Operations.Nullable,
                    Operations.Provenance,
                    Operations.ReadCsv,
+                   Operations.Window,
+                   Operations.WriteCsv,
                    Operations.Shuffle,
                    Operations.Sort,
                    Operations.Subset,
@@ -285,13 +279,12 @@ test-suite tests
                    Operations.Typing,
                    LazyParquet,
                    Parquet,
+                   ParquetTestData,
                    Properties,
                    Monad
     build-depends:  base >= 4 && < 5,
                     bytestring >= 0.11 && < 0.13,
-                    dataframe >= 0.5 && < 1,
-                    bytestring >= 0.11 && < 0.13,
-                    directory >= 1.3.0.0 && < 2,
+                    dataframe ^>= 1.1,
                     HUnit ^>= 1.6,
                     QuickCheck >= 2 && < 3,
                     random-shuffle >= 0.0.4 && < 1,

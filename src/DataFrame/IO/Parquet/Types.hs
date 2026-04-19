@@ -203,6 +203,7 @@ data PageHeader = PageHeader
     }
     deriving (Show, Eq)
 
+emptyPageHeader :: PageHeader
 emptyPageHeader = PageHeader PAGE_TYPE_UNKNOWN 0 0 0 PAGE_TYPE_HEADER_UNKNOWN
 
 data PageTypeHeader
@@ -232,7 +233,10 @@ data PageTypeHeader
     | PAGE_TYPE_HEADER_UNKNOWN
     deriving (Show, Eq)
 
+emptyDictionaryPageHeader :: PageTypeHeader
 emptyDictionaryPageHeader = DictionaryPageHeader 0 PARQUET_ENCODING_UNKNOWN False
+
+emptyDataPageHeader :: PageTypeHeader
 emptyDataPageHeader =
     DataPageHeader
         0
@@ -240,6 +244,7 @@ emptyDataPageHeader =
         PARQUET_ENCODING_UNKNOWN
         PARQUET_ENCODING_UNKNOWN
         emptyColumnStatistics
+emptyDataPageHeaderV2 :: PageTypeHeader
 emptyDataPageHeaderV2 =
     DataPageHeaderV2
         0

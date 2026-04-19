@@ -1,0 +1,9 @@
+id,score,name
+1,10,alice
+2,20,bob
+3,30,carol
+4,40,dave
+5,50,eve
+6,abc,frank
+7,,grace
+8,80,N/A

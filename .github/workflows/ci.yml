@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    name: GHC ${{ matrix.ghc }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        ghc: ["9.6.7", "9.8.4", "9.10.3", "9.12.2"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: haskell-actions/setup@v2
+        id: setup
+        with:
+          ghc-version: ${{ matrix.ghc }}
+          cabal-version: latest
+
+      - name: Set LIBTORCH_HOME
+        run: echo "LIBTORCH_HOME=$HOME/.cache/libtorch" >> $GITHUB_ENV
+
+      - name: Configure
+        run: |
+          cat > cabal.project <<EOF
+          packages:
+            .
+            examples/
+            dataframe-persistent/
+            dataframe-hasktorch/
+            dataframe-fastcsv/
+          EOF
+
+      - name: Freeze
+        run: cabal freeze
+
+      - name: Cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ steps.setup.outputs.cabal-store }}
+            ${{ env.LIBTORCH_HOME }}
+          key: ${{ runner.os }}-ghc-${{ matrix.ghc }}-${{ hashFiles('cabal.project.freeze') }}
+          restore-keys: ${{ runner.os }}-ghc-${{ matrix.ghc }}-
+
+      - name: Build all packages
+        run: |
+          ./examples/setup_torch.sh
+          cabal build all
+
+      - name: Test all packages
+        run: cabal test all

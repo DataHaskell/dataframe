@@ -142,12 +142,12 @@ $(F.declareColumnsFromCsvFile "./housing.csv")
 main :: IO ()
 main = do
     df <- D.readCsv "./housing.csv"
-    let (isExpensive, dfWithExpensive) = D.deriveWithExpr "is_expensive" (median_house_value .>= 500000) df
+    let (isExpensive, dfWithExpensive) = D.deriveWithExpr "is_expensive" (median_house_value .>=. 500000) df
         (roomsPerHoushold, dfWithRoomsPerHousehold) = D.deriveWithExpr "rooms_per_household" (total_rooms / households) dfWithExpensive
         meanBedrooms = D.meanMaybe total_bedrooms dfWithRoomsPerHousehold
         dfWithTotalBedroomsImputed = D.impute total_bedrooms meanBedrooms dfWithRoomsPerHousehold
 
-    print $ dfWithTotalBedroomsImputed |> D.filterWhere (isExpensive .&& roomsPerHousehold .>= 7 .&& (F.col @Double "total_bedrooms") .>= 200)
+    print $ dfWithTotalBedroomsImputed |> D.filterWhere (isExpensive .&&. roomsPerHousehold .>=. 7 .&&. (F.col @Double "total_bedrooms") .>=. 200)
 ```
 
 Our code is now inundated with different dataframe variables and a bunch of pipeline management. Should we just revert back to using the old `derive` and keep track of names and types ourselves? Not at all. We can use a structure called a `FrameM` to remove this boilerplate while still keeping the guarantees we unlocked before.
@@ -171,11 +171,11 @@ main :: IO ()
 main = do
   df <- D.readCsv "./housing.csv"
   let df' = execFrameM df $ do
-              isExpensive   <- deriveM "is_expensive" (median_house_value .>= 500000)
+              isExpensive   <- deriveM "is_expensive" (median_house_value .>=. 500000)
               roomsPerHousehold <- deriveM "rooms_per_household" (total_rooms / households)
               meanBedrooms   <- inspectM (D.meanMaybe total_bedrooms)
               totalBedrooms  <- imputeM total_bedrooms meanBedrooms
-              filterWhereM (isExpensive .&& roomsPerHousehold .>= 7 .&& totalBedrooms .>= 200)
+              filterWhereM (isExpensive .&&. roomsPerHousehold .>=. 7 .&&.totalBedrooms .>=. 200)
   print df'
 ```
 
@@ -202,7 +202,7 @@ main = do
 
   let ((is_expensive, totalBedrooms), df') =
         runFrameM df $ do
-          is_expensive  <- deriveM "is_expensive" (median_house_value .>= 500000)
+          is_expensive  <- deriveM "is_expensive" (median_house_value .>=. 500000)
           meanBedrooms  <- inspectM (D.meanMaybe total_bedrooms)
           totalBedrooms <- imputeM total_bedrooms meanBedrooms
           -- Return the Exprs we want to reuse outside the monad:
@@ -210,7 +210,7 @@ main = do
 
   print $
     df'
-      |> D.filterWhere (isExpensive .&& totalBedrooms .>= 200)
+      |> D.filterWhere (isExpensive .&&. totalBedrooms .>=. 200)
 ```
 
 Now we can reuse the derived Exprs elsewhere - for example, in plotting, or further filtering with the regular dataframe API.
@@ -220,9 +220,9 @@ We can go ahead and run the complete file with the same command as before.
 ## Type safety, schema evolution, and the “foot‑gun”
 
 What’s type‑safe here?
-* Expressions are typed: `median_house_value .>= 500000` won’t compile if `median_house_value` isn’t numeric.
-`ocean_proximity .&& median_house_value .>= 500000` won’t compile because `.&&` expects a Bool on both sides.
-* Operators are typed: `(.>=)` expects both sides to be numeric Exprs of compatible type; `(.&&)` expects boolean Exprs.
+* Expressions are typed: `median_house_value .>=. 500000` won’t compile if `median_house_value` isn’t numeric.
+`ocean_proximity .&&. median_house_value .>=. 500000` won’t compile because `.&&.` expects a `Bool` on both sides.
+* Operators are typed: `(.>=.)` expects both sides to be numeric Exprs of the same type; `(.&&.)` expects non-nullable boolean Exprs (use `(.&&)` when either side may be `Maybe Bool`).
 
 Where is it not type‑safe?
 * DataFrame schema isn’t in the type: Expressions are name‑based (e.g "median_house_value"), not tied to a specific DataFrame at the type level. This is deliberate: it enables schema evolution (you can add/remove/rename columns without changing every type signature).

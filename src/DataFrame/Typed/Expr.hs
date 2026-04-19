@@ -11,6 +11,7 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE UndecidableInstances #-}
+{-# OPTIONS_GHC -Wno-orphans #-}
 
 {- | Type-safe expression construction for typed DataFrames.
 
@@ -65,11 +66,25 @@ module DataFrame.Typed.Expr (
     (.>=.),
     (.>.),
 
+    -- * Same-type arithmetic operators
+    (.+.),
+    (.-.),
+    (.*.),
+    (./.),
+
+    -- * Same-type exponentiation operators
+    (.^^.),
+    (.^.),
+
     -- * Nullable-aware arithmetic operators
     (.+),
     (.-),
     (.*),
     (./),
+
+    -- * Nullable-aware exponentiation operators
+    (.^^),
+    (.^),
 
     -- * Nullable-aware comparison operators (three-valued logic)
     (.==),
@@ -82,6 +97,8 @@ module DataFrame.Typed.Expr (
     -- * Logical operators
     (.&&.),
     (.||.),
+    (.&&),
+    (.||),
     DataFrame.Typed.Expr.not,
 
     -- * Aggregation combinators
@@ -112,12 +129,11 @@ import Data.String (IsString (..))
 import qualified Data.Text as T
 import GHC.TypeLits (KnownSymbol, Symbol, symbolVal)
 
+import qualified DataFrame.Functions as F
 import DataFrame.Internal.Column (Columnable)
 import DataFrame.Internal.Expression (
-    AggStrategy (..),
     BinaryOp (..),
     Expr (..),
-    MeanAcc (..),
     NamedExpr,
     UExpr (..),
     UnaryOp (..),
@@ -139,7 +155,7 @@ import DataFrame.Internal.Nullable (
  )
 import DataFrame.Internal.Types (Promote, PromoteDiv)
 
-import DataFrame.Typed.Schema (AssertPresent, Lookup)
+import DataFrame.Typed.Schema (AssertPresent, SafeLookup)
 import DataFrame.Typed.Types (TExpr (..), TSortOrder (..))
 import Prelude hiding (maximum, minimum, sum)
 
@@ -156,7 +172,7 @@ salary = col \@\"salary\"
 col ::
     forall (name :: Symbol) cols a.
     ( KnownSymbol name
-    , a ~ Lookup name cols
+    , a ~ SafeLookup name cols
     , Columnable a
     , AssertPresent name cols
     ) =>
@@ -253,8 +269,12 @@ nullLift2 ::
 nullLift2 f (TExpr a) (TExpr b) = TExpr (Binary (MkBinaryOp (applyNull2 f) "nullLift2" Nothing False 0) a b)
 
 infixl 4 .==., ./=., .<., .<=., .>=., .>.
-infixr 3 .&&.
-infixr 2 .||.
+infix 4 .==, ./=, .<, .<=, .>=, .>
+infixr 3 .&&., .&&
+infixr 2 .||., .||
+infixl 6 .+., .-.
+infixl 7 .*., ./.
+infixr 8 .^^., .^^, .^., .^
 
 (.==.) ::
     (Columnable a, Eq a) => TExpr cols a -> TExpr cols a -> TExpr cols Bool
@@ -280,11 +300,56 @@ infixr 2 .||.
     (Columnable a, Ord a) => TExpr cols a -> TExpr cols a -> TExpr cols Bool
 (.>.) (TExpr a) (TExpr b) = TExpr (Binary (MkBinaryOp (>) "gt" (Just ">") False 4) a b)
 
+-- Same-type arithmetic operators
+
+(.+.) :: (Columnable a, Num a) => TExpr cols a -> TExpr cols a -> TExpr cols a
+(.+.) = (+)
+
+(.-.) :: (Columnable a, Num a) => TExpr cols a -> TExpr cols a -> TExpr cols a
+(.-.) = (-)
+
+(.*.) :: (Columnable a, Num a) => TExpr cols a -> TExpr cols a -> TExpr cols a
+(.*.) = (*)
+
+(./.) ::
+    (Columnable a, Fractional a) => TExpr cols a -> TExpr cols a -> TExpr cols a
+(./.) = (/)
+
+-- Same-type exponentiation operators
+
+(.^^.) ::
+    (Columnable a, Columnable b, Fractional a, Integral b) =>
+    TExpr cols a -> TExpr cols b -> TExpr cols a
+(.^^.) (TExpr a) (TExpr b) = TExpr (Binary (MkBinaryOp (^^) "pow" (Just ".^^.") False 8) a b)
+
+(.^.) ::
+    (Columnable a, Columnable b, Num a, Integral b) =>
+    TExpr cols a -> TExpr cols b -> TExpr cols a
+(.^.) (TExpr a) (TExpr b) = TExpr (Binary (MkBinaryOp (^) "pow" (Just ".^.") False 8) a b)
+
 (.&&.) :: TExpr cols Bool -> TExpr cols Bool -> TExpr cols Bool
-(.&&.) (TExpr a) (TExpr b) = TExpr (Binary (MkBinaryOp (&&) "and" (Just "&&") True 3) a b)
+(.&&.) (TExpr a) (TExpr b) = TExpr (Binary (MkBinaryOp (&&) "and" (Just ".&&.") True 3) a b)
 
 (.||.) :: TExpr cols Bool -> TExpr cols Bool -> TExpr cols Bool
-(.||.) (TExpr a) (TExpr b) = TExpr (Binary (MkBinaryOp (||) "or" (Just "||") True 2) a b)
+(.||.) (TExpr a) (TExpr b) = TExpr (Binary (MkBinaryOp (||) "or" (Just ".||.") True 2) a b)
+
+-- | Nullable-aware logical AND. Returns @Maybe Bool@ when either operand is nullable.
+(.&&) ::
+    (NullableCmpOp a b (NullCmpResult a b), BaseType a ~ Bool) =>
+    TExpr cols a ->
+    TExpr cols b ->
+    TExpr cols (NullCmpResult a b)
+(.&&) (TExpr a) (TExpr b) =
+    TExpr (Binary (MkBinaryOp (nullCmpOp (&&)) "nulland" (Just ".&&") True 3) a b)
+
+-- | Nullable-aware logical OR. Returns @Maybe Bool@ when either operand is nullable.
+(.||) ::
+    (NullableCmpOp a b (NullCmpResult a b), BaseType a ~ Bool) =>
+    TExpr cols a ->
+    TExpr cols b ->
+    TExpr cols (NullCmpResult a b)
+(.||) (TExpr a) (TExpr b) =
+    TExpr (Binary (MkBinaryOp (nullCmpOp (||)) "nullor" (Just ".||") True 2) a b)
 
 -------------------------------------------------------------------------------
 -- Nullable-aware arithmetic operators
@@ -292,7 +357,6 @@ infixr 2 .||.
 
 infixl 6 .+, .-
 infixl 7 .*, ./
-infix 4 .==, ./=, .<, .<=, .>=, .>
 
 {- | Nullable-aware addition. Works for all combinations of nullable\/non-nullable operands.
 @col \@\"x\" '.+' col \@\"y\"  -- :: TExpr cols (Maybe Int)  when y :: Maybe Int@
@@ -364,6 +428,34 @@ infix 4 .==, ./=, .<, .<=, .>=, .>
             b
         )
 
+-- | Nullable-aware exponentiation (fractional base, integral exponent).
+(.^^) ::
+    ( Columnable (BaseType a)
+    , Columnable (BaseType b)
+    , Fractional (BaseType a)
+    , Integral (BaseType b)
+    , NumericWidenOp (BaseType a) (BaseType b)
+    , NullLift2Op a b (BaseType a) a
+    , Num (Promote (BaseType a) (BaseType b))
+    ) =>
+    TExpr cols a -> TExpr cols b -> TExpr cols a
+(.^^) (TExpr a) (TExpr b) =
+    TExpr (Binary (MkBinaryOp (applyNull2 (^^)) "pow" (Just ".^^") False 8) a b)
+
+-- | Nullable-aware exponentiation (num base, integral exponent).
+(.^) ::
+    ( Columnable (BaseType a)
+    , Columnable (BaseType b)
+    , Num (BaseType a)
+    , Integral (BaseType b)
+    , NumericWidenOp (BaseType a) (BaseType b)
+    , NullLift2Op a b (BaseType a) a
+    , Num (Promote (BaseType a) (BaseType b))
+    ) =>
+    TExpr cols a -> TExpr cols b -> TExpr cols a
+(.^) (TExpr a) (TExpr b) =
+    TExpr (Binary (MkBinaryOp (applyNull2 (^)) "pow" (Just ".^") False 8) a b)
+
 -------------------------------------------------------------------------------
 -- Nullable-aware comparison operators (three-valued logic)
 -------------------------------------------------------------------------------
@@ -430,33 +522,22 @@ not (TExpr e) = TExpr (Unary (MkUnaryOp Prelude.not "not" (Just "!")) e)
 -------------------------------------------------------------------------------
 
 sum :: (Columnable a, Num a) => TExpr cols a -> TExpr cols a
-sum (TExpr e) = TExpr (Agg (FoldAgg "sum" Nothing (+)) e)
+sum (TExpr e) = TExpr (F.sum e)
 
 mean :: (Columnable a, Real a) => TExpr cols a -> TExpr cols Double
-mean (TExpr e) =
-    TExpr
-        ( Agg
-            ( MergeAgg
-                "mean"
-                (MeanAcc 0.0 0)
-                (\(MeanAcc s c) x -> MeanAcc (s + realToFrac x) (c + 1))
-                (\(MeanAcc s1 c1) (MeanAcc s2 c2) -> MeanAcc (s1 + s2) (c1 + c2))
-                (\(MeanAcc s c) -> if c == 0 then 0 / 0 else s / fromIntegral c)
-            )
-            e
-        )
+mean (TExpr e) = TExpr (F.mean e)
 
 count :: (Columnable a) => TExpr cols a -> TExpr cols Int
-count (TExpr e) = TExpr (Agg (MergeAgg "count" (0 :: Int) (\c _ -> c + 1) (+) id) e)
+count (TExpr e) = TExpr (F.count e)
 
 minimum :: (Columnable a, Ord a) => TExpr cols a -> TExpr cols a
-minimum (TExpr e) = TExpr (Agg (FoldAgg "minimum" Nothing min) e)
+minimum (TExpr e) = TExpr (F.minimum e)
 
 maximum :: (Columnable a, Ord a) => TExpr cols a -> TExpr cols a
-maximum (TExpr e) = TExpr (Agg (FoldAgg "maximum" Nothing max) e)
+maximum (TExpr e) = TExpr (F.maximum e)
 
 collect :: (Columnable a) => TExpr cols a -> TExpr cols [a]
-collect (TExpr e) = TExpr (Agg (FoldAgg "collect" (Just []) (flip (:))) e)
+collect (TExpr e) = TExpr (F.collect e)
 
 -------------------------------------------------------------------------------
 -- Cast / coercion expressions
@@ -464,14 +545,14 @@ collect (TExpr e) = TExpr (Agg (FoldAgg "collect" (Just []) (flip (:))) e)
 
 castExpr ::
     forall b cols src.
-    (Columnable b, Columnable src) => TExpr cols src -> TExpr cols (Maybe b)
+    (Columnable b, Columnable src, Read b) => TExpr cols src -> TExpr cols (Maybe b)
 castExpr (TExpr e) =
     TExpr
         (CastExprWith @b @(Maybe b) @src "castExpr" (either (const Nothing) Just) e)
 
 castExprWithDefault ::
     forall b cols src.
-    (Columnable b, Columnable src) => b -> TExpr cols src -> TExpr cols b
+    (Columnable b, Columnable src, Read b) => b -> TExpr cols src -> TExpr cols b
 castExprWithDefault def (TExpr e) =
     TExpr
         ( CastExprWith @b @b @src
@@ -482,7 +563,8 @@ castExprWithDefault def (TExpr e) =
 
 castExprEither ::
     forall b cols src.
-    (Columnable b, Columnable src) => TExpr cols src -> TExpr cols (Either T.Text b)
+    (Columnable b, Columnable src, Read b) =>
+    TExpr cols src -> TExpr cols (Either T.Text b)
 castExprEither (TExpr e) =
     TExpr
         ( CastExprWith @b @(Either T.Text b) @src
@@ -493,7 +575,7 @@ castExprEither (TExpr e) =
 
 unsafeCastExpr ::
     forall b cols src.
-    (Columnable b, Columnable src) => TExpr cols src -> TExpr cols b
+    (Columnable b, Columnable src, Read b) => TExpr cols src -> TExpr cols b
 unsafeCastExpr (TExpr e) =
     TExpr
         ( CastExprWith @b @b @src
@@ -511,9 +593,9 @@ as :: (Columnable a) => TExpr cols a -> T.Text -> NamedExpr
 as (TExpr e) name = (name, UExpr e)
 
 -- | Create an ascending sort order from a typed expression.
-asc :: (Columnable a) => TExpr cols a -> TSortOrder cols
+asc :: (Columnable a, Ord a) => TExpr cols a -> TSortOrder cols
 asc = Asc
 
 -- | Create a descending sort order from a typed expression.
-desc :: (Columnable a) => TExpr cols a -> TSortOrder cols
+desc :: (Columnable a, Ord a) => TExpr cols a -> TSortOrder cols
 desc = Desc

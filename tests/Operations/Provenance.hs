@@ -3,9 +3,7 @@
 
 module Operations.Provenance where
 
-import qualified Data.List as L
 import qualified Data.Map as M
-import qualified Data.Text as T
 import qualified DataFrame as D
 import qualified DataFrame.Functions as F
 import qualified DataFrame.Internal.Column as DI

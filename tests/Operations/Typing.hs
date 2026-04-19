@@ -1,17 +1,20 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TypeApplications #-}
 
 module Operations.Typing where
 
 import qualified Data.Text as T
+import qualified Data.Text.IO as TIO
 import qualified Data.Vector as V
 import qualified Data.Vector.Unboxed as VU
 import qualified DataFrame as D
 import qualified DataFrame.Internal.Column as DI
+import DataFrame.Internal.DataFrame (getColumn)
 import qualified DataFrame.Operations.Typing as D
 
 import Data.Time (Day, fromGregorian)
-import Test.HUnit (Test (TestCase, TestLabel), assertEqual)
+import Test.HUnit (Test (TestCase, TestLabel), assertEqual, assertFailure)
 
 testData :: D.DataFrame
 testData =
@@ -33,6 +36,41 @@ dimensionsTest =
     , TestLabel "dimensions_emptyDataframeDimensions" emptyDataframeDimensions
     ]
 
+-- Shared data directory
+typingDataDir :: FilePath
+typingDataDir = "./tests/data/typing/"
+
+-- Shared input/expected data
+intsInput :: [T.Text]
+intsInput = T.pack . show <$> ([1 .. 50] :: [Int])
+
+intsExpected :: [Int]
+intsExpected = [1 .. 50]
+
+doublesSpecial :: [Double]
+doublesSpecial = [3.14, 2.22, 8.55, 23.3, 12.22222235049450945049504950]
+
+doublesSpecialInput :: [T.Text]
+doublesSpecialInput = ["3.14", "2.22", "8.55", "23.3", "12.22222235049451"]
+
+doublesExpected :: [Double]
+doublesExpected = [1.0 .. 50.0] ++ doublesSpecial
+
+doublesInput :: [T.Text]
+doublesInput = (T.pack . show <$> ([1.0 .. 50.0] :: [Double])) ++ doublesSpecialInput
+
+intsAndDoublesExpected :: [Double]
+intsAndDoublesExpected = ([1 .. 50] :: [Double]) ++ doublesExpected
+
+intsAndDoublesInput :: [T.Text]
+intsAndDoublesInput = intsInput ++ doublesInput
+
+datesExpected :: [Day]
+datesExpected = [fromGregorian 2020 02 12 .. fromGregorian 2020 02 26]
+
+datesInput :: [T.Text]
+datesInput = T.pack . show <$> datesExpected
+
 -- PARSING TESTS
 ------- 1. SIMPLE CASES
 parseBools :: Test
@@ -41,14 +79,14 @@ parseBools =
         afterParse = [True, True, True] ++ [False, False, False]
         beforeParse :: [T.Text]
         beforeParse = ["True", "true", "TRUE"] ++ ["False", "false", "FALSE"]
-        expected = DI.UnboxedColumn $ VU.fromList afterParse
+        expected = DI.fromVector $ V.fromList afterParse
         actual =
             D.parseDefault (D.defaultParseOptions{D.sampleSize = 10}) $
                 DI.fromVector $
                     V.fromList beforeParse
      in TestCase
             ( assertEqual
-                "Correctly parses Bools without missing values as UnboxedColumn of Bools"
+                "Correctly parses Bools without missing values as OptionalColumn of Maybe Bools"
                 expected
                 actual
             )
@@ -58,15 +96,15 @@ parseInts =
     let afterParse :: [Int]
         afterParse = [1 .. 50]
         beforeParse :: [T.Text]
-        beforeParse = T.pack . show <$> [1 .. 50]
-        expected = DI.UnboxedColumn $ VU.fromList afterParse
+        beforeParse = T.pack . show <$> ([1 .. 50] :: [Int])
+        expected = DI.fromVector $ V.fromList afterParse
         actual =
             D.parseDefault (D.defaultParseOptions{D.sampleSize = 10}) $
                 DI.fromVector $
                     V.fromList beforeParse
      in TestCase
             ( assertEqual
-                "Correctly parses Ints without missing values as UnboxedColumn of Ints"
+                "Correctly parses Ints without missing values as OptionalColumn of Maybe Ints"
                 expected
                 actual
             )
@@ -78,156 +116,49 @@ parseDoubles =
         beforeParse :: [T.Text]
         beforeParse =
             T.pack . show
-                <$> [1.0 .. 50.0] ++ [3.14, 2.22, 8.55, 23.3, 12.22222235049450945049504950]
-        expected = DI.UnboxedColumn $ VU.fromList afterParse
+                <$> ( [1.0 .. 50.0] ++ [3.14, 2.22, 8.55, 23.3, 12.22222235049450945049504950] ::
+                        [Double]
+                    )
+        expected = DI.fromVector $ V.fromList afterParse
         actual =
             D.parseDefault (D.defaultParseOptions{D.sampleSize = 10}) $
                 DI.fromVector $
                     V.fromList beforeParse
      in TestCase
             ( assertEqual
-                "Correctly parses Doubles without missing values as UnboxedColumn of Doubles"
+                "Correctly parses Doubles without missing values as OptionalColumn of Maybe Doubles"
                 expected
                 actual
             )
 
 parseDates :: Test
 parseDates =
-    let afterParse :: [Day]
-        afterParse =
-            [ fromGregorian 2020 02 12
-            , fromGregorian 2020 02 13
-            , fromGregorian 2020 02 14
-            , fromGregorian 2020 02 15
-            , fromGregorian 2020 02 16
-            , fromGregorian 2020 02 17
-            , fromGregorian 2020 02 18
-            , fromGregorian 2020 02 19
-            , fromGregorian 2020 02 20
-            , fromGregorian 2020 02 21
-            , fromGregorian 2020 02 22
-            , fromGregorian 2020 02 23
-            , fromGregorian 2020 02 24
-            , fromGregorian 2020 02 25
-            , fromGregorian 2020 02 26
-            ]
-        beforeParse :: [T.Text]
-        beforeParse =
-            [ "2020-02-12"
-            , "2020-02-13"
-            , "2020-02-14"
-            , "2020-02-15"
-            , "2020-02-16"
-            , "2020-02-17"
-            , "2020-02-18"
-            , "2020-02-19"
-            , "2020-02-20"
-            , "2020-02-21"
-            , "2020-02-22"
-            , "2020-02-23"
-            , "2020-02-24"
-            , "2020-02-25"
-            , "2020-02-26"
-            ]
-        expected = DI.BoxedColumn $ V.fromList afterParse
+    let afterParse = datesExpected
+        beforeParse = datesInput
+        expected = DI.fromVector $ V.fromList afterParse
         actual =
             D.parseDefault (D.defaultParseOptions{D.sampleSize = 10}) $
                 DI.fromVector $
                     V.fromList beforeParse
      in TestCase
             ( assertEqual
-                "Correctly parses Dates without missing values as BoxedColumn of Days"
+                "Correctly parses Dates without missing values as OptionalColumn of Maybe Days"
                 expected
                 actual
             )
 
 parseTexts :: Test
-parseTexts =
-    let afterParse :: [T.Text]
-        afterParse =
-            [ "To"
-            , "protect"
-            , "the"
-            , "world"
-            , "from"
-            , "devastation"
-            , "To"
-            , "unite"
-            , "all"
-            , "people"
-            , "within"
-            , "our"
-            , "nation"
-            , "To"
-            , "denounce"
-            , "the"
-            , "evils"
-            , "of"
-            , "truth"
-            , "and"
-            , "love"
-            , "To"
-            , "extend"
-            , "our"
-            , "reach"
-            , "to"
-            , "the"
-            , "stars"
-            , "above"
-            , "JESSIE!"
-            , "JAMES!"
-            , "TEAM ROCKET BLASTS OFF AT THE SPEED OF LIGHT!"
-            , "Surrender now or prepare to fight!"
-            , "Meowth, that's right!"
-            ]
-        beforeParse :: [T.Text]
-        beforeParse =
-            [ "To"
-            , "protect"
-            , "the"
-            , "world"
-            , "from"
-            , "devastation"
-            , "To"
-            , "unite"
-            , "all"
-            , "people"
-            , "within"
-            , "our"
-            , "nation"
-            , "To"
-            , "denounce"
-            , "the"
-            , "evils"
-            , "of"
-            , "truth"
-            , "and"
-            , "love"
-            , "To"
-            , "extend"
-            , "our"
-            , "reach"
-            , "to"
-            , "the"
-            , "stars"
-            , "above"
-            , "JESSIE!"
-            , "JAMES!"
-            , "TEAM ROCKET BLASTS OFF AT THE SPEED OF LIGHT!"
-            , "Surrender now or prepare to fight!"
-            , "Meowth, that's right!"
-            ]
-        expected = DI.BoxedColumn $ V.fromList afterParse
+parseTexts = TestCase $ do
+    texts <- T.lines <$> TIO.readFile (typingDataDir <> "texts.txt")
+    let expected = DI.fromVector $ V.fromList texts
         actual =
             D.parseDefault (D.defaultParseOptions{D.sampleSize = 10}) $
                 DI.fromVector $
-                    V.fromList beforeParse
-     in TestCase
-            ( assertEqual
-                "Correctly parses Text without missing values as BoxedColumn of Text"
-                expected
-                actual
-            )
+                    V.fromList texts
+    assertEqual
+        "Correctly parses Text without missing values as OptionalColumn of Maybe Text"
+        expected
+        actual
 
 --- 2. COMBINATION CASES
 parseBoolsAndIntsAsTexts :: Test
@@ -236,540 +167,88 @@ parseBoolsAndIntsAsTexts =
         afterParse = ["True", "true", "TRUE"] ++ ["False", "false", "FALSE"] ++ ["1", "0", "1"]
         beforeParse :: [T.Text]
         beforeParse = ["True", "true", "TRUE"] ++ ["False", "false", "FALSE"] ++ ["1", "0", "1"]
-        expected = DI.BoxedColumn $ V.fromList afterParse
+        expected = DI.fromVector $ V.fromList afterParse
         actual =
             D.parseDefault (D.defaultParseOptions{D.sampleSize = 10}) $
                 DI.fromVector $
                     V.fromList beforeParse
      in TestCase
             ( assertEqual
-                "Correctly parses mixture of Bools and Ints as Text"
+                "Correctly parses mixture of Bools and Ints as Maybe Text"
                 expected
                 actual
             )
 
 parseIntsAndDoublesAsDoubles :: Test
 parseIntsAndDoublesAsDoubles =
-    let afterParse :: [Double]
-        afterParse =
-            [ 1
-            , 2
-            , 3
-            , 4
-            , 5
-            , 6
-            , 7
-            , 8
-            , 9
-            , 10
-            , 11
-            , 12
-            , 13
-            , 14
-            , 15
-            , 16
-            , 17
-            , 18
-            , 19
-            , 20
-            , 21
-            , 22
-            , 23
-            , 24
-            , 25
-            , 26
-            , 27
-            , 28
-            , 29
-            , 30
-            , 31
-            , 32
-            , 33
-            , 34
-            , 35
-            , 36
-            , 37
-            , 38
-            , 39
-            , 40
-            , 41
-            , 42
-            , 43
-            , 44
-            , 45
-            , 46
-            , 47
-            , 48
-            , 49
-            , 50
-            , 1.0
-            , 2.0
-            , 3.0
-            , 4.0
-            , 5.0
-            , 6.0
-            , 7.0
-            , 8.0
-            , 9.0
-            , 10.0
-            , 11.0
-            , 12.0
-            , 13.0
-            , 14.0
-            , 15.0
-            , 16.0
-            , 17.0
-            , 18.0
-            , 19.0
-            , 20.0
-            , 21.0
-            , 22.0
-            , 23.0
-            , 24.0
-            , 25.0
-            , 26.0
-            , 27.0
-            , 28.0
-            , 29.0
-            , 30.0
-            , 31.0
-            , 32.0
-            , 33.0
-            , 34.0
-            , 35.0
-            , 36.0
-            , 37.0
-            , 38.0
-            , 39.0
-            , 40.0
-            , 41.0
-            , 42.0
-            , 43.0
-            , 44.0
-            , 45.0
-            , 46.0
-            , 47.0
-            , 48.0
-            , 49.0
-            , 50.0
-            , 3.14
-            , 2.22
-            , 8.55
-            , 23.3
-            , 12.22222235049450945049504950
-            ]
-        beforeParse :: [T.Text]
-        beforeParse =
-            [ "1"
-            , "2"
-            , "3"
-            , "4"
-            , "5"
-            , "6"
-            , "7"
-            , "8"
-            , "9"
-            , "10"
-            , "11"
-            , "12"
-            , "13"
-            , "14"
-            , "15"
-            , "16"
-            , "17"
-            , "18"
-            , "19"
-            , "20"
-            , "21"
-            , "22"
-            , "23"
-            , "24"
-            , "25"
-            , "26"
-            , "27"
-            , "28"
-            , "29"
-            , "30"
-            , "31"
-            , "32"
-            , "33"
-            , "34"
-            , "35"
-            , "36"
-            , "37"
-            , "38"
-            , "39"
-            , "40"
-            , "41"
-            , "42"
-            , "43"
-            , "44"
-            , "45"
-            , "46"
-            , "47"
-            , "48"
-            , "49"
-            , "50"
-            , "1.0"
-            , "2.0"
-            , "3.0"
-            , "4.0"
-            , "5.0"
-            , "6.0"
-            , "7.0"
-            , "8.0"
-            , "9.0"
-            , "10.0"
-            , "11.0"
-            , "12.0"
-            , "13.0"
-            , "14.0"
-            , "15.0"
-            , "16.0"
-            , "17.0"
-            , "18.0"
-            , "19.0"
-            , "20.0"
-            , "21.0"
-            , "22.0"
-            , "23.0"
-            , "24.0"
-            , "25.0"
-            , "26.0"
-            , "27.0"
-            , "28.0"
-            , "29.0"
-            , "30.0"
-            , "31.0"
-            , "32.0"
-            , "33.0"
-            , "34.0"
-            , "35.0"
-            , "36.0"
-            , "37.0"
-            , "38.0"
-            , "39.0"
-            , "40.0"
-            , "41.0"
-            , "42.0"
-            , "43.0"
-            , "44.0"
-            , "45.0"
-            , "46.0"
-            , "47.0"
-            , "48.0"
-            , "49.0"
-            , "50.0"
-            , "3.14"
-            , "2.22"
-            , "8.55"
-            , "23.3"
-            , "12.22222235049451"
-            ]
-        expected = DI.UnboxedColumn $ VU.fromList afterParse
+    let afterParse = intsAndDoublesExpected
+        beforeParse = intsAndDoublesInput
+        expected = DI.fromVector $ V.fromList afterParse
         actual =
             D.parseDefault (D.defaultParseOptions{D.sampleSize = 10}) $
                 DI.fromVector $
                     V.fromList beforeParse
      in TestCase
             ( assertEqual
-                "Correctly parses a mixture of Ints and Doubles as UnboxedColumn of Doubles"
+                "Correctly parses a mixture of Ints and Doubles as OptionalColumn of Maybe Doubles"
                 expected
                 actual
             )
 
 parseIntsAndDatesAsTexts :: Test
 parseIntsAndDatesAsTexts =
-    let afterParse :: [T.Text]
-        afterParse =
-            [ "1"
-            , "2"
-            , "3"
-            , "4"
-            , "5"
-            , "6"
-            , "7"
-            , "8"
-            , "9"
-            , "10"
-            , "11"
-            , "12"
-            , "13"
-            , "14"
-            , "15"
-            , "16"
-            , "17"
-            , "18"
-            , "19"
-            , "20"
-            , "21"
-            , "22"
-            , "23"
-            , "24"
-            , "25"
-            , "26"
-            , "27"
-            , "28"
-            , "29"
-            , "30"
-            , "2020-02-12"
-            , "2020-02-13"
-            , "2020-02-14"
-            , "2020-02-15"
-            , "2020-02-16"
-            , "2020-02-17"
-            , "2020-02-18"
-            , "2020-02-19"
-            , "2020-02-20"
-            ]
+    let data30 = T.pack . show <$> ([1 .. 30] :: [Int])
+        data9dates = take 9 datesInput
+        afterParse :: [T.Text]
+        afterParse = data30 ++ data9dates
         beforeParse :: [T.Text]
-        beforeParse =
-            [ "1"
-            , "2"
-            , "3"
-            , "4"
-            , "5"
-            , "6"
-            , "7"
-            , "8"
-            , "9"
-            , "10"
-            , "11"
-            , "12"
-            , "13"
-            , "14"
-            , "15"
-            , "16"
-            , "17"
-            , "18"
-            , "19"
-            , "20"
-            , "21"
-            , "22"
-            , "23"
-            , "24"
-            , "25"
-            , "26"
-            , "27"
-            , "28"
-            , "29"
-            , "30"
-            , "2020-02-12"
-            , "2020-02-13"
-            , "2020-02-14"
-            , "2020-02-15"
-            , "2020-02-16"
-            , "2020-02-17"
-            , "2020-02-18"
-            , "2020-02-19"
-            , "2020-02-20"
-            ]
-        expected = DI.BoxedColumn $ V.fromList afterParse
+        beforeParse = data30 ++ data9dates
+        expected = DI.fromVector $ V.fromList afterParse
         actual =
             D.parseDefault (D.defaultParseOptions{D.sampleSize = 10}) $
                 DI.fromVector $
                     V.fromList beforeParse
      in TestCase
             ( assertEqual
-                "Correctly parses a mixture of Ints and Dates as BoxedColumn of Texts"
+                "Correctly parses a mixture of Ints and Dates as OptionalColumn of Maybe Texts"
                 expected
                 actual
             )
 
 parseTextsAndDoublesAsTexts :: Test
 parseTextsAndDoublesAsTexts =
-    let afterParse :: [T.Text]
-        afterParse =
-            [ "To"
-            , "protect"
-            , "the"
-            , "world"
-            , "from"
-            , "devastation"
-            , "1.0"
-            , "2.0"
-            , "3.0"
-            , "4.0"
-            , "5.0"
-            , "6.0"
-            , "7.0"
-            , "8.0"
-            , "9.0"
-            , "10.0"
-            , "11.0"
-            , "12.0"
-            , "13.0"
-            , "14.0"
-            , "15.0"
-            , "16.0"
-            , "17.0"
-            , "18.0"
-            , "19.0"
-            , "20.0"
-            , "21.0"
-            , "22.0"
-            , "23.0"
-            , "24.0"
-            , "25.0"
-            , "26.0"
-            , "27.0"
-            , "28.0"
-            , "29.0"
-            , "30.0"
-            , "31.0"
-            , "32.0"
-            , "33.0"
-            , "34.0"
-            , "35.0"
-            , "36.0"
-            , "37.0"
-            , "38.0"
-            , "39.0"
-            , "40.0"
-            , "41.0"
-            , "42.0"
-            , "43.0"
-            , "44.0"
-            , "45.0"
-            , "46.0"
-            , "47.0"
-            , "48.0"
-            , "49.0"
-            , "50.0"
-            , "3.14"
-            , "2.22"
-            , "8.55"
-            , "23.3"
-            , "12.22222235049451"
-            ]
+    let shortTexts = ["To", "protect", "the", "world", "from", "devastation"]
+        afterParse :: [T.Text]
+        afterParse = shortTexts ++ doublesInput
         beforeParse :: [T.Text]
-        beforeParse =
-            [ "To"
-            , "protect"
-            , "the"
-            , "world"
-            , "from"
-            , "devastation"
-            , "1.0"
-            , "2.0"
-            , "3.0"
-            , "4.0"
-            , "5.0"
-            , "6.0"
-            , "7.0"
-            , "8.0"
-            , "9.0"
-            , "10.0"
-            , "11.0"
-            , "12.0"
-            , "13.0"
-            , "14.0"
-            , "15.0"
-            , "16.0"
-            , "17.0"
-            , "18.0"
-            , "19.0"
-            , "20.0"
-            , "21.0"
-            , "22.0"
-            , "23.0"
-            , "24.0"
-            , "25.0"
-            , "26.0"
-            , "27.0"
-            , "28.0"
-            , "29.0"
-            , "30.0"
-            , "31.0"
-            , "32.0"
-            , "33.0"
-            , "34.0"
-            , "35.0"
-            , "36.0"
-            , "37.0"
-            , "38.0"
-            , "39.0"
-            , "40.0"
-            , "41.0"
-            , "42.0"
-            , "43.0"
-            , "44.0"
-            , "45.0"
-            , "46.0"
-            , "47.0"
-            , "48.0"
-            , "49.0"
-            , "50.0"
-            , "3.14"
-            , "2.22"
-            , "8.55"
-            , "23.3"
-            , "12.22222235049451"
-            ]
-        expected = DI.BoxedColumn $ V.fromList afterParse
+        beforeParse = shortTexts ++ doublesInput
+        expected = DI.fromVector $ V.fromList afterParse
         actual =
             D.parseDefault (D.defaultParseOptions{D.sampleSize = 10}) $
                 DI.fromVector $
                     V.fromList beforeParse
      in TestCase
             ( assertEqual
-                "Correctly parses a mixture of Texts and Doubles as BoxedColumn of Texts"
+                "Correctly parses a mixture of Texts and Doubles as OptionalColumn of Maybe Texts"
                 expected
                 actual
             )
 
 parseDatesAndTextsAsTexts :: Test
 parseDatesAndTextsAsTexts =
-    let afterParse :: [T.Text]
-        afterParse =
-            [ "2020-02-12"
-            , "2020-02-13"
-            , "2020-02-14"
-            , "2020-02-15"
-            , "2020-02-16"
-            , "2020-02-17"
-            , "2020-02-18"
-            , "2020-02-19"
-            , "2020-02-20"
-            , "2020-02-21"
-            , "2020-02-22"
-            , "2020-02-23"
-            , "2020-02-24"
-            , "2020-02-25"
-            , "2020-02-26"
-            , "Jessie"
-            , "James"
-            , "Meowth"
-            ]
+    let extra = ["Jessie", "James", "Meowth"]
+        afterParse :: [T.Text]
+        afterParse = datesInput ++ extra
         beforeParse :: [T.Text]
-        beforeParse =
-            [ "2020-02-12"
-            , "2020-02-13"
-            , "2020-02-14"
-            , "2020-02-15"
-            , "2020-02-16"
-            , "2020-02-17"
-            , "2020-02-18"
-            , "2020-02-19"
-            , "2020-02-20"
-            , "2020-02-21"
-            , "2020-02-22"
-            , "2020-02-23"
-            , "2020-02-24"
-            , "2020-02-25"
-            , "2020-02-26"
-            , "Jessie"
-            , "James"
-            , "Meowth"
-            ]
-        expected = DI.BoxedColumn $ V.fromList afterParse
+        beforeParse = datesInput ++ extra
+        expected = DI.fromVector $ V.fromList afterParse
         actual =
             D.parseDefault (D.defaultParseOptions{D.sampleSize = 10}) $
                 DI.fromVector $
                     V.fromList beforeParse
      in TestCase
             ( assertEqual
-                "Correctly parses a mixture of Dates and Texts as BoxedColumn of Texts"
+                "Correctly parses a mixture of Dates and Texts as OptionalColumn of Maybe Texts"
                 expected
                 actual
             )
@@ -782,10 +261,10 @@ parseBoolsWithoutSafeRead =
         afterParse = replicate 10 True ++ replicate 10 False
         beforeParse :: [T.Text]
         beforeParse = replicate 10 "true" ++ replicate 10 "false"
-        expected = DI.UnboxedColumn $ VU.fromList afterParse
+        expected = DI.UnboxedColumn Nothing $ VU.fromList afterParse
         actual =
             D.parseDefault
-                (D.defaultParseOptions{D.sampleSize = 10, D.parseSafe = False})
+                (D.defaultParseOptions{D.sampleSize = 10, D.parseSafe = D.NoSafeRead})
                 $ DI.fromVector
                 $ V.fromList beforeParse
      in TestCase
@@ -797,116 +276,12 @@ parseBoolsWithoutSafeRead =
 
 parseIntsWithoutSafeRead :: Test
 parseIntsWithoutSafeRead =
-    let afterParse :: [Int]
-        afterParse =
-            [ 1
-            , 2
-            , 3
-            , 4
-            , 5
-            , 6
-            , 7
-            , 8
-            , 9
-            , 10
-            , 11
-            , 12
-            , 13
-            , 14
-            , 15
-            , 16
-            , 17
-            , 18
-            , 19
-            , 20
-            , 21
-            , 22
-            , 23
-            , 24
-            , 25
-            , 26
-            , 27
-            , 28
-            , 29
-            , 30
-            , 31
-            , 32
-            , 33
-            , 34
-            , 35
-            , 36
-            , 37
-            , 38
-            , 39
-            , 40
-            , 41
-            , 42
-            , 43
-            , 44
-            , 45
-            , 46
-            , 47
-            , 48
-            , 49
-            , 50
-            ]
-        beforeParse :: [T.Text]
-        beforeParse =
-            [ "1"
-            , "2"
-            , "3"
-            , "4"
-            , "5"
-            , "6"
-            , "7"
-            , "8"
-            , "9"
-            , "10"
-            , "11"
-            , "12"
-            , "13"
-            , "14"
-            , "15"
-            , "16"
-            , "17"
-            , "18"
-            , "19"
-            , "20"
-            , "21"
-            , "22"
-            , "23"
-            , "24"
-            , "25"
-            , "26"
-            , "27"
-            , "28"
-            , "29"
-            , "30"
-            , "31"
-            , "32"
-            , "33"
-            , "34"
-            , "35"
-            , "36"
-            , "37"
-            , "38"
-            , "39"
-            , "40"
-            , "41"
-            , "42"
-            , "43"
-            , "44"
-            , "45"
-            , "46"
-            , "47"
-            , "48"
-            , "49"
-            , "50"
-            ]
-        expected = DI.UnboxedColumn $ VU.fromList afterParse
+    let afterParse = intsExpected
+        beforeParse = intsInput
+        expected = DI.UnboxedColumn Nothing $ VU.fromList afterParse
         actual =
             D.parseDefault
-                (D.defaultParseOptions{D.sampleSize = 10, D.parseSafe = False})
+                (D.defaultParseOptions{D.sampleSize = 10, D.parseSafe = D.NoSafeRead})
                 $ DI.fromVector
                 $ V.fromList beforeParse
      in TestCase
@@ -918,126 +293,12 @@ parseIntsWithoutSafeRead =
 
 parseDoublesWithoutSafeRead :: Test
 parseDoublesWithoutSafeRead =
-    let afterParse :: [Double]
-        afterParse =
-            [ 1.0
-            , 2.0
-            , 3.0
-            , 4.0
-            , 5.0
-            , 6.0
-            , 7.0
-            , 8.0
-            , 9.0
-            , 10.0
-            , 11.0
-            , 12.0
-            , 13.0
-            , 14.0
-            , 15.0
-            , 16.0
-            , 17.0
-            , 18.0
-            , 19.0
-            , 20.0
-            , 21.0
-            , 22.0
-            , 23.0
-            , 24.0
-            , 25.0
-            , 26.0
-            , 27.0
-            , 28.0
-            , 29.0
-            , 30.0
-            , 31.0
-            , 32.0
-            , 33.0
-            , 34.0
-            , 35.0
-            , 36.0
-            , 37.0
-            , 38.0
-            , 39.0
-            , 40.0
-            , 41.0
-            , 42.0
-            , 43.0
-            , 44.0
-            , 45.0
-            , 46.0
-            , 47.0
-            , 48.0
-            , 49.0
-            , 50.0
-            , 3.14
-            , 2.22
-            , 8.55
-            , 23.3
-            , 12.22222235049450945049504950
-            ]
-        beforeParse :: [T.Text]
-        beforeParse =
-            [ "1.0"
-            , "2.0"
-            , "3.0"
-            , "4.0"
-            , "5.0"
-            , "6.0"
-            , "7.0"
-            , "8.0"
-            , "9.0"
-            , "10.0"
-            , "11.0"
-            , "12.0"
-            , "13.0"
-            , "14.0"
-            , "15.0"
-            , "16.0"
-            , "17.0"
-            , "18.0"
-            , "19.0"
-            , "20.0"
-            , "21.0"
-            , "22.0"
-            , "23.0"
-            , "24.0"
-            , "25.0"
-            , "26.0"
-            , "27.0"
-            , "28.0"
-            , "29.0"
-            , "30.0"
-            , "31.0"
-            , "32.0"
-            , "33.0"
-            , "34.0"
-            , "35.0"
-            , "36.0"
-            , "37.0"
-            , "38.0"
-            , "39.0"
-            , "40.0"
-            , "41.0"
-            , "42.0"
-            , "43.0"
-            , "44.0"
-            , "45.0"
-            , "46.0"
-            , "47.0"
-            , "48.0"
-            , "49.0"
-            , "50.0"
-            , "3.14"
-            , "2.22"
-            , "8.55"
-            , "23.3"
-            , "12.22222235049451"
-            ]
-        expected = DI.UnboxedColumn $ VU.fromList afterParse
+    let afterParse = doublesExpected
+        beforeParse = doublesInput
+        expected = DI.UnboxedColumn Nothing $ VU.fromList afterParse
         actual =
             D.parseDefault
-                (D.defaultParseOptions{D.sampleSize = 10, D.parseSafe = False})
+                (D.defaultParseOptions{D.sampleSize = 10, D.parseSafe = D.NoSafeRead})
                 $ DI.fromVector
                 $ V.fromList beforeParse
      in TestCase
@@ -1049,46 +310,12 @@ parseDoublesWithoutSafeRead =
 
 parseDatesWithoutSafeRead :: Test
 parseDatesWithoutSafeRead =
-    let afterParse :: [Day]
-        afterParse =
-            [ fromGregorian 2020 02 12
-            , fromGregorian 2020 02 13
-            , fromGregorian 2020 02 14
-            , fromGregorian 2020 02 15
-            , fromGregorian 2020 02 16
-            , fromGregorian 2020 02 17
-            , fromGregorian 2020 02 18
-            , fromGregorian 2020 02 19
-            , fromGregorian 2020 02 20
-            , fromGregorian 2020 02 21
-            , fromGregorian 2020 02 22
-            , fromGregorian 2020 02 23
-            , fromGregorian 2020 02 24
-            , fromGregorian 2020 02 25
-            , fromGregorian 2020 02 26
-            ]
-        beforeParse :: [T.Text]
-        beforeParse =
-            [ "2020-02-12"
-            , "2020-02-13"
-            , "2020-02-14"
-            , "2020-02-15"
-            , "2020-02-16"
-            , "2020-02-17"
-            , "2020-02-18"
-            , "2020-02-19"
-            , "2020-02-20"
-            , "2020-02-21"
-            , "2020-02-22"
-            , "2020-02-23"
-            , "2020-02-24"
-            , "2020-02-25"
-            , "2020-02-26"
-            ]
-        expected = DI.BoxedColumn $ V.fromList afterParse
+    let afterParse = datesExpected
+        beforeParse = datesInput
+        expected = DI.BoxedColumn Nothing $ V.fromList afterParse
         actual =
             D.parseDefault
-                (D.defaultParseOptions{D.sampleSize = 10, D.parseSafe = False})
+                (D.defaultParseOptions{D.sampleSize = 10, D.parseSafe = D.NoSafeRead})
                 $ DI.fromVector
                 $ V.fromList beforeParse
      in TestCase
@@ -1099,93 +326,18 @@ parseDatesWithoutSafeRead =
             )
 
 parseTextsWithoutSafeRead :: Test
-parseTextsWithoutSafeRead =
-    let afterParse :: [T.Text]
-        afterParse =
-            [ "To"
-            , "protect"
-            , "the"
-            , "world"
-            , "from"
-            , "devastation"
-            , "To"
-            , "unite"
-            , "all"
-            , "people"
-            , "within"
-            , "our"
-            , "nation"
-            , "To"
-            , "denounce"
-            , "the"
-            , "evils"
-            , "of"
-            , "truth"
-            , "and"
-            , "love"
-            , "To"
-            , "extend"
-            , "our"
-            , "reach"
-            , "to"
-            , "the"
-            , "stars"
-            , "above"
-            , "JESSIE!"
-            , "JAMES!"
-            , "TEAM ROCKET BLASTS OFF AT THE SPEED OF LIGHT!"
-            , "Surrender now or prepare to fight!"
-            , "Meowth, that's right!"
-            ]
-        beforeParse :: [T.Text]
-        beforeParse =
-            [ "To"
-            , "protect"
-            , "the"
-            , "world"
-            , "from"
-            , "devastation"
-            , "To"
-            , "unite"
-            , "all"
-            , "people"
-            , "within"
-            , "our"
-            , "nation"
-            , "To"
-            , "denounce"
-            , "the"
-            , "evils"
-            , "of"
-            , "truth"
-            , "and"
-            , "love"
-            , "To"
-            , "extend"
-            , "our"
-            , "reach"
-            , "to"
-            , "the"
-            , "stars"
-            , "above"
-            , "JESSIE!"
-            , "JAMES!"
-            , "TEAM ROCKET BLASTS OFF AT THE SPEED OF LIGHT!"
-            , "Surrender now or prepare to fight!"
-            , "Meowth, that's right!"
-            ]
-        expected = DI.BoxedColumn $ V.fromList afterParse
+parseTextsWithoutSafeRead = TestCase $ do
+    texts <- T.lines <$> TIO.readFile (typingDataDir <> "texts.txt")
+    let expected = DI.BoxedColumn Nothing $ V.fromList texts
         actual =
             D.parseDefault
-                (D.defaultParseOptions{D.sampleSize = 10, D.parseSafe = False})
+                (D.defaultParseOptions{D.sampleSize = 10, D.parseSafe = D.NoSafeRead})
                 $ DI.fromVector
-                $ V.fromList beforeParse
-     in TestCase
-            ( assertEqual
-                "Correctly parses Text without missing values as BoxedColumn of Text"
-                expected
-                actual
-            )
+                $ V.fromList texts
+    assertEqual
+        "Correctly parses Text without missing values as BoxedColumn of Text"
+        expected
+        actual
 
 parseBoolsAndEmptyStringsWithoutSafeRead :: Test
 parseBoolsAndEmptyStringsWithoutSafeRead =
@@ -1193,10 +345,10 @@ parseBoolsAndEmptyStringsWithoutSafeRead =
         afterParse = replicate 10 Nothing ++ replicate 10 (Just True) ++ replicate 10 (Just False)
         beforeParse :: [T.Text]
         beforeParse = replicate 10 "" ++ replicate 10 "true" ++ replicate 10 "false"
-        expected = DI.OptionalColumn $ V.fromList afterParse
+        expected = DI.fromVector $ V.fromList afterParse
         actual =
             D.parseDefault
-                (D.defaultParseOptions{D.sampleSize = 10, D.parseSafe = False})
+                (D.defaultParseOptions{D.sampleSize = 10, D.parseSafe = D.NoSafeRead})
                 $ DI.fromVector
                 $ V.fromList beforeParse
      in TestCase
@@ -1208,126 +360,13 @@ parseBoolsAndEmptyStringsWithoutSafeRead =
 
 parseIntsAndEmptyStringsWithoutSafeRead :: Test
 parseIntsAndEmptyStringsWithoutSafeRead =
-    let afterParse :: [Maybe Int]
-        afterParse =
-            [ Nothing
-            , Nothing
-            , Nothing
-            , Nothing
-            , Nothing
-            , Just 1
-            , Just 2
-            , Just 3
-            , Just 4
-            , Just 5
-            , Just 6
-            , Just 7
-            , Just 8
-            , Just 9
-            , Just 10
-            , Just 11
-            , Just 12
-            , Just 13
-            , Just 14
-            , Just 15
-            , Just 16
-            , Just 17
-            , Just 18
-            , Just 19
-            , Just 20
-            , Just 21
-            , Just 22
-            , Just 23
-            , Just 24
-            , Just 25
-            , Just 26
-            , Just 27
-            , Just 28
-            , Just 29
-            , Just 30
-            , Just 31
-            , Just 32
-            , Just 33
-            , Just 34
-            , Just 35
-            , Just 36
-            , Just 37
-            , Just 38
-            , Just 39
-            , Just 40
-            , Just 41
-            , Just 42
-            , Just 43
-            , Just 44
-            , Just 45
-            , Just 46
-            , Just 47
-            , Just 48
-            , Just 49
-            , Just 50
-            ]
-        beforeParse :: [T.Text]
-        beforeParse =
-            [ ""
-            , ""
-            , ""
-            , ""
-            , ""
-            , "1"
-            , "2"
-            , "3"
-            , "4"
-            , "5"
-            , "6"
-            , "7"
-            , "8"
-            , "9"
-            , "10"
-            , "11"
-            , "12"
-            , "13"
-            , "14"
-            , "15"
-            , "16"
-            , "17"
-            , "18"
-            , "19"
-            , "20"
-            , "21"
-            , "22"
-            , "23"
-            , "24"
-            , "25"
-            , "26"
-            , "27"
-            , "28"
-            , "29"
-            , "30"
-            , "31"
-            , "32"
-            , "33"
-            , "34"
-            , "35"
-            , "36"
-            , "37"
-            , "38"
-            , "39"
-            , "40"
-            , "41"
-            , "42"
-            , "43"
-            , "44"
-            , "45"
-            , "46"
-            , "47"
-            , "48"
-            , "49"
-            , "50"
-            ]
-        expected = DI.OptionalColumn $ V.fromList afterParse
+    let beforeParse = replicate 5 "" ++ intsInput
+        afterParse :: [Maybe Int]
+        afterParse = replicate 5 Nothing ++ map Just intsExpected
+        expected = DI.fromVector $ V.fromList afterParse
         actual =
             D.parseDefault
-                (D.defaultParseOptions{D.sampleSize = 10, D.parseSafe = False})
+                (D.defaultParseOptions{D.sampleSize = 10, D.parseSafe = D.NoSafeRead})
                 $ DI.fromVector
                 $ V.fromList beforeParse
      in TestCase
@@ -1339,136 +378,26 @@ parseIntsAndEmptyStringsWithoutSafeRead =
 
 parseIntsAndDoublesAndEmptyStringsWithoutSafeRead :: Test
 parseIntsAndDoublesAndEmptyStringsWithoutSafeRead =
-    let afterParse :: [Maybe Double]
+    let intGrp = T.pack . show <$> ([1 .. 10] :: [Int])
+        dblGrps =
+            [ T.pack . show <$> ([11.0 .. 20.0] :: [Double])
+            , T.pack . show <$> ([21.0 .. 30.0] :: [Double])
+            , T.pack . show <$> ([31.0 .. 40.0] :: [Double])
+            , T.pack . show <$> ([41.0 .. 50.0] :: [Double])
+            ]
+        beforeParse = intGrp ++ [""] ++ concatMap (\g -> g ++ [""]) dblGrps ++ doublesSpecialInput
+        afterParse :: [Maybe Double]
         afterParse =
-            [ Just 1.0
-            , Just 2.0
-            , Just 3.0
-            , Just 4.0
-            , Just 5.0
-            , Just 6.0
-            , Just 7.0
-            , Just 8.0
-            , Just 9.0
-            , Just 10.0
-            , Nothing
-            , Just 11.0
-            , Just 12.0
-            , Just 13.0
-            , Just 14.0
-            , Just 15.0
-            , Just 16.0
-            , Just 17.0
-            , Just 18.0
-            , Just 19.0
-            , Just 20.0
-            , Nothing
-            , Just 21.0
-            , Just 22.0
-            , Just 23.0
-            , Just 24.0
-            , Just 25.0
-            , Just 26.0
-            , Just 27.0
-            , Just 28.0
-            , Just 29.0
-            , Just 30.0
-            , Nothing
-            , Just 31.0
-            , Just 32.0
-            , Just 33.0
-            , Just 34.0
-            , Just 35.0
-            , Just 36.0
-            , Just 37.0
-            , Just 38.0
-            , Just 39.0
-            , Just 40.0
-            , Nothing
-            , Just 41.0
-            , Just 42.0
-            , Just 43.0
-            , Just 44.0
-            , Just 45.0
-            , Just 46.0
-            , Just 47.0
-            , Just 48.0
-            , Just 49.0
-            , Just 50.0
-            , Nothing
-            , Just 3.14
-            , Just 2.22
-            , Just 8.55
-            , Just 23.3
-            , Just 12.22222235049451
-            ]
-        beforeParse :: [T.Text]
-        beforeParse =
-            [ "1"
-            , "2"
-            , "3"
-            , "4"
-            , "5"
-            , "6"
-            , "7"
-            , "8"
-            , "9"
-            , "10"
-            , ""
-            , "11.0"
-            , "12.0"
-            , "13.0"
-            , "14.0"
-            , "15.0"
-            , "16.0"
-            , "17.0"
-            , "18.0"
-            , "19.0"
-            , "20.0"
-            , ""
-            , "21.0"
-            , "22.0"
-            , "23.0"
-            , "24.0"
-            , "25.0"
-            , "26.0"
-            , "27.0"
-            , "28.0"
-            , "29.0"
-            , "30.0"
-            , ""
-            , "31.0"
-            , "32.0"
-            , "33.0"
-            , "34.0"
-            , "35.0"
-            , "36.0"
-            , "37.0"
-            , "38.0"
-            , "39.0"
-            , "40.0"
-            , ""
-            , "41.0"
-            , "42.0"
-            , "43.0"
-            , "44.0"
-            , "45.0"
-            , "46.0"
-            , "47.0"
-            , "48.0"
-            , "49.0"
-            , "50.0"
-            , ""
-            , "3.14"
-            , "2.22"
-            , "8.55"
-            , "23.3"
-            , "12.22222235049451"
-            ]
-        expected = DI.OptionalColumn $ V.fromList afterParse
+            map Just ([1.0 .. 10.0] :: [Double])
+                ++ [Nothing]
+                ++ concatMap
+                    (\g -> map Just g ++ [Nothing])
+                    [[11.0 .. 20.0], [21.0 .. 30.0], [31.0 .. 40.0], [41.0 .. 50.0]]
+                ++ map Just doublesSpecial
+        expected = DI.fromVector $ V.fromList afterParse
         actual =
             D.parseDefault
-                (D.defaultParseOptions{D.sampleSize = 10, D.parseSafe = False})
+                (D.defaultParseOptions{D.sampleSize = 10, D.parseSafe = D.NoSafeRead})
                 $ DI.fromVector
                 $ V.fromList beforeParse
      in TestCase
@@ -1480,56 +409,15 @@ parseIntsAndDoublesAndEmptyStringsWithoutSafeRead =
 
 parseDatesAndEmptyStringsWithoutSafeRead :: Test
 parseDatesAndEmptyStringsWithoutSafeRead =
-    let afterParse :: [Maybe Day]
-        afterParse =
-            [ Just $ fromGregorian 2020 02 12
-            , Just $ fromGregorian 2020 02 13
-            , Just $ fromGregorian 2020 02 14
-            , Nothing
-            , Just $ fromGregorian 2020 02 15
-            , Just $ fromGregorian 2020 02 16
-            , Just $ fromGregorian 2020 02 17
-            , Nothing
-            , Just $ fromGregorian 2020 02 18
-            , Just $ fromGregorian 2020 02 19
-            , Just $ fromGregorian 2020 02 20
-            , Nothing
-            , Just $ fromGregorian 2020 02 21
-            , Just $ fromGregorian 2020 02 22
-            , Just $ fromGregorian 2020 02 23
-            , Nothing
-            , Just $ fromGregorian 2020 02 24
-            , Just $ fromGregorian 2020 02 25
-            , Just $ fromGregorian 2020 02 26
-            , Nothing
-            ]
-        beforeParse :: [T.Text]
-        beforeParse =
-            [ "2020-02-12"
-            , "2020-02-13"
-            , "2020-02-14"
-            , ""
-            , "2020-02-15"
-            , "2020-02-16"
-            , "2020-02-17"
-            , ""
-            , "2020-02-18"
-            , "2020-02-19"
-            , "2020-02-20"
-            , ""
-            , "2020-02-21"
-            , "2020-02-22"
-            , "2020-02-23"
-            , ""
-            , "2020-02-24"
-            , "2020-02-25"
-            , "2020-02-26"
-            , ""
-            ]
-        expected = DI.OptionalColumn $ V.fromList afterParse
+    -- Pattern: 3 dates, empty, 3 dates, empty, 3 dates, empty, 3 dates, empty, 3 dates, empty
+    let groups = chunksOf3 datesExpected
+        beforeParse = concatMap (\g -> map (T.pack . show) g ++ [""]) groups
+        afterParse :: [Maybe Day]
+        afterParse = concatMap (\g -> map Just g ++ [Nothing]) groups
+        expected = DI.fromVector $ V.fromList afterParse
         actual =
             D.parseDefault
-                (D.defaultParseOptions{D.sampleSize = 10, D.parseSafe = False})
+                (D.defaultParseOptions{D.sampleSize = 10, D.parseSafe = D.NoSafeRead})
                 $ DI.fromVector
                 $ V.fromList beforeParse
      in TestCase
@@ -1538,109 +426,24 @@ parseDatesAndEmptyStringsWithoutSafeRead =
                 expected
                 actual
             )
+  where
+    chunksOf3 [] = []
+    chunksOf3 xs = take 3 xs : chunksOf3 (drop 3 xs)
 
 parseTextsAndEmptyStringsWithoutSafeRead :: Test
-parseTextsAndEmptyStringsWithoutSafeRead =
-    let afterParse :: [Maybe T.Text]
-        afterParse =
-            [ Nothing
-            , Just "To"
-            , Just "protect"
-            , Just "the"
-            , Just "world"
-            , Just "from"
-            , Just "devastation"
-            , Nothing
-            , Just "To"
-            , Just "unite"
-            , Just "all"
-            , Just "people"
-            , Just "within"
-            , Just "our"
-            , Just "nation"
-            , Nothing
-            , Just "To"
-            , Just "denounce"
-            , Just "the"
-            , Just "evils"
-            , Just "of"
-            , Just "truth"
-            , Just "and"
-            , Just "love"
-            , Nothing
-            , Just "To"
-            , Just "extend"
-            , Just "our"
-            , Just "reach"
-            , Just "to"
-            , Just "the"
-            , Just "stars"
-            , Just "above"
-            , Nothing
-            , Just "JESSIE!"
-            , Just "JAMES!"
-            , Just "TEAM ROCKET BLASTS OFF AT THE SPEED OF LIGHT!"
-            , Nothing
-            , Just "Surrender now or prepare to fight!"
-            , Nothing
-            , Just "Meowth, that's right!"
-            ]
-        beforeParse :: [T.Text]
-        beforeParse =
-            [ ""
-            , "To"
-            , "protect"
-            , "the"
-            , "world"
-            , "from"
-            , "devastation"
-            , ""
-            , "To"
-            , "unite"
-            , "all"
-            , "people"
-            , "within"
-            , "our"
-            , "nation"
-            , ""
-            , "To"
-            , "denounce"
-            , "the"
-            , "evils"
-            , "of"
-            , "truth"
-            , "and"
-            , "love"
-            , ""
-            , "To"
-            , "extend"
-            , "our"
-            , "reach"
-            , "to"
-            , "the"
-            , "stars"
-            , "above"
-            , ""
-            , "JESSIE!"
-            , "JAMES!"
-            , "TEAM ROCKET BLASTS OFF AT THE SPEED OF LIGHT!"
-            , ""
-            , "Surrender now or prepare to fight!"
-            , ""
-            , "Meowth, that's right!"
-            ]
-        expected = DI.OptionalColumn $ V.fromList afterParse
+parseTextsAndEmptyStringsWithoutSafeRead = TestCase $ do
+    raw <- T.lines <$> TIO.readFile (typingDataDir <> "texts_with_empties.txt")
+    let afterParse = map (\t -> if t == "" then Nothing else Just t) raw
+        expected = DI.fromVector $ V.fromList afterParse
         actual =
             D.parseDefault
-                (D.defaultParseOptions{D.sampleSize = 10, D.parseSafe = False})
+                (D.defaultParseOptions{D.sampleSize = 10, D.parseSafe = D.NoSafeRead})
                 $ DI.fromVector
-                $ V.fromList beforeParse
-     in TestCase
-            ( assertEqual
-                "Correctly parses Texts and Empty Strings as OptionalColumn of Text, with safeRead off"
-                expected
-                actual
-            )
+                $ V.fromList raw
+    assertEqual
+        "Correctly parses Texts and Empty Strings as OptionalColumn of Text, with safeRead off"
+        expected
+        actual
 
 parseBoolsAndNullishStringsWithoutSafeRead :: Test
 parseBoolsAndNullishStringsWithoutSafeRead =
@@ -1648,10 +451,10 @@ parseBoolsAndNullishStringsWithoutSafeRead =
         afterParse = replicate 10 "N/A" ++ replicate 10 "True" ++ replicate 10 "False"
         beforeParse :: [T.Text]
         beforeParse = replicate 10 "N/A" ++ replicate 10 "True" ++ replicate 10 "False"
-        expected = DI.BoxedColumn $ V.fromList afterParse
+        expected = DI.BoxedColumn Nothing $ V.fromList afterParse
         actual =
             D.parseDefault
-                (D.defaultParseOptions{D.sampleSize = 10, D.parseSafe = False})
+                (D.defaultParseOptions{D.sampleSize = 10, D.parseSafe = D.NoSafeRead})
                 $ DI.fromVector
                 $ V.fromList beforeParse
      in TestCase
@@ -1663,126 +466,13 @@ parseBoolsAndNullishStringsWithoutSafeRead =
 
 parseIntsAndNullishStringsWithoutSafeRead :: Test
 parseIntsAndNullishStringsWithoutSafeRead =
-    let afterParse :: [T.Text]
-        afterParse =
-            [ "N/A"
-            , "N/A"
-            , "N/A"
-            , "N/A"
-            , "N/A"
-            , "1"
-            , "2"
-            , "3"
-            , "4"
-            , "5"
-            , "6"
-            , "7"
-            , "8"
-            , "9"
-            , "10"
-            , "11"
-            , "12"
-            , "13"
-            , "14"
-            , "15"
-            , "16"
-            , "17"
-            , "18"
-            , "19"
-            , "20"
-            , "21"
-            , "22"
-            , "23"
-            , "24"
-            , "25"
-            , "26"
-            , "27"
-            , "28"
-            , "29"
-            , "30"
-            , "31"
-            , "32"
-            , "33"
-            , "34"
-            , "35"
-            , "36"
-            , "37"
-            , "38"
-            , "39"
-            , "40"
-            , "41"
-            , "42"
-            , "43"
-            , "44"
-            , "45"
-            , "46"
-            , "47"
-            , "48"
-            , "49"
-            , "50"
-            ]
-        beforeParse :: [T.Text]
-        beforeParse =
-            [ "N/A"
-            , "N/A"
-            , "N/A"
-            , "N/A"
-            , "N/A"
-            , "1"
-            , "2"
-            , "3"
-            , "4"
-            , "5"
-            , "6"
-            , "7"
-            , "8"
-            , "9"
-            , "10"
-            , "11"
-            , "12"
-            , "13"
-            , "14"
-            , "15"
-            , "16"
-            , "17"
-            , "18"
-            , "19"
-            , "20"
-            , "21"
-            , "22"
-            , "23"
-            , "24"
-            , "25"
-            , "26"
-            , "27"
-            , "28"
-            , "29"
-            , "30"
-            , "31"
-            , "32"
-            , "33"
-            , "34"
-            , "35"
-            , "36"
-            , "37"
-            , "38"
-            , "39"
-            , "40"
-            , "41"
-            , "42"
-            , "43"
-            , "44"
-            , "45"
-            , "46"
-            , "47"
-            , "48"
-            , "49"
-            , "50"
-            ]
-        expected = DI.BoxedColumn $ V.fromList afterParse
+    let beforeParse = replicate 5 "N/A" ++ intsInput
+        afterParse :: [T.Text]
+        afterParse = beforeParse
+        expected = DI.BoxedColumn Nothing $ V.fromList afterParse
         actual =
             D.parseDefault
-                (D.defaultParseOptions{D.sampleSize = 10, D.parseSafe = False})
+                (D.defaultParseOptions{D.sampleSize = 10, D.parseSafe = D.NoSafeRead})
                 $ DI.fromVector
                 $ V.fromList beforeParse
      in TestCase
@@ -1794,136 +484,25 @@ parseIntsAndNullishStringsWithoutSafeRead =
 
 parseIntsAndDoublesAndNullishStringsWithoutSafeRead :: Test
 parseIntsAndDoublesAndNullishStringsWithoutSafeRead =
-    let afterParse :: [T.Text]
-        afterParse =
-            [ "1"
-            , "2"
-            , "3"
-            , "4"
-            , "5"
-            , "6"
-            , "7"
-            , "8"
-            , "9"
-            , "10"
-            , "Nothing"
-            , "11.0"
-            , "12.0"
-            , "13.0"
-            , "14.0"
-            , "15.0"
-            , "16.0"
-            , "17.0"
-            , "18.0"
-            , "19.0"
-            , "20.0"
-            , "N/A"
-            , "21.0"
-            , "22.0"
-            , "23.0"
-            , "24.0"
-            , "25.0"
-            , "26.0"
-            , "27.0"
-            , "28.0"
-            , "29.0"
-            , "30.0"
-            , "NULL"
-            , "31.0"
-            , "32.0"
-            , "33.0"
-            , "34.0"
-            , "35.0"
-            , "36.0"
-            , "37.0"
-            , "38.0"
-            , "39.0"
-            , "40.0"
-            , "null"
-            , "41.0"
-            , "42.0"
-            , "43.0"
-            , "44.0"
-            , "45.0"
-            , "46.0"
-            , "47.0"
-            , "48.0"
-            , "49.0"
-            , "50.0"
-            , "NAN"
-            , "3.14"
-            , "2.22"
-            , "8.55"
-            , "23.3"
-            , "12.22222235049451"
+    -- Nullish separators are literal text strings (not interpreted as null when safeRead=False)
+    let nullishSeps = ["Nothing", "N/A", "NULL", "null", "NAN"]
+        intGrp = T.pack . show <$> ([1 .. 10] :: [Int])
+        dblGrps =
+            [ T.pack . show <$> ([11.0 .. 20.0] :: [Double])
+            , T.pack . show <$> ([21.0 .. 30.0] :: [Double])
+            , T.pack . show <$> ([31.0 .. 40.0] :: [Double])
+            , T.pack . show <$> ([41.0 .. 50.0] :: [Double])
             ]
-        beforeParse :: [T.Text]
         beforeParse =
-            [ "1"
-            , "2"
-            , "3"
-            , "4"
-            , "5"
-            , "6"
-            , "7"
-            , "8"
-            , "9"
-            , "10"
-            , "Nothing"
-            , "11.0"
-            , "12.0"
-            , "13.0"
-            , "14.0"
-            , "15.0"
-            , "16.0"
-            , "17.0"
-            , "18.0"
-            , "19.0"
-            , "20.0"
-            , "N/A"
-            , "21.0"
-            , "22.0"
-            , "23.0"
-            , "24.0"
-            , "25.0"
-            , "26.0"
-            , "27.0"
-            , "28.0"
-            , "29.0"
-            , "30.0"
-            , "NULL"
-            , "31.0"
-            , "32.0"
-            , "33.0"
-            , "34.0"
-            , "35.0"
-            , "36.0"
-            , "37.0"
-            , "38.0"
-            , "39.0"
-            , "40.0"
-            , "null"
-            , "41.0"
-            , "42.0"
-            , "43.0"
-            , "44.0"
-            , "45.0"
-            , "46.0"
-            , "47.0"
-            , "48.0"
-            , "49.0"
-            , "50.0"
-            , "NAN"
-            , "3.14"
-            , "2.22"
-            , "8.55"
-            , "23.3"
-            , "12.22222235049451"
-            ]
-        expected = DI.BoxedColumn $ V.fromList afterParse
+            intGrp
+                ++ concat (zipWith (:) nullishSeps dblGrps)
+                ++ doublesSpecialInput
+        afterParse :: [T.Text]
+        afterParse = beforeParse
+        expected = DI.BoxedColumn Nothing $ V.fromList afterParse
         actual =
             D.parseDefault
-                (D.defaultParseOptions{D.sampleSize = 10, D.parseSafe = False})
+                (D.defaultParseOptions{D.sampleSize = 10, D.parseSafe = D.NoSafeRead})
                 $ DI.fromVector
                 $ V.fromList beforeParse
      in TestCase
@@ -1935,138 +514,21 @@ parseIntsAndDoublesAndNullishStringsWithoutSafeRead =
 
 parseIntsAndNullishAndEmptyStringsWithoutSafeRead :: Test
 parseIntsAndNullishAndEmptyStringsWithoutSafeRead =
-    let afterParse :: [Maybe T.Text]
-        afterParse =
-            [ Just "N/A"
-            , Just "N/A"
-            , Just "N/A"
-            , Just "N/A"
-            , Just "N/A"
-            , Nothing
-            , Just "1"
-            , Just "2"
-            , Just "3"
-            , Just "4"
-            , Just "5"
-            , Just "6"
-            , Just "7"
-            , Just "8"
-            , Just "9"
-            , Just "10"
-            , Nothing
-            , Just "11"
-            , Just "12"
-            , Just "13"
-            , Just "14"
-            , Just "15"
-            , Just "16"
-            , Just "17"
-            , Just "18"
-            , Just "19"
-            , Just "20"
-            , Nothing
-            , Just "21"
-            , Just "22"
-            , Just "23"
-            , Just "24"
-            , Just "25"
-            , Just "26"
-            , Just "27"
-            , Just "28"
-            , Just "29"
-            , Just "30"
-            , Nothing
-            , Just "31"
-            , Just "32"
-            , Just "33"
-            , Just "34"
-            , Just "35"
-            , Just "36"
-            , Just "37"
-            , Just "38"
-            , Just "39"
-            , Just "40"
-            , Nothing
-            , Just "41"
-            , Just "42"
-            , Just "43"
-            , Just "44"
-            , Just "45"
-            , Just "46"
-            , Just "47"
-            , Just "48"
-            , Just "49"
-            , Just "50"
-            , Nothing
-            ]
-        beforeParse :: [T.Text]
+    -- Pattern: 5x"N/A", then groups of ("" : 10 ints), with trailing ""
+    let groups = [[1 .. 10], [11 .. 20], [21 .. 30], [31 .. 40], [41 .. 50]] :: [[Int]]
         beforeParse =
-            [ "N/A"
-            , "N/A"
-            , "N/A"
-            , "N/A"
-            , "N/A"
-            , ""
-            , "1"
-            , "2"
-            , "3"
-            , "4"
-            , "5"
-            , "6"
-            , "7"
-            , "8"
-            , "9"
-            , "10"
-            , ""
-            , "11"
-            , "12"
-            , "13"
-            , "14"
-            , "15"
-            , "16"
-            , "17"
-            , "18"
-            , "19"
-            , "20"
-            , ""
-            , "21"
-            , "22"
-            , "23"
-            , "24"
-            , "25"
-            , "26"
-            , "27"
-            , "28"
-            , "29"
-            , "30"
-            , ""
-            , "31"
-            , "32"
-            , "33"
-            , "34"
-            , "35"
-            , "36"
-            , "37"
-            , "38"
-            , "39"
-            , "40"
-            , ""
-            , "41"
-            , "42"
-            , "43"
-            , "44"
-            , "45"
-            , "46"
-            , "47"
-            , "48"
-            , "49"
-            , "50"
-            , ""
-            ]
-        expected = DI.OptionalColumn $ V.fromList afterParse
+            replicate 5 "N/A"
+                ++ concatMap (\g -> "" : map (T.pack . show) g) groups
+                ++ [""]
+        afterParse :: [Maybe T.Text]
+        afterParse =
+            replicate 5 (Just "N/A")
+                ++ concatMap (\g -> Nothing : map (Just . T.pack . show) g) groups
+                ++ [Nothing]
+        expected = DI.fromVector $ V.fromList afterParse
         actual =
             D.parseDefault
-                (D.defaultParseOptions{D.sampleSize = 10, D.parseSafe = False})
+                (D.defaultParseOptions{D.sampleSize = 10, D.parseSafe = D.NoSafeRead})
                 $ DI.fromVector
                 $ V.fromList beforeParse
      in TestCase
@@ -2077,113 +539,21 @@ parseIntsAndNullishAndEmptyStringsWithoutSafeRead =
             )
 
 parseTextsAndEmptyAndNullishStringsWithoutSafeRead :: Test
-parseTextsAndEmptyAndNullishStringsWithoutSafeRead =
-    let afterParse :: [Maybe T.Text]
-        afterParse =
-            [ Nothing
-            , Just "To"
-            , Just "protect"
-            , Just "the"
-            , Just "world"
-            , Just "from"
-            , Just "devastation"
-            , Nothing
-            , Just "To"
-            , Just "unite"
-            , Just "all"
-            , Just "people"
-            , Just "within"
-            , Just "our"
-            , Just "nation"
-            , Nothing
-            , Just "To"
-            , Just "denounce"
-            , Just "the"
-            , Just "evils"
-            , Just "of"
-            , Just "truth"
-            , Just "and"
-            , Just "love"
-            , Nothing
-            , Just "To"
-            , Just "extend"
-            , Just "our"
-            , Just "reach"
-            , Just "to"
-            , Just "the"
-            , Just "stars"
-            , Just "above"
-            , Nothing
-            , Just "JESSIE!"
-            , Just "JAMES!"
-            , Just "TEAM ROCKET BLASTS OFF AT THE SPEED OF LIGHT!"
-            , Nothing
-            , Just "Surrender now or prepare to fight!"
-            , Nothing
-            , Just "Meowth, that's right!"
-            , Just "NaN"
-            , Just "Nothing"
-            , Just "N/A"
-            ]
-        beforeParse :: [T.Text]
-        beforeParse =
-            [ ""
-            , "To"
-            , "protect"
-            , "the"
-            , "world"
-            , "from"
-            , "devastation"
-            , ""
-            , "To"
-            , "unite"
-            , "all"
-            , "people"
-            , "within"
-            , "our"
-            , "nation"
-            , ""
-            , "To"
-            , "denounce"
-            , "the"
-            , "evils"
-            , "of"
-            , "truth"
-            , "and"
-            , "love"
-            , ""
-            , "To"
-            , "extend"
-            , "our"
-            , "reach"
-            , "to"
-            , "the"
-            , "stars"
-            , "above"
-            , ""
-            , "JESSIE!"
-            , "JAMES!"
-            , "TEAM ROCKET BLASTS OFF AT THE SPEED OF LIGHT!"
-            , ""
-            , "Surrender now or prepare to fight!"
-            , ""
-            , "Meowth, that's right!"
-            , "NaN"
-            , "Nothing"
-            , "N/A"
-            ]
-        expected = DI.OptionalColumn $ V.fromList afterParse
+parseTextsAndEmptyAndNullishStringsWithoutSafeRead = TestCase $ do
+    raw <-
+        T.lines <$> TIO.readFile (typingDataDir <> "texts_with_empties_and_nullish.txt")
+    -- safeRead=False: empty strings -> Nothing, nullish text stays as Just
+    let afterParse = map (\t -> if t == "" then Nothing else Just t) raw
+        expected = DI.fromVector $ V.fromList afterParse
         actual =
             D.parseDefault
-                (D.defaultParseOptions{D.sampleSize = 10, D.parseSafe = False})
+                (D.defaultParseOptions{D.sampleSize = 10, D.parseSafe = D.NoSafeRead})
                 $ DI.fromVector
-                $ V.fromList beforeParse
-     in TestCase
-            ( assertEqual
-                "Correctly parses Texts and Empty Strings as OptionalColumn of Text, with safeRead off"
-                expected
-                actual
-            )
+                $ V.fromList raw
+    assertEqual
+        "Correctly parses Texts and Empty Strings as OptionalColumn of Text, with safeRead off"
+        expected
+        actual
 
 -- 3B. PARSING WITH SAFEREAD ON
 parseBoolsAndEmptyStringsWithSafeRead :: Test
@@ -2192,7 +562,7 @@ parseBoolsAndEmptyStringsWithSafeRead =
         afterParse = replicate 10 Nothing ++ replicate 10 (Just True)
         beforeParse :: [T.Text]
         beforeParse = replicate 10 "" ++ replicate 10 "true"
-        expected = DI.OptionalColumn $ V.fromList afterParse
+        expected = DI.fromVector $ V.fromList afterParse
         actual =
             D.parseDefault (D.defaultParseOptions{D.sampleSize = 10}) $
                 DI.fromVector $
@@ -2206,123 +576,10 @@ parseBoolsAndEmptyStringsWithSafeRead =
 
 parseIntsAndEmptyStringsWithSafeRead :: Test
 parseIntsAndEmptyStringsWithSafeRead =
-    let afterParse :: [Maybe Int]
-        afterParse =
-            [ Nothing
-            , Nothing
-            , Nothing
-            , Nothing
-            , Nothing
-            , Just 1
-            , Just 2
-            , Just 3
-            , Just 4
-            , Just 5
-            , Just 6
-            , Just 7
-            , Just 8
-            , Just 9
-            , Just 10
-            , Just 11
-            , Just 12
-            , Just 13
-            , Just 14
-            , Just 15
-            , Just 16
-            , Just 17
-            , Just 18
-            , Just 19
-            , Just 20
-            , Just 21
-            , Just 22
-            , Just 23
-            , Just 24
-            , Just 25
-            , Just 26
-            , Just 27
-            , Just 28
-            , Just 29
-            , Just 30
-            , Just 31
-            , Just 32
-            , Just 33
-            , Just 34
-            , Just 35
-            , Just 36
-            , Just 37
-            , Just 38
-            , Just 39
-            , Just 40
-            , Just 41
-            , Just 42
-            , Just 43
-            , Just 44
-            , Just 45
-            , Just 46
-            , Just 47
-            , Just 48
-            , Just 49
-            , Just 50
-            ]
-        beforeParse :: [T.Text]
-        beforeParse =
-            [ ""
-            , ""
-            , ""
-            , ""
-            , ""
-            , "1"
-            , "2"
-            , "3"
-            , "4"
-            , "5"
-            , "6"
-            , "7"
-            , "8"
-            , "9"
-            , "10"
-            , "11"
-            , "12"
-            , "13"
-            , "14"
-            , "15"
-            , "16"
-            , "17"
-            , "18"
-            , "19"
-            , "20"
-            , "21"
-            , "22"
-            , "23"
-            , "24"
-            , "25"
-            , "26"
-            , "27"
-            , "28"
-            , "29"
-            , "30"
-            , "31"
-            , "32"
-            , "33"
-            , "34"
-            , "35"
-            , "36"
-            , "37"
-            , "38"
-            , "39"
-            , "40"
-            , "41"
-            , "42"
-            , "43"
-            , "44"
-            , "45"
-            , "46"
-            , "47"
-            , "48"
-            , "49"
-            , "50"
-            ]
-        expected = DI.OptionalColumn $ V.fromList afterParse
+    let beforeParse = replicate 5 "" ++ intsInput
+        afterParse :: [Maybe Int]
+        afterParse = replicate 5 Nothing ++ map Just intsExpected
+        expected = DI.fromVector $ V.fromList afterParse
         actual =
             D.parseDefault (D.defaultParseOptions{D.sampleSize = 10}) $
                 DI.fromVector $
@@ -2336,133 +593,23 @@ parseIntsAndEmptyStringsWithSafeRead =
 
 parseIntsAndDoublesAndEmptyStringsWithSafeRead :: Test
 parseIntsAndDoublesAndEmptyStringsWithSafeRead =
-    let afterParse :: [Maybe Double]
+    let intGrp = T.pack . show <$> ([1 .. 10] :: [Int])
+        dblGrps =
+            [ T.pack . show <$> ([11.0 .. 20.0] :: [Double])
+            , T.pack . show <$> ([21.0 .. 30.0] :: [Double])
+            , T.pack . show <$> ([31.0 .. 40.0] :: [Double])
+            , T.pack . show <$> ([41.0 .. 50.0] :: [Double])
+            ]
+        beforeParse = intGrp ++ [""] ++ concatMap (\g -> g ++ [""]) dblGrps ++ doublesSpecialInput
+        afterParse :: [Maybe Double]
         afterParse =
-            [ Just 1.0
-            , Just 2.0
-            , Just 3.0
-            , Just 4.0
-            , Just 5.0
-            , Just 6.0
-            , Just 7.0
-            , Just 8.0
-            , Just 9.0
-            , Just 10.0
-            , Nothing
-            , Just 11.0
-            , Just 12.0
-            , Just 13.0
-            , Just 14.0
-            , Just 15.0
-            , Just 16.0
-            , Just 17.0
-            , Just 18.0
-            , Just 19.0
-            , Just 20.0
-            , Nothing
-            , Just 21.0
-            , Just 22.0
-            , Just 23.0
-            , Just 24.0
-            , Just 25.0
-            , Just 26.0
-            , Just 27.0
-            , Just 28.0
-            , Just 29.0
-            , Just 30.0
-            , Nothing
-            , Just 31.0
-            , Just 32.0
-            , Just 33.0
-            , Just 34.0
-            , Just 35.0
-            , Just 36.0
-            , Just 37.0
-            , Just 38.0
-            , Just 39.0
-            , Just 40.0
-            , Nothing
-            , Just 41.0
-            , Just 42.0
-            , Just 43.0
-            , Just 44.0
-            , Just 45.0
-            , Just 46.0
-            , Just 47.0
-            , Just 48.0
-            , Just 49.0
-            , Just 50.0
-            , Nothing
-            , Just 3.14
-            , Just 2.22
-            , Just 8.55
-            , Just 23.3
-            , Just 12.22222235049451
-            ]
-        beforeParse :: [T.Text]
-        beforeParse =
-            [ "1"
-            , "2"
-            , "3"
-            , "4"
-            , "5"
-            , "6"
-            , "7"
-            , "8"
-            , "9"
-            , "10"
-            , ""
-            , "11.0"
-            , "12.0"
-            , "13.0"
-            , "14.0"
-            , "15.0"
-            , "16.0"
-            , "17.0"
-            , "18.0"
-            , "19.0"
-            , "20.0"
-            , ""
-            , "21.0"
-            , "22.0"
-            , "23.0"
-            , "24.0"
-            , "25.0"
-            , "26.0"
-            , "27.0"
-            , "28.0"
-            , "29.0"
-            , "30.0"
-            , ""
-            , "31.0"
-            , "32.0"
-            , "33.0"
-            , "34.0"
-            , "35.0"
-            , "36.0"
-            , "37.0"
-            , "38.0"
-            , "39.0"
-            , "40.0"
-            , ""
-            , "41.0"
-            , "42.0"
-            , "43.0"
-            , "44.0"
-            , "45.0"
-            , "46.0"
-            , "47.0"
-            , "48.0"
-            , "49.0"
-            , "50.0"
-            , ""
-            , "3.14"
-            , "2.22"
-            , "8.55"
-            , "23.3"
-            , "12.22222235049451"
-            ]
-        expected = DI.OptionalColumn $ V.fromList afterParse
+            map Just ([1.0 .. 10.0] :: [Double])
+                ++ [Nothing]
+                ++ concatMap
+                    (\g -> map Just g ++ [Nothing])
+                    [[11.0 .. 20.0], [21.0 .. 30.0], [31.0 .. 40.0], [41.0 .. 50.0]]
+                ++ map Just doublesSpecial
+        expected = DI.fromVector $ V.fromList afterParse
         actual =
             D.parseDefault (D.defaultParseOptions{D.sampleSize = 10}) $
                 DI.fromVector $
@@ -2476,53 +623,11 @@ parseIntsAndDoublesAndEmptyStringsWithSafeRead =
 
 parseDatesAndEmptyStringsWithSafeRead :: Test
 parseDatesAndEmptyStringsWithSafeRead =
-    let afterParse :: [Maybe Day]
-        afterParse =
-            [ Just $ fromGregorian 2020 02 12
-            , Just $ fromGregorian 2020 02 13
-            , Just $ fromGregorian 2020 02 14
-            , Nothing
-            , Just $ fromGregorian 2020 02 15
-            , Just $ fromGregorian 2020 02 16
-            , Just $ fromGregorian 2020 02 17
-            , Nothing
-            , Just $ fromGregorian 2020 02 18
-            , Just $ fromGregorian 2020 02 19
-            , Just $ fromGregorian 2020 02 20
-            , Nothing
-            , Just $ fromGregorian 2020 02 21
-            , Just $ fromGregorian 2020 02 22
-            , Just $ fromGregorian 2020 02 23
-            , Nothing
-            , Just $ fromGregorian 2020 02 24
-            , Just $ fromGregorian 2020 02 25
-            , Just $ fromGregorian 2020 02 26
-            , Nothing
-            ]
-        beforeParse :: [T.Text]
-        beforeParse =
-            [ "2020-02-12"
-            , "2020-02-13"
-            , "2020-02-14"
-            , ""
-            , "2020-02-15"
-            , "2020-02-16"
-            , "2020-02-17"
-            , ""
-            , "2020-02-18"
-            , "2020-02-19"
-            , "2020-02-20"
-            , ""
-            , "2020-02-21"
-            , "2020-02-22"
-            , "2020-02-23"
-            , ""
-            , "2020-02-24"
-            , "2020-02-25"
-            , "2020-02-26"
-            , ""
-            ]
-        expected = DI.OptionalColumn $ V.fromList afterParse
+    let groups = chunksOf3 datesExpected
+        beforeParse = concatMap (\g -> map (T.pack . show) g ++ [""]) groups
+        afterParse :: [Maybe Day]
+        afterParse = concatMap (\g -> map Just g ++ [Nothing]) groups
+        expected = DI.fromVector $ V.fromList afterParse
         actual =
             D.parseDefault (D.defaultParseOptions{D.sampleSize = 10}) $
                 DI.fromVector $
@@ -2533,228 +638,30 @@ parseDatesAndEmptyStringsWithSafeRead =
                 expected
                 actual
             )
+  where
+    chunksOf3 [] = []
+    chunksOf3 xs = take 3 xs : chunksOf3 (drop 3 xs)
 
 parseTextsAndEmptyStringsWithSafeRead :: Test
-parseTextsAndEmptyStringsWithSafeRead =
-    let afterParse :: [Maybe T.Text]
-        afterParse =
-            [ Nothing
-            , Just "To"
-            , Just "protect"
-            , Just "the"
-            , Just "world"
-            , Just "from"
-            , Just "devastation"
-            , Nothing
-            , Just "To"
-            , Just "unite"
-            , Just "all"
-            , Just "people"
-            , Just "within"
-            , Just "our"
-            , Just "nation"
-            , Nothing
-            , Just "To"
-            , Just "denounce"
-            , Just "the"
-            , Just "evils"
-            , Just "of"
-            , Just "truth"
-            , Just "and"
-            , Just "love"
-            , Nothing
-            , Just "To"
-            , Just "extend"
-            , Just "our"
-            , Just "reach"
-            , Just "to"
-            , Just "the"
-            , Just "stars"
-            , Just "above"
-            , Nothing
-            , Just "JESSIE!"
-            , Just "JAMES!"
-            , Just "TEAM ROCKET BLASTS OFF AT THE SPEED OF LIGHT!"
-            , Nothing
-            , Just "Surrender now or prepare to fight!"
-            , Nothing
-            , Just "Meowth, that's right!"
-            ]
-        beforeParse :: [T.Text]
-        beforeParse =
-            [ ""
-            , "To"
-            , "protect"
-            , "the"
-            , "world"
-            , "from"
-            , "devastation"
-            , ""
-            , "To"
-            , "unite"
-            , "all"
-            , "people"
-            , "within"
-            , "our"
-            , "nation"
-            , ""
-            , "To"
-            , "denounce"
-            , "the"
-            , "evils"
-            , "of"
-            , "truth"
-            , "and"
-            , "love"
-            , ""
-            , "To"
-            , "extend"
-            , "our"
-            , "reach"
-            , "to"
-            , "the"
-            , "stars"
-            , "above"
-            , ""
-            , "JESSIE!"
-            , "JAMES!"
-            , "TEAM ROCKET BLASTS OFF AT THE SPEED OF LIGHT!"
-            , ""
-            , "Surrender now or prepare to fight!"
-            , ""
-            , "Meowth, that's right!"
-            ]
-        expected = DI.OptionalColumn $ V.fromList afterParse
+parseTextsAndEmptyStringsWithSafeRead = TestCase $ do
+    raw <- T.lines <$> TIO.readFile (typingDataDir <> "texts_with_empties.txt")
+    let afterParse = map (\t -> if t == "" then Nothing else Just t) raw
+        expected = DI.fromVector $ V.fromList afterParse
         actual =
             D.parseDefault (D.defaultParseOptions{D.sampleSize = 10}) $
                 DI.fromVector $
-                    V.fromList beforeParse
-     in TestCase
-            ( assertEqual
-                "Correctly parses Texts and Empty Strings as OptionalColumn of Text, with safeRead on"
-                expected
-                actual
-            )
+                    V.fromList raw
+    assertEqual
+        "Correctly parses Texts and Empty Strings as OptionalColumn of Text, with safeRead on"
+        expected
+        actual
 
 parseIntsAndNullishStringsWithSafeRead :: Test
 parseIntsAndNullishStringsWithSafeRead =
-    let afterParse :: [Maybe Int]
-        afterParse =
-            [ Nothing
-            , Nothing
-            , Nothing
-            , Nothing
-            , Nothing
-            , Just 1
-            , Just 2
-            , Just 3
-            , Just 4
-            , Just 5
-            , Just 6
-            , Just 7
-            , Just 8
-            , Just 9
-            , Just 10
-            , Just 11
-            , Just 12
-            , Just 13
-            , Just 14
-            , Just 15
-            , Just 16
-            , Just 17
-            , Just 18
-            , Just 19
-            , Just 20
-            , Just 21
-            , Just 22
-            , Just 23
-            , Just 24
-            , Just 25
-            , Just 26
-            , Just 27
-            , Just 28
-            , Just 29
-            , Just 30
-            , Just 31
-            , Just 32
-            , Just 33
-            , Just 34
-            , Just 35
-            , Just 36
-            , Just 37
-            , Just 38
-            , Just 39
-            , Just 40
-            , Just 41
-            , Just 42
-            , Just 43
-            , Just 44
-            , Just 45
-            , Just 46
-            , Just 47
-            , Just 48
-            , Just 49
-            , Just 50
-            ]
-        beforeParse :: [T.Text]
-        beforeParse =
-            [ "N/A"
-            , "N/A"
-            , "N/A"
-            , "N/A"
-            , "N/A"
-            , "1"
-            , "2"
-            , "3"
-            , "4"
-            , "5"
-            , "6"
-            , "7"
-            , "8"
-            , "9"
-            , "10"
-            , "11"
-            , "12"
-            , "13"
-            , "14"
-            , "15"
-            , "16"
-            , "17"
-            , "18"
-            , "19"
-            , "20"
-            , "21"
-            , "22"
-            , "23"
-            , "24"
-            , "25"
-            , "26"
-            , "27"
-            , "28"
-            , "29"
-            , "30"
-            , "31"
-            , "32"
-            , "33"
-            , "34"
-            , "35"
-            , "36"
-            , "37"
-            , "38"
-            , "39"
-            , "40"
-            , "41"
-            , "42"
-            , "43"
-            , "44"
-            , "45"
-            , "46"
-            , "47"
-            , "48"
-            , "49"
-            , "50"
-            ]
-        expected = DI.OptionalColumn $ V.fromList afterParse
+    let beforeParse = replicate 5 "N/A" ++ intsInput
+        afterParse :: [Maybe Int]
+        afterParse = replicate 5 Nothing ++ map Just intsExpected
+        expected = DI.fromVector $ V.fromList afterParse
         actual =
             D.parseDefault (D.defaultParseOptions{D.sampleSize = 10}) $
                 DI.fromVector $
@@ -2768,133 +675,29 @@ parseIntsAndNullishStringsWithSafeRead =
 
 parseIntsAndDoublesAndNullishStringsWithSafeRead :: Test
 parseIntsAndDoublesAndNullishStringsWithSafeRead =
-    let afterParse :: [Maybe Double]
-        afterParse =
-            [ Just 1.0
-            , Just 2.0
-            , Just 3.0
-            , Just 4.0
-            , Just 5.0
-            , Just 6.0
-            , Just 7.0
-            , Just 8.0
-            , Just 9.0
-            , Just 10.0
-            , Nothing
-            , Just 11.0
-            , Just 12.0
-            , Just 13.0
-            , Just 14.0
-            , Just 15.0
-            , Just 16.0
-            , Just 17.0
-            , Just 18.0
-            , Just 19.0
-            , Just 20.0
-            , Nothing
-            , Just 21.0
-            , Just 22.0
-            , Just 23.0
-            , Just 24.0
-            , Just 25.0
-            , Just 26.0
-            , Just 27.0
-            , Just 28.0
-            , Just 29.0
-            , Just 30.0
-            , Nothing
-            , Just 31.0
-            , Just 32.0
-            , Just 33.0
-            , Just 34.0
-            , Just 35.0
-            , Just 36.0
-            , Just 37.0
-            , Just 38.0
-            , Just 39.0
-            , Just 40.0
-            , Nothing
-            , Just 41.0
-            , Just 42.0
-            , Just 43.0
-            , Just 44.0
-            , Just 45.0
-            , Just 46.0
-            , Just 47.0
-            , Just 48.0
-            , Just 49.0
-            , Just 50.0
-            , Nothing
-            , Just 3.14
-            , Just 2.22
-            , Just 8.55
-            , Just 23.3
-            , Just 12.03
+    -- Note: this test uses different special doubles and nullish separators than the safeRead=False version
+    let nullishSeps = ["Nothing", "N/A", "NULL", "null", "NAN"]
+        intGrp = T.pack . show <$> ([1 .. 10] :: [Int])
+        dblGrps =
+            [ T.pack . show <$> ([11.0 .. 20.0] :: [Double])
+            , T.pack . show <$> ([21.0 .. 30.0] :: [Double])
+            , T.pack . show <$> ([31.0 .. 40.0] :: [Double])
+            , T.pack . show <$> ([41.0 .. 50.0] :: [Double])
             ]
-        beforeParse :: [T.Text]
         beforeParse =
-            [ "1"
-            , "2"
-            , "3"
-            , "4"
-            , "5"
-            , "6"
-            , "7"
-            , "8"
-            , "9"
-            , "10"
-            , "Nothing"
-            , "11.0"
-            , "12.0"
-            , "13.0"
-            , "14.0"
-            , "15.0"
-            , "16.0"
-            , "17.0"
-            , "18.0"
-            , "19.0"
-            , "20.0"
-            , "N/A"
-            , "21.0"
-            , "22.0"
-            , "23.0"
-            , "24.0"
-            , "25.0"
-            , "26.0"
-            , "27.0"
-            , "28.0"
-            , "29.0"
-            , "30.0"
-            , "NULL"
-            , "31.0"
-            , "32.0"
-            , "33.0"
-            , "34.0"
-            , "35.0"
-            , "36.0"
-            , "37.0"
-            , "38.0"
-            , "39.0"
-            , "40.0"
-            , "null"
-            , "41.0"
-            , "42.0"
-            , "43.0"
-            , "44.0"
-            , "45.0"
-            , "46.0"
-            , "47.0"
-            , "48.0"
-            , "49.0"
-            , "50.0"
-            , "NAN"
-            , "3.14"
-            , "2.22"
-            , "8.55"
-            , "23.3"
-            , "12.03"
-            ]
-        expected = DI.OptionalColumn $ V.fromList afterParse
+            intGrp
+                ++ concat (zipWith (:) nullishSeps dblGrps)
+                ++ [nullishSeps !! 4]
+                ++ ["3.14", "2.22", "8.55", "23.3", "12.03"]
+        afterParse :: [Maybe Double]
+        afterParse =
+            map Just ([1.0 .. 10.0] :: [Double])
+                ++ [Nothing]
+                ++ concatMap
+                    (\g -> map Just g ++ [Nothing])
+                    [[11.0 .. 20.0], [21.0 .. 30.0], [31.0 .. 40.0], [41.0 .. 50.0]]
+                ++ map Just [3.14, 2.22, 8.55, 23.3, 12.03]
+        expected = DI.fromVector $ V.fromList afterParse
         actual =
             D.parseDefault (D.defaultParseOptions{D.sampleSize = 10}) $
                 DI.fromVector $
@@ -2908,135 +711,18 @@ parseIntsAndDoublesAndNullishStringsWithSafeRead =
 
 parseIntsAndNullishAndEmptyStringsWithSafeRead :: Test
 parseIntsAndNullishAndEmptyStringsWithSafeRead =
-    let afterParse :: [Maybe Int]
-        afterParse =
-            [ Nothing
-            , Nothing
-            , Nothing
-            , Nothing
-            , Nothing
-            , Nothing
-            , Just 1
-            , Just 2
-            , Just 3
-            , Just 4
-            , Just 5
-            , Just 6
-            , Just 7
-            , Just 8
-            , Just 9
-            , Just 10
-            , Nothing
-            , Just 11
-            , Just 12
-            , Just 13
-            , Just 14
-            , Just 15
-            , Just 16
-            , Just 17
-            , Just 18
-            , Just 19
-            , Just 20
-            , Nothing
-            , Just 21
-            , Just 22
-            , Just 23
-            , Just 24
-            , Just 25
-            , Just 26
-            , Just 27
-            , Just 28
-            , Just 29
-            , Just 30
-            , Nothing
-            , Just 31
-            , Just 32
-            , Just 33
-            , Just 34
-            , Just 35
-            , Just 36
-            , Just 37
-            , Just 38
-            , Just 39
-            , Just 40
-            , Nothing
-            , Just 41
-            , Just 42
-            , Just 43
-            , Just 44
-            , Just 45
-            , Just 46
-            , Just 47
-            , Just 48
-            , Just 49
-            , Just 50
-            , Nothing
-            ]
-        beforeParse :: [T.Text]
+    -- safeRead=True: N/A, Nothing -> Nothing; "" -> Nothing
+    let groups = [[1 .. 10], [11 .. 20], [21 .. 30], [31 .. 40], [41 .. 50]] :: [[Int]]
         beforeParse =
-            [ "N/A"
-            , "N/A"
-            , "N/A"
-            , "N/A"
-            , "Nothing"
-            , ""
-            , "1"
-            , "2"
-            , "3"
-            , "4"
-            , "5"
-            , "6"
-            , "7"
-            , "8"
-            , "9"
-            , "10"
-            , ""
-            , "11"
-            , "12"
-            , "13"
-            , "14"
-            , "15"
-            , "16"
-            , "17"
-            , "18"
-            , "19"
-            , "20"
-            , ""
-            , "21"
-            , "22"
-            , "23"
-            , "24"
-            , "25"
-            , "26"
-            , "27"
-            , "28"
-            , "29"
-            , "30"
-            , ""
-            , "31"
-            , "32"
-            , "33"
-            , "34"
-            , "35"
-            , "36"
-            , "37"
-            , "38"
-            , "39"
-            , "40"
-            , ""
-            , "41"
-            , "42"
-            , "43"
-            , "44"
-            , "45"
-            , "46"
-            , "47"
-            , "48"
-            , "49"
-            , "50"
-            , ""
-            ]
-        expected = DI.OptionalColumn $ V.fromList afterParse
+            ["N/A", "N/A", "N/A", "N/A", "Nothing"]
+                ++ concatMap (\g -> "" : map (T.pack . show) g) groups
+                ++ [""]
+        afterParse :: [Maybe Int]
+        afterParse =
+            replicate 5 Nothing
+                ++ concatMap (\g -> Nothing : map Just g) groups
+                ++ [Nothing]
+        expected = DI.fromVector $ V.fromList afterParse
         actual =
             D.parseDefault (D.defaultParseOptions{D.sampleSize = 10}) $
                 DI.fromVector $
@@ -3050,93 +736,25 @@ parseIntsAndNullishAndEmptyStringsWithSafeRead =
 
 parseIntsAndDoublesAndNullishAndEmptyStringsWithSafeRead :: Test
 parseIntsAndDoublesAndNullishAndEmptyStringsWithSafeRead =
-    let afterParse :: [Maybe Double]
+    -- Data: 4xN/A, "Nothing", "", then 10 ints (1-10), "", 10 ints (11-20), "", 10 ints (21-30), "", 3.14
+    let beforeParse =
+            ["N/A", "N/A", "N/A", "N/A", "Nothing", ""]
+                ++ map (T.pack . show) ([1 .. 10] :: [Int])
+                ++ [""]
+                ++ map (T.pack . show) ([11 .. 20] :: [Int])
+                ++ [""]
+                ++ map (T.pack . show) ([21 .. 30] :: [Int])
+                ++ ["", "3.14"]
+        afterParse :: [Maybe Double]
         afterParse =
-            [ Nothing
-            , Nothing
-            , Nothing
-            , Nothing
-            , Nothing
-            , Nothing
-            , Just 1
-            , Just 2
-            , Just 3
-            , Just 4
-            , Just 5
-            , Just 6
-            , Just 7
-            , Just 8
-            , Just 9
-            , Just 10
-            , Nothing
-            , Just 11
-            , Just 12
-            , Just 13
-            , Just 14
-            , Just 15
-            , Just 16
-            , Just 17
-            , Just 18
-            , Just 19
-            , Just 20
-            , Nothing
-            , Just 21
-            , Just 22
-            , Just 23
-            , Just 24
-            , Just 25
-            , Just 26
-            , Just 27
-            , Just 28
-            , Just 29
-            , Just 30
-            , Nothing
-            , Just 3.14
-            ]
-        beforeParse :: [T.Text]
-        beforeParse =
-            [ "N/A"
-            , "N/A"
-            , "N/A"
-            , "N/A"
-            , "Nothing"
-            , ""
-            , "1"
-            , "2"
-            , "3"
-            , "4"
-            , "5"
-            , "6"
-            , "7"
-            , "8"
-            , "9"
-            , "10"
-            , ""
-            , "11"
-            , "12"
-            , "13"
-            , "14"
-            , "15"
-            , "16"
-            , "17"
-            , "18"
-            , "19"
-            , "20"
-            , ""
-            , "21"
-            , "22"
-            , "23"
-            , "24"
-            , "25"
-            , "26"
-            , "27"
-            , "28"
-            , "29"
-            , "30"
-            , ""
-            , "3.14"
-            ]
-        expected = DI.OptionalColumn $ V.fromList afterParse
+            replicate 6 Nothing
+                ++ map Just ([1 .. 10] :: [Double])
+                ++ [Nothing]
+                ++ map Just ([11 .. 20] :: [Double])
+                ++ [Nothing]
+                ++ map Just ([21 .. 30] :: [Double])
+                ++ [Nothing, Just 3.14]
+        expected = DI.fromVector $ V.fromList afterParse
         actual =
             D.parseDefault (D.defaultParseOptions{D.sampleSize = 10}) $
                 DI.fromVector $
@@ -3149,109 +767,296 @@ parseIntsAndDoublesAndNullishAndEmptyStringsWithSafeRead =
             )
 
 parseTextsAndEmptyAndNullishStringsWithSafeRead :: Test
-parseTextsAndEmptyAndNullishStringsWithSafeRead =
-    let afterParse :: [Maybe T.Text]
-        afterParse =
-            [ Nothing
-            , Just "To"
-            , Just "protect"
-            , Just "the"
-            , Just "world"
-            , Just "from"
-            , Just "devastation"
-            , Nothing
-            , Just "To"
-            , Just "unite"
-            , Just "all"
-            , Just "people"
-            , Just "within"
-            , Just "our"
-            , Just "nation"
-            , Nothing
-            , Just "To"
-            , Just "denounce"
-            , Just "the"
-            , Just "evils"
-            , Just "of"
-            , Just "truth"
-            , Just "and"
-            , Just "love"
-            , Nothing
-            , Just "To"
-            , Just "extend"
-            , Just "our"
-            , Just "reach"
-            , Just "to"
-            , Just "the"
-            , Just "stars"
-            , Just "above"
-            , Nothing
-            , Just "JESSIE!"
-            , Just "JAMES!"
-            , Just "TEAM ROCKET BLASTS OFF AT THE SPEED OF LIGHT!"
-            , Nothing
-            , Just "Surrender now or prepare to fight!"
-            , Nothing
-            , Just "Meowth, that's right!"
-            , Nothing
-            , Nothing
-            , Nothing
-            ]
-        beforeParse :: [T.Text]
-        beforeParse =
-            [ ""
-            , "To"
-            , "protect"
-            , "the"
-            , "world"
-            , "from"
-            , "devastation"
-            , ""
-            , "To"
-            , "unite"
-            , "all"
-            , "people"
-            , "within"
-            , "our"
-            , "nation"
-            , ""
-            , "To"
-            , "denounce"
-            , "the"
-            , "evils"
-            , "of"
-            , "truth"
-            , "and"
-            , "love"
-            , ""
-            , "To"
-            , "extend"
-            , "our"
-            , "reach"
-            , "to"
-            , "the"
-            , "stars"
-            , "above"
-            , ""
-            , "JESSIE!"
-            , "JAMES!"
-            , "TEAM ROCKET BLASTS OFF AT THE SPEED OF LIGHT!"
-            , ""
-            , "Surrender now or prepare to fight!"
-            , ""
-            , "Meowth, that's right!"
-            , "NaN"
-            , "Nothing"
-            , "N/A"
-            ]
-        expected = DI.OptionalColumn $ V.fromList afterParse
+parseTextsAndEmptyAndNullishStringsWithSafeRead = TestCase $ do
+    raw <-
+        T.lines <$> TIO.readFile (typingDataDir <> "texts_with_empties_and_nullish.txt")
+    -- safeRead=True: empty strings and nullish tokens (NaN, Nothing, N/A) -> Nothing
+    let isNullish t = t `elem` ["NaN", "Nothing", "N/A", "nan", "null", "NULL", "NA", "na", "NAN"]
+        afterParse = map (\t -> if t == "" || isNullish t then Nothing else Just t) raw
+        expected = DI.fromVector $ V.fromList afterParse
         actual =
             D.parseDefault (D.defaultParseOptions{D.sampleSize = 10}) $
                 DI.fromVector $
-                    V.fromList beforeParse
+                    V.fromList raw
+    assertEqual
+        "Correctly parses Texts and Empty Strings as OptionalColumn of Text, with safeRead off"
+        expected
+        actual
+
+-- 3C. PARSING WITH SAFEREAD = EitherRead
+--
+-- EitherRead wraps every column as @Either Text a@: successful parses become
+-- @Right v@; failures (including nullish/empty cells) become @Left <raw>@
+-- preserving the original input verbatim.
+
+parseBoolsWithEitherRead :: Test
+parseBoolsWithEitherRead =
+    let beforeParse :: [T.Text]
+        beforeParse = ["true", "", "false", "N/A", "True"]
+        afterParse :: [Either T.Text Bool]
+        afterParse =
+            [Right True, Left "", Right False, Left "N/A", Right True]
+        expected = DI.fromVector $ V.fromList afterParse
+        actual =
+            D.parseDefault
+                (D.defaultParseOptions{D.sampleSize = 5, D.parseSafe = D.EitherRead})
+                $ DI.fromVector
+                $ V.fromList beforeParse
      in TestCase
             ( assertEqual
-                "Correctly parses Texts and Empty Strings as OptionalColumn of Text, with safeRead off"
+                "EitherRead wraps Bools as Either Text Bool; failures carry raw text"
+                expected
+                actual
+            )
+
+parseIntsWithEitherRead :: Test
+parseIntsWithEitherRead =
+    -- Sample (first 5 rows) is cleanly Int; later rows exercise the Left path.
+    let beforeParse :: [T.Text]
+        beforeParse = ["1", "2", "3", "4", "42", "abc", "", "N/A"]
+        afterParse :: [Either T.Text Int]
+        afterParse =
+            [ Right 1
+            , Right 2
+            , Right 3
+            , Right 4
+            , Right 42
+            , Left "abc"
+            , Left ""
+            , Left "N/A"
+            ]
+        expected = DI.fromVector $ V.fromList afterParse
+        actual =
+            D.parseDefault
+                (D.defaultParseOptions{D.sampleSize = 5, D.parseSafe = D.EitherRead})
+                $ DI.fromVector
+                $ V.fromList beforeParse
+     in TestCase
+            ( assertEqual
+                "EitherRead wraps Ints as Either Text Int; failures carry raw text"
+                expected
+                actual
+            )
+
+parseDoublesWithEitherRead :: Test
+parseDoublesWithEitherRead =
+    -- Sample is cleanly Double; "oops" / "" come after and must surface as Left.
+    let beforeParse :: [T.Text]
+        beforeParse = ["1.5", "2.0", "3.5", "4.25", "3.14", "oops", ""]
+        afterParse :: [Either T.Text Double]
+        afterParse =
+            [ Right 1.5
+            , Right 2.0
+            , Right 3.5
+            , Right 4.25
+            , Right 3.14
+            , Left "oops"
+            , Left ""
+            ]
+        expected = DI.fromVector $ V.fromList afterParse
+        actual =
+            D.parseDefault
+                (D.defaultParseOptions{D.sampleSize = 5, D.parseSafe = D.EitherRead})
+                $ DI.fromVector
+                $ V.fromList beforeParse
+     in TestCase
+            ( assertEqual
+                "EitherRead wraps Doubles as Either Text Double; failures carry raw text"
+                expected
+                actual
+            )
+
+parseTextsWithEitherRead :: Test
+parseTextsWithEitherRead =
+    let beforeParse :: [T.Text]
+        beforeParse = ["hello", "", "world"]
+        afterParse :: [Either T.Text T.Text]
+        afterParse = [Right "hello", Left "", Right "world"]
+        expected = DI.fromVector $ V.fromList afterParse
+        actual =
+            D.parseDefault
+                (D.defaultParseOptions{D.sampleSize = 3, D.parseSafe = D.EitherRead})
+                $ DI.fromVector
+                $ V.fromList beforeParse
+     in TestCase
+            ( assertEqual
+                "EitherRead wraps Texts as Either Text Text; empty cells become Left \"\""
+                expected
+                actual
+            )
+
+parseDatesWithEitherRead :: Test
+parseDatesWithEitherRead =
+    -- Sample is clean dates; "not-a-date" and "" come after and become Left.
+    let beforeParse :: [T.Text]
+        beforeParse =
+            (T.pack . show <$> take 5 datesExpected) ++ ["not-a-date", ""]
+        expectedGood :: [Either T.Text Day]
+        expectedGood = Right <$> take 5 datesExpected
+        expectedBad :: [Either T.Text Day]
+        expectedBad = [Left "not-a-date", Left ""]
+        expected = DI.fromVector $ V.fromList (expectedGood ++ expectedBad)
+        actual =
+            D.parseDefault
+                (D.defaultParseOptions{D.sampleSize = 5, D.parseSafe = D.EitherRead})
+                $ DI.fromVector
+                $ V.fromList beforeParse
+     in TestCase
+            ( assertEqual
+                "EitherRead wraps Dates as Either Text Day; failures carry raw text"
+                expected
+                actual
+            )
+
+-- parseDefaults honours per-column overrides: 'ages' stays strict Int,
+-- 'notes' is wrapped as Either Text Text.
+parseDefaultsPerColumnOverrides :: Test
+parseDefaultsPerColumnOverrides = TestCase $ do
+    let df =
+            D.fromNamedColumns
+                [ ("ages", DI.fromList @T.Text ["1", "2", "3"])
+                , ("notes", DI.fromList @T.Text ["hello", "", "world"])
+                ]
+        opts =
+            D.defaultParseOptions
+                { D.sampleSize = 3
+                , D.parseSafe = D.MaybeRead
+                , D.parseSafeOverrides =
+                    [ ("ages", D.NoSafeRead)
+                    , ("notes", D.EitherRead)
+                    ]
+                }
+        result = D.parseDefaults opts df
+    case getColumn "ages" result of
+        Just (DI.UnboxedColumn Nothing _) -> pure () -- strict Int
+        Just col ->
+            assertFailure $
+                "'ages' should be bare UnboxedColumn, got "
+                    <> show col
+        Nothing -> assertFailure "ages column missing"
+    let expectedNotes =
+            DI.fromList @(Either T.Text T.Text)
+                [Right "hello", Left "", Right "world"]
+    case getColumn "notes" result of
+        Just col ->
+            assertEqual
+                "'notes' override EitherRead → Either Text Text"
+                expectedNotes
+                col
+        Nothing -> assertFailure "notes column missing"
+
+-- Default=NoSafeRead, single override to MaybeRead.
+parseDefaultsNoSafeReadWithMaybeOverride :: Test
+parseDefaultsNoSafeReadWithMaybeOverride = TestCase $ do
+    let df =
+            D.fromNamedColumns
+                [ ("x", DI.fromList @T.Text ["1", "2", "3"])
+                , ("y", DI.fromList @T.Text ["a", "", "c"])
+                ]
+        opts =
+            D.defaultParseOptions
+                { D.sampleSize = 3
+                , D.parseSafe = D.NoSafeRead
+                , D.parseSafeOverrides = [("y", D.MaybeRead)]
+                }
+        result = D.parseDefaults opts df
+    -- 'x': NoSafeRead default → bare Int, no bitmap.
+    case getColumn "x" result of
+        Just (DI.UnboxedColumn Nothing _) -> pure ()
+        Just col ->
+            assertFailure $
+                "'x' should be bare UnboxedColumn, got " <> show col
+        Nothing -> assertFailure "x column missing"
+    -- 'y': MaybeRead override → nullable Text with bitmap.
+    case getColumn "y" result of
+        Just (DI.BoxedColumn (Just _) _) -> pure ()
+        Just col ->
+            assertFailure $
+                "'y' MaybeRead override should yield nullable column, got " <> show col
+        Nothing -> assertFailure "y column missing"
+
+-- Default=EitherRead, single override to NoSafeRead.
+parseDefaultsEitherReadWithNoSafeOverride :: Test
+parseDefaultsEitherReadWithNoSafeOverride = TestCase $ do
+    let df =
+            D.fromNamedColumns
+                [ ("nums", DI.fromList @T.Text ["10", "20", "30"])
+                , ("tags", DI.fromList @T.Text ["foo", "", "baz"])
+                ]
+        opts =
+            D.defaultParseOptions
+                { D.sampleSize = 3
+                , D.parseSafe = D.EitherRead
+                , D.parseSafeOverrides = [("nums", D.NoSafeRead)]
+                }
+        result = D.parseDefaults opts df
+    -- 'nums': NoSafeRead override → bare Int.
+    case getColumn "nums" result of
+        Just (DI.UnboxedColumn Nothing _) -> pure ()
+        Just col ->
+            assertFailure $
+                "'nums' NoSafeRead override should give bare UnboxedColumn, got "
+                    <> show col
+        Nothing -> assertFailure "nums column missing"
+    -- 'tags': default EitherRead → Either Text Text.
+    let expectedTags =
+            DI.fromList @(Either T.Text T.Text) [Right "foo", Left "", Right "baz"]
+    case getColumn "tags" result of
+        Just col ->
+            assertEqual "'tags' inherits EitherRead default" expectedTags col
+        Nothing -> assertFailure "tags column missing"
+
+-- Empty overrides: behaves identically to no overrides.
+parseDefaultsEmptyOverrides :: Test
+parseDefaultsEmptyOverrides = TestCase $ do
+    let df =
+            D.fromNamedColumns
+                [("v", DI.fromList @T.Text ["1", "2", "3"])]
+        opts1 = D.defaultParseOptions{D.sampleSize = 3}
+        opts2 = opts1{D.parseSafeOverrides = []}
+    assertEqual
+        "empty parseSafeOverrides ≡ no overrides"
+        (D.parseDefaults opts1 df)
+        (D.parseDefaults opts2 df)
+
+-- Override for non-existent column: silently ignored, no crash.
+parseDefaultsNonExistentOverride :: Test
+parseDefaultsNonExistentOverride = TestCase $ do
+    let df =
+            D.fromNamedColumns
+                [("a", DI.fromList @T.Text ["1", "2", "3"])]
+        opts =
+            D.defaultParseOptions
+                { D.sampleSize = 3
+                , D.parseSafeOverrides = [("z", D.EitherRead)]
+                }
+        result = D.parseDefaults opts df
+    -- 'a' should parse normally under the default (MaybeRead).
+    case getColumn "a" result of
+        Just (DI.UnboxedColumn (Just _) _) -> pure ()
+        Just col ->
+            assertFailure $
+                "'a' should be nullable UnboxedColumn under MaybeRead default, got "
+                    <> show col
+        Nothing -> assertFailure "a column missing"
+
+parseAllNullWithEitherRead :: Test
+parseAllNullWithEitherRead =
+    -- NoAssumption path: sample is all empty/nullish so inference can't
+    -- pick a numeric type. EitherRead still wraps as Either Text Text.
+    let beforeParse :: [T.Text]
+        beforeParse = ["", "", "", "N/A", ""]
+        afterParse :: [Either T.Text T.Text]
+        afterParse = [Left "", Left "", Left "", Right "N/A", Left ""]
+        expected = DI.fromVector $ V.fromList afterParse
+        actual =
+            D.parseDefault
+                (D.defaultParseOptions{D.sampleSize = 5, D.parseSafe = D.EitherRead})
+                $ DI.fromVector
+                $ V.fromList beforeParse
+     in TestCase
+            ( assertEqual
+                "EitherRead with all-null sample produces Either Text Text"
                 expected
                 actual
             )
@@ -3263,14 +1068,14 @@ parseBoolsWithOneExample =
         afterParse = False : replicate 50 True
         beforeParse :: [T.Text]
         beforeParse = "false" : replicate 50 "true"
-        expected = DI.UnboxedColumn $ VU.fromList afterParse
+        expected = DI.fromVector $ V.fromList afterParse
         actual =
             D.parseDefault (D.defaultParseOptions{D.sampleSize = 1}) $
                 DI.fromVector $
                     V.fromList beforeParse
      in TestCase
             ( assertEqual
-                "Correctly parses Bools without missing values as UnboxedColumn of Ints with only one example"
+                "Correctly parses Bools without missing values as OptionalColumn of Maybe Bools with only one example"
                 expected
                 actual
             )
@@ -3281,1181 +1086,150 @@ parseBoolsWithManyExamples =
         afterParse = False : replicate 50 True
         beforeParse :: [T.Text]
         beforeParse = "false" : replicate 50 "true"
-        expected = DI.UnboxedColumn $ VU.fromList afterParse
+        expected = DI.fromVector $ V.fromList afterParse
         actual =
             D.parseDefault (D.defaultParseOptions{D.sampleSize = 49}) $
                 DI.fromVector $
                     V.fromList beforeParse
      in TestCase
             ( assertEqual
-                "Correctly parses Bools without missing values as UnboxedColumn of Ints with only one example"
+                "Correctly parses Bools without missing values as OptionalColumn of Maybe Bools with only one example"
                 expected
                 actual
             )
 
 parseIntsWithOneExample :: Test
 parseIntsWithOneExample =
-    let afterParse :: [Int]
-        afterParse =
-            [ 1
-            , 2
-            , 3
-            , 4
-            , 5
-            , 6
-            , 7
-            , 8
-            , 9
-            , 10
-            , 11
-            , 12
-            , 13
-            , 14
-            , 15
-            , 16
-            , 17
-            , 18
-            , 19
-            , 20
-            , 21
-            , 22
-            , 23
-            , 24
-            , 25
-            , 26
-            , 27
-            , 28
-            , 29
-            , 30
-            , 31
-            , 32
-            , 33
-            , 34
-            , 35
-            , 36
-            , 37
-            , 38
-            , 39
-            , 40
-            , 41
-            , 42
-            , 43
-            , 44
-            , 45
-            , 46
-            , 47
-            , 48
-            , 49
-            , 50
-            ]
-        beforeParse :: [T.Text]
-        beforeParse =
-            [ "1"
-            , "2"
-            , "3"
-            , "4"
-            , "5"
-            , "6"
-            , "7"
-            , "8"
-            , "9"
-            , "10"
-            , "11"
-            , "12"
-            , "13"
-            , "14"
-            , "15"
-            , "16"
-            , "17"
-            , "18"
-            , "19"
-            , "20"
-            , "21"
-            , "22"
-            , "23"
-            , "24"
-            , "25"
-            , "26"
-            , "27"
-            , "28"
-            , "29"
-            , "30"
-            , "31"
-            , "32"
-            , "33"
-            , "34"
-            , "35"
-            , "36"
-            , "37"
-            , "38"
-            , "39"
-            , "40"
-            , "41"
-            , "42"
-            , "43"
-            , "44"
-            , "45"
-            , "46"
-            , "47"
-            , "48"
-            , "49"
-            , "50"
-            ]
-        expected = DI.UnboxedColumn $ VU.fromList afterParse
+    let afterParse = intsExpected
+        beforeParse = intsInput
+        expected = DI.fromVector $ V.fromList afterParse
         actual =
             D.parseDefault (D.defaultParseOptions{D.sampleSize = 1}) $
                 DI.fromVector $
                     V.fromList beforeParse
      in TestCase
             ( assertEqual
-                "Correctly parses Ints without missing values as UnboxedColumn of Ints with only one example"
+                "Correctly parses Ints without missing values as OptionalColumn of Maybe Ints with only one example"
                 expected
                 actual
             )
 
 parseIntsWithTwentyFiveExamples :: Test
 parseIntsWithTwentyFiveExamples =
-    let afterParse :: [Int]
-        afterParse =
-            [ 1
-            , 2
-            , 3
-            , 4
-            , 5
-            , 6
-            , 7
-            , 8
-            , 9
-            , 10
-            , 11
-            , 12
-            , 13
-            , 14
-            , 15
-            , 16
-            , 17
-            , 18
-            , 19
-            , 20
-            , 21
-            , 22
-            , 23
-            , 24
-            , 25
-            , 26
-            , 27
-            , 28
-            , 29
-            , 30
-            , 31
-            , 32
-            , 33
-            , 34
-            , 35
-            , 36
-            , 37
-            , 38
-            , 39
-            , 40
-            , 41
-            , 42
-            , 43
-            , 44
-            , 45
-            , 46
-            , 47
-            , 48
-            , 49
-            , 50
-            ]
-        beforeParse :: [T.Text]
-        beforeParse =
-            [ "1"
-            , "2"
-            , "3"
-            , "4"
-            , "5"
-            , "6"
-            , "7"
-            , "8"
-            , "9"
-            , "10"
-            , "11"
-            , "12"
-            , "13"
-            , "14"
-            , "15"
-            , "16"
-            , "17"
-            , "18"
-            , "19"
-            , "20"
-            , "21"
-            , "22"
-            , "23"
-            , "24"
-            , "25"
-            , "26"
-            , "27"
-            , "28"
-            , "29"
-            , "30"
-            , "31"
-            , "32"
-            , "33"
-            , "34"
-            , "35"
-            , "36"
-            , "37"
-            , "38"
-            , "39"
-            , "40"
-            , "41"
-            , "42"
-            , "43"
-            , "44"
-            , "45"
-            , "46"
-            , "47"
-            , "48"
-            , "49"
-            , "50"
-            ]
-        expected = DI.UnboxedColumn $ VU.fromList afterParse
+    let afterParse = intsExpected
+        beforeParse = intsInput
+        expected = DI.fromVector $ V.fromList afterParse
         actual =
             D.parseDefault (D.defaultParseOptions{D.sampleSize = 25}) $
                 DI.fromVector $
                     V.fromList beforeParse
      in TestCase
             ( assertEqual
-                "Correctly parses Ints without missing values as UnboxedColumn of Ints with some examples"
+                "Correctly parses Ints without missing values as OptionalColumn of Maybe Ints with some examples"
                 expected
                 actual
             )
 
 parseIntsWithFortyNineExamples :: Test
 parseIntsWithFortyNineExamples =
-    let afterParse :: [Int]
-        afterParse =
-            [ 1
-            , 2
-            , 3
-            , 4
-            , 5
-            , 6
-            , 7
-            , 8
-            , 9
-            , 10
-            , 11
-            , 12
-            , 13
-            , 14
-            , 15
-            , 16
-            , 17
-            , 18
-            , 19
-            , 20
-            , 21
-            , 22
-            , 23
-            , 24
-            , 25
-            , 26
-            , 27
-            , 28
-            , 29
-            , 30
-            , 31
-            , 32
-            , 33
-            , 34
-            , 35
-            , 36
-            , 37
-            , 38
-            , 39
-            , 40
-            , 41
-            , 42
-            , 43
-            , 44
-            , 45
-            , 46
-            , 47
-            , 48
-            , 49
-            , 50
-            ]
-        beforeParse :: [T.Text]
-        beforeParse =
-            [ "1"
-            , "2"
-            , "3"
-            , "4"
-            , "5"
-            , "6"
-            , "7"
-            , "8"
-            , "9"
-            , "10"
-            , "11"
-            , "12"
-            , "13"
-            , "14"
-            , "15"
-            , "16"
-            , "17"
-            , "18"
-            , "19"
-            , "20"
-            , "21"
-            , "22"
-            , "23"
-            , "24"
-            , "25"
-            , "26"
-            , "27"
-            , "28"
-            , "29"
-            , "30"
-            , "31"
-            , "32"
-            , "33"
-            , "34"
-            , "35"
-            , "36"
-            , "37"
-            , "38"
-            , "39"
-            , "40"
-            , "41"
-            , "42"
-            , "43"
-            , "44"
-            , "45"
-            , "46"
-            , "47"
-            , "48"
-            , "49"
-            , "50"
-            ]
-        expected = DI.UnboxedColumn $ VU.fromList afterParse
+    let afterParse = intsExpected
+        beforeParse = intsInput
+        expected = DI.fromVector $ V.fromList afterParse
         actual =
             D.parseDefault (D.defaultParseOptions{D.sampleSize = 49}) $
                 DI.fromVector $
                     V.fromList beforeParse
      in TestCase
             ( assertEqual
-                "Correctly parses Ints without missing values as UnboxedColumn of Ints with many examples"
+                "Correctly parses Ints without missing values as OptionalColumn of Maybe Ints with many examples"
                 expected
                 actual
             )
 
 parseDatesWithOneExample :: Test
 parseDatesWithOneExample =
-    let afterParse :: [Day]
-        afterParse =
-            [ fromGregorian 2020 02 12
-            , fromGregorian 2020 02 13
-            , fromGregorian 2020 02 14
-            , fromGregorian 2020 02 15
-            , fromGregorian 2020 02 16
-            , fromGregorian 2020 02 17
-            , fromGregorian 2020 02 18
-            , fromGregorian 2020 02 19
-            , fromGregorian 2020 02 20
-            , fromGregorian 2020 02 21
-            , fromGregorian 2020 02 22
-            , fromGregorian 2020 02 23
-            , fromGregorian 2020 02 24
-            , fromGregorian 2020 02 25
-            , fromGregorian 2020 02 26
-            ]
-        beforeParse :: [T.Text]
-        beforeParse =
-            [ "2020-02-12"
-            , "2020-02-13"
-            , "2020-02-14"
-            , "2020-02-15"
-            , "2020-02-16"
-            , "2020-02-17"
-            , "2020-02-18"
-            , "2020-02-19"
-            , "2020-02-20"
-            , "2020-02-21"
-            , "2020-02-22"
-            , "2020-02-23"
-            , "2020-02-24"
-            , "2020-02-25"
-            , "2020-02-26"
-            ]
-        expected = DI.BoxedColumn $ V.fromList afterParse
+    let afterParse = datesExpected
+        beforeParse = datesInput
+        expected = DI.fromVector $ V.fromList afterParse
         actual =
             D.parseDefault (D.defaultParseOptions{D.sampleSize = 1}) $
                 DI.fromVector $
                     V.fromList beforeParse
      in TestCase
             ( assertEqual
-                "Correctly parses Dates without missing values as BoxedColumn of Days with only one example"
+                "Correctly parses Dates without missing values as OptionalColumn of Maybe Days with only one example"
                 expected
                 actual
             )
 
 parseDatesWithFifteenExamples :: Test
 parseDatesWithFifteenExamples =
-    let afterParse :: [Day]
-        afterParse =
-            [ fromGregorian 2020 02 12
-            , fromGregorian 2020 02 13
-            , fromGregorian 2020 02 14
-            , fromGregorian 2020 02 15
-            , fromGregorian 2020 02 16
-            , fromGregorian 2020 02 17
-            , fromGregorian 2020 02 18
-            , fromGregorian 2020 02 19
-            , fromGregorian 2020 02 20
-            , fromGregorian 2020 02 21
-            , fromGregorian 2020 02 22
-            , fromGregorian 2020 02 23
-            , fromGregorian 2020 02 24
-            , fromGregorian 2020 02 25
-            , fromGregorian 2020 02 26
-            ]
-        beforeParse :: [T.Text]
-        beforeParse =
-            [ "2020-02-12"
-            , "2020-02-13"
-            , "2020-02-14"
-            , "2020-02-15"
-            , "2020-02-16"
-            , "2020-02-17"
-            , "2020-02-18"
-            , "2020-02-19"
-            , "2020-02-20"
-            , "2020-02-21"
-            , "2020-02-22"
-            , "2020-02-23"
-            , "2020-02-24"
-            , "2020-02-25"
-            , "2020-02-26"
-            ]
-        expected = DI.BoxedColumn $ V.fromList afterParse
+    let afterParse = datesExpected
+        beforeParse = datesInput
+        expected = DI.fromVector $ V.fromList afterParse
         actual =
             D.parseDefault (D.defaultParseOptions{D.sampleSize = 15}) $
                 DI.fromVector $
                     V.fromList beforeParse
      in TestCase
             ( assertEqual
-                "Correctly parses Dates without missing values as BoxedColumn of Days with many examples"
+                "Correctly parses Dates without missing values as OptionalColumn of Maybe Days with many examples"
                 expected
                 actual
             )
 
 parseIntsAndDoublesAsDoublesWithOneExample :: Test
 parseIntsAndDoublesAsDoublesWithOneExample =
-    let afterParse :: [Double]
-        afterParse =
-            [ 1
-            , 2
-            , 3
-            , 4
-            , 5
-            , 6
-            , 7
-            , 8
-            , 9
-            , 10
-            , 11
-            , 12
-            , 13
-            , 14
-            , 15
-            , 16
-            , 17
-            , 18
-            , 19
-            , 20
-            , 21
-            , 22
-            , 23
-            , 24
-            , 25
-            , 26
-            , 27
-            , 28
-            , 29
-            , 30
-            , 31
-            , 32
-            , 33
-            , 34
-            , 35
-            , 36
-            , 37
-            , 38
-            , 39
-            , 40
-            , 41
-            , 42
-            , 43
-            , 44
-            , 45
-            , 46
-            , 47
-            , 48
-            , 49
-            , 50
-            , 1.0
-            , 2.0
-            , 3.0
-            , 4.0
-            , 5.0
-            , 6.0
-            , 7.0
-            , 8.0
-            , 9.0
-            , 10.0
-            , 11.0
-            , 12.0
-            , 13.0
-            , 14.0
-            , 15.0
-            , 16.0
-            , 17.0
-            , 18.0
-            , 19.0
-            , 20.0
-            , 21.0
-            , 22.0
-            , 23.0
-            , 24.0
-            , 25.0
-            , 26.0
-            , 27.0
-            , 28.0
-            , 29.0
-            , 30.0
-            , 31.0
-            , 32.0
-            , 33.0
-            , 34.0
-            , 35.0
-            , 36.0
-            , 37.0
-            , 38.0
-            , 39.0
-            , 40.0
-            , 41.0
-            , 42.0
-            , 43.0
-            , 44.0
-            , 45.0
-            , 46.0
-            , 47.0
-            , 48.0
-            , 49.0
-            , 50.0
-            , 3.14
-            , 2.22
-            , 8.55
-            , 23.3
-            , 12.22222235049450945049504950
-            ]
-        beforeParse :: [T.Text]
-        beforeParse =
-            [ "1"
-            , "2"
-            , "3"
-            , "4"
-            , "5"
-            , "6"
-            , "7"
-            , "8"
-            , "9"
-            , "10"
-            , "11"
-            , "12"
-            , "13"
-            , "14"
-            , "15"
-            , "16"
-            , "17"
-            , "18"
-            , "19"
-            , "20"
-            , "21"
-            , "22"
-            , "23"
-            , "24"
-            , "25"
-            , "26"
-            , "27"
-            , "28"
-            , "29"
-            , "30"
-            , "31"
-            , "32"
-            , "33"
-            , "34"
-            , "35"
-            , "36"
-            , "37"
-            , "38"
-            , "39"
-            , "40"
-            , "41"
-            , "42"
-            , "43"
-            , "44"
-            , "45"
-            , "46"
-            , "47"
-            , "48"
-            , "49"
-            , "50"
-            , "1.0"
-            , "2.0"
-            , "3.0"
-            , "4.0"
-            , "5.0"
-            , "6.0"
-            , "7.0"
-            , "8.0"
-            , "9.0"
-            , "10.0"
-            , "11.0"
-            , "12.0"
-            , "13.0"
-            , "14.0"
-            , "15.0"
-            , "16.0"
-            , "17.0"
-            , "18.0"
-            , "19.0"
-            , "20.0"
-            , "21.0"
-            , "22.0"
-            , "23.0"
-            , "24.0"
-            , "25.0"
-            , "26.0"
-            , "27.0"
-            , "28.0"
-            , "29.0"
-            , "30.0"
-            , "31.0"
-            , "32.0"
-            , "33.0"
-            , "34.0"
-            , "35.0"
-            , "36.0"
-            , "37.0"
-            , "38.0"
-            , "39.0"
-            , "40.0"
-            , "41.0"
-            , "42.0"
-            , "43.0"
-            , "44.0"
-            , "45.0"
-            , "46.0"
-            , "47.0"
-            , "48.0"
-            , "49.0"
-            , "50.0"
-            , "3.14"
-            , "2.22"
-            , "8.55"
-            , "23.3"
-            , "12.22222235049451"
-            ]
-        expected = DI.UnboxedColumn $ VU.fromList afterParse
+    let afterParse = intsAndDoublesExpected
+        beforeParse = intsAndDoublesInput
+        expected = DI.fromVector $ V.fromList afterParse
         actual =
             D.parseDefault (D.defaultParseOptions{D.sampleSize = 1}) $
                 DI.fromVector $
                     V.fromList beforeParse
      in TestCase
             ( assertEqual
-                "Correctly parses a mixture of Ints and Doubles as UnboxedColumn of Doubles with just one example"
+                "Correctly parses a mixture of Ints and Doubles as OptionalColumn of Maybe Doubles with just one example"
                 expected
                 actual
             )
 
 parseIntsAndDoublesAsDoublesWithManyExamples :: Test
 parseIntsAndDoublesAsDoublesWithManyExamples =
-    let afterParse :: [Double]
-        afterParse =
-            [ 1
-            , 2
-            , 3
-            , 4
-            , 5
-            , 6
-            , 7
-            , 8
-            , 9
-            , 10
-            , 11
-            , 12
-            , 13
-            , 14
-            , 15
-            , 16
-            , 17
-            , 18
-            , 19
-            , 20
-            , 21
-            , 22
-            , 23
-            , 24
-            , 25
-            , 26
-            , 27
-            , 28
-            , 29
-            , 30
-            , 31
-            , 32
-            , 33
-            , 34
-            , 35
-            , 36
-            , 37
-            , 38
-            , 39
-            , 40
-            , 41
-            , 42
-            , 43
-            , 44
-            , 45
-            , 46
-            , 47
-            , 48
-            , 49
-            , 50
-            , 1.0
-            , 2.0
-            , 3.0
-            , 4.0
-            , 5.0
-            , 6.0
-            , 7.0
-            , 8.0
-            , 9.0
-            , 10.0
-            , 11.0
-            , 12.0
-            , 13.0
-            , 14.0
-            , 15.0
-            , 16.0
-            , 17.0
-            , 18.0
-            , 19.0
-            , 20.0
-            , 21.0
-            , 22.0
-            , 23.0
-            , 24.0
-            , 25.0
-            , 26.0
-            , 27.0
-            , 28.0
-            , 29.0
-            , 30.0
-            , 31.0
-            , 32.0
-            , 33.0
-            , 34.0
-            , 35.0
-            , 36.0
-            , 37.0
-            , 38.0
-            , 39.0
-            , 40.0
-            , 41.0
-            , 42.0
-            , 43.0
-            , 44.0
-            , 45.0
-            , 46.0
-            , 47.0
-            , 48.0
-            , 49.0
-            , 50.0
-            , 3.14
-            , 2.22
-            , 8.55
-            , 23.3
-            , 12.22222235049450945049504950
-            ]
-        beforeParse :: [T.Text]
-        beforeParse =
-            [ "1"
-            , "2"
-            , "3"
-            , "4"
-            , "5"
-            , "6"
-            , "7"
-            , "8"
-            , "9"
-            , "10"
-            , "11"
-            , "12"
-            , "13"
-            , "14"
-            , "15"
-            , "16"
-            , "17"
-            , "18"
-            , "19"
-            , "20"
-            , "21"
-            , "22"
-            , "23"
-            , "24"
-            , "25"
-            , "26"
-            , "27"
-            , "28"
-            , "29"
-            , "30"
-            , "31"
-            , "32"
-            , "33"
-            , "34"
-            , "35"
-            , "36"
-            , "37"
-            , "38"
-            , "39"
-            , "40"
-            , "41"
-            , "42"
-            , "43"
-            , "44"
-            , "45"
-            , "46"
-            , "47"
-            , "48"
-            , "49"
-            , "50"
-            , "1.0"
-            , "2.0"
-            , "3.0"
-            , "4.0"
-            , "5.0"
-            , "6.0"
-            , "7.0"
-            , "8.0"
-            , "9.0"
-            , "10.0"
-            , "11.0"
-            , "12.0"
-            , "13.0"
-            , "14.0"
-            , "15.0"
-            , "16.0"
-            , "17.0"
-            , "18.0"
-            , "19.0"
-            , "20.0"
-            , "21.0"
-            , "22.0"
-            , "23.0"
-            , "24.0"
-            , "25.0"
-            , "26.0"
-            , "27.0"
-            , "28.0"
-            , "29.0"
-            , "30.0"
-            , "31.0"
-            , "32.0"
-            , "33.0"
-            , "34.0"
-            , "35.0"
-            , "36.0"
-            , "37.0"
-            , "38.0"
-            , "39.0"
-            , "40.0"
-            , "41.0"
-            , "42.0"
-            , "43.0"
-            , "44.0"
-            , "45.0"
-            , "46.0"
-            , "47.0"
-            , "48.0"
-            , "49.0"
-            , "50.0"
-            , "3.14"
-            , "2.22"
-            , "8.55"
-            , "23.3"
-            , "12.22222235049451"
-            ]
-        expected = DI.UnboxedColumn $ VU.fromList afterParse
+    let afterParse = intsAndDoublesExpected
+        beforeParse = intsAndDoublesInput
+        expected = DI.fromVector $ V.fromList afterParse
         actual =
             D.parseDefault (D.defaultParseOptions{D.sampleSize = 50}) $
                 DI.fromVector $
                     V.fromList beforeParse
      in TestCase
             ( assertEqual
-                "Correctly parses a mixture of Ints and Doubles as UnboxedColumn of Doubles with just one example"
+                "Correctly parses a mixture of Ints and Doubles as OptionalColumn of Maybe Doubles with many examples"
                 expected
                 actual
             )
 
 parseIntsAndDoublesAndEmptyStringsAsDoublesWithOneExampleWithSafeReadOff :: Test
 parseIntsAndDoublesAndEmptyStringsAsDoublesWithOneExampleWithSafeReadOff =
-    let afterParse :: [Maybe Double]
+    -- Pattern: 10 empties, 50 ints (as int text), 50 doubles (as double text), 5 specials
+    let beforeParse =
+            replicate 10 ""
+                ++ intsInput
+                ++ (T.pack . show <$> ([1.0 .. 50.0] :: [Double]))
+                ++ doublesSpecialInput
+        afterParse :: [Maybe Double]
         afterParse =
-            [ Nothing
-            , Nothing
-            , Nothing
-            , Nothing
-            , Nothing
-            , Nothing
-            , Nothing
-            , Nothing
-            , Nothing
-            , Nothing
-            , Just 1.0
-            , Just 2.0
-            , Just 3.0
-            , Just 4.0
-            , Just 5.0
-            , Just 6.0
-            , Just 7.0
-            , Just 8.0
-            , Just 9.0
-            , Just 10.0
-            , Just 11.0
-            , Just 12.0
-            , Just 13.0
-            , Just 14.0
-            , Just 15.0
-            , Just 16.0
-            , Just 17.0
-            , Just 18.0
-            , Just 19.0
-            , Just 20.0
-            , Just 21.0
-            , Just 22.0
-            , Just 23.0
-            , Just 24.0
-            , Just 25.0
-            , Just 26.0
-            , Just 27.0
-            , Just 28.0
-            , Just 29.0
-            , Just 30.0
-            , Just 31.0
-            , Just 32.0
-            , Just 33.0
-            , Just 34.0
-            , Just 35.0
-            , Just 36.0
-            , Just 37.0
-            , Just 38.0
-            , Just 39.0
-            , Just 40.0
-            , Just 41.0
-            , Just 42.0
-            , Just 43.0
-            , Just 44.0
-            , Just 45.0
-            , Just 46.0
-            , Just 47.0
-            , Just 48.0
-            , Just 49.0
-            , Just 50.0
-            , Just 1.0
-            , Just 2.0
-            , Just 3.0
-            , Just 4.0
-            , Just 5.0
-            , Just 6.0
-            , Just 7.0
-            , Just 8.0
-            , Just 9.0
-            , Just 10.0
-            , Just 11.0
-            , Just 12.0
-            , Just 13.0
-            , Just 14.0
-            , Just 15.0
-            , Just 16.0
-            , Just 17.0
-            , Just 18.0
-            , Just 19.0
-            , Just 20.0
-            , Just 21.0
-            , Just 22.0
-            , Just 23.0
-            , Just 24.0
-            , Just 25.0
-            , Just 26.0
-            , Just 27.0
-            , Just 28.0
-            , Just 29.0
-            , Just 30.0
-            , Just 31.0
-            , Just 32.0
-            , Just 33.0
-            , Just 34.0
-            , Just 35.0
-            , Just 36.0
-            , Just 37.0
-            , Just 38.0
-            , Just 39.0
-            , Just 40.0
-            , Just 41.0
-            , Just 42.0
-            , Just 43.0
-            , Just 44.0
-            , Just 45.0
-            , Just 46.0
-            , Just 47.0
-            , Just 48.0
-            , Just 49.0
-            , Just 50.0
-            , Just 3.14
-            , Just 2.22
-            , Just 8.55
-            , Just 23.3
-            , Just 12.22222235049451
-            ]
-        beforeParse :: [T.Text]
-        beforeParse =
-            [ ""
-            , ""
-            , ""
-            , ""
-            , ""
-            , ""
-            , ""
-            , ""
-            , ""
-            , ""
-            , "1"
-            , "2"
-            , "3"
-            , "4"
-            , "5"
-            , "6"
-            , "7"
-            , "8"
-            , "9"
-            , "10"
-            , "11"
-            , "12"
-            , "13"
-            , "14"
-            , "15"
-            , "16"
-            , "17"
-            , "18"
-            , "19"
-            , "20"
-            , "21"
-            , "22"
-            , "23"
-            , "24"
-            , "25"
-            , "26"
-            , "27"
-            , "28"
-            , "29"
-            , "30"
-            , "31"
-            , "32"
-            , "33"
-            , "34"
-            , "35"
-            , "36"
-            , "37"
-            , "38"
-            , "39"
-            , "40"
-            , "41"
-            , "42"
-            , "43"
-            , "44"
-            , "45"
-            , "46"
-            , "47"
-            , "48"
-            , "49"
-            , "50"
-            , "1.0"
-            , "2.0"
-            , "3.0"
-            , "4.0"
-            , "5.0"
-            , "6.0"
-            , "7.0"
-            , "8.0"
-            , "9.0"
-            , "10.0"
-            , "11.0"
-            , "12.0"
-            , "13.0"
-            , "14.0"
-            , "15.0"
-            , "16.0"
-            , "17.0"
-            , "18.0"
-            , "19.0"
-            , "20.0"
-            , "21.0"
-            , "22.0"
-            , "23.0"
-            , "24.0"
-            , "25.0"
-            , "26.0"
-            , "27.0"
-            , "28.0"
-            , "29.0"
-            , "30.0"
-            , "31.0"
-            , "32.0"
-            , "33.0"
-            , "34.0"
-            , "35.0"
-            , "36.0"
-            , "37.0"
-            , "38.0"
-            , "39.0"
-            , "40.0"
-            , "41.0"
-            , "42.0"
-            , "43.0"
-            , "44.0"
-            , "45.0"
-            , "46.0"
-            , "47.0"
-            , "48.0"
-            , "49.0"
-            , "50.0"
-            , "3.14"
-            , "2.22"
-            , "8.55"
-            , "23.3"
-            , "12.22222235049451"
-            ]
-        expected = DI.OptionalColumn $ V.fromList afterParse
+            replicate 10 Nothing
+                ++ map Just ([1.0 .. 50.0] :: [Double])
+                ++ map Just ([1.0 .. 50.0] :: [Double])
+                ++ map Just doublesSpecial
+        expected = DI.fromVector $ V.fromList afterParse
         actual =
-            D.parseDefault (D.defaultParseOptions{D.sampleSize = 1, D.parseSafe = False}) $
-                DI.fromVector $
-                    V.fromList beforeParse
+            D.parseDefault
+                (D.defaultParseOptions{D.sampleSize = 1, D.parseSafe = D.NoSafeRead})
+                $ DI.fromVector
+                $ V.fromList beforeParse
      in TestCase
             ( assertEqual
                 "Correctly parses a mixture of Ints and Doubles as UnboxedColumn of Doubles with just one example"
@@ -4466,246 +1240,21 @@ parseIntsAndDoublesAndEmptyStringsAsDoublesWithOneExampleWithSafeReadOff =
 parseIntsAndDoublesAndEmptyStringsAsDoublesWithManyExamplesWithSafeReadOff ::
     Test
 parseIntsAndDoublesAndEmptyStringsAsDoublesWithManyExamplesWithSafeReadOff =
-    let afterParse :: [Maybe Double]
+    let beforeParse =
+            replicate 10 ""
+                ++ intsInput
+                ++ (T.pack . show <$> ([1.0 .. 50.0] :: [Double]))
+                ++ doublesSpecialInput
+        afterParse :: [Maybe Double]
         afterParse =
-            [ Nothing
-            , Nothing
-            , Nothing
-            , Nothing
-            , Nothing
-            , Nothing
-            , Nothing
-            , Nothing
-            , Nothing
-            , Nothing
-            , Just 1.0
-            , Just 2.0
-            , Just 3.0
-            , Just 4.0
-            , Just 5.0
-            , Just 6.0
-            , Just 7.0
-            , Just 8.0
-            , Just 9.0
-            , Just 10.0
-            , Just 11.0
-            , Just 12.0
-            , Just 13.0
-            , Just 14.0
-            , Just 15.0
-            , Just 16.0
-            , Just 17.0
-            , Just 18.0
-            , Just 19.0
-            , Just 20.0
-            , Just 21.0
-            , Just 22.0
-            , Just 23.0
-            , Just 24.0
-            , Just 25.0
-            , Just 26.0
-            , Just 27.0
-            , Just 28.0
-            , Just 29.0
-            , Just 30.0
-            , Just 31.0
-            , Just 32.0
-            , Just 33.0
-            , Just 34.0
-            , Just 35.0
-            , Just 36.0
-            , Just 37.0
-            , Just 38.0
-            , Just 39.0
-            , Just 40.0
-            , Just 41.0
-            , Just 42.0
-            , Just 43.0
-            , Just 44.0
-            , Just 45.0
-            , Just 46.0
-            , Just 47.0
-            , Just 48.0
-            , Just 49.0
-            , Just 50.0
-            , Just 1.0
-            , Just 2.0
-            , Just 3.0
-            , Just 4.0
-            , Just 5.0
-            , Just 6.0
-            , Just 7.0
-            , Just 8.0
-            , Just 9.0
-            , Just 10.0
-            , Just 11.0
-            , Just 12.0
-            , Just 13.0
-            , Just 14.0
-            , Just 15.0
-            , Just 16.0
-            , Just 17.0
-            , Just 18.0
-            , Just 19.0
-            , Just 20.0
-            , Just 21.0
-            , Just 22.0
-            , Just 23.0
-            , Just 24.0
-            , Just 25.0
-            , Just 26.0
-            , Just 27.0
-            , Just 28.0
-            , Just 29.0
-            , Just 30.0
-            , Just 31.0
-            , Just 32.0
-            , Just 33.0
-            , Just 34.0
-            , Just 35.0
-            , Just 36.0
-            , Just 37.0
-            , Just 38.0
-            , Just 39.0
-            , Just 40.0
-            , Just 41.0
-            , Just 42.0
-            , Just 43.0
-            , Just 44.0
-            , Just 45.0
-            , Just 46.0
-            , Just 47.0
-            , Just 48.0
-            , Just 49.0
-            , Just 50.0
-            , Just 3.14
-            , Just 2.22
-            , Just 8.55
-            , Just 23.3
-            , Just 12.22222235049451
-            ]
-        beforeParse :: [T.Text]
-        beforeParse =
-            [ ""
-            , ""
-            , ""
-            , ""
-            , ""
-            , ""
-            , ""
-            , ""
-            , ""
-            , ""
-            , "1"
-            , "2"
-            , "3"
-            , "4"
-            , "5"
-            , "6"
-            , "7"
-            , "8"
-            , "9"
-            , "10"
-            , "11"
-            , "12"
-            , "13"
-            , "14"
-            , "15"
-            , "16"
-            , "17"
-            , "18"
-            , "19"
-            , "20"
-            , "21"
-            , "22"
-            , "23"
-            , "24"
-            , "25"
-            , "26"
-            , "27"
-            , "28"
-            , "29"
-            , "30"
-            , "31"
-            , "32"
-            , "33"
-            , "34"
-            , "35"
-            , "36"
-            , "37"
-            , "38"
-            , "39"
-            , "40"
-            , "41"
-            , "42"
-            , "43"
-            , "44"
-            , "45"
-            , "46"
-            , "47"
-            , "48"
-            , "49"
-            , "50"
-            , "1.0"
-            , "2.0"
-            , "3.0"
-            , "4.0"
-            , "5.0"
-            , "6.0"
-            , "7.0"
-            , "8.0"
-            , "9.0"
-            , "10.0"
-            , "11.0"
-            , "12.0"
-            , "13.0"
-            , "14.0"
-            , "15.0"
-            , "16.0"
-            , "17.0"
-            , "18.0"
-            , "19.0"
-            , "20.0"
-            , "21.0"
-            , "22.0"
-            , "23.0"
-            , "24.0"
-            , "25.0"
-            , "26.0"
-            , "27.0"
-            , "28.0"
-            , "29.0"
-            , "30.0"
-            , "31.0"
-            , "32.0"
-            , "33.0"
-            , "34.0"
-            , "35.0"
-            , "36.0"
-            , "37.0"
-            , "38.0"
-            , "39.0"
-            , "40.0"
-            , "41.0"
-            , "42.0"
-            , "43.0"
-            , "44.0"
-            , "45.0"
-            , "46.0"
-            , "47.0"
-            , "48.0"
-            , "49.0"
-            , "50.0"
-            , "3.14"
-            , "2.22"
-            , "8.55"
-            , "23.3"
-            , "12.22222235049451"
-            ]
-        expected = DI.OptionalColumn $ V.fromList afterParse
+            replicate 10 Nothing
+                ++ map Just ([1.0 .. 50.0] :: [Double])
+                ++ map Just ([1.0 .. 50.0] :: [Double])
+                ++ map Just doublesSpecial
+        expected = DI.fromVector $ V.fromList afterParse
         actual =
             D.parseDefault
-                (D.defaultParseOptions{D.sampleSize = 30, D.parseSafe = False})
+                (D.defaultParseOptions{D.sampleSize = 30, D.parseSafe = D.NoSafeRead})
                 $ DI.fromVector
                 $ V.fromList beforeParse
      in TestCase
@@ -4718,167 +1267,27 @@ parseIntsAndDoublesAndEmptyStringsAsDoublesWithManyExamplesWithSafeReadOff =
 parseIntsAndDoublesAndEmptyStringsAndNullishAsStringssWithOneExampleWithSafeReadOff ::
     Test
 parseIntsAndDoublesAndEmptyStringsAndNullishAsStringssWithOneExampleWithSafeReadOff =
-    let afterParse :: [Maybe T.Text]
-        afterParse =
-            [ Nothing
-            , Nothing
-            , Nothing
-            , Nothing
-            , Nothing
-            , Nothing
-            , Nothing
-            , Nothing
-            , Nothing
-            , Nothing
-            , Just "NaN"
-            , Just "N/A"
-            , Just "NaN"
-            , Just "N/A"
-            , Just "NaN"
-            , Just "N/A"
-            , Just "NaN"
-            , Just "N/A"
-            , Just "NaN"
-            , Just "N/A"
-            , Just "1"
-            , Just "2"
-            , Just "3"
-            , Just "4"
-            , Just "5"
-            , Just "6"
-            , Just "7"
-            , Just "8"
-            , Just "9"
-            , Just "10"
-            , Just "11"
-            , Just "12"
-            , Just "13"
-            , Just "14"
-            , Just "15"
-            , Just "16"
-            , Just "17"
-            , Just "18"
-            , Just "19"
-            , Just "20"
-            , Just "1.0"
-            , Just "2.0"
-            , Just "3.0"
-            , Just "4.0"
-            , Just "5.0"
-            , Just "6.0"
-            , Just "7.0"
-            , Just "8.0"
-            , Just "9.0"
-            , Just "10.0"
-            , Just "11.0"
-            , Just "12.0"
-            , Just "13.0"
-            , Just "14.0"
-            , Just "15.0"
-            , Just "16.0"
-            , Just "17.0"
-            , Just "18.0"
-            , Just "19.0"
-            , Just "20.0"
-            , Just "21.0"
-            , Just "22.0"
-            , Just "23.0"
-            , Just "24.0"
-            , Just "25.0"
-            , Just "26.0"
-            , Just "27.0"
-            , Just "28.0"
-            , Just "29.0"
-            , Just "30.0"
-            , Just "3.14"
-            , Just "2.22"
-            , Just "8.55"
-            , Just "23.3"
-            , Just "12.22222235049451"
-            ]
-        beforeParse :: [T.Text]
+    -- Pattern: 10 empties, 5x(NaN,N/A), 20 ints (1-20), 30 doubles (1.0-30.0), 5 specials
+    let nullishPairs = concat (replicate 5 ["NaN", "N/A"])
         beforeParse =
-            [ ""
-            , ""
-            , ""
-            , ""
-            , ""
-            , ""
-            , ""
-            , ""
-            , ""
-            , ""
-            , "NaN"
-            , "N/A"
-            , "NaN"
-            , "N/A"
-            , "NaN"
-            , "N/A"
-            , "NaN"
-            , "N/A"
-            , "NaN"
-            , "N/A"
-            , "1"
-            , "2"
-            , "3"
-            , "4"
-            , "5"
-            , "6"
-            , "7"
-            , "8"
-            , "9"
-            , "10"
-            , "11"
-            , "12"
-            , "13"
-            , "14"
-            , "15"
-            , "16"
-            , "17"
-            , "18"
-            , "19"
-            , "20"
-            , "1.0"
-            , "2.0"
-            , "3.0"
-            , "4.0"
-            , "5.0"
-            , "6.0"
-            , "7.0"
-            , "8.0"
-            , "9.0"
-            , "10.0"
-            , "11.0"
-            , "12.0"
-            , "13.0"
-            , "14.0"
-            , "15.0"
-            , "16.0"
-            , "17.0"
-            , "18.0"
-            , "19.0"
-            , "20.0"
-            , "21.0"
-            , "22.0"
-            , "23.0"
-            , "24.0"
-            , "25.0"
-            , "26.0"
-            , "27.0"
-            , "28.0"
-            , "29.0"
-            , "30.0"
-            , "3.14"
-            , "2.22"
-            , "8.55"
-            , "23.3"
-            , "12.22222235049451"
-            ]
-        expected = DI.OptionalColumn $ V.fromList afterParse
+            replicate 10 ""
+                ++ nullishPairs
+                ++ (T.pack . show <$> ([1 .. 20] :: [Int]))
+                ++ (T.pack . show <$> ([1.0 .. 30.0] :: [Double]))
+                ++ doublesSpecialInput
+        afterParse :: [Maybe T.Text]
+        afterParse =
+            replicate 10 Nothing
+                ++ map Just nullishPairs
+                ++ map (Just . T.pack . show) ([1 .. 20] :: [Int])
+                ++ map (Just . T.pack . show) ([1.0 .. 30.0] :: [Double])
+                ++ map Just doublesSpecialInput
+        expected = DI.fromVector $ V.fromList afterParse
         actual =
-            D.parseDefault (D.defaultParseOptions{D.sampleSize = 1, D.parseSafe = False}) $
-                DI.fromVector $
-                    V.fromList beforeParse
+            D.parseDefault
+                (D.defaultParseOptions{D.sampleSize = 1, D.parseSafe = D.NoSafeRead})
+                $ DI.fromVector
+                $ V.fromList beforeParse
      in TestCase
             ( assertEqual
                 "Correctly parses a mixture of Ints, Doubles, empty strings, nullish as OptionalColumn of Text with just one example, when safeRead is off"
@@ -4889,166 +1298,24 @@ parseIntsAndDoublesAndEmptyStringsAndNullishAsStringssWithOneExampleWithSafeRead
 parseIntsAndDoublesAndEmptyStringsAndNullishAsStringssWithManyExamplesWithSafeReadOff ::
     Test
 parseIntsAndDoublesAndEmptyStringsAndNullishAsStringssWithManyExamplesWithSafeReadOff =
-    let afterParse :: [Maybe T.Text]
-        afterParse =
-            [ Nothing
-            , Nothing
-            , Nothing
-            , Nothing
-            , Nothing
-            , Nothing
-            , Nothing
-            , Nothing
-            , Nothing
-            , Nothing
-            , Just "NaN"
-            , Just "N/A"
-            , Just "NaN"
-            , Just "N/A"
-            , Just "NaN"
-            , Just "N/A"
-            , Just "NaN"
-            , Just "N/A"
-            , Just "NaN"
-            , Just "N/A"
-            , Just "1"
-            , Just "2"
-            , Just "3"
-            , Just "4"
-            , Just "5"
-            , Just "6"
-            , Just "7"
-            , Just "8"
-            , Just "9"
-            , Just "10"
-            , Just "11"
-            , Just "12"
-            , Just "13"
-            , Just "14"
-            , Just "15"
-            , Just "16"
-            , Just "17"
-            , Just "18"
-            , Just "19"
-            , Just "20"
-            , Just "1.0"
-            , Just "2.0"
-            , Just "3.0"
-            , Just "4.0"
-            , Just "5.0"
-            , Just "6.0"
-            , Just "7.0"
-            , Just "8.0"
-            , Just "9.0"
-            , Just "10.0"
-            , Just "11.0"
-            , Just "12.0"
-            , Just "13.0"
-            , Just "14.0"
-            , Just "15.0"
-            , Just "16.0"
-            , Just "17.0"
-            , Just "18.0"
-            , Just "19.0"
-            , Just "20.0"
-            , Just "21.0"
-            , Just "22.0"
-            , Just "23.0"
-            , Just "24.0"
-            , Just "25.0"
-            , Just "26.0"
-            , Just "27.0"
-            , Just "28.0"
-            , Just "29.0"
-            , Just "30.0"
-            , Just "3.14"
-            , Just "2.22"
-            , Just "8.55"
-            , Just "23.3"
-            , Just "12.22222235049451"
-            ]
-        beforeParse :: [T.Text]
+    let nullishPairs = concat (replicate 5 ["NaN", "N/A"])
         beforeParse =
-            [ ""
-            , ""
-            , ""
-            , ""
-            , ""
-            , ""
-            , ""
-            , ""
-            , ""
-            , ""
-            , "NaN"
-            , "N/A"
-            , "NaN"
-            , "N/A"
-            , "NaN"
-            , "N/A"
-            , "NaN"
-            , "N/A"
-            , "NaN"
-            , "N/A"
-            , "1"
-            , "2"
-            , "3"
-            , "4"
-            , "5"
-            , "6"
-            , "7"
-            , "8"
-            , "9"
-            , "10"
-            , "11"
-            , "12"
-            , "13"
-            , "14"
-            , "15"
-            , "16"
-            , "17"
-            , "18"
-            , "19"
-            , "20"
-            , "1.0"
-            , "2.0"
-            , "3.0"
-            , "4.0"
-            , "5.0"
-            , "6.0"
-            , "7.0"
-            , "8.0"
-            , "9.0"
-            , "10.0"
-            , "11.0"
-            , "12.0"
-            , "13.0"
-            , "14.0"
-            , "15.0"
-            , "16.0"
-            , "17.0"
-            , "18.0"
-            , "19.0"
-            , "20.0"
-            , "21.0"
-            , "22.0"
-            , "23.0"
-            , "24.0"
-            , "25.0"
-            , "26.0"
-            , "27.0"
-            , "28.0"
-            , "29.0"
-            , "30.0"
-            , "3.14"
-            , "2.22"
-            , "8.55"
-            , "23.3"
-            , "12.22222235049451"
-            ]
-        expected = DI.OptionalColumn $ V.fromList afterParse
+            replicate 10 ""
+                ++ nullishPairs
+                ++ (T.pack . show <$> ([1 .. 20] :: [Int]))
+                ++ (T.pack . show <$> ([1.0 .. 30.0] :: [Double]))
+                ++ doublesSpecialInput
+        afterParse :: [Maybe T.Text]
+        afterParse =
+            replicate 10 Nothing
+                ++ map Just nullishPairs
+                ++ map (Just . T.pack . show) ([1 .. 20] :: [Int])
+                ++ map (Just . T.pack . show) ([1.0 .. 30.0] :: [Double])
+                ++ map Just doublesSpecialInput
+        expected = DI.fromVector $ V.fromList afterParse
         actual =
             D.parseDefault
-                (D.defaultParseOptions{D.sampleSize = 30, D.parseSafe = False})
+                (D.defaultParseOptions{D.sampleSize = 30, D.parseSafe = D.NoSafeRead})
                 $ DI.fromVector
                 $ V.fromList beforeParse
      in TestCase
@@ -5066,7 +1333,7 @@ parseManyNullishAndOneInt =
         afterParse = replicate 100 Nothing ++ [Just 100000]
         beforeParse :: [T.Text]
         beforeParse = replicate 100 "NaN" ++ ["100000"]
-        expected = DI.OptionalColumn $ V.fromList afterParse
+        expected = DI.fromVector $ V.fromList afterParse
         actual =
             D.parseDefault (D.defaultParseOptions{D.sampleSize = 10}) $
                 DI.fromVector $
@@ -5080,7 +1347,7 @@ parseManyNullishAndOneDouble =
         afterParse = replicate 100 Nothing ++ [Just 3.14]
         beforeParse :: [T.Text]
         beforeParse = replicate 100 "NaN" ++ ["3.14"]
-        expected = DI.OptionalColumn $ V.fromList afterParse
+        expected = DI.fromVector $ V.fromList afterParse
         actual =
             D.parseDefault (D.defaultParseOptions{D.sampleSize = 10}) $
                 DI.fromVector $
@@ -5094,7 +1361,7 @@ parseManyNullishAndOneDate =
         afterParse = replicate 100 Nothing ++ [Just $ fromGregorian 2024 12 25]
         beforeParse :: [T.Text]
         beforeParse = replicate 100 "NaN" ++ ["2024-12-25"]
-        expected = DI.OptionalColumn $ V.fromList afterParse
+        expected = DI.fromVector $ V.fromList afterParse
         actual =
             D.parseDefault (D.defaultParseOptions{D.sampleSize = 10}) $
                 DI.fromVector $
@@ -5108,7 +1375,7 @@ parseManyNullishAndIncorrectDates =
         afterParse = replicate 100 Nothing ++ [Just "2024-12-25", Just "2024-12-w6"]
         beforeParse :: [T.Text]
         beforeParse = replicate 100 "NaN" ++ ["2024-12-25", "2024-12-w6"]
-        expected = DI.OptionalColumn $ V.fromList afterParse
+        expected = DI.fromVector $ V.fromList afterParse
         actual =
             D.parseDefault (D.defaultParseOptions{D.sampleSize = 10}) $
                 DI.fromVector $
@@ -5122,7 +1389,7 @@ parseRepeatedNullish =
         afterParse = replicate 100 Nothing
         beforeParse :: [T.Text]
         beforeParse = replicate 100 "NaN"
-        expected = DI.OptionalColumn $ V.fromList afterParse
+        expected = DI.fromVector $ V.fromList afterParse
         actual =
             D.parseDefault (D.defaultParseOptions{D.sampleSize = 10}) $
                 DI.fromVector $
@@ -5213,6 +1480,28 @@ tests =
            , TestLabel
                 "parseTextsAndEmptyAndNullishStringsWithSafeRead"
                 parseTextsAndEmptyAndNullishStringsWithSafeRead
+           , -- 3C. PARSING WITH EitherRead
+             TestLabel "parseBoolsWithEitherRead" parseBoolsWithEitherRead
+           , TestLabel "parseIntsWithEitherRead" parseIntsWithEitherRead
+           , TestLabel "parseDoublesWithEitherRead" parseDoublesWithEitherRead
+           , TestLabel "parseTextsWithEitherRead" parseTextsWithEitherRead
+           , TestLabel "parseDatesWithEitherRead" parseDatesWithEitherRead
+           , TestLabel "parseAllNullWithEitherRead" parseAllNullWithEitherRead
+           , TestLabel
+                "parseDefaultsPerColumnOverrides"
+                parseDefaultsPerColumnOverrides
+           , TestLabel
+                "parseDefaultsNoSafeReadWithMaybeOverride"
+                parseDefaultsNoSafeReadWithMaybeOverride
+           , TestLabel
+                "parseDefaultsEitherReadWithNoSafeOverride"
+                parseDefaultsEitherReadWithNoSafeOverride
+           , TestLabel
+                "parseDefaultsEmptyOverrides"
+                parseDefaultsEmptyOverrides
+           , TestLabel
+                "parseDefaultsNonExistentOverride"
+                parseDefaultsNonExistentOverride
            , -- 4. PARSING MUST NOT DEPEND ON THE NUMBER OF EXAMPLES
              TestLabel "parseBoolsWithOneExample" parseBoolsWithOneExample
            , TestLabel "parseBoolsWithManyExamples" parseBoolsWithManyExamples

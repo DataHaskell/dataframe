@@ -244,7 +244,7 @@ correlationSelfIdentity =
                     (abs (r - 1.0) < 1e-10)
         )
 
--- Requesting a missing column should throw ColumnNotFoundException
+-- Requesting a missing column should throw ColumnsNotFoundException
 correlationMissingColumn :: Test
 correlationMissingColumn =
     TestCase

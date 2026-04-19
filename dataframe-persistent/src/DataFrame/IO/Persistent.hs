@@ -41,19 +41,16 @@ module DataFrame.IO.Persistent (
 import Control.Monad (forM)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Trans.Reader (ReaderT)
-import Data.ByteString (ByteString)
 import qualified Data.Map.Strict as M
 import Data.Proxy (Proxy (..))
 import Data.Text (Text)
 import qualified Data.Text as T
-import Data.Time (Day, TimeOfDay, UTCTime)
 import qualified Data.Vector as V
 import qualified DataFrame.Internal.Column as DFCol
 import DataFrame.Internal.DataFrame (DataFrame (..))
 import qualified DataFrame.Internal.DataFrame as DF
 import Database.Persist
 import Database.Persist.Sql hiding (Column)
-import Database.Persist.Types (fieldHaskell, getEntityFields, unFieldNameHS)
 import Unsafe.Coerce (unsafeCoerce)
 
 -- | Get number of rows in a DataFrame
@@ -146,7 +143,7 @@ entitiesToDataFrame config entities = do
                 numCols = length colNames
                 dimensions = (0, numCols)
                 emptyColumns = replicate numCols (DFCol.fromList ([] :: [Text]))
-            return $ DataFrame (V.fromList emptyColumns) indices dimensions
+            return $ DataFrame (V.fromList emptyColumns) indices dimensions M.empty
         else do
             -- Create columns from entity data
             columns <- createColumnsFromEntities @record config entities
@@ -154,7 +151,7 @@ entitiesToDataFrame config entities = do
                 numRows = if null entities then 0 else length entities
                 numCols = length colNames
                 dimensions = (numRows, numCols)
-            return $ DataFrame (V.fromList columns) indices dimensions
+            return $ DataFrame (V.fromList columns) indices dimensions M.empty
 
 -- | Create columns from entities
 createColumnsFromEntities ::

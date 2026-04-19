@@ -36,7 +36,7 @@ jobs:
       - name: Run HLint
         uses: haskell-actions/hlint-run@v2
         with:
-          path: '["src/", "app/", "benchmark/", "examples/", "dataframe-hasktorch/", "dataframe-persistent"]'
+          path: '["src/", "app/", "benchmark/", "examples/", "dataframe-hasktorch/", "dataframe-persistent/", "dataframe-fastcsv/"]'
           fail-on: warning
   linux:
     name: Haskell-CI - Linux - ${{ matrix.compiler }}
@@ -171,6 +171,7 @@ jobs:
         run: |
           touch cabal.project
           echo "packages: $GITHUB_WORKSPACE/source/." >> cabal.project
+          echo "packages: $GITHUB_WORKSPACE/source/dataframe-fastcsv" >> cabal.project
           cat cabal.project
       - name: sdist
         run: |
@@ -184,10 +185,13 @@ jobs:
         run: |
           PKGDIR_dataframe="$(find "$GITHUB_WORKSPACE/unpacked" -maxdepth 1 -type d -regex '.*/dataframe-[0-9.]*')"
           echo "PKGDIR_dataframe=${PKGDIR_dataframe}" >> "$GITHUB_ENV"
+          PKGDIR_fastcsv="$(find "$GITHUB_WORKSPACE/unpacked" -maxdepth 1 -type d -regex '.*/dataframe-fastcsv-[0-9.]*')"
+          echo "PKGDIR_fastcsv=${PKGDIR_fastcsv}" >> "$GITHUB_ENV"
           rm -f cabal.project cabal.project.local
           touch cabal.project
           touch cabal.project.local
           echo "packages: ${PKGDIR_dataframe}" >> cabal.project
+          echo "packages: ${PKGDIR_fastcsv}" >> cabal.project
           echo "package dataframe" >> cabal.project
           echo "    ghc-options: -Werror=missing-methods -Werror=missing-fields" >> cabal.project
           echo "package dataframe" >> cabal.project
@@ -196,7 +200,7 @@ jobs:
           echo "    ghc-options: -Werror=incomplete-patterns -Werror=incomplete-uni-patterns" >> cabal.project
           cat >> cabal.project <<EOF
           EOF
-          $HCPKG list --simple-output --names-only | perl -ne 'for (split /\s+/) { print "constraints: any.$_ installed\n" unless /^(dataframe)$/; }' >> cabal.project.local
+          $HCPKG list --simple-output --names-only | perl -ne 'for (split /\s+/) { print "constraints: any.$_ installed\n" unless /^(dataframe|dataframe-fastcsv)$/; }' >> cabal.project.local
           cat cabal.project
           cat cabal.project.local
       - name: dump install plan
@@ -225,6 +229,10 @@ jobs:
       - name: cabal check
         run: |
           cd ${PKGDIR_dataframe} || false
+          ${CABAL} -vnormal check
+      - name: cabal check (dataframe-fastcsv)
+        run: |
+          cd ${PKGDIR_fastcsv} || false
           ${CABAL} -vnormal check
       - name: haddock
         run: |

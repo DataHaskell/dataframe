@@ -1,11 +1,14 @@
 {-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE CPP #-}
 
 module DataFrame.IO.Parquet.Encoding where
 
 import Data.Bits
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Unsafe as BSU
+#if !MIN_VERSION_base(4,20,0)
 import Data.List (foldl')
+#endif
 import qualified Data.Vector.Unboxed as VU
 import Data.Word
 import DataFrame.IO.Parquet.Binary (readUVarInt)
@@ -82,7 +85,7 @@ decodeRLEBitPackedHybrid bw need bs
 
 decodeDictIndicesV1 ::
     Int -> Int -> BS.ByteString -> (VU.Vector Int, BS.ByteString)
-decodeDictIndicesV1 need dictCard bs =
+decodeDictIndicesV1 need _dictCard bs =
     case BS.uncons bs of
         Nothing -> error "empty dictionary index stream"
         Just (w0, rest0) ->

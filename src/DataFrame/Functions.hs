@@ -2,6 +2,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE IncoherentInstances #-}
 {-# LANGUAGE InstanceSigs #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
@@ -125,16 +126,16 @@ nullLift2 f =
 values are wrapped in 'Just'.  Existing 'Nothing' in optional source columns
 stays as 'Nothing'.
 -}
-cast :: forall a. (Columnable a) => T.Text -> Expr (Maybe a)
-cast name = CastWith name "cast" (either (const Nothing) Just)
+cast :: forall a. (Columnable a, Read a) => T.Text -> Expr (Maybe a)
+cast colName = CastWith colName "cast" (either (const Nothing) Just)
 
 {- | Lenient coercion that substitutes a default for unconvertible values.
 Looks up column @name@, coerces its values to @a@, and uses @def@ wherever
 conversion fails or the source value is 'Nothing'.
 -}
-castWithDefault :: forall a. (Columnable a) => a -> T.Text -> Expr a
-castWithDefault def name =
-    CastWith name ("castWithDefault:" <> T.pack (show def)) (fromRight def)
+castWithDefault :: forall a. (Columnable a, Read a) => a -> T.Text -> Expr a
+castWithDefault def colName =
+    CastWith colName ("castWithDefault:" <> T.pack (show def)) (fromRight def)
 
 {- | Lenient coercion returning @Either T.Text a@.  Successfully converted
 values are 'Right'; values that cannot be parsed are kept as 'Left' with
@@ -142,27 +143,29 @@ their original string representation, so the caller can inspect or handle
 them downstream.  Existing 'Nothing' in optional source columns becomes
 @Left \"null\"@.
 -}
-castEither :: forall a. (Columnable a) => T.Text -> Expr (Either T.Text a)
-castEither name = CastWith name "castEither" (either (Left . T.pack) Right)
+castEither ::
+    forall a. (Columnable a, Read a) => T.Text -> Expr (Either T.Text a)
+castEither colName = CastWith colName "castEither" (either (Left . T.pack) Right)
 
 {- | Lenient coercion for assertedly non-nullable columns.
 Substitutes @error@ for @Nothing@, so it will crash at evaluation time if
 any @Nothing@ is actually encountered.  For non-nullable and
 fully-populated nullable columns no cost is paid.
 -}
-unsafeCast :: forall a. (Columnable a) => T.Text -> Expr a
-unsafeCast name =
+unsafeCast :: forall a. (Columnable a, Read a) => T.Text -> Expr a
+unsafeCast colName =
     CastWith
-        name
+        colName
         "unsafeCast"
         (fromRight (error "unsafeCast: unexpected Nothing in column"))
 
 castExpr ::
-    forall b src. (Columnable b, Columnable src) => Expr src -> Expr (Maybe b)
+    forall b src.
+    (Columnable b, Columnable src, Read b) => Expr src -> Expr (Maybe b)
 castExpr = CastExprWith @b @(Maybe b) @src "castExpr" (either (const Nothing) Just)
 
 castExprWithDefault ::
-    forall b src. (Columnable b, Columnable src) => b -> Expr src -> Expr b
+    forall b src. (Columnable b, Columnable src, Read b) => b -> Expr src -> Expr b
 castExprWithDefault def =
     CastExprWith @b @b @src
         ("castExprWithDefault:" <> T.pack (show def))
@@ -170,14 +173,14 @@ castExprWithDefault def =
 
 castExprEither ::
     forall b src.
-    (Columnable b, Columnable src) => Expr src -> Expr (Either T.Text b)
+    (Columnable b, Columnable src, Read b) => Expr src -> Expr (Either T.Text b)
 castExprEither =
     CastExprWith @b @(Either T.Text b) @src
         "castExprEither"
         (either (Left . T.pack) Right)
 
 unsafeCastExpr ::
-    forall b src. (Columnable b, Columnable src) => Expr src -> Expr b
+    forall b src. (Columnable b, Columnable src, Read b) => Expr src -> Expr b
 unsafeCastExpr =
     CastExprWith @b @b @src
         "unsafeCastExpr"
@@ -230,9 +233,21 @@ not =
 
 count :: (Columnable a) => Expr a -> Expr Int
 count = Agg (MergeAgg "count" (0 :: Int) (\c _ -> c + 1) (+) id)
+{-# SPECIALIZE count :: Expr Double -> Expr Int #-}
+{-# SPECIALIZE count :: Expr Float -> Expr Int #-}
+{-# SPECIALIZE count :: Expr Int -> Expr Int #-}
+{-# SPECIALIZE count :: Expr Int8 -> Expr Int #-}
+{-# SPECIALIZE count :: Expr Int16 -> Expr Int #-}
+{-# SPECIALIZE count :: Expr Int32 -> Expr Int #-}
+{-# SPECIALIZE count :: Expr Int64 -> Expr Int #-}
+{-# INLINEABLE count #-}
 
 collect :: (Columnable a) => Expr a -> Expr [a]
 collect = Agg (FoldAgg "collect" (Just []) (flip (:)))
+{-# SPECIALIZE collect :: Expr Double -> Expr [Double] #-}
+{-# SPECIALIZE collect :: Expr Float -> Expr [Float] #-}
+{-# SPECIALIZE collect :: Expr Int -> Expr [Int] #-}
+{-# INLINEABLE collect #-}
 
 mode :: (Ord a, Columnable a, Eq a) => Expr a -> Expr a
 mode =
@@ -242,24 +257,61 @@ mode =
             ( fst
                 . L.maximumBy (compare `on` snd)
                 . M.toList
-                . V.foldl' (\m e -> M.insertWith (+) e 1 m) M.empty
+                . V.foldl' (\m e -> M.insertWith (+) e (1 :: Int) m) M.empty
             )
         )
+{-# SPECIALIZE mode :: Expr Double -> Expr Double #-}
+{-# SPECIALIZE mode :: Expr Float -> Expr Float #-}
+{-# SPECIALIZE mode :: Expr Int -> Expr Int #-}
+{-# SPECIALIZE mode :: Expr Int8 -> Expr Int8 #-}
+{-# SPECIALIZE mode :: Expr Int16 -> Expr Int16 #-}
+{-# SPECIALIZE mode :: Expr Int32 -> Expr Int32 #-}
+{-# SPECIALIZE mode :: Expr Int64 -> Expr Int64 #-}
+{-# INLINEABLE mode #-}
 
 minimum :: (Columnable a, Ord a) => Expr a -> Expr a
 minimum = Agg (FoldAgg "minimum" Nothing Prelude.min)
+{-# SPECIALIZE DataFrame.Functions.minimum :: Expr Double -> Expr Double #-}
+{-# SPECIALIZE DataFrame.Functions.minimum :: Expr Float -> Expr Float #-}
+{-# SPECIALIZE DataFrame.Functions.minimum :: Expr Int -> Expr Int #-}
+{-# SPECIALIZE DataFrame.Functions.minimum :: Expr Int8 -> Expr Int8 #-}
+{-# SPECIALIZE DataFrame.Functions.minimum :: Expr Int16 -> Expr Int16 #-}
+{-# SPECIALIZE DataFrame.Functions.minimum :: Expr Int32 -> Expr Int32 #-}
+{-# SPECIALIZE DataFrame.Functions.minimum :: Expr Int64 -> Expr Int64 #-}
+{-# INLINEABLE DataFrame.Functions.minimum #-}
 
 maximum :: (Columnable a, Ord a) => Expr a -> Expr a
 maximum = Agg (FoldAgg "maximum" Nothing Prelude.max)
+{-# SPECIALIZE DataFrame.Functions.maximum :: Expr Double -> Expr Double #-}
+{-# SPECIALIZE DataFrame.Functions.maximum :: Expr Float -> Expr Float #-}
+{-# SPECIALIZE DataFrame.Functions.maximum :: Expr Int -> Expr Int #-}
+{-# SPECIALIZE DataFrame.Functions.maximum :: Expr Int8 -> Expr Int8 #-}
+{-# SPECIALIZE DataFrame.Functions.maximum :: Expr Int16 -> Expr Int16 #-}
+{-# SPECIALIZE DataFrame.Functions.maximum :: Expr Int32 -> Expr Int32 #-}
+{-# SPECIALIZE DataFrame.Functions.maximum :: Expr Int64 -> Expr Int64 #-}
+{-# INLINEABLE DataFrame.Functions.maximum #-}
 
 sum :: forall a. (Columnable a, Num a) => Expr a -> Expr a
 sum = Agg (FoldAgg "sum" Nothing (+))
 {-# SPECIALIZE DataFrame.Functions.sum :: Expr Double -> Expr Double #-}
+{-# SPECIALIZE DataFrame.Functions.sum :: Expr Float -> Expr Float #-}
 {-# SPECIALIZE DataFrame.Functions.sum :: Expr Int -> Expr Int #-}
+{-# SPECIALIZE DataFrame.Functions.sum :: Expr Int8 -> Expr Int8 #-}
+{-# SPECIALIZE DataFrame.Functions.sum :: Expr Int16 -> Expr Int16 #-}
+{-# SPECIALIZE DataFrame.Functions.sum :: Expr Int32 -> Expr Int32 #-}
+{-# SPECIALIZE DataFrame.Functions.sum :: Expr Int64 -> Expr Int64 #-}
 {-# INLINEABLE DataFrame.Functions.sum #-}
 
 sumMaybe :: forall a. (Columnable a, Num a) => Expr (Maybe a) -> Expr a
 sumMaybe = Agg (CollectAgg "sumMaybe" (P.sum . Maybe.catMaybes . V.toList))
+{-# SPECIALIZE sumMaybe :: Expr (Maybe Double) -> Expr Double #-}
+{-# SPECIALIZE sumMaybe :: Expr (Maybe Float) -> Expr Float #-}
+{-# SPECIALIZE sumMaybe :: Expr (Maybe Int) -> Expr Int #-}
+{-# SPECIALIZE sumMaybe :: Expr (Maybe Int8) -> Expr Int8 #-}
+{-# SPECIALIZE sumMaybe :: Expr (Maybe Int16) -> Expr Int16 #-}
+{-# SPECIALIZE sumMaybe :: Expr (Maybe Int32) -> Expr Int32 #-}
+{-# SPECIALIZE sumMaybe :: Expr (Maybe Int64) -> Expr Int64 #-}
+{-# INLINEABLE sumMaybe #-}
 
 mean :: (Columnable a, Real a) => Expr a -> Expr Double
 mean =
@@ -271,18 +323,58 @@ mean =
             (\(MeanAcc s1 c1) (MeanAcc s2 c2) -> MeanAcc (s1 + s2) (c1 + c2))
             (\(MeanAcc s c) -> if c == 0 then 0 / 0 else s / fromIntegral c)
         )
+{-# SPECIALIZE mean :: Expr Double -> Expr Double #-}
+{-# SPECIALIZE mean :: Expr Float -> Expr Double #-}
+{-# SPECIALIZE mean :: Expr Int -> Expr Double #-}
+{-# SPECIALIZE mean :: Expr Int8 -> Expr Double #-}
+{-# SPECIALIZE mean :: Expr Int16 -> Expr Double #-}
+{-# SPECIALIZE mean :: Expr Int32 -> Expr Double #-}
+{-# SPECIALIZE mean :: Expr Int64 -> Expr Double #-}
+{-# INLINEABLE mean #-}
 
 meanMaybe :: forall a. (Columnable a, Real a) => Expr (Maybe a) -> Expr Double
 meanMaybe = Agg (CollectAgg "meanMaybe" (mean' . optionalToDoubleVector))
+{-# SPECIALIZE meanMaybe :: Expr (Maybe Double) -> Expr Double #-}
+{-# SPECIALIZE meanMaybe :: Expr (Maybe Float) -> Expr Double #-}
+{-# SPECIALIZE meanMaybe :: Expr (Maybe Int) -> Expr Double #-}
+{-# SPECIALIZE meanMaybe :: Expr (Maybe Int8) -> Expr Double #-}
+{-# SPECIALIZE meanMaybe :: Expr (Maybe Int16) -> Expr Double #-}
+{-# SPECIALIZE meanMaybe :: Expr (Maybe Int32) -> Expr Double #-}
+{-# SPECIALIZE meanMaybe :: Expr (Maybe Int64) -> Expr Double #-}
+{-# INLINEABLE meanMaybe #-}
 
 variance :: (Columnable a, Real a, VU.Unbox a) => Expr a -> Expr Double
 variance = Agg (CollectAgg "variance" variance')
+{-# SPECIALIZE variance :: Expr Double -> Expr Double #-}
+{-# SPECIALIZE variance :: Expr Float -> Expr Double #-}
+{-# SPECIALIZE variance :: Expr Int -> Expr Double #-}
+{-# SPECIALIZE variance :: Expr Int8 -> Expr Double #-}
+{-# SPECIALIZE variance :: Expr Int16 -> Expr Double #-}
+{-# SPECIALIZE variance :: Expr Int32 -> Expr Double #-}
+{-# SPECIALIZE variance :: Expr Int64 -> Expr Double #-}
+{-# INLINEABLE variance #-}
 
 median :: (Columnable a, Real a, VU.Unbox a) => Expr a -> Expr Double
 median = Agg (CollectAgg "median" median')
+{-# SPECIALIZE median :: Expr Double -> Expr Double #-}
+{-# SPECIALIZE median :: Expr Float -> Expr Double #-}
+{-# SPECIALIZE median :: Expr Int -> Expr Double #-}
+{-# SPECIALIZE median :: Expr Int8 -> Expr Double #-}
+{-# SPECIALIZE median :: Expr Int16 -> Expr Double #-}
+{-# SPECIALIZE median :: Expr Int32 -> Expr Double #-}
+{-# SPECIALIZE median :: Expr Int64 -> Expr Double #-}
+{-# INLINEABLE median #-}
 
 medianMaybe :: (Columnable a, Real a) => Expr (Maybe a) -> Expr Double
 medianMaybe = Agg (CollectAgg "meanMaybe" (median' . optionalToDoubleVector))
+{-# SPECIALIZE medianMaybe :: Expr (Maybe Double) -> Expr Double #-}
+{-# SPECIALIZE medianMaybe :: Expr (Maybe Float) -> Expr Double #-}
+{-# SPECIALIZE medianMaybe :: Expr (Maybe Int) -> Expr Double #-}
+{-# SPECIALIZE medianMaybe :: Expr (Maybe Int8) -> Expr Double #-}
+{-# SPECIALIZE medianMaybe :: Expr (Maybe Int16) -> Expr Double #-}
+{-# SPECIALIZE medianMaybe :: Expr (Maybe Int32) -> Expr Double #-}
+{-# SPECIALIZE medianMaybe :: Expr (Maybe Int64) -> Expr Double #-}
+{-# INLINEABLE medianMaybe #-}
 
 optionalToDoubleVector :: (Real a) => V.Vector (Maybe a) -> VU.Vector Double
 optionalToDoubleVector =
@@ -301,59 +393,120 @@ percentile n =
 
 stddev :: (Columnable a, Real a, VU.Unbox a) => Expr a -> Expr Double
 stddev = Agg (CollectAgg "stddev" (sqrt . variance'))
+{-# SPECIALIZE stddev :: Expr Double -> Expr Double #-}
+{-# SPECIALIZE stddev :: Expr Float -> Expr Double #-}
+{-# SPECIALIZE stddev :: Expr Int -> Expr Double #-}
+{-# SPECIALIZE stddev :: Expr Int8 -> Expr Double #-}
+{-# SPECIALIZE stddev :: Expr Int16 -> Expr Double #-}
+{-# SPECIALIZE stddev :: Expr Int32 -> Expr Double #-}
+{-# SPECIALIZE stddev :: Expr Int64 -> Expr Double #-}
+{-# INLINEABLE stddev #-}
 
 stddevMaybe :: forall a. (Columnable a, Real a) => Expr (Maybe a) -> Expr Double
 stddevMaybe = Agg (CollectAgg "stddevMaybe" (sqrt . variance' . optionalToDoubleVector))
+{-# SPECIALIZE stddevMaybe :: Expr (Maybe Double) -> Expr Double #-}
+{-# SPECIALIZE stddevMaybe :: Expr (Maybe Float) -> Expr Double #-}
+{-# SPECIALIZE stddevMaybe :: Expr (Maybe Int) -> Expr Double #-}
+{-# SPECIALIZE stddevMaybe :: Expr (Maybe Int8) -> Expr Double #-}
+{-# SPECIALIZE stddevMaybe :: Expr (Maybe Int16) -> Expr Double #-}
+{-# SPECIALIZE stddevMaybe :: Expr (Maybe Int32) -> Expr Double #-}
+{-# SPECIALIZE stddevMaybe :: Expr (Maybe Int64) -> Expr Double #-}
+{-# INLINEABLE stddevMaybe #-}
 
 zScore :: Expr Double -> Expr Double
 zScore c = (c - mean c) / stddev c
 
 pow :: (Columnable a, Num a) => Expr a -> Int -> Expr a
-pow expr i = lift2Decorated (^) "max" (Just "^") True 8 expr (Lit i)
+pow expr i = lift2Decorated (^) "pow" (Just "^") True 8 expr (Lit i)
+{-# SPECIALIZE pow :: Expr Double -> Int -> Expr Double #-}
+{-# SPECIALIZE pow :: Expr Float -> Int -> Expr Float #-}
+{-# SPECIALIZE pow :: Expr Int -> Int -> Expr Int #-}
+{-# INLINEABLE pow #-}
 
 relu :: (Columnable a, Num a, Ord a) => Expr a -> Expr a
 relu = liftDecorated (Prelude.max 0) "relu" Nothing
+{-# SPECIALIZE relu :: Expr Double -> Expr Double #-}
+{-# SPECIALIZE relu :: Expr Float -> Expr Float #-}
+{-# SPECIALIZE relu :: Expr Int -> Expr Int #-}
+{-# INLINEABLE relu #-}
 
 min :: (Columnable a, Ord a) => Expr a -> Expr a -> Expr a
-min = lift2Decorated Prelude.min "max" Nothing True 1
+min = lift2Decorated Prelude.min "min" Nothing True 1
+{-# SPECIALIZE DataFrame.Functions.min ::
+    Expr Double -> Expr Double -> Expr Double
+    #-}
+{-# SPECIALIZE DataFrame.Functions.min ::
+    Expr Float -> Expr Float -> Expr Float
+    #-}
+{-# SPECIALIZE DataFrame.Functions.min :: Expr Int -> Expr Int -> Expr Int #-}
+{-# INLINEABLE DataFrame.Functions.min #-}
 
 max :: (Columnable a, Ord a) => Expr a -> Expr a -> Expr a
 max = lift2Decorated Prelude.max "max" Nothing True 1
+{-# SPECIALIZE DataFrame.Functions.max ::
+    Expr Double -> Expr Double -> Expr Double
+    #-}
+{-# SPECIALIZE DataFrame.Functions.max ::
+    Expr Float -> Expr Float -> Expr Float
+    #-}
+{-# SPECIALIZE DataFrame.Functions.max :: Expr Int -> Expr Int -> Expr Int #-}
+{-# INLINEABLE DataFrame.Functions.max #-}
 
 reduce ::
     forall a b.
     (Columnable a, Columnable b) => Expr b -> a -> (a -> b -> a) -> Expr a
 reduce expr start f = Agg (FoldAgg "foldUdf" (Just start) f) expr
+{-# INLINEABLE reduce #-}
 
 toMaybe :: (Columnable a) => Expr a -> Expr (Maybe a)
 toMaybe = liftDecorated Just "toMaybe" Nothing
+{-# SPECIALIZE toMaybe :: Expr Double -> Expr (Maybe Double) #-}
+{-# SPECIALIZE toMaybe :: Expr Float -> Expr (Maybe Float) #-}
+{-# SPECIALIZE toMaybe :: Expr Int -> Expr (Maybe Int) #-}
+{-# INLINEABLE toMaybe #-}
 
 fromMaybe :: (Columnable a) => a -> Expr (Maybe a) -> Expr a
 fromMaybe d = liftDecorated (Maybe.fromMaybe d) "fromMaybe" Nothing
+{-# SPECIALIZE fromMaybe :: Double -> Expr (Maybe Double) -> Expr Double #-}
+{-# SPECIALIZE fromMaybe :: Float -> Expr (Maybe Float) -> Expr Float #-}
+{-# SPECIALIZE fromMaybe :: Int -> Expr (Maybe Int) -> Expr Int #-}
+{-# INLINEABLE fromMaybe #-}
 
 isJust :: (Columnable a) => Expr (Maybe a) -> Expr Bool
 isJust = liftDecorated Maybe.isJust "isJust" Nothing
+{-# SPECIALIZE isJust :: Expr (Maybe Double) -> Expr Bool #-}
+{-# SPECIALIZE isJust :: Expr (Maybe Int) -> Expr Bool #-}
+{-# INLINEABLE isJust #-}
 
 isNothing :: (Columnable a) => Expr (Maybe a) -> Expr Bool
 isNothing = liftDecorated Maybe.isNothing "isNothing" Nothing
+{-# SPECIALIZE isNothing :: Expr (Maybe Double) -> Expr Bool #-}
+{-# SPECIALIZE isNothing :: Expr (Maybe Int) -> Expr Bool #-}
+{-# INLINEABLE isNothing #-}
 
 fromJust :: (Columnable a) => Expr (Maybe a) -> Expr a
 fromJust = liftDecorated Maybe.fromJust "fromJust" Nothing
+{-# SPECIALIZE fromJust :: Expr (Maybe Double) -> Expr Double #-}
+{-# SPECIALIZE fromJust :: Expr (Maybe Int) -> Expr Int #-}
+{-# INLINEABLE fromJust #-}
 
 whenPresent ::
     forall a b.
     (Columnable a, Columnable b) => (a -> b) -> Expr (Maybe a) -> Expr (Maybe b)
 whenPresent f = liftDecorated (fmap f) "whenPresent" Nothing
+{-# INLINEABLE whenPresent #-}
 
 whenBothPresent ::
     forall a b c.
     (Columnable a, Columnable b, Columnable c) =>
     (a -> b -> c) -> Expr (Maybe a) -> Expr (Maybe b) -> Expr (Maybe c)
 whenBothPresent f = lift2Decorated (\l r -> f <$> l <*> r) "whenBothPresent" Nothing False 0
+{-# INLINEABLE whenBothPresent #-}
 
 recode ::
     forall a b.
-    (Columnable a, Columnable b) => [(a, b)] -> Expr a -> Expr (Maybe b)
+    (Columnable a, Columnable b, Show (a, b)) =>
+    [(a, b)] -> Expr a -> Expr (Maybe b)
 recode mapping =
     Unary
         ( MkUnaryOp
@@ -367,12 +520,12 @@ recodeWithCondition ::
     forall a b.
     (Columnable a, Columnable b) =>
     Expr b -> [(Expr a -> Expr Bool, b)] -> Expr a -> Expr b
-recodeWithCondition fallback [] value = fallback
-recodeWithCondition fallback ((cond, value) : rest) expr = ifThenElse (cond expr) (lit value) (recodeWithCondition fallback rest expr)
+recodeWithCondition fallback [] _val = fallback
+recodeWithCondition fallback ((cond, val) : rest) expr = ifThenElse (cond expr) (lit val) (recodeWithCondition fallback rest expr)
 
 recodeWithDefault ::
     forall a b.
-    (Columnable a, Columnable b) => b -> [(a, b)] -> Expr a -> Expr b
+    (Columnable a, Columnable b, Show (a, b)) => b -> [(a, b)] -> Expr a -> Expr b
 recodeWithDefault d mapping =
     Unary
         ( MkUnaryOp
@@ -428,6 +581,23 @@ bind ::
     (Columnable a, Columnable (m a), Monad m, Columnable b, Columnable (m b)) =>
     (a -> m b) -> Expr (m a) -> Expr (m b)
 bind f = liftDecorated (>>= f) "bind" Nothing
+
+{- | Window function: evaluate an expression partitioned by the given columns.
+
+Each partition computes the inner expression independently, and the result
+is broadcast back to every row in that partition. This is analogous to
+Polars' @.over()@ or SQL @OVER (PARTITION BY ...)@.
+
+@
+-- Per-country median, broadcast to every row:
+F.over [\"country\"] (F.median (F.col \@Double \"amount\"))
+
+-- Deviation from group mean:
+F.col \@Double \"amount\" - F.over [\"group\"] (F.mean (F.col \@Double \"amount\"))
+@
+-}
+over :: (Columnable a) => [T.Text] -> Expr a -> Expr a
+over = Over
 
 -- See Section 2.4 of the Haskell Report https://www.haskell.org/definition/haskell2010.pdf
 isReservedId :: T.Text -> Bool
@@ -508,7 +678,7 @@ typeFromString [t0] = do
             | otherwise -> do
                 m <- lookupTypeName t
                 case m of
-                    Just name -> pure (ConT name)
+                    Just tyName -> pure (ConT tyName)
                     Nothing -> fail $ "Unsupported type: " ++ t0
 typeFromString [tycon, t1] = AppT <$> typeFromString [tycon] <*> typeFromString [t1]
 typeFromString [tycon, t1, t2] =
@@ -568,14 +738,14 @@ schemaToEmptyDataFrame nullableCols elems =
      in fromNamedColumns (map (schemaElemToColumn nullableCols) leafElems)
 
 schemaElemToColumn :: S.Set T.Text -> SchemaElement -> (T.Text, Column)
-schemaElemToColumn nullableCols elem =
-    let name = elementName elem
-        isNull = name `S.member` nullableCols
-        col =
+schemaElemToColumn nullableCols element =
+    let colName = elementName element
+        isNull = colName `S.member` nullableCols
+        column =
             if isNull
-                then emptyNullableColumnForType (elementType elem)
-                else emptyColumnForType (elementType elem)
-     in (name, col)
+                then emptyNullableColumnForType (elementType element)
+                else emptyColumnForType (elementType element)
+     in (colName, column)
 
 emptyColumnForType :: TType -> Column
 emptyColumnForType = \case
@@ -621,14 +791,15 @@ declareColumnsWithPrefix' prefix df =
         types = map (columnTypeString . (`unsafeGetColumn` df)) names
         specs =
             zipWith
-                ( \name type_ -> (name, maybe "" (sanitize . (<> "_")) prefix <> sanitize name, type_)
+                ( \colName type_ -> (colName, maybe "" (sanitize . (<> "_")) prefix <> sanitize colName, type_)
                 )
                 names
                 types
      in
         fmap concat $ forM specs $ \(raw, nm, tyStr) -> do
             ty <- typeFromString (words tyStr)
-            trace (T.unpack (nm <> " :: Expr " <> T.pack tyStr)) pure ()
+            let tyDisplay = if ' ' `elem` tyStr then "(" <> T.pack tyStr <> ")" else T.pack tyStr
+            trace (T.unpack (nm <> " :: Expr " <> tyDisplay)) pure ()
             let n = mkName (T.unpack nm)
             sig <- sigD n [t|Expr $(pure ty)|]
             val <- valD (varP n) (normalB [|col $(TH.lift raw)|]) []

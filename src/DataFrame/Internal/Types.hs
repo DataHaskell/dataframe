@@ -13,14 +13,13 @@
 
 module DataFrame.Internal.Types where
 
-import Control.DeepSeq (NFData)
 import Data.Int (Int16, Int32, Int64, Int8)
 import Data.Kind (Constraint, Type)
 import Data.Typeable (Typeable)
 import qualified Data.Vector.Unboxed as VU
 import Data.Word (Word16, Word32, Word64, Word8)
 
-type Columnable' a = (Typeable a, Show a, Ord a, Eq a, Read a, NFData a)
+type Columnable' a = (Typeable a, Show a, Eq a)
 
 {- | A type with column representations used to select the
 "right" representation when specializing the `toColumn` function.
@@ -28,7 +27,7 @@ type Columnable' a = (Typeable a, Show a, Ord a, Eq a, Read a, NFData a)
 data Rep
     = RBoxed
     | RUnboxed
-    | ROptional
+    | RNullableBoxed
 
 -- | Type-level if statement.
 type family If (cond :: Bool) (yes :: k) (no :: k) :: k where
@@ -69,9 +68,9 @@ type family Numeric (a :: Type) :: Bool where
     Numeric Float = 'True
     Numeric _ = 'False
 
--- | Compute the column representation tag for any ‘a’.
+-- | Compute the column representation tag for any 'a'.
 type family KindOf a :: Rep where
-    KindOf (Maybe a) = 'ROptional
+    KindOf (Maybe a) = 'RNullableBoxed
     KindOf a = If (Unboxable a) 'RUnboxed 'RBoxed
 
 -- | Type-level boolean for constraint/type comparison.

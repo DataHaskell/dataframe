@@ -62,7 +62,7 @@ showTable properMarkdown header types rows =
         separator = T.intercalate "-|-" [T.replicate width (T.singleton '-') | width <- widths]
         fillCols fill cols =
             T.intercalate " | " [fill c width col | (c, width, col) <- zip3 cs widths cols]
-        lines =
+        outputLines =
             if properMarkdown
                 then
                     T.concat ["| ", fillCols colTitleFill consolidatedHeader, " |"]
@@ -75,4 +75,4 @@ showTable properMarkdown header types rows =
                         : fillCols colTitleFill types
                         : separator
                         : map (fillCols colValueFill) rows
-     in T.unlines lines
+     in T.unlines outputLines

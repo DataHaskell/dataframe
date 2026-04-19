@@ -30,12 +30,15 @@ import DataFrame.Internal.Column (
     Column (..),
     MutableColumn (..),
     columnLength,
+    ensureOptional,
     freezeColumn',
+    freezeColumnEither,
     writeColumn,
  )
 import DataFrame.Internal.DataFrame (DataFrame (..))
 import DataFrame.Internal.Parsing
 import DataFrame.Internal.Schema (Schema, SchemaType (..), elements)
+import DataFrame.Operations.Typing (SafeReadMode (..), effectiveSafeRead)
 import System.IO
 import Type.Reflection
 import Prelude hiding (takeWhile)
@@ -44,7 +47,12 @@ import Prelude hiding (takeWhile)
 data ReadOptions = ReadOptions
     { hasHeader :: Bool
     , inferTypes :: Bool
-    , safeRead :: Bool
+    , safeRead :: SafeReadMode
+    {- ^ Default 'SafeReadMode' for columns without an entry in
+    'safeReadOverrides'.
+    -}
+    , safeReadOverrides :: [(T.Text, SafeReadMode)]
+    -- ^ Per-column 'SafeReadMode' overrides; takes precedence over 'safeRead'.
     , rowRange :: !(Maybe (Int, Int)) -- (start, length)
     , seekPos :: !(Maybe Integer)
     , totalRows :: !(Maybe Int)
@@ -52,15 +60,19 @@ data ReadOptions = ReadOptions
     , rowsRead :: !Int
     }
 
-{- | By default we assume the file has a header, we infer the types on read
-and we convert any rows with nullish objects into Maybe (safeRead).
+{- | By default we assume the file has a header and we infer types on read.
+'safeRead' starts as 'NoSafeRead' — set it to 'MaybeRead' to wrap columns as
+@Maybe a@, or 'EitherRead' to wrap as @Either Text a@ preserving the raw text
+of any rows that fail to parse. Use 'safeReadOverrides' to pick a different
+mode for specific columns.
 -}
 defaultOptions :: ReadOptions
 defaultOptions =
     ReadOptions
         { hasHeader = True
         , inferTypes = True
-        , safeRead = True
+        , safeRead = NoSafeRead
+        , safeReadOverrides = []
         , rowRange = Nothing
         , seekPos = Nothing
         , totalRows = Nothing
@@ -86,13 +98,13 @@ readTsv path = fst <$> readSeparated '\t' defaultOptions path
 readSeparated ::
     Char -> ReadOptions -> FilePath -> IO (DataFrame, (Integer, T.Text, Int))
 readSeparated c opts path = do
-    totalRows <- case totalRows opts of
+    totalRows' <- case totalRows opts of
         Nothing ->
             countRows c path >>= \total -> if hasHeader opts then return (total - 1) else return total
         Just n -> if hasHeader opts then return (n - 1) else return n
-    let (_, len) = case rowRange opts of
-            Nothing -> (0, totalRows)
-            Just (start, len) -> (start, min len (totalRows - rowsRead opts))
+    let (_, len') = case rowRange opts of
+            Nothing -> (0, totalRows')
+            Just (start, len'') -> (start, min len'' (totalRows' - rowsRead opts))
     withFile path ReadMode $ \handle -> do
         firstRow <- fmap T.strip . parseSep c <$> TIO.hGetLine handle
         let columnNames =
@@ -108,7 +120,7 @@ readSeparated c opts path = do
 
         -- Initialize mutable vectors for each column
         let numColumns = length columnNames
-        let numRows = len
+        let numRows = len'
         -- Use this row to infer the types of the rest of the column.
         (dataRow, remainder) <- readSingleLine c (leftOver opts) handle
 
@@ -124,7 +136,11 @@ readSeparated c opts path = do
 
         -- Freeze the mutable vectors into immutable ones
         nulls' <- V.unsafeFreeze nullIndices
-        cols <- V.mapM (freezeColumn mutableCols nulls' opts) (V.generate numColumns id)
+        let !columnNamesV = V.fromList columnNames
+        cols <-
+            V.mapM
+                (freezeColumn columnNamesV mutableCols nulls' opts)
+                (V.generate numColumns id)
         pos <- hTell handle
 
         return
@@ -168,13 +184,13 @@ fillColumns ::
     IO (T.Text, Int)
 fillColumns n c mutableCols nullIndices unused handle = do
     input <- newIORef unused
-    rowsRead <- newIORef (0 :: Int)
+    rowsRead' <- newIORef (0 :: Int)
     forM_ [1 .. (n - 1)] $ \i -> do
-        isEOF <- hIsEOF handle
+        atEOF <- hIsEOF handle
         input' <- readIORef input
-        unless (isEOF && input' == mempty) $ do
+        unless (atEOF && input' == mempty) $ do
             parseWith (TIO.hGetChunk handle) (parseRow c) input' >>= \case
-                Fail unconsumed ctx er -> do
+                Fail _unconsumed ctx er -> do
                     erpos <- hTell handle
                     fail $
                         "Failed to parse CSV file around "
@@ -187,10 +203,10 @@ fillColumns n c mutableCols nullIndices unused handle = do
                     fail "Partial handler is called"
                 Done (unconsumed :: T.Text) (row :: [T.Text]) -> do
                     writeIORef input unconsumed
-                    modifyIORef rowsRead (+ 1)
+                    modifyIORef rowsRead' (+ 1)
                     zipWithM_ (writeValue mutableCols nullIndices i) [0 ..] row
     l <- readIORef input
-    r <- readIORef rowsRead
+    r <- readIORef rowsRead'
     pure (l, r)
 {-# INLINE fillColumns #-}
 
@@ -205,20 +221,32 @@ writeValue ::
 writeValue mutableCols nullIndices count colIndex value = do
     col <- VM.unsafeRead mutableCols colIndex
     res <- writeColumn count value col
-    let modify value = VM.unsafeModify nullIndices ((count, value) :) colIndex
+    let modify val = VM.unsafeModify nullIndices ((count, val) :) colIndex
     either modify (const (return ())) res
 {-# INLINE writeValue #-}
 
 -- | Freezes a mutable vector into an immutable one, trimming it to the actual row count.
 freezeColumn ::
+    V.Vector T.Text ->
     VM.IOVector MutableColumn ->
     V.Vector [(Int, T.Text)] ->
     ReadOptions ->
     Int ->
     IO Column
-freezeColumn mutableCols nulls opts colIndex = do
+freezeColumn colNames mutableCols nulls opts colIndex = do
     col <- VM.unsafeRead mutableCols colIndex
-    freezeColumn' (nulls V.! colIndex) col
+    let colNulls = nulls V.! colIndex
+        mode =
+            effectiveSafeRead
+                (safeRead opts)
+                (safeReadOverrides opts)
+                (colNames V.! colIndex)
+    case mode of
+        EitherRead -> freezeColumnEither colNulls col
+        MaybeRead -> do
+            frozen <- freezeColumn' colNulls col
+            return $! ensureOptional frozen
+        NoSafeRead -> freezeColumn' colNulls col
 {-# INLINE freezeColumn #-}
 
 -- ---------------------------------------------------------------------------
@@ -341,12 +369,6 @@ writeColumnBs i bs (MBoxedColumn (col :: VM.IOVector a)) =
             let val = TextEncoding.decodeUtf8Lenient bs
              in VM.unsafeWrite col i val >> return (Right True)
         Nothing -> return (Left (TextEncoding.decodeUtf8Lenient bs))
-writeColumnBs i bs (MOptionalColumn (col :: VM.IOVector (Maybe a))) =
-    case testEquality (typeRep @a) (typeRep @T.Text) of
-        Just Refl ->
-            let val = TextEncoding.decodeUtf8Lenient bs
-             in VM.unsafeWrite col i (Just val) >> return (Right True)
-        Nothing -> return (Left (TextEncoding.decodeUtf8Lenient bs))
 writeColumnBs i bs (MUnboxedColumn (col :: VUM.IOVector a)) =
     case testEquality (typeRep @a) (typeRep @Double) of
         Just Refl -> case readByteStringDouble bs of
@@ -396,12 +418,12 @@ getNthFieldBs sep targetIdx bs
                             else go idx start inQ (pos + 1)
 
     extract s e =
-        let field = BS.take (e - s) (BS.drop s bs)
-         in if BS.length field >= 2
-                && BS.head field == quoteChar
-                && BS.last field == quoteChar
-                then BS.init (BS.tail field)
-                else field
+        let fieldVal = BS.take (e - s) (BS.drop s bs)
+         in if BS.length fieldVal >= 2
+                && BS.head fieldVal == quoteChar
+                && BS.last fieldVal == quoteChar
+                then BS.init (BS.tail fieldVal)
+                else fieldVal
 {-# INLINE getNthFieldBs #-}
 
 -- | Allocate a fresh 'MutableColumn' for @n@ slots based on a 'SchemaType'.
@@ -417,7 +439,6 @@ makeCol n (SType (_ :: P.Proxy a)) =
 sliceCol :: Int -> MutableColumn -> MutableColumn
 sliceCol n (MBoxedColumn col) = MBoxedColumn (VM.take n col)
 sliceCol n (MUnboxedColumn col) = MUnboxedColumn (VUM.take n col)
-sliceCol n (MOptionalColumn col) = MOptionalColumn (VM.take n col)
 
 {- | Finds the index of the next unquoted newline (0x0A).
 Fast path: uses memchr (SIMD) and falls back to a quote-aware linear scan

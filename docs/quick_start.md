@@ -66,7 +66,7 @@ import qualified DataFrame.Functions as F
 import DataFrame.Monad
 
 import Data.Text (Text)
-import DataFrame.Functions ((.&&), (.>=))
+import DataFrame.Functions ((.&&.), (.>=.))
 
 $(F.declareColumnsFromCsvFile "./data/housing.csv")
 
@@ -76,8 +76,8 @@ main = do
     print $ execFrameM df $ do
         -- 1) Type safe reference to `median_house_value` and `median_income`
         -- 2) creates a type safe reference to the newly created column.
-        is_expensive <- deriveM "is_expensive" (median_house_value .>= 500000)
-        luxury <- deriveM "luxury" (is_expensive .&& median_income .>= 8)
+        is_expensive <- deriveM "is_expensive" (median_house_value .>=. 500000)
+        luxury <- deriveM "luxury" (is_expensive .&&. median_income .>=. 8)
         filterWhereM luxury
 ```
 

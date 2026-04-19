@@ -21,9 +21,9 @@ import Control.Exception (throw)
 import Data.Maybe
 import DataFrame.Errors (DataFrameException (..), TypeErrorContext (..))
 import DataFrame.Internal.Column (
-    Column (..),
     Columnable,
     TypedColumn (..),
+    hasMissing,
     ifoldrColumn,
     imapColumn,
     mapColumn,
@@ -63,7 +63,8 @@ safeApply ::
     DataFrame ->
     Either DataFrameException DataFrame
 safeApply f columnName d = case getColumn columnName d of
-    Nothing -> Left $ ColumnNotFoundException columnName "apply" (M.keys $ columnIndices d)
+    Nothing ->
+        Left $ ColumnsNotFoundException [columnName] "apply" (M.keys $ columnIndices d)
     Just column -> do
         column' <- mapColumn f column
         pure $ insertColumn columnName column' d
@@ -163,8 +164,8 @@ applyWhere ::
 applyWhere condition filterColumnName f columnName df = case getColumn filterColumnName df of
     Nothing ->
         throw $
-            ColumnNotFoundException
-                filterColumnName
+            ColumnsNotFoundException
+                [filterColumnName]
                 "applyWhere"
                 (M.keys $ columnIndices df)
     Just column -> case ifoldrColumn
@@ -193,7 +194,7 @@ applyAtIndex ::
 applyAtIndex i f columnName df = case getColumn columnName df of
     Nothing ->
         throw $
-            ColumnNotFoundException columnName "applyAtIndex" (M.keys $ columnIndices df)
+            ColumnsNotFoundException [columnName] "applyAtIndex" (M.keys $ columnIndices df)
     Just column -> case imapColumn (\index value -> if index == i then f value else value) column of
         Left e -> throw e
         Right column' -> insertColumn columnName column' df
@@ -208,8 +209,9 @@ imputeCore ::
     DataFrame
 imputeCore (Col columnName) value df = case getColumn columnName df of
     Nothing ->
-        throw $ ColumnNotFoundException columnName "impute" (M.keys $ columnIndices df)
-    Just (OptionalColumn _) -> case safeApply (fromMaybe value) columnName df of
+        throw $
+            ColumnsNotFoundException [columnName] "impute" (M.keys $ columnIndices df)
+    Just col | hasMissing col -> case safeApply (fromMaybe value) columnName df of
         Left (TypeMismatchException context) -> throw $ TypeMismatchException (context{callingFunctionName = Just "impute"})
         Left exception -> throw exception
         Right res -> res

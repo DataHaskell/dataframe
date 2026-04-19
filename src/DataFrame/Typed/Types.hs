@@ -73,8 +73,8 @@ newtype TExpr (cols :: [Type]) a = TExpr {unTExpr :: Expr a}
 
 -- | A typed sort order validated against schema @cols@.
 data TSortOrder (cols :: [Type]) where
-    Asc :: (Columnable a) => TExpr cols a -> TSortOrder cols
-    Desc :: (Columnable a) => TExpr cols a -> TSortOrder cols
+    Asc :: (Columnable a, Ord a) => TExpr cols a -> TSortOrder cols
+    Desc :: (Columnable a, Ord a) => TExpr cols a -> TSortOrder cols
 
 -- | A phantom-typed wrapper over 'GroupedDataFrame'.
 newtype TypedGrouped (keys :: [Symbol]) (cols :: [Type])

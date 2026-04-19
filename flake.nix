@@ -19,19 +19,25 @@
 
         hsPkgs = pkgs.haskellPackages.extend (self: super: rec {
           granite = self.callCabal2nix "granite" granitePkg { };
+          dataframe-fastcsv = self.callCabal2nix "dataframe-fastcsv" ./dataframe-fastcsv {
+            inherit parallel;
+          };
           dataframe = self.callCabal2nix "dataframe" ./. {
             inherit granite;
           };
+          parallel = super.parallel_3_3_0_0;
         });
       in
       {
         packages = {
           default = hsPkgs.dataframe;
+          dataframe = hsPkgs.dataframe;
+          dataframe-fastcsv = hsPkgs.dataframe-fastcsv;
         };
 
         devShells.default = hsPkgs.shellFor {
-          packages = ps: [ (ps.callCabal2nix "dataframe" ./. { }) ];
-          nativeBuildInputs = with pkgs; [
+          packages = ps: [ ps.dataframe ps.dataframe-fastcsv ];
+          nativeBuildInputs = with hsPkgs; [
             ghc
             cabal-install
             haskell-language-server

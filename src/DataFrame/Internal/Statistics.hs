@@ -63,12 +63,12 @@ data VarAcc
     deriving (Show)
 
 varianceStep :: VarAcc -> Double -> VarAcc
-varianceStep (VarAcc !n !mean !m2) !x =
+varianceStep (VarAcc !n !meanVal !m2) !x =
     let !n' = n + 1
-        !delta = x - mean
-        !mean' = mean + delta / fromIntegral n'
-        !m2' = m2 + delta * (x - mean')
-     in VarAcc n' mean' m2'
+        !delta = x - meanVal
+        !meanVal' = meanVal + delta / fromIntegral n'
+        !m2' = m2 + delta * (x - meanVal')
+     in VarAcc n' meanVal' m2'
 {-# INLINE varianceStep #-}
 
 computeVariance :: VarAcc -> Double
@@ -89,21 +89,24 @@ varianceDouble' = computeVariance . VU.foldl' varianceStep (VarAcc 0 0 0)
 data SkewAcc = SkewAcc !Int !Double !Double !Double deriving (Show)
 
 skewnessStep :: (VU.Unbox a, Num a, Real a) => SkewAcc -> a -> SkewAcc
-skewnessStep (SkewAcc !n !mean !m2 !m3) !x' =
+skewnessStep (SkewAcc !n !meanVal !m2 !m3) !x' =
     let !n' = n + 1
         x = rtf x'
         !k = fromIntegral n'
-        !delta = x - mean
-        !mean' = mean + delta / k
-        !m2' = m2 + (delta ^ 2 * (k - 1)) / k
-        !m3' = m3 + (delta ^ 3 * (k - 1) * (k - 2)) / k ^ 2 - (3 * delta * m2) / k
-     in SkewAcc n' mean' m2' m3'
+        !delta = x - meanVal
+        !meanVal' = meanVal + delta / k
+        !m2' = m2 + (delta ^ (2 :: Int) * (k - 1)) / k
+        !m3' =
+            m3
+                + (delta ^ (3 :: Int) * (k - 1) * (k - 2)) / k ^ (2 :: Int)
+                - (3 * delta * m2) / k
+     in SkewAcc n' meanVal' m2' m3'
 {-# INLINE skewnessStep #-}
 
 computeSkewness :: SkewAcc -> Double
 computeSkewness (SkewAcc n _ m2 m3)
     | n < 3 = 0 -- or error "skewness of <3 samples"
-    | otherwise = (sqrt (fromIntegral n - 1) * m3) / sqrt (m2 ^ 3)
+    | otherwise = (sqrt (fromIntegral n - 1) * m3) / sqrt (m2 ^ (3 :: Int))
 {-# INLINE computeSkewness #-}
 
 skewness' :: (VU.Unbox a, Real a, Num a) => VU.Vector a -> Double
@@ -151,8 +154,8 @@ quantiles' qs q samp
         VU.mapM
             ( \i -> do
                 let !p = fromIntegral i / fromIntegral q
-                    !position = p * fromIntegral (n - 1)
-                    !index = floor position
+                    !position = p * fromIntegral (n - 1) :: Double
+                    !index = floor position :: Int
                     !f = position - fromIntegral index
                 x <- fmap rtf (VUM.read mutableSamp index)
                 if f == 0
@@ -180,9 +183,9 @@ quantilesOrd' qs q samp
         VA.sort mutableSamp
         V.mapM
             ( \i -> do
-                let !p = fromIntegral i / fromIntegral q
+                let !p = fromIntegral i / fromIntegral q :: Double
                     !position = p * fromIntegral (n - 1)
-                    !index = floor position
+                    !index = floor position :: Int
                 -- This is not exact for Ord instances.
                 -- Figure out how to make it so.
                 VM.read mutableSamp index
@@ -201,7 +204,7 @@ interQuartileRange' samp =
 meanSquaredError :: VU.Vector Double -> VU.Vector Double -> Maybe Double
 meanSquaredError target prediction =
     let
-        squareDiff = VU.ifoldl' (\sq i e -> (e - target VU.! i) ^ 2 + sq) 0 prediction
+        squareDiff = VU.ifoldl' (\sq i e -> (e - target VU.! i) ^ (2 :: Int) + sq) 0 prediction
      in
         Just $ squareDiff / fromIntegral (max (VU.length target) (VU.length prediction))
 {-# INLINE meanSquaredError #-}

@@ -2,11 +2,11 @@
 {-# LANGUAGE CApiFFI #-}
 {-# LANGUAGE ForeignFunctionInterface #-}
 
-module DataFrame.IO.Unstable.CSV (
-    fastReadCsvUnstable,
-    readCsvUnstable,
-    fastReadTsvUnstable,
-    readTsvUnstable,
+module DataFrame.IO.CSV.Fast (
+    fastReadCsv,
+    readCsvFast,
+    fastReadTsv,
+    readTsvFast,
     getDelimiterIndices,
 ) where
 
@@ -53,7 +53,11 @@ import DataFrame.IO.CSV (
     typeInferenceSampleSize,
  )
 import DataFrame.Internal.DataFrame (DataFrame (..))
-import DataFrame.Operations.Typing (ParseOptions (..), parseFromExamples)
+import DataFrame.Operations.Typing (
+    ParseOptions (..),
+    effectiveSafeRead,
+    parseFromExamples,
+ )
 
 readSeparatedDefaultFast :: Word8 -> FilePath -> IO DataFrame
 readSeparatedDefaultFast separator =
@@ -72,17 +76,17 @@ readSeparatedDefault separator =
             getDelimiterIndices_ separator originalLen v indices
         )
 
-fastReadCsvUnstable :: FilePath -> IO DataFrame
-fastReadCsvUnstable = readSeparatedDefaultFast comma
+fastReadCsv :: FilePath -> IO DataFrame
+fastReadCsv = readSeparatedDefaultFast comma
 
-readCsvUnstable :: FilePath -> IO DataFrame
-readCsvUnstable = readSeparatedDefault comma
+readCsvFast :: FilePath -> IO DataFrame
+readCsvFast = readSeparatedDefault comma
 
-fastReadTsvUnstable :: FilePath -> IO DataFrame
-fastReadTsvUnstable = readSeparatedDefaultFast tab
+fastReadTsv :: FilePath -> IO DataFrame
+fastReadTsv = readSeparatedDefaultFast tab
 
-readTsvUnstable :: FilePath -> IO DataFrame
-readTsvUnstable = readSeparatedDefault tab
+readTsvFast :: FilePath -> IO DataFrame
+readTsvFast = readSeparatedDefault tab
 
 readSeparated ::
     Word8 ->
@@ -119,21 +123,27 @@ readSeparated separator opts delimiterIndices filePath = do
             ProvideNames ns ->
                 (Vector.fromList ns, 0)
         numRow = totalRows - dataStartRow
-        parseTypes col =
+        parseTypes name col =
             let n =
                     if shouldInferFromSample (typeSpec opts)
                         then typeInferenceSampleSize (typeSpec opts)
                         else 0
+                mode =
+                    effectiveSafeRead
+                        (safeRead opts)
+                        (safeReadOverrides opts)
+                        name
                 parseOpts =
                     ParseOptions
                         { missingValues = missingIndicators opts
                         , sampleSize = n
-                        , parseSafe = safeRead opts
+                        , parseSafe = mode
+                        , parseSafeOverrides = []
                         , parseDateFormat = dateFormat opts
                         }
              in parseFromExamples parseOpts col
         generateColumn col =
-            parseTypes $
+            parseTypes (columnNames Vector.! col) $
                 Vector.fromListN
                     numRow
                     ( map

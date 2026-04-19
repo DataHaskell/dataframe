@@ -10,6 +10,7 @@
 module DataFrame.Display.Terminal.Plot where
 
 import Control.Monad
+import qualified Data.Bifunctor
 import qualified Data.List as L
 import qualified Data.Map as M
 import qualified Data.Text as T
@@ -18,9 +19,10 @@ import Data.Type.Equality (TestEquality (testEquality), type (:~:) (Refl))
 import qualified Data.Vector as V
 import qualified Data.Vector.Generic as VG
 import qualified Data.Vector.Unboxed as VU
+import Data.Word (Word8)
 import DataFrame.Internal.Types
 import GHC.Stack (HasCallStack)
-import Type.Reflection (typeRep)
+import Type.Reflection (TypeRep, typeRep)
 
 import DataFrame.Internal.Column (Column (..), Columnable, isNumeric)
 import qualified DataFrame.Internal.Column as D
@@ -169,7 +171,7 @@ plotCorrelationMatrix df = do
                         numericCols
                 )
                 numericCols
-    print (zip [0 ..] numericCols)
+    print (zip [(0 :: Int) ..] numericCols)
     T.putStrLn $ heatmap correlations (defPlot{plotTitle = "Correlation Matrix"})
   where
     correlation xs ys =
@@ -177,8 +179,8 @@ plotCorrelationMatrix df = do
             meanX = sum xs / n
             meanY = sum ys / n
             covXY = sum [(x - meanX) * (y - meanY) | (x, y) <- zip xs ys] / n
-            stdX = sqrt $ sum [(x - meanX) ^ 2 | x <- xs] / n
-            stdY = sqrt $ sum [(y - meanY) ^ 2 | y <- ys] / n
+            stdX = sqrt $ sum [(x - meanX) ^ (2 :: Int) | x <- xs] / n
+            stdY = sqrt $ sum [(y - meanY) ^ (2 :: Int) | y <- ys] / n
          in covXY / (stdX * stdY)
 
 plotBars :: (HasCallStack) => T.Text -> DataFrame -> IO ()
@@ -252,7 +254,7 @@ plotGroupedBarsWithN n groupCol valCol config df = do
                     M.toList $
                         M.fromListWith
                             (+)
-                            [(g <> " - " <> v, 1) | (g, v) <- pairs]
+                            [(g <> " - " <> v, 1 :: Int) | (g, v) <- pairs]
                 finalCounts = groupWithOther n [(k, fromIntegral v) | (k, v) <- counts]
             T.putStrLn $ bars finalCounts (plotSettings config)
 
@@ -339,21 +341,54 @@ getCategoricalCounts colName df =
         Just idx ->
             let col = columns df V.! idx
              in case col of
-                    BoxedColumn vec ->
-                        let counts = countValues vec
-                         in Just [(T.pack (show k), fromIntegral v) | (k, v) <- counts]
-                    UnboxedColumn vec ->
-                        let counts = countValuesUnboxed vec
-                         in Just [(T.pack (show k), fromIntegral v) | (k, v) <- counts]
-                    OptionalColumn vec ->
-                        let counts = countValues vec
-                         in Just [(T.pack (show k), fromIntegral v) | (k, v) <- counts]
+                    BoxedColumn _ (vec :: V.Vector a) ->
+                        Just (countBoxed (typeRep @a) vec)
+                    UnboxedColumn _ (vec :: VU.Vector a) ->
+                        Just (countUnboxed (typeRep @a) vec)
   where
-    countValues :: (Ord a, Show a) => V.Vector a -> [(a, Int)]
+    countBoxed ::
+        forall a. (Show a) => TypeRep a -> V.Vector a -> [(T.Text, Double)]
+    countBoxed tr vec
+        | Just Refl <- testEquality tr (typeRep @T.Text) = toPairs $ countValues vec
+        | Just Refl <- testEquality tr (typeRep @String) = toPairs $ countValues vec
+        | Just Refl <- testEquality tr (typeRep @Integer) = toPairs $ countValues vec
+        | Just Refl <- testEquality tr (typeRep @Int) = toPairs $ countValues vec
+        | Just Refl <- testEquality tr (typeRep @Double) = toPairs $ countValues vec
+        | Just Refl <- testEquality tr (typeRep @Float) = toPairs $ countValues vec
+        | Just Refl <- testEquality tr (typeRep @Bool) = toPairs $ countValues vec
+        | Just Refl <- testEquality tr (typeRep @Char) = toPairs $ countValues vec
+        | otherwise = countByShow $ V.toList vec
+
+    countUnboxed ::
+        forall a. (Show a, VU.Unbox a) => TypeRep a -> VU.Vector a -> [(T.Text, Double)]
+    countUnboxed tr vec
+        | Just Refl <- testEquality tr (typeRep @Int) = toPairs $ countValuesUnboxed vec
+        | Just Refl <- testEquality tr (typeRep @Double) =
+            toPairs $ countValuesUnboxed vec
+        | Just Refl <- testEquality tr (typeRep @Float) =
+            toPairs $ countValuesUnboxed vec
+        | Just Refl <- testEquality tr (typeRep @Bool) =
+            toPairs $ countValuesUnboxed vec
+        | Just Refl <- testEquality tr (typeRep @Char) =
+            toPairs $ countValuesUnboxed vec
+        | Just Refl <- testEquality tr (typeRep @Word8) =
+            toPairs $ countValuesUnboxed vec
+        | otherwise = countByShow $ VU.toList vec
+
+    toPairs :: (Show a) => [(a, Int)] -> [(T.Text, Double)]
+    toPairs = map (\(k, v) -> (T.pack (show k), fromIntegral v))
+
+    countValues :: (Ord a) => V.Vector a -> [(a, Int)]
     countValues vec = M.toList $ V.foldr' (\x acc -> M.insertWith (+) x 1 acc) M.empty vec
 
-    countValuesUnboxed :: (Ord a, Show a, VU.Unbox a) => VU.Vector a -> [(a, Int)]
+    countValuesUnboxed :: (Ord a, VU.Unbox a) => VU.Vector a -> [(a, Int)]
     countValuesUnboxed vec = M.toList $ VU.foldr' (\x acc -> M.insertWith (+) x 1 acc) M.empty vec
+
+    countByShow :: (Show a) => [a] -> [(T.Text, Double)]
+    countByShow xs =
+        map (Data.Bifunctor.bimap T.pack fromIntegral) $
+            M.toList $
+                L.foldl' (\acc x -> M.insertWith (+) (show x) (1 :: Int) acc) M.empty xs
 
 isNumericColumnCheck :: T.Text -> DataFrame -> Bool
 isNumericColumnCheck colName df = isNumericColumn df colName
@@ -365,9 +400,8 @@ extractStringColumn colName df =
         Just idx ->
             let col = columns df V.! idx
              in case col of
-                    BoxedColumn vec -> V.toList $ V.map (T.pack . show) vec
-                    UnboxedColumn vec -> V.toList $ VG.map (T.pack . show) (VG.convert vec)
-                    OptionalColumn vec -> V.toList $ V.map (T.pack . show) vec
+                    BoxedColumn _ vec -> V.toList $ V.map (T.pack . show) vec
+                    UnboxedColumn _ vec -> V.toList $ VG.map (T.pack . show) (VG.convert vec)
 
 extractNumericColumn :: (HasCallStack) => T.Text -> DataFrame -> [Double]
 extractNumericColumn colName df =
@@ -376,9 +410,8 @@ extractNumericColumn colName df =
         Just idx ->
             let col = columns df V.! idx
              in case col of
-                    BoxedColumn vec -> vectorToDoubles vec
-                    UnboxedColumn vec -> unboxedVectorToDoubles vec
-                    _ -> []
+                    BoxedColumn _ vec -> vectorToDoubles vec
+                    UnboxedColumn _ vec -> unboxedVectorToDoubles vec
 
 vectorToDoubles :: forall a. (Columnable a, Show a) => V.Vector a -> [Double]
 vectorToDoubles vec =
@@ -546,7 +579,7 @@ plotPieGroupedWith groupCol valCol config df = do
             let groups = extractStringColumn groupCol df
                 vals = extractStringColumn valCol df
                 combined = zipWith (\g v -> g <> " - " <> v) groups vals
-                counts = M.toList $ M.fromListWith (+) [(c, 1) | c <- combined]
+                counts = M.toList $ M.fromListWith (+) [(c, 1 :: Int) | c <- combined]
                 finalCounts = groupWithOtherForPie 10 [(k, fromIntegral v) | (k, v) <- counts]
             T.putStrLn $ pie finalCounts (plotSettings config)
 

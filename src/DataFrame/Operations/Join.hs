@@ -1,4 +1,5 @@
 {-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE NumericUnderscores #-}
@@ -10,10 +11,13 @@
 module DataFrame.Operations.Join where
 
 import Control.Applicative ((<|>))
+import Control.Exception (throw)
 import Control.Monad (forM_, when)
 import Control.Monad.ST (ST, runST)
 import qualified Data.HashMap.Strict as HM
+#if !MIN_VERSION_base(4,20,0)
 import Data.List (foldl')
+#endif
 import qualified Data.Map.Strict as M
 import Data.Maybe (fromMaybe)
 import Data.STRef (newSTRef, readSTRef, writeSTRef)
@@ -24,6 +28,9 @@ import qualified Data.Vector as VB
 import qualified Data.Vector.Algorithms.Merge as VA
 import qualified Data.Vector.Unboxed as VU
 import qualified Data.Vector.Unboxed.Mutable as VUM
+import DataFrame.Errors (
+    DataFrameException (ColumnsNotFoundException),
+ )
 import DataFrame.Internal.Column as D
 import DataFrame.Internal.DataFrame as D
 import DataFrame.Operations.Aggregation as D
@@ -74,8 +81,8 @@ buildCompactIndex :: VU.Vector Int -> CompactIndex
 buildCompactIndex hashes =
     let n = VU.length hashes
         (sortedHashes, sortedIndices) = sortWithIndices hashes
-        !offsets = buildOffsets sortedHashes n 0 HM.empty
-     in CompactIndex sortedIndices offsets
+        !offs = buildOffsets sortedHashes n 0 HM.empty
+     in CompactIndex sortedIndices offs
   where
     buildOffsets ::
         VU.Vector Int ->
@@ -145,6 +152,15 @@ fillCrossProduct !leftSI !rightSI !lStart !lEnd !rStart !rEnd !lv !rv !pos = goL
 keyColIndices :: S.Set T.Text -> DataFrame -> [Int]
 keyColIndices csSet df = M.elems $ M.restrictKeys (D.columnIndices df) csSet
 
+-- | Validate that all requested join keys exist, then return their indices.
+validatedKeyColIndices :: T.Text -> S.Set T.Text -> DataFrame -> [Int]
+validatedKeyColIndices callPoint csSet df =
+    let columnIdxs = D.columnIndices df
+        missingKeys = S.toAscList (csSet `S.difference` M.keysSet columnIdxs)
+     in case missingKeys of
+            [] -> M.elems $ M.restrictKeys columnIdxs csSet
+            _ -> throw (ColumnsNotFoundException missingKeys callPoint (M.keys columnIdxs))
+
 -- ============================================================
 -- Inner Join
 -- ============================================================
@@ -172,36 +188,39 @@ ghci> D.innerJoin ["key"] df other
 innerJoin :: [T.Text] -> DataFrame -> DataFrame -> DataFrame
 innerJoin cs left right
     | D.null right || D.null left = D.empty
-    | otherwise =
-        let
-            csSet = S.fromList cs
-            leftRows = fst (D.dimensions left)
-            rightRows = fst (D.dimensions right)
+    | otherwise = innerJoinNonEmpty cs left right
 
-            leftKeyIdxs = keyColIndices csSet left
-            rightKeyIdxs = keyColIndices csSet right
-            leftHashes = D.computeRowHashes leftKeyIdxs left
-            rightHashes = D.computeRowHashes rightKeyIdxs right
+innerJoinNonEmpty :: [T.Text] -> DataFrame -> DataFrame -> DataFrame
+innerJoinNonEmpty cs left right =
+    let
+        csSet = S.fromList cs
+        leftRows = fst (D.dimensions left)
+        rightRows = fst (D.dimensions right)
 
-            buildRows = min leftRows rightRows
-            (leftIxs, rightIxs)
-                | buildRows > joinStrategyThreshold =
-                    sortMergeInnerKernel leftHashes rightHashes
-                | rightRows <= leftRows =
-                    -- Build on right (smaller or equal), probe with left
-                    hashInnerKernel leftHashes rightHashes
-                | otherwise =
-                    -- Build on left (smaller), probe with right, swap result
-                    let (!rIxs, !lIxs) = hashInnerKernel rightHashes leftHashes
-                     in (lIxs, rIxs)
-         in
-            assembleInner csSet left right leftIxs rightIxs
+        leftKeyIdxs = validatedKeyColIndices "innerJoin" csSet left
+        rightKeyIdxs = validatedKeyColIndices "innerJoin" csSet right
+        leftHashes = D.computeRowHashes leftKeyIdxs left
+        rightHashes = D.computeRowHashes rightKeyIdxs right
+
+        buildRows = min leftRows rightRows
+        (leftIxs, rightIxs)
+            | buildRows > joinStrategyThreshold =
+                sortMergeInnerKernel leftHashes rightHashes
+            | rightRows <= leftRows =
+                -- Build on right (smaller or equal), probe with left
+                hashInnerKernel leftHashes rightHashes
+            | otherwise =
+                -- Build on left (smaller), probe with right, swap result
+                let (!rIxs, !lIxs) = hashInnerKernel rightHashes leftHashes
+                 in (lIxs, rIxs)
+     in
+        assembleInner csSet left right leftIxs rightIxs
 
 -- | Compute hashes for the given key column names in a DataFrame.
 buildHashColumn :: [T.Text] -> DataFrame -> VU.Vector Int
 buildHashColumn keys df =
     let csSet = S.fromList keys
-        keyIdxs = keyColIndices csSet df
+        keyIdxs = validatedKeyColIndices "buildHashColumn" csSet df
      in D.computeRowHashes keyIdxs df
 
 {- | Probe one batch of rows against a pre-built 'CompactIndex'.
@@ -527,28 +546,35 @@ ghci> D.leftJoin ["key"] df other
 @
 -}
 leftJoin :: [T.Text] -> DataFrame -> DataFrame -> DataFrame
-leftJoin cs left right
+leftJoin = leftJoinWithCallPoint "leftJoin"
+
+leftJoinWithCallPoint ::
+    T.Text -> [T.Text] -> DataFrame -> DataFrame -> DataFrame
+leftJoinWithCallPoint callPoint cs left right
     | D.null right || D.nRows right == 0 = left
     | D.null left || D.nRows left == 0 = D.empty
-    | otherwise =
-        let
-            csSet = S.fromList cs
-            rightRows = fst (D.dimensions right)
+    | otherwise = leftJoinNonEmpty callPoint cs left right
 
-            leftKeyIdxs = keyColIndices csSet left
-            rightKeyIdxs = keyColIndices csSet right
-            leftHashes = D.computeRowHashes leftKeyIdxs left
-            rightHashes = D.computeRowHashes rightKeyIdxs right
+leftJoinNonEmpty :: T.Text -> [T.Text] -> DataFrame -> DataFrame -> DataFrame
+leftJoinNonEmpty callPoint cs left right =
+    let
+        csSet = S.fromList cs
+        rightRows = fst (D.dimensions right)
 
-            -- Right is always the build side for left join
-            (leftIxs, rightIxs)
-                | rightRows > joinStrategyThreshold =
-                    sortMergeLeftKernel leftHashes rightHashes
-                | otherwise =
-                    hashLeftKernel leftHashes rightHashes
-         in
-            -- rightIxs uses -1 as sentinel for "no match"
-            assembleLeft csSet left right leftIxs rightIxs
+        leftKeyIdxs = validatedKeyColIndices callPoint csSet left
+        rightKeyIdxs = validatedKeyColIndices callPoint csSet right
+        leftHashes = D.computeRowHashes leftKeyIdxs left
+        rightHashes = D.computeRowHashes rightKeyIdxs right
+
+        -- Right is always the build side for left join
+        (leftIxs, rightIxs)
+            | rightRows > joinStrategyThreshold =
+                sortMergeLeftKernel leftHashes rightHashes
+            | otherwise =
+                hashLeftKernel leftHashes rightHashes
+     in
+        -- rightIxs uses -1 as sentinel for "no match"
+        assembleLeft csSet left right leftIxs rightIxs
 
 {- | Hash-based left join kernel.
 Returns @(leftExpandedIndices, rightExpandedIndices)@ where
@@ -798,33 +824,36 @@ ghci> D.rightJoin ["key"] df other
 -}
 rightJoin ::
     [T.Text] -> DataFrame -> DataFrame -> DataFrame
-rightJoin cs left right = leftJoin cs right left
+rightJoin cs left right = leftJoinWithCallPoint "rightJoin" cs right left
 
 fullOuterJoin ::
     [T.Text] -> DataFrame -> DataFrame -> DataFrame
 fullOuterJoin cs left right
     | D.null right || D.nRows right == 0 = left
     | D.null left || D.nRows left == 0 = right
-    | otherwise =
-        let
-            csSet = S.fromList cs
-            leftRows = fst (D.dimensions left)
-            rightRows = fst (D.dimensions right)
+    | otherwise = fullOuterJoinNonEmpty cs left right
 
-            leftKeyIdxs = keyColIndices csSet left
-            rightKeyIdxs = keyColIndices csSet right
-            leftHashes = D.computeRowHashes leftKeyIdxs left
-            rightHashes = D.computeRowHashes rightKeyIdxs right
+fullOuterJoinNonEmpty :: [T.Text] -> DataFrame -> DataFrame -> DataFrame
+fullOuterJoinNonEmpty cs left right =
+    let
+        csSet = S.fromList cs
+        leftRows = fst (D.dimensions left)
+        rightRows = fst (D.dimensions right)
 
-            -- Both sides can have nulls in full outer
-            (leftIxs, rightIxs)
-                | max leftRows rightRows > joinStrategyThreshold =
-                    sortMergeFullOuterKernel leftHashes rightHashes
-                | otherwise =
-                    hashFullOuterKernel leftHashes rightHashes
-         in
-            -- Both index vectors use -1 as sentinel
-            assembleFullOuter csSet left right leftIxs rightIxs
+        leftKeyIdxs = validatedKeyColIndices "fullOuterJoin" csSet left
+        rightKeyIdxs = validatedKeyColIndices "fullOuterJoin" csSet right
+        leftHashes = D.computeRowHashes leftKeyIdxs left
+        rightHashes = D.computeRowHashes rightKeyIdxs right
+
+        -- Both sides can have nulls in full outer
+        (leftIxs, rightIxs)
+            | max leftRows rightRows > joinStrategyThreshold =
+                sortMergeFullOuterKernel leftHashes rightHashes
+            | otherwise =
+                hashFullOuterKernel leftHashes rightHashes
+     in
+        -- Both index vectors use -1 as sentinel
+        assembleFullOuter csSet left right leftIxs rightIxs
 
 {- | Hash-based full outer join kernel.
 Builds compact indices on both sides.
@@ -1028,23 +1057,31 @@ assembleFullOuter csSet left right leftIxs rightIxs =
         insertIfPresent _ Nothing df = df
         insertIfPresent name (Just c) df = D.insertColumn name c df
 
-        -- Coalesce two OptionalColumns: take first non-Nothing per row,
+        -- Coalesce two nullable columns: take first non-Nothing per row,
         -- producing a non-optional column.
         coalesceKeyColumn :: Column -> Column -> Column
         coalesceKeyColumn
-            (OptionalColumn (lCol :: VB.Vector (Maybe a)))
-            (OptionalColumn (rCol :: VB.Vector (Maybe b))) =
+            (BoxedColumn lBm (lCol :: VB.Vector a))
+            (BoxedColumn rBm (rCol :: VB.Vector b)) =
                 case testEquality (typeRep @a) (typeRep @b) of
                     Just Refl ->
-                        D.fromVector $
-                            VB.zipWith
-                                ( \l r ->
-                                    fromMaybe (error "fullOuterJoin: null on both sides of key column") (l <|> r)
-                                )
-                                lCol
-                                rCol
+                        let asMaybe bm =
+                                VB.imap
+                                    ( \i v -> case bm of
+                                        Just bm' -> if bitmapTestBit bm' i then Just v else Nothing
+                                        Nothing -> Just v
+                                    )
+                            lMaybe = asMaybe lBm lCol
+                            rMaybe = asMaybe rBm rCol
+                         in D.fromVector $
+                                VB.zipWith
+                                    ( \l r ->
+                                        fromMaybe (error "fullOuterJoin: null on both sides of key column") (l <|> r)
+                                    )
+                                    lMaybe
+                                    rMaybe
                     Nothing -> error "Cannot join columns of different types"
-        coalesceKeyColumn _ _ = error "fullOuterJoin: expected OptionalColumn for key columns"
+        coalesceKeyColumn _ _ = error "fullOuterJoin: expected nullable column for key columns"
      in D.fold
             ( \name df ->
                 if S.member name csSet

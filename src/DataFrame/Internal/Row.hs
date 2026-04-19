@@ -13,13 +13,9 @@ import qualified Data.List as L
 import qualified Data.Map as M
 import qualified Data.Text as T
 import qualified Data.Vector as V
-import qualified Data.Vector.Algorithms.Merge as VA
-import qualified Data.Vector.Generic as VG
 import qualified Data.Vector.Unboxed as VU
 
-import Control.DeepSeq (NFData (..))
 import Control.Exception (throw)
-import Control.Monad.ST (runST)
 import Data.Function (on)
 import Data.Maybe (fromMaybe)
 import Data.Type.Equality (TestEquality (..))
@@ -28,15 +24,6 @@ import DataFrame.Errors (DataFrameException (..))
 import DataFrame.Internal.Column
 import DataFrame.Internal.DataFrame
 import DataFrame.Internal.Expression (Expr (..))
-import Text.ParserCombinators.ReadPrec (ReadPrec)
-import Text.Read (
-    Lexeme (Ident),
-    lexP,
-    parens,
-    readListPrec,
-    readListPrecDefault,
-    readPrec,
- )
 import Type.Reflection (typeOf, typeRep)
 
 data Any where
@@ -48,18 +35,9 @@ instance Eq Any where
         Refl <- testEquality (typeOf a) (typeOf b)
         return $ a == b
 
-instance Ord Any where
-    (<=) :: Any -> Any -> Bool
-    (Value a) <= (Value b) = fromMaybe False $ do
-        Refl <- testEquality (typeOf a) (typeOf b)
-        return $ a <= b
-
 instance Show Any where
     show :: Any -> String
     show (Value a) = T.unpack (showValue a)
-
-instance NFData Any where
-    rnf (Value a) = rnf a
 
 showValue :: forall a. (Columnable a) => a -> T.Text
 showValue v = case testEquality (typeRep @a) (typeRep @T.Text) of
@@ -67,15 +45,6 @@ showValue v = case testEquality (typeRep @a) (typeRep @T.Text) of
     Nothing -> case testEquality (typeRep @a) (typeRep @String) of
         Just Refl -> T.pack v
         Nothing -> (T.pack . show) v
-
-instance Read Any where
-    readListPrec :: ReadPrec [Any]
-    readListPrec = readListPrecDefault
-
-    readPrec :: ReadPrec Any
-    readPrec = parens $ do
-        Ident "Value" <- lexP
-        readPrec
 
 -- | Wraps a value into an \Any\ type. This helps up represent rows as heterogenous lists.
 toAny :: forall a. (Columnable a) => a -> Any
@@ -92,7 +61,7 @@ type Row = V.Vector Any
 (!?) :: [a] -> Int -> Maybe a
 (!?) [] _ = Nothing
 (!?) (x : _) 0 = Just x
-(!?) (x : xs) n = (!?) xs (n - 1)
+(!?) (_x : xs) n = (!?) xs (n - 1)
 
 mkColumnFromRow :: Int -> [[Any]] -> Column
 mkColumnFromRow i rows = case rows of
@@ -173,13 +142,12 @@ mkRowFromArgs names df i = V.map get (V.fromList names)
     get name = case getColumn name df of
         Nothing ->
             throw $
-                ColumnNotFoundException
-                    name
+                ColumnsNotFoundException
+                    [name]
                     "[INTERNAL] mkRowFromArgs"
                     (M.keys $ columnIndices df)
-        Just (BoxedColumn column) -> toAny (column V.! i)
-        Just (UnboxedColumn column) -> toAny (column VU.! i)
-        Just (OptionalColumn column) -> toAny (column V.! i)
+        Just (BoxedColumn _ column) -> toAny (column V.! i)
+        Just (UnboxedColumn _ column) -> toAny (column VU.! i)
 
 -- This function will return the items in the order that is specified
 -- by the user. For example, if the dataframe consists of the columns
@@ -197,28 +165,11 @@ mkRowRep df names i = V.generate (L.length names) (\index -> get (names' V.! ind
                 ++ "the other columns at index "
                 ++ show i
     get name = case getColumn name df of
-        Just (BoxedColumn c) -> case c V.!? i of
+        Just (BoxedColumn _ c) -> case c V.!? i of
             Just e -> toAny e
             Nothing -> throwError name
-        Just (OptionalColumn c) -> case c V.!? i of
-            Just e -> toAny e
-            Nothing -> throwError name
-        Just (UnboxedColumn c) -> case c VU.!? i of
+        Just (UnboxedColumn _ c) -> case c VU.!? i of
             Just e -> toAny e
             Nothing -> throwError name
         Nothing ->
-            throw $ ColumnNotFoundException name "mkRowRep" (M.keys $ columnIndices df)
-
-sortedIndexes' :: [Bool] -> V.Vector Row -> VU.Vector Int
-sortedIndexes' flipCompare rows = runST $ do
-    withIndexes <- VG.thaw (V.indexed rows)
-    VA.sortBy (produceOrderingFromRow flipCompare `on` snd) withIndexes
-    sorted <- VG.unsafeFreeze withIndexes
-    return $ VU.generate (VG.length rows) (\i -> fst (sorted VG.! i))
-
-produceOrderingFromRow :: [Bool] -> Row -> Row -> Ordering
-produceOrderingFromRow mustFlips v1 v2 = V.foldr (<>) mempty vZipped
-  where
-    vFlip = V.fromList mustFlips
-    vZipped =
-        V.zipWith3 (\b e1 e2 -> if b then compare e1 e2 else compare e2 e1) vFlip v1 v2
+            throw $ ColumnsNotFoundException [name] "mkRowRep" (M.keys $ columnIndices df)

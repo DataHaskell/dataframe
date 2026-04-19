@@ -1,5 +1,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE TypeOperators #-}
 
 module DataFrame.Operators where
 
@@ -34,19 +36,19 @@ import DataFrame.Internal.Nullable (
  )
 import DataFrame.Internal.Types (Promote, PromoteDiv)
 
-infix 8 .^^
-infix 6 .+, .-
-infix 7 .*, ./
-infix 4 .==, .<, .<=, .>=, .>, ./=
-infixr 3 .&&
-infixr 2 .||
+infixr 8 .^^, .^^., .^, .^.
+infixl 7 .*, ./, .*., ./.
+infixl 6 .+, .-, .+., .-.
+infix 4 .==, .==., .<, .<., .<=, .<=., .>=, .>=., .>, .>., ./=, ./=.
+infixr 3 .&&, .&&.
+infixr 2 .||, .||.
 infixr 0 .=
 
 (|>) :: a -> (a -> b) -> b
 (|>) = (&)
 
 as :: (Columnable a) => Expr a -> T.Text -> NamedExpr
-as expr name = (name, UExpr expr)
+as expr colName = (colName, UExpr expr)
 
 name :: (Show a) => Expr a -> T.Text
 name (Col n) = n
@@ -69,7 +71,7 @@ lit = Lit
 liftDecorated ::
     (Columnable a, Columnable b) =>
     (a -> b) -> T.Text -> Maybe T.Text -> Expr a -> Expr b
-liftDecorated f name rep = Unary (MkUnaryOp{unaryFn = f, unaryName = name, unarySymbol = rep})
+liftDecorated f opName rep = Unary (MkUnaryOp{unaryFn = f, unaryName = opName, unarySymbol = rep})
 
 lift2Decorated ::
     (Columnable c, Columnable b, Columnable a) =>
@@ -81,16 +83,70 @@ lift2Decorated ::
     Expr c ->
     Expr b ->
     Expr a
-lift2Decorated f name rep comm prec =
+lift2Decorated f opName rep comm prec =
     Binary
         ( MkBinaryOp
             { binaryFn = f
-            , binaryName = name
+            , binaryName = opName
             , binarySymbol = rep
             , binaryCommutative = comm
             , binaryPrecedence = prec
             }
         )
+
+(.==.) ::
+    (Columnable a, Eq a) =>
+    Expr a ->
+    Expr a ->
+    Expr Bool
+(.==.) = lift2Decorated (==) "eq" (Just ".==.") True 4
+
+(./=.) ::
+    (Columnable a, Eq a) =>
+    Expr a ->
+    Expr a ->
+    Expr Bool
+(./=.) = lift2Decorated (/=) "neq" (Just "./=.") True 4
+
+(.<.) ::
+    (Columnable a, Ord a) =>
+    Expr a ->
+    Expr a ->
+    Expr Bool
+(.<.) = lift2Decorated (<) "lt" (Just ".<.") False 4
+
+(.>.) ::
+    (Columnable a, Ord a) =>
+    Expr a ->
+    Expr a ->
+    Expr Bool
+(.>.) = lift2Decorated (>) "gt" (Just ".>.") False 4
+
+(.<=.) ::
+    (Columnable a, Ord a) =>
+    Expr a ->
+    Expr a ->
+    Expr Bool
+(.<=.) = lift2Decorated (<=) "leq" (Just ".<=.") False 4
+
+(.>=.) ::
+    (Columnable a, Ord a) =>
+    Expr a ->
+    Expr a ->
+    Expr Bool
+(.>=.) = lift2Decorated (>=) "geq" (Just ".>=.") False 4
+
+(.+.) :: (Columnable a, Num a) => Expr a -> Expr a -> Expr a
+(.+.) = (+)
+
+(.-.) :: (Columnable a, Num a) => Expr a -> Expr a -> Expr a
+(.-.) = (-)
+
+(.*.) :: (Columnable a, Num a) => Expr a -> Expr a -> Expr a
+(.*.) = (*)
+
+(./.) :: (Columnable a, Fractional a) => Expr a -> Expr a -> Expr a
+(./.) = (/)
 
 -- Nullable-aware arithmetic operators
 
@@ -190,11 +246,27 @@ lift2Decorated f name rep comm prec =
     Expr (NullCmpResult a b)
 (.>=) = lift2Decorated (nullCmpOp (>=)) "geq" (Just ".>=") False 4
 
-(.&&) :: Expr Bool -> Expr Bool -> Expr Bool
-(.&&) = lift2Decorated (&&) "and" (Just "&&") True 3
+(.&&.) :: Expr Bool -> Expr Bool -> Expr Bool
+(.&&.) = lift2Decorated (&&) "and" (Just ".&&.") True 3
 
-(.||) :: Expr Bool -> Expr Bool -> Expr Bool
-(.||) = lift2Decorated (||) "or" (Just "||") True 2
+(.||.) :: Expr Bool -> Expr Bool -> Expr Bool
+(.||.) = lift2Decorated (||) "or" (Just ".||.") True 2
+
+-- | Nullable-aware logical AND. Returns @Maybe Bool@ when either operand is nullable.
+(.&&) ::
+    (NullableCmpOp a b (NullCmpResult a b), BaseType a ~ Bool) =>
+    Expr a ->
+    Expr b ->
+    Expr (NullCmpResult a b)
+(.&&) = lift2Decorated (nullCmpOp (&&)) "nulland" (Just ".&&") True 3
+
+-- | Nullable-aware logical OR. Returns @Maybe Bool@ when either operand is nullable.
+(.||) ::
+    (NullableCmpOp a b (NullCmpResult a b), BaseType a ~ Bool) =>
+    Expr a ->
+    Expr b ->
+    Expr (NullCmpResult a b)
+(.||) = lift2Decorated (nullCmpOp (||)) "nullor" (Just ".||") True 2
 
 (.^^) ::
     ( Columnable (BaseType a)
@@ -219,3 +291,15 @@ lift2Decorated f name rep comm prec =
     ) =>
     Expr a -> Expr b -> Expr a
 (.^) = lift2Decorated (applyNull2 (^)) "pow" (Just ".^") False 8
+
+-- Same-type (non-nullable) exponentiation operators
+
+(.^^.) ::
+    (Columnable a, Columnable b, Fractional a, Integral b) =>
+    Expr a -> Expr b -> Expr a
+(.^^.) = lift2Decorated (^^) "pow" (Just ".^^.") False 8
+
+(.^.) ::
+    (Columnable a, Columnable b, Num a, Integral b) =>
+    Expr a -> Expr b -> Expr a
+(.^.) = lift2Decorated (^) "pow" (Just ".^.") False 8

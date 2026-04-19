@@ -401,7 +401,7 @@ import qualified DataFrame.Functions as F
 import DataFrame.Operators
 
 df |> D.derive "doubled_A" (F.col @Double "A" * F.lit 2)
-   |> D.filterWhere (F.col @Double "doubled_A" .> F.lit 1.0)
+   |> D.filterWhere (F.col @Double "doubled_A" .>. F.lit 1.0)
    |> D.select ["date", "doubled_A"]
 ```
 
@@ -415,7 +415,7 @@ import DataFrame.Monad
 
 execFrameM df $ do
     doubledA <- deriveM "doubled_A" (F.col @Double "A" * F.lit 2)
-    filterWhereM (doubledA .> F.lit 1.0)
+    filterWhereM (doubledA .>. F.lit 1.0)
     modifyM (D.select ["date", "doubled_A"])
 ```
 
@@ -445,7 +445,7 @@ case T.freeze @MySchema df of
     Nothing  -> error "schema mismatch at startup"
     Just tdf ->
         tdf |> T.derive @"doubled_A" (T.col @"A" * T.lit 2)
-            |> T.filterWhere (T.col @"doubled_A" .> T.lit 1.0)
+            |> T.filterWhere (T.col @"doubled_A" .>. T.lit 1.0)
             |> T.select @'["date", "doubled_A"]
 ```
 
@@ -820,9 +820,9 @@ Alternatively, you can use `filterWhere` with boolean expression combinations:
 
 ```haskell
 df_csv
-  |> D.filterWhere ((F.col @Int "birth_year" .>= 1982) 
-                    .&& (F.col @Int "birth_year" .<= 1996)
-                    .&& (F.col @Double "height" .> 1.7))
+  |> D.filterWhere ((F.col @Int "birth_year" .>=. 1982)
+                    .&&. (F.col @Int "birth_year" .<=. 1996)
+                    .&&. (F.col @Double "height" .>. 1.7))
 ```
 
 ### Grouping and Aggregation
@@ -1086,7 +1086,7 @@ mySchema = [ ("name",   schemaType @T.Text)
 result :: IO DataFrame
 result = L.runDataFrame $
     L.scanCsv mySchema "data.csv"
-    |> L.filter (F.col @Double "height" .> F.lit 1.7)
+    |> L.filter (F.col @Double "height" .>. F.lit 1.7)
     |> L.select ["name", "weight", "height"]
     |> L.derive "bmi" (F.col @Double "weight" ./
                        (F.col @Double "height" * F.col @Double "height"))
@@ -1117,7 +1117,7 @@ workflows.  Its type inference is automatic — you rarely need to declare schem
 result :: IO DataFrame
 result = L.runDataFrame $
     L.scanParquet mySchema "warehouse/events.parquet"
-    |> L.filter  (F.col @T.Text "country" .== F.lit "US")
+    |> L.filter  (F.col @T.Text "country" .==. F.lit "US")
     |> L.select  ["event_id", "country", "revenue"]
     |> L.take   1000
 ```
@@ -1161,7 +1161,7 @@ starwars %>%
 import qualified Data.Text as T
 
 starwars 
-  |> D.filterWhere (F.col @Text "species" .== "Droid")
+  |> D.filterWhere (F.col @Text "species" .==. "Droid")
 ```
 
 **Output (truncated for readability):**
@@ -1353,7 +1353,7 @@ starwars
   |> D.aggregate [ F.mean mass `as` "mean_mass"
                  , F.count mass `as` "count"
                  ]
-  |> D.filterWhere ((F.col @Int "count" .> 1) .&& (F.col @Double "mean_mass" .> 50))
+  |> D.filterWhere ((F.col @Int "count" .>. 1) .&&. (F.col @Double "mean_mass" .>. 50))
 ```
 
 **Output:**
@@ -1377,7 +1377,7 @@ starwars
 **Key points:**
 
 1. We use `aggregate` with a list of aggregation expressions
-2. `filterWhere` allows filtering based on multiple column conditions using `.&&` (AND) and `.|` (OR)
+2. `filterWhere` allows filtering based on multiple column conditions using `.&&.` (AND) and `.||.` (OR)
 3. Type annotations ensure we're comparing the right types
 
 ### BMI + Group Pipeline — Frame Monad Version
@@ -1392,7 +1392,7 @@ execFrameM starwars $ do
     bmiCol <- deriveM "bmi"
                   (F.col @Double "mass"
                    / F.pow (F.col @Double "height" / F.lit 100) 2)
-    filterWhereM (bmiCol .> F.lit 20.0)
+    filterWhereM (bmiCol .>. F.lit 20.0)
     modifyM (D.select ["name", "height", "mass", "bmi"])
 ```
 
@@ -1427,7 +1427,7 @@ example tdf =
                       (T.col @"mass" / (T.col @"height" / T.lit 100) ^ 2)
                       stripped
     in withBmi
-        |> T.filterWhere (T.col @"bmi" .> T.lit 20.0)
+        |> T.filterWhere (T.col @"bmi" .>. T.lit 20.0)
         |> T.select @'["name", "height", "mass", "bmi"]
 ```
 
@@ -1475,17 +1475,17 @@ tdf |> T.derive @"bonus" (T.col @"salary" * T.lit 0.1)
 
 **Untyped**
 ```haskell
-df |> D.filterWhere (F.col @Double "salary" .> F.lit 50000)
+df |> D.filterWhere (F.col @Double "salary" .>. F.lit 50000)
 ```
 
 **Frame monad**
 ```haskell
-execFrameM df $ filterWhereM (F.col @Double "salary" .> F.lit 50000)
+execFrameM df $ filterWhereM (F.col @Double "salary" .>. F.lit 50000)
 ```
 
 **Typed**
 ```haskell
-tdf |> T.filterWhere (T.col @"salary" .> T.lit 50000)
+tdf |> T.filterWhere (T.col @"salary" .>. T.lit 50000)
 ```
 
 #### Grouping and aggregating
@@ -1552,7 +1552,7 @@ import qualified DataFrame.Lazy as L
 
 result <- L.runDataFrame $
     L.scanCsv mySchema "large_file.csv"
-    |> L.filter  (F.col @Double "revenue" .> F.lit 1000)
+    |> L.filter  (F.col @Double "revenue" .>. F.lit 1000)
     |> L.select  ["id", "region", "revenue"]
     |> L.derive  "tax" (F.col @Double "revenue" * F.lit 0.2)
     |> L.take   10000

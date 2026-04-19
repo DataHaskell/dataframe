@@ -187,6 +187,7 @@ hunitTests =
     , TestLabel "unit_stratifiedSplit_proportions" unit_stratifiedSplit_proportions
     ]
 
+tests :: [DataFrame -> Bool]
 tests =
     [ prop_dropZero
     , prop_takeZero

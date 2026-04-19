@@ -26,37 +26,39 @@ readUVarInt xs = loop xs 0 0 0
     -}
     loop :: BS.ByteString -> Word64 -> Int -> Int -> (Word64, BS.ByteString)
     loop bs result _ 10 = (result, bs)
-    loop xs result shift i = case BS.uncons xs of
+    loop xs' result shiftAmt i = case BS.uncons xs' of
         Nothing -> error "readUVarInt: not enough input bytes"
-        Just (b, bs) ->
+        Just (b, bs') ->
             if b < 0x80
-                then (result .|. (fromIntegral b `shiftL` shift), bs)
+                then (result .|. (fromIntegral b `shiftL` shiftAmt), bs')
                 else
                     let payloadBits = fromIntegral (b .&. 0x7f) :: Word64
-                     in loop bs (result .|. (payloadBits `shiftL` shift)) (shift + 7) (i + 1)
+                     in loop bs' (result .|. (payloadBits `shiftL` shiftAmt)) (shiftAmt + 7) (i + 1)
 
 readVarIntFromBytes :: (Integral a) => BS.ByteString -> (a, BS.ByteString)
-readVarIntFromBytes bs = (fromIntegral n, rem)
+readVarIntFromBytes bs = (fromIntegral n, remainder)
   where
-    (n, rem) = loop 0 0 bs
-    loop shift result bs = case BS.uncons bs of
+    (n, remainder) = loop 0 0 bs
+    loop shiftAmt result bs' = case BS.uncons bs' of
         Nothing -> (result, BS.empty)
         Just (x, xs) ->
-            let res = result .|. (fromIntegral (x .&. 0x7f) :: Integer) `shiftL` shift
-             in if x .&. 0x80 /= 0x80 then (res, xs) else loop (shift + 7) res xs
+            let res = result .|. (fromIntegral (x .&. 0x7f) :: Integer) `shiftL` shiftAmt
+             in if x .&. 0x80 /= 0x80 then (res, xs) else loop (shiftAmt + 7) res xs
 
 readIntFromBytes :: (Integral a) => BS.ByteString -> (a, BS.ByteString)
 readIntFromBytes bs =
-    let (n, rem) = readVarIntFromBytes bs
+    let (n, remainder) = readVarIntFromBytes bs
         u = fromIntegral n :: Word32
-     in (fromIntegral $ (fromIntegral (u `shiftR` 1) :: Int32) .^. (-(n .&. 1)), rem)
+     in ( fromIntegral $ (fromIntegral (u `shiftR` 1) :: Int32) .^. (-(n .&. 1))
+        , remainder
+        )
 
 readInt32FromBytes :: BS.ByteString -> (Int32, BS.ByteString)
 readInt32FromBytes bs =
-    let (n', rem) = readVarIntFromBytes @Int64 bs
+    let (n', remainder) = readVarIntFromBytes @Int64 bs
         n = fromIntegral n' :: Int32
         u = fromIntegral n :: Word32
-     in ((fromIntegral (u `shiftR` 1) :: Int32) .^. (-(n .&. 1)), rem)
+     in ((fromIntegral (u `shiftR` 1) :: Int32) .^. (-(n .&. 1)), remainder)
 
 readAndAdvance :: IORef Int -> BS.ByteString -> IO Word8
 readAndAdvance bufferPos buffer = do
@@ -68,12 +70,12 @@ readAndAdvance bufferPos buffer = do
 readVarIntFromBuffer :: (Integral a) => BS.ByteString -> IORef Int -> IO a
 readVarIntFromBuffer buf bufferPos = do
     start <- readIORef bufferPos
-    let loop i shift result = do
+    let loop i shiftAmt result = do
             b <- readAndAdvance bufferPos buf
-            let res = result .|. (fromIntegral (b .&. 0x7f) :: Integer) `shiftL` shift
+            let res = result .|. (fromIntegral (b .&. 0x7f) :: Integer) `shiftL` shiftAmt
             if b .&. 0x80 /= 0x80
                 then return res
-                else loop (i + 1) (shift + 7) res
+                else loop (i + 1) (shiftAmt + 7) res
     fromIntegral <$> loop start 0 0
 
 readIntFromBuffer :: (Integral a) => BS.ByteString -> IORef Int -> IO a
@@ -96,9 +98,9 @@ readString buf pos = do
 readByteStringFromBytes :: BS.ByteString -> (BS.ByteString, BS.ByteString)
 readByteStringFromBytes xs =
     let
-        (size, rem) = readVarIntFromBytes @Int xs
+        (size, remainder) = readVarIntFromBytes @Int xs
      in
-        BS.splitAt size rem
+        BS.splitAt size remainder
 
 readByteString :: BS.ByteString -> IORef Int -> IO BS.ByteString
 readByteString buf pos = do

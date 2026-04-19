@@ -302,12 +302,12 @@ do you see?
 
 
 Finally, in addition to simple mathematical operators like subtraction and 
-division, you can ask R to make comparisons like greater than, `.>`, less than,
-`.<`, and equality, `.==`. For example, we can ask if boys outnumber girls in each 
+division, you can ask R to make comparisons like greater than, `.>.`, less than,
+`.<.`, and equality, `.==.` (use `.>`, `.<`, `.==` when either operand may be nullable). For example, we can ask if boys outnumber girls in each
 year with the expression
 
 ```haskell
-dataframe> withTotal |> D.derive "more_boys" (boys .> girls)
+dataframe> withTotal |> D.derive "more_boys" (boys .>. girls)
 ----------------------------------------
  year | boys | girls | total | more_boys
 ------|------|-------|-------|----------

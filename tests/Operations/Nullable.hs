@@ -27,7 +27,7 @@ testData :: D.DataFrame
 testData =
     D.fromNamedColumns
         [ ("x", DI.fromList ([1, 2, 3] :: [Int]))
-        , ("y", DI.OptionalColumn (V.fromList [Just 10, Nothing, Just 30 :: Maybe Int]))
+        , ("y", DI.fromVector (V.fromList [Just 10, Nothing, Just 30 :: Maybe Int]))
         ]
 
 -- | col @Int .+ col @(Maybe Int)  should give Maybe Int column
@@ -36,7 +36,7 @@ addIntMaybeInt =
     TestCase
         ( assertEqual
             "Int .+ Maybe Int = Maybe Int"
-            (Just $ DI.OptionalColumn (V.fromList [Just 11, Nothing, Just 33 :: Maybe Int]))
+            (Just $ DI.fromVector (V.fromList [Just 11, Nothing, Just 33 :: Maybe Int]))
             ( DI.getColumn "result" $
                 D.derive
                     "result"
@@ -51,7 +51,7 @@ addMaybeIntInt =
     TestCase
         ( assertEqual
             "Maybe Int .+ Int = Maybe Int"
-            (Just $ DI.OptionalColumn (V.fromList [Just 11, Nothing, Just 33 :: Maybe Int]))
+            (Just $ DI.fromVector (V.fromList [Just 11, Nothing, Just 33 :: Maybe Int]))
             ( DI.getColumn "result" $
                 D.derive
                     "result"
@@ -81,7 +81,7 @@ addMaybeMaybe =
     TestCase
         ( assertEqual
             "Maybe Int .+ Maybe Int = Maybe Int"
-            (Just $ DI.OptionalColumn (V.fromList [Just 20, Nothing, Just 60 :: Maybe Int]))
+            (Just $ DI.fromVector (V.fromList [Just 20, Nothing, Just 60 :: Maybe Int]))
             ( DI.getColumn "result" $
                 D.derive
                     "result"
@@ -97,7 +97,7 @@ subIntMaybeInt =
         ( assertEqual
             "Int .- Maybe Int = Maybe Int"
             ( Just $
-                DI.OptionalColumn (V.fromList [Just (-9), Nothing, Just (-27) :: Maybe Int])
+                DI.fromVector (V.fromList [Just (-9), Nothing, Just (-27) :: Maybe Int])
             )
             ( DI.getColumn "result" $
                 D.derive
@@ -114,7 +114,7 @@ eqIntMaybeInt =
         ( assertEqual
             "Int .== Maybe Int = Maybe Bool"
             ( Just $
-                DI.OptionalColumn (V.fromList [Just False, Nothing, Just False :: Maybe Bool])
+                DI.fromVector (V.fromList [Just False, Nothing, Just False :: Maybe Bool])
             )
             ( DI.getColumn "result" $
                 D.derive
@@ -150,7 +150,7 @@ nullLiftMaybeInt =
         ( assertEqual
             "nullLift negate (Maybe Int) propagates Nothing"
             ( Just $
-                DI.OptionalColumn (V.fromList [Just (-10), Nothing, Just (-30) :: Maybe Int])
+                DI.fromVector (V.fromList [Just (-10), Nothing, Just (-30) :: Maybe Int])
             )
             ( DI.getColumn "result" $
                 D.derive
@@ -181,7 +181,7 @@ nullLift2IntMaybeInt =
     TestCase
         ( assertEqual
             "nullLift2 (+) Int (Maybe Int) = Maybe Int"
-            (Just $ DI.OptionalColumn (V.fromList [Just 11, Nothing, Just 33 :: Maybe Int]))
+            (Just $ DI.fromVector (V.fromList [Just 11, Nothing, Just 33 :: Maybe Int]))
             ( DI.getColumn "result" $
                 D.derive
                     "result"
@@ -196,7 +196,7 @@ nullLift2MaybeIntInt =
     TestCase
         ( assertEqual
             "nullLift2 (+) (Maybe Int) Int = Maybe Int"
-            (Just $ DI.OptionalColumn (V.fromList [Just 11, Nothing, Just 33 :: Maybe Int]))
+            (Just $ DI.fromVector (V.fromList [Just 11, Nothing, Just 33 :: Maybe Int]))
             ( DI.getColumn "result" $
                 D.derive
                     "result"
@@ -229,11 +229,11 @@ crossData :: D.DataFrame
 crossData =
     D.fromNamedColumns
         [ ("x", DI.fromList ([1, 2, 3] :: [Int]))
-        , ("y", DI.OptionalColumn (V.fromList [Just 10, Nothing, Just 30 :: Maybe Int]))
+        , ("y", DI.fromVector (V.fromList [Just 10, Nothing, Just 30 :: Maybe Int]))
         , ("d", DI.fromList ([1.5, 2.5, 3.5] :: [Double]))
         ,
             ( "md"
-            , DI.OptionalColumn (V.fromList [Just 10.5, Nothing, Just 30.5 :: Maybe Double])
+            , DI.fromVector (V.fromList [Just 10.5, Nothing, Just 30.5 :: Maybe Double])
             )
         ]
 
@@ -268,7 +268,7 @@ addMaybeIntDouble =
         ( assertEqual
             "Maybe Int .+ Double = Maybe Double"
             ( Just $
-                DI.OptionalColumn (V.fromList [Just 11.5, Nothing, Just 33.5 :: Maybe Double])
+                DI.fromVector (V.fromList [Just 11.5, Nothing, Just 33.5 :: Maybe Double])
             )
             ( DI.getColumn "result" $
                 D.derive "result" (F.col @(Maybe Int) "y" .+ F.col @Double "d") crossData
@@ -282,7 +282,7 @@ addIntMaybeDouble =
         ( assertEqual
             "Int .+ Maybe Double = Maybe Double"
             ( Just $
-                DI.OptionalColumn (V.fromList [Just 11.5, Nothing, Just 33.5 :: Maybe Double])
+                DI.fromVector (V.fromList [Just 11.5, Nothing, Just 33.5 :: Maybe Double])
             )
             ( DI.getColumn "result" $
                 D.derive "result" (F.col @Int "x" .+ F.col @(Maybe Double) "md") crossData
@@ -296,7 +296,7 @@ addMaybeIntMaybeDouble =
         ( assertEqual
             "Maybe Int .+ Maybe Double = Maybe Double"
             ( Just $
-                DI.OptionalColumn (V.fromList [Just 20.5, Nothing, Just 60.5 :: Maybe Double])
+                DI.fromVector (V.fromList [Just 20.5, Nothing, Just 60.5 :: Maybe Double])
             )
             ( DI.getColumn "result" $
                 D.derive
@@ -349,7 +349,7 @@ subMaybeIntDouble =
         ( assertEqual
             "Maybe Int .- Double = Maybe Double"
             ( Just $
-                DI.OptionalColumn (V.fromList [Just 8.5, Nothing, Just 26.5 :: Maybe Double])
+                DI.fromVector (V.fromList [Just 8.5, Nothing, Just 26.5 :: Maybe Double])
             )
             ( DI.getColumn "result" $
                 D.derive "result" (F.col @(Maybe Int) "y" .- F.col @Double "d") crossData
@@ -363,7 +363,7 @@ subIntMaybeDouble =
         ( assertEqual
             "Int .- Maybe Double = Maybe Double"
             ( Just $
-                DI.OptionalColumn
+                DI.fromVector
                     (V.fromList [Just (-9.5), Nothing, Just (-27.5) :: Maybe Double])
             )
             ( DI.getColumn "result" $
@@ -378,7 +378,7 @@ subMaybeIntMaybeDouble =
         ( assertEqual
             "Maybe Int .- Maybe Double = Maybe Double"
             ( Just $
-                DI.OptionalColumn
+                DI.fromVector
                     (V.fromList [Just (-0.5), Nothing, Just (-0.5) :: Maybe Double])
             )
             ( DI.getColumn "result" $
@@ -408,7 +408,7 @@ mulMaybeIntDouble =
         ( assertEqual
             "Maybe Int .* Double = Maybe Double"
             ( Just $
-                DI.OptionalColumn (V.fromList [Just 15.0, Nothing, Just 105.0 :: Maybe Double])
+                DI.fromVector (V.fromList [Just 15.0, Nothing, Just 105.0 :: Maybe Double])
             )
             ( DI.getColumn "result" $
                 D.derive "result" (F.col @(Maybe Int) "y" .* F.col @Double "d") crossData
@@ -422,7 +422,7 @@ mulIntMaybeDouble =
         ( assertEqual
             "Int .* Maybe Double = Maybe Double"
             ( Just $
-                DI.OptionalColumn (V.fromList [Just 10.5, Nothing, Just 91.5 :: Maybe Double])
+                DI.fromVector (V.fromList [Just 10.5, Nothing, Just 91.5 :: Maybe Double])
             )
             ( DI.getColumn "result" $
                 D.derive "result" (F.col @Int "x" .* F.col @(Maybe Double) "md") crossData
@@ -436,7 +436,7 @@ mulMaybeIntMaybeDouble =
         ( assertEqual
             "Maybe Int .* Maybe Double = Maybe Double"
             ( Just $
-                DI.OptionalColumn (V.fromList [Just 105.0, Nothing, Just 915.0 :: Maybe Double])
+                DI.fromVector (V.fromList [Just 105.0, Nothing, Just 915.0 :: Maybe Double])
             )
             ( DI.getColumn "result" $
                 D.derive
@@ -451,11 +451,11 @@ divData :: D.DataFrame
 divData =
     D.fromNamedColumns
         [ ("x", DI.fromList ([2, 4, 6] :: [Int]))
-        , ("y", DI.OptionalColumn (V.fromList [Just 4, Nothing, Just 6 :: Maybe Int]))
+        , ("y", DI.fromVector (V.fromList [Just 4, Nothing, Just 6 :: Maybe Int]))
         , ("d", DI.fromList ([1.0, 2.0, 3.0] :: [Double]))
         ,
             ( "md"
-            , DI.OptionalColumn (V.fromList [Just 1.0, Nothing, Just 3.0 :: Maybe Double])
+            , DI.fromVector (V.fromList [Just 1.0, Nothing, Just 3.0 :: Maybe Double])
             )
         ]
 
@@ -490,7 +490,7 @@ divMaybeIntDouble =
         ( assertEqual
             "Maybe Int ./ Double = Maybe Double"
             ( Just $
-                DI.OptionalColumn (V.fromList [Just 4.0, Nothing, Just 2.0 :: Maybe Double])
+                DI.fromVector (V.fromList [Just 4.0, Nothing, Just 2.0 :: Maybe Double])
             )
             ( DI.getColumn "result" $
                 D.derive "result" (F.col @(Maybe Int) "y" ./ F.col @Double "d") divData
@@ -504,7 +504,7 @@ divIntMaybeDouble =
         ( assertEqual
             "Int ./ Maybe Double = Maybe Double"
             ( Just $
-                DI.OptionalColumn (V.fromList [Just 2.0, Nothing, Just 2.0 :: Maybe Double])
+                DI.fromVector (V.fromList [Just 2.0, Nothing, Just 2.0 :: Maybe Double])
             )
             ( DI.getColumn "result" $
                 D.derive "result" (F.col @Int "x" ./ F.col @(Maybe Double) "md") divData
@@ -518,7 +518,7 @@ divMaybeIntMaybeDouble =
         ( assertEqual
             "Maybe Int ./ Maybe Double = Maybe Double"
             ( Just $
-                DI.OptionalColumn (V.fromList [Just 4.0, Nothing, Just 2.0 :: Maybe Double])
+                DI.fromVector (V.fromList [Just 4.0, Nothing, Just 2.0 :: Maybe Double])
             )
             ( DI.getColumn "result" $
                 D.derive "result" (F.col @(Maybe Int) "y" ./ F.col @(Maybe Double) "md") divData
@@ -705,7 +705,7 @@ applyFmapMaybeInt =
     TestCase
         ( assertEqual
             "apply negate to Maybe Int column fmaps"
-            (Just $ DI.OptionalColumn (V.fromList [Just (-10), Nothing, Just (-30 :: Int)]))
+            (Just $ DI.fromVector (V.fromList [Just (-10), Nothing, Just (-30 :: Int)]))
             ( DI.getColumn "y" $
                 D.apply @Int negate "y" testData
             )

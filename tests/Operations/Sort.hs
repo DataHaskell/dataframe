@@ -85,7 +85,7 @@ sortByColumnDoesNotExist =
     TestCase
         ( assertExpectException
             "[Error Case]"
-            (D.columnNotFound "[\"test0\"]" "sortBy" (D.columnNames testData))
+            (D.columnsNotFound ["test0"] "sortBy" (D.columnNames testData))
             (print $ D.sortBy [D.Asc (F.col @Int "test0")] testData)
         )
 

@@ -7,6 +7,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE UndecidableInstances #-}
+{-# OPTIONS_GHC -Wno-orphans #-}
 
 module DataFrame.Operations.Statistics where
 
@@ -60,7 +61,8 @@ ghci> D.frequencies "ocean_proximity" df
  Percentage (%) | 44.26%    | 31.74% | 0.02%  | 11.09%   | 12.88%
 @
 -}
-frequencies :: forall a. (Columnable a) => Expr a -> DataFrame -> DataFrame
+frequencies ::
+    forall a. (Columnable a, Ord a) => Expr a -> DataFrame -> DataFrame
 frequencies expr df =
     let
         counts = valueCounts expr df
@@ -68,11 +70,11 @@ frequencies expr df =
         initDf =
             empty
                 & insertVector "Statistic" (V.fromList ["Count" :: T.Text, "Percentage (%)"])
-        freqs col =
+        freqs _col' =
             L.foldl'
-                ( \d (col, k) ->
+                ( \d (col'', k) ->
                     insertVector
-                        (showValue @a col)
+                        (showValue @a col'')
                         (V.fromList [toAny k, calculatePercentage counts k])
                         d
                 )
@@ -213,7 +215,7 @@ correlation first second df = do
 
 _getColumnAsDouble :: T.Text -> DataFrame -> Maybe (VU.Vector Double)
 _getColumnAsDouble name df = case getColumn name df of
-    Just (UnboxedColumn (f :: VU.Vector a)) -> case testEquality (typeRep @a) (typeRep @Double) of
+    Just (UnboxedColumn _ (f :: VU.Vector a)) -> case testEquality (typeRep @a) (typeRep @Double) of
         Just Refl -> Just f
         Nothing -> case sIntegral @a of
             STrue -> Just (VU.map fromIntegral f)
@@ -222,7 +224,7 @@ _getColumnAsDouble name df = case getColumn name df of
                 SFalse -> Nothing
     Nothing ->
         throw $
-            ColumnNotFoundException name "_getColumnAsDouble" (M.keys $ columnIndices df)
+            ColumnsNotFoundException [name] "_getColumnAsDouble" (M.keys $ columnIndices df)
     _ -> Nothing -- Return a type mismatch error here.
 {-# INLINE _getColumnAsDouble #-}
 
@@ -237,21 +239,18 @@ optionalToDoubleVector =
 sum ::
     forall a. (Columnable a, Num a) => Expr a -> DataFrame -> a
 sum (Col name) df = case getColumn name df of
-    Nothing -> throw $ ColumnNotFoundException name "sum" (M.keys $ columnIndices df)
-    Just ((UnboxedColumn (column :: VU.Vector a'))) -> case testEquality (typeRep @a') (typeRep @a) of
+    Nothing -> throw $ ColumnsNotFoundException [name] "sum" (M.keys $ columnIndices df)
+    Just ((UnboxedColumn _ (column :: VU.Vector a'))) -> case testEquality (typeRep @a') (typeRep @a) of
         Just Refl -> VG.sum column
         Nothing -> 0
-    Just ((BoxedColumn (column :: V.Vector a'))) -> case testEquality (typeRep @a') (typeRep @a) of
+    Just ((BoxedColumn _ (column :: V.Vector a'))) -> case testEquality (typeRep @a') (typeRep @a) of
         Just Refl -> VG.sum column
-        Nothing -> 0
-    Just ((OptionalColumn (column :: V.Vector (Maybe a')))) -> case testEquality (typeRep @a') (typeRep @a) of
-        Just Refl -> VG.sum (VG.map (fromMaybe 0) column)
         Nothing -> 0
 sum expr df = case interpret df expr of
     Left e -> throw e
     Right (TColumn xs) -> case toVector @a @V.Vector xs of
         Left e -> throw e
-        Right xs -> VG.sum xs
+        Right xs' -> VG.sum xs'
 
 {- | /O(n)/ Impute missing values in a column using a derived scalar.
 
@@ -370,7 +369,7 @@ summarize df =
             quantiles = applyStatistics (quantiles' (VU.fromList [0, 1, 2, 3, 4]) 4) name df
             min' = flip (VG.!) 0 <$> quantiles
             quartile1 = flip (VG.!) 1 <$> quantiles
-            median' = flip (VG.!) 2 <$> quantiles
+            medianVal = flip (VG.!) 2 <$> quantiles
             quartile3 = flip (VG.!) 3 <$> quantiles
             max' = flip (VG.!) 4 <$> quantiles
             iqr = (-) <$> quartile3 <*> quartile1
@@ -380,7 +379,7 @@ summarize df =
             , mean' <$> doubleColumn name
             , min'
             , quartile1
-            , median'
+            , medianVal
             , quartile3
             , max'
             , sqrt . variance' <$> doubleColumn name

@@ -25,7 +25,7 @@ import qualified Data.Vector.Unboxed as VU
 import qualified DataFrame.Internal.Column as DI
 
 import Control.Monad (foldM_, forM, join, void, when, zipWithM_)
-import Data.Bits (setBit, testBit)
+import Data.Bits (popCount, setBit, testBit)
 import Data.Int (Int32, Int64)
 import Data.Maybe (fromMaybe, isNothing)
 import Data.Type.Equality (TestEquality (testEquality), type (:~:) (Refl))
@@ -188,25 +188,28 @@ makeLeafArray nRows nullCnt bufPtrs extraCleanup = do
     p `at` _arrayPrivateData $ castStablePtrToPtr cleanup
     return p
 
-buildBitmap :: V.Vector (Maybe a) -> IO (Ptr Word8, Int)
-buildBitmap vec = do
-    let n = V.length vec
-        bitmapBytes = max 1 ((n + 7) `div` 8)
-        nullCount = V.length (V.filter isNothing vec)
-    bitmapPtr <- mallocBytes bitmapBytes :: IO (Ptr Word8)
-    mapM_ (\i -> pokeElemOff bitmapPtr i (0 :: Word8)) [0 .. bitmapBytes - 1]
-    V.iforM_ vec $ \i mv ->
-        case mv of
-            Nothing -> return ()
-            Just _ -> do
-                let byteIdx = i `div` 8
-                    bitIdx = i `mod` 8
-                b <- peekElemOff bitmapPtr byteIdx
-                pokeElemOff bitmapPtr byteIdx (setBit b bitIdx)
+{- | Allocate an Arrow-format validity bitmap from a 'DI.Bitmap'.
+Returns (ptr, nullCount). Caller must 'free' the pointer.
+-}
+bitmapToPtr :: Int -> DI.Bitmap -> IO (Ptr Word8, Int)
+bitmapToPtr n bm = do
+    let numBytes = max 1 ((n + 7) `div` 8)
+        validCount = VU.foldl' (\acc b -> acc + popCount b) 0 bm
+        nullCount = n - validCount
+    bitmapPtr <- mallocBytes numBytes :: IO (Ptr Word8)
+    VU.imapM_ (pokeElemOff bitmapPtr) bm
+    when (VU.length bm < numBytes) $
+        mapM_
+            (\i -> pokeElemOff bitmapPtr i (0 :: Word8))
+            [VU.length bm .. numBytes - 1]
     return (bitmapPtr, nullCount)
 
+-- | Read an Arrow validity bitmap into a 'DI.Bitmap'.
+readArrowBitmap :: Ptr Word8 -> Int -> IO DI.Bitmap
+readArrowBitmap bitmapPtr n = VU.generateM ((n + 7) `div` 8) (peekElemOff bitmapPtr)
+
 columnToArrow :: T.Text -> Column -> IO (Ptr ArrowSchema, Ptr ArrowArray)
-columnToArrow colName (UnboxedColumn (vec :: VU.Vector a))
+columnToArrow colName (UnboxedColumn _ (vec :: VU.Vector a))
     | Just Refl <- testEquality (typeRep @a) (typeRep @Int) = do
         let n = VU.length vec
         dataPtr <- mallocArray (max 1 n) :: IO (Ptr Int64)
@@ -214,7 +217,7 @@ columnToArrow colName (UnboxedColumn (vec :: VU.Vector a))
         sPtr <- makeLeafSchema "l" colName
         aPtr <- makeLeafArray n 0 [nullPtr, castPtr dataPtr] (free dataPtr)
         return (sPtr, aPtr)
-columnToArrow colName (UnboxedColumn (vec :: VU.Vector a))
+columnToArrow colName (UnboxedColumn _ (vec :: VU.Vector a))
     | Just Refl <- testEquality (typeRep @a) (typeRep @Double) = do
         let n = VU.length vec
         dataPtr <- mallocArray (max 1 n) :: IO (Ptr Double)
@@ -222,7 +225,7 @@ columnToArrow colName (UnboxedColumn (vec :: VU.Vector a))
         sPtr <- makeLeafSchema "g" colName
         aPtr <- makeLeafArray n 0 [nullPtr, castPtr dataPtr] (free dataPtr)
         return (sPtr, aPtr)
-columnToArrow colName (BoxedColumn (vec :: V.Vector a))
+columnToArrow colName (BoxedColumn _ (vec :: V.Vector a))
     | Just Refl <- testEquality (typeRep @a) (typeRep @T.Text) = do
         let n = V.length vec
             bss = map TE.encodeUtf8 (V.toList vec)
@@ -250,7 +253,7 @@ columnToArrow colName (BoxedColumn (vec :: V.Vector a))
                 [nullPtr, castPtr offPtr, castPtr charsPtr]
                 (free offPtr >> free charsPtr)
         return (sPtr, aPtr)
-columnToArrow colName (BoxedColumn (vec :: V.Vector a))
+columnToArrow colName (BoxedColumn _ (vec :: V.Vector a))
     | Just Refl <- testEquality (typeRep @a) (typeRep @Double) = do
         let n = V.length vec
         dataPtr <- mallocArray (max 1 n) :: IO (Ptr Double)
@@ -258,7 +261,7 @@ columnToArrow colName (BoxedColumn (vec :: V.Vector a))
         sPtr <- makeLeafSchema "g" colName
         aPtr <- makeLeafArray n 0 [nullPtr, castPtr dataPtr] (free dataPtr)
         return (sPtr, aPtr)
-columnToArrow colName (BoxedColumn (vec :: V.Vector a))
+columnToArrow colName (BoxedColumn _ (vec :: V.Vector a))
     | Just Refl <- testEquality (typeRep @a) (typeRep @Int) = do
         let n = V.length vec
         dataPtr <- mallocArray (max 1 n) :: IO (Ptr Int64)
@@ -266,16 +269,13 @@ columnToArrow colName (BoxedColumn (vec :: V.Vector a))
         sPtr <- makeLeafSchema "l" colName
         aPtr <- makeLeafArray n 0 [nullPtr, castPtr dataPtr] (free dataPtr)
         return (sPtr, aPtr)
-columnToArrow colName (OptionalColumn (vec :: V.Vector (Maybe a)))
+-- Nullable Int (UnboxedColumn with bitmap)
+columnToArrow colName (UnboxedColumn (Just bm) (vec :: VU.Vector a))
     | Just Refl <- testEquality (typeRep @a) (typeRep @Int) = do
-        let n = V.length vec
-        (bitmapPtr, nullCount) <- buildBitmap vec
+        let n = VU.length vec
+        (bitmapPtr, nullCount) <- bitmapToPtr n bm
         dataPtr <- mallocArray (max 1 n) :: IO (Ptr Int64)
-        V.imapM_
-            ( \i mv ->
-                pokeElemOff dataPtr i (fromIntegral (fromMaybe 0 mv) :: Int64)
-            )
-            vec
+        VU.imapM_ (\i v -> pokeElemOff dataPtr i (fromIntegral v :: Int64)) vec
         sPtr <- makeLeafSchema "l" colName
         aPtr <-
             makeLeafArray
@@ -284,16 +284,13 @@ columnToArrow colName (OptionalColumn (vec :: V.Vector (Maybe a)))
                 [castPtr bitmapPtr, castPtr dataPtr]
                 (free bitmapPtr >> free dataPtr)
         return (sPtr, aPtr)
-columnToArrow colName (OptionalColumn (vec :: V.Vector (Maybe a)))
+-- Nullable Double (UnboxedColumn with bitmap)
+columnToArrow colName (UnboxedColumn (Just bm) (vec :: VU.Vector a))
     | Just Refl <- testEquality (typeRep @a) (typeRep @Double) = do
-        let n = V.length vec
-        (bitmapPtr, nullCount) <- buildBitmap vec
+        let n = VU.length vec
+        (bitmapPtr, nullCount) <- bitmapToPtr n bm
         dataPtr <- mallocArray (max 1 n) :: IO (Ptr Double)
-        V.imapM_
-            ( \i mv ->
-                pokeElemOff dataPtr i (maybe 0.0 realToFrac mv :: Double)
-            )
-            vec
+        VU.imapM_ (\i v -> pokeElemOff dataPtr i (realToFrac v :: Double)) vec
         sPtr <- makeLeafSchema "g" colName
         aPtr <-
             makeLeafArray
@@ -302,14 +299,18 @@ columnToArrow colName (OptionalColumn (vec :: V.Vector (Maybe a)))
                 [castPtr bitmapPtr, castPtr dataPtr]
                 (free bitmapPtr >> free dataPtr)
         return (sPtr, aPtr)
-columnToArrow colName (OptionalColumn (vec :: V.Vector (Maybe a)))
+-- Nullable Text (BoxedColumn with bitmap)
+columnToArrow colName (BoxedColumn (Just bm) (vec :: V.Vector a))
     | Just Refl <- testEquality (typeRep @a) (typeRep @T.Text) = do
         let n = V.length vec
-            texts = V.toList vec
-            bss = map (maybe BS.empty TE.encodeUtf8) texts
+            -- For null positions, use empty BS (null placeholder in vec is never evaluated)
+            bss =
+                map
+                    (\i -> if DI.bitmapTestBit bm i then TE.encodeUtf8 (vec V.! i) else BS.empty)
+                    [0 .. n - 1]
             cumOff = scanl (+) 0 (map BS.length bss)
             total = last cumOff
-        (bitmapPtr, nullCount) <- buildBitmap vec
+        (bitmapPtr, nullCount) <- bitmapToPtr n bm
         offPtr <- mallocArray (n + 1) :: IO (Ptr Int32)
         zipWithM_
             (\i o -> pokeElemOff offPtr i (fromIntegral o :: Int32))
@@ -353,7 +354,7 @@ dataframeToArrow df = do
 
     let nRows = case colsInOrder of
             [] -> 0
-            _ -> DI.columnLength (snd (head colsInOrder))
+            (_, col) : _ -> DI.columnLength col
     topSchema <- mallocBytes arrowSchemaSize
     fmtStr <- newCString "+s"
     nameStr <- newCString ""
@@ -463,19 +464,12 @@ readInt64Col n nullCnt bufArr = do
     if nullCnt > 0
         then do
             let bitmapPtr = castPtr bitmapVoid :: Ptr Word8
-            vec <- V.generateM n $ \i -> do
-                valid <- bitmapIsSet bitmapPtr i
-                if valid
-                    then do
-                        v <- peekElemOff dataPtr i
-                        return (Just (fromIntegral v :: Int))
-                    else return Nothing
-            return $ OptionalColumn (vec :: V.Vector (Maybe Int))
+            bm <- readArrowBitmap bitmapPtr n
+            vec <- VU.generateM n $ \i -> fmap fromIntegral (peekElemOff dataPtr i :: IO Int64)
+            return $ UnboxedColumn (Just bm) (vec :: VU.Vector Int)
         else do
-            vec <- VU.generateM n $ \i -> do
-                v <- peekElemOff dataPtr i
-                return (fromIntegral v :: Int)
-            return $ UnboxedColumn (vec :: VU.Vector Int)
+            vec <- VU.generateM n $ \i -> fmap fromIntegral (peekElemOff dataPtr i :: IO Int64)
+            return $ UnboxedColumn Nothing (vec :: VU.Vector Int)
 
 readInt32Col :: Int -> Int64 -> Ptr (Ptr ()) -> IO Column
 readInt32Col n nullCnt bufArr = do
@@ -485,19 +479,12 @@ readInt32Col n nullCnt bufArr = do
     if nullCnt > 0
         then do
             let bitmapPtr = castPtr bitmapVoid :: Ptr Word8
-            vec <- V.generateM n $ \i -> do
-                valid <- bitmapIsSet bitmapPtr i
-                if valid
-                    then do
-                        v <- peekElemOff dataPtr i
-                        return (Just (fromIntegral v :: Int))
-                    else return Nothing
-            return $ OptionalColumn (vec :: V.Vector (Maybe Int))
+            bm <- readArrowBitmap bitmapPtr n
+            vec <- VU.generateM n $ \i -> fmap fromIntegral (peekElemOff dataPtr i :: IO Int32)
+            return $ UnboxedColumn (Just bm) (vec :: VU.Vector Int)
         else do
-            vec <- VU.generateM n $ \i -> do
-                v <- peekElemOff dataPtr i
-                return (fromIntegral v :: Int)
-            return $ UnboxedColumn (vec :: VU.Vector Int)
+            vec <- VU.generateM n $ \i -> fmap fromIntegral (peekElemOff dataPtr i :: IO Int32)
+            return $ UnboxedColumn Nothing (vec :: VU.Vector Int)
 
 readFloat64Col :: Int -> Int64 -> Ptr (Ptr ()) -> IO Column
 readFloat64Col n nullCnt bufArr = do
@@ -507,15 +494,12 @@ readFloat64Col n nullCnt bufArr = do
     if nullCnt > 0
         then do
             let bitmapPtr = castPtr bitmapVoid :: Ptr Word8
-            vec <- V.generateM n $ \i -> do
-                valid <- bitmapIsSet bitmapPtr i
-                if valid
-                    then Just <$> (peekElemOff dataPtr i :: IO Double)
-                    else return Nothing
-            return $ OptionalColumn (vec :: V.Vector (Maybe Double))
+            bm <- readArrowBitmap bitmapPtr n
+            vec <- VU.generateM n (peekElemOff dataPtr)
+            return $ UnboxedColumn (Just bm) (vec :: VU.Vector Double)
         else do
             vec <- VU.generateM n (peekElemOff dataPtr)
-            return $ UnboxedColumn (vec :: VU.Vector Double)
+            return $ UnboxedColumn Nothing (vec :: VU.Vector Double)
 
 readFloat32Col :: Int -> Int64 -> Ptr (Ptr ()) -> IO Column
 readFloat32Col n nullCnt bufArr = do
@@ -525,19 +509,12 @@ readFloat32Col n nullCnt bufArr = do
     if nullCnt > 0
         then do
             let bitmapPtr = castPtr bitmapVoid :: Ptr Word8
-            vec <- V.generateM n $ \i -> do
-                valid <- bitmapIsSet bitmapPtr i
-                if valid
-                    then do
-                        v <- peekElemOff dataPtr i
-                        return (Just (realToFrac v :: Double))
-                    else return Nothing
-            return $ OptionalColumn (vec :: V.Vector (Maybe Double))
+            bm <- readArrowBitmap bitmapPtr n
+            vec <- VU.generateM n $ \i -> fmap (realToFrac :: Float -> Double) (peekElemOff dataPtr i)
+            return $ UnboxedColumn (Just bm) (vec :: VU.Vector Double)
         else do
-            vec <- VU.generateM n $ \i -> do
-                v <- peekElemOff dataPtr i
-                return (realToFrac v :: Double)
-            return $ UnboxedColumn (vec :: VU.Vector Double)
+            vec <- VU.generateM n $ \i -> fmap (realToFrac :: Float -> Double) (peekElemOff dataPtr i)
+            return $ UnboxedColumn Nothing (vec :: VU.Vector Double)
 
 -- | Read a large_string (format "U") column with int64 offsets.
 readLargeUtf8Col :: Int -> Int64 -> Ptr (Ptr ()) -> IO Column
@@ -547,30 +524,20 @@ readLargeUtf8Col n nullCnt bufArr = do
     charVoid <- peekElemOff bufArr 2
     let offsetPtr = castPtr offsetVoid :: Ptr Int64
         charPtr = castPtr charVoid :: Ptr Word8
+    let readText i = do
+            start <- fromIntegral <$> peekElemOff offsetPtr i
+            end <- fromIntegral <$> peekElemOff offsetPtr (i + 1)
+            TE.decodeUtf8
+                <$> BS.packCStringLen (castPtr (charPtr `plusPtr` start), end - start)
     if nullCnt > 0
         then do
             let bitmapPtr = castPtr bitmapVoid :: Ptr Word8
-            vec <- V.generateM n $ \i -> do
-                valid <- bitmapIsSet bitmapPtr i
-                if valid
-                    then do
-                        start <- fromIntegral <$> peekElemOff offsetPtr i
-                        end <- fromIntegral <$> peekElemOff offsetPtr (i + 1)
-                        bs <-
-                            BS.packCStringLen
-                                (castPtr (charPtr `plusPtr` start), end - start)
-                        return $ Just (TE.decodeUtf8 bs)
-                    else return Nothing
-            return $ OptionalColumn vec
+            bm <- readArrowBitmap bitmapPtr n
+            vec <- V.generateM n readText
+            return $ BoxedColumn (Just bm) vec
         else do
-            vec <- V.generateM n $ \i -> do
-                start <- fromIntegral <$> peekElemOff offsetPtr i
-                end <- fromIntegral <$> peekElemOff offsetPtr (i + 1)
-                bs <-
-                    BS.packCStringLen
-                        (castPtr (charPtr `plusPtr` start), end - start)
-                return $ TE.decodeUtf8 bs
-            return $ BoxedColumn vec
+            vec <- V.generateM n readText
+            return $ BoxedColumn Nothing vec
 
 -- | Read a utf8 (format "u") column with int32 offsets.
 readUtf8Col :: Int -> Int64 -> Ptr (Ptr ()) -> IO Column
@@ -580,27 +547,17 @@ readUtf8Col n nullCnt bufArr = do
     charVoid <- peekElemOff bufArr 2
     let offsetPtr = castPtr offsetVoid :: Ptr Int32
         charPtr = castPtr charVoid :: Ptr Word8
+        readText i = do
+            start <- fromIntegral <$> peekElemOff offsetPtr i
+            end <- fromIntegral <$> peekElemOff offsetPtr (i + 1)
+            TE.decodeUtf8
+                <$> BS.packCStringLen (castPtr (charPtr `plusPtr` start), end - start)
     if nullCnt > 0
         then do
             let bitmapPtr = castPtr bitmapVoid :: Ptr Word8
-            vec <- V.generateM n $ \i -> do
-                valid <- bitmapIsSet bitmapPtr i
-                if valid
-                    then do
-                        start <- fromIntegral <$> peekElemOff offsetPtr i
-                        end <- fromIntegral <$> peekElemOff offsetPtr (i + 1)
-                        bs <-
-                            BS.packCStringLen
-                                (castPtr (charPtr `plusPtr` start), end - start)
-                        return $ Just (TE.decodeUtf8 bs)
-                    else return Nothing
-            return $ OptionalColumn vec
+            bm <- readArrowBitmap bitmapPtr n
+            vec <- V.generateM n readText
+            return $ BoxedColumn (Just bm) vec
         else do
-            vec <- V.generateM n $ \i -> do
-                start <- fromIntegral <$> peekElemOff offsetPtr i
-                end <- fromIntegral <$> peekElemOff offsetPtr (i + 1)
-                bs <-
-                    BS.packCStringLen
-                        (castPtr (charPtr `plusPtr` start), end - start)
-                return $ TE.decodeUtf8 bs
-            return $ BoxedColumn vec
+            vec <- V.generateM n readText
+            return $ BoxedColumn Nothing vec

@@ -1,4 +1,3 @@
-{-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
 module Main where
@@ -11,6 +10,7 @@ import Test.QuickCheck
 
 import qualified DecisionTree
 import qualified Functions
+import qualified IO.CSV
 import qualified IO.JSON
 import qualified Internal.Parsing
 import qualified LazyParquet
@@ -33,6 +33,8 @@ import qualified Operations.Statistics
 import qualified Operations.Subset
 import qualified Operations.Take
 import qualified Operations.Typing
+import qualified Operations.Window
+import qualified Operations.WriteCsv
 import qualified Parquet
 import qualified Properties
 
@@ -53,19 +55,22 @@ tests =
             ++ Operations.Nullable.tests
             ++ Operations.Provenance.tests
             ++ Operations.ReadCsv.tests
+            ++ Operations.WriteCsv.tests
             ++ Operations.Shuffle.tests
             ++ Operations.Sort.tests
             ++ Operations.Statistics.tests
             ++ Operations.Subset.hunitTests
             ++ Operations.Take.tests
             ++ Operations.Typing.tests
+            ++ Operations.Window.tests
             ++ Functions.tests
+            ++ IO.CSV.tests
             ++ IO.JSON.tests
             ++ Parquet.tests
             ++ LazyParquet.tests
 
 isSuccessful :: Result -> Bool
-isSuccessful (Success{..}) = True
+isSuccessful (Success{}) = True
 isSuccessful _ = False
 
 main :: IO ()

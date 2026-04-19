@@ -17,6 +17,7 @@ import qualified Data.Vector.Generic as VG
 import qualified Data.Vector.Unboxed as VU
 
 import Control.Exception (throw)
+import Data.Bits (popCount)
 import Data.Either
 import qualified Data.Foldable as Fold
 import Data.Function (on, (&))
@@ -44,6 +45,7 @@ import DataFrame.Internal.DataFrame (
     derivingExpressions,
     empty,
     getColumn,
+    null,
  )
 import DataFrame.Internal.Expression
 import DataFrame.Internal.Interpreter
@@ -305,7 +307,7 @@ insertUnboxedVector ::
     -- | DataFrame to add the column to
     DataFrame ->
     DataFrame
-insertUnboxedVector name xs = insertColumn name (UnboxedColumn xs)
+insertUnboxedVector name xs = insertColumn name (UnboxedColumn Nothing xs)
 
 {- | /O(n)/ Add a column to the dataframe.
 
@@ -389,13 +391,15 @@ insertColumn name column d =
 @
 -}
 cloneColumn :: T.Text -> T.Text -> DataFrame -> DataFrame
-cloneColumn original new df = fromMaybe
-    ( throw $
-        ColumnNotFoundException original "cloneColumn" (M.keys $ columnIndices df)
-    )
-    $ do
-        column <- getColumn original df
-        return $ insertColumn new column df
+cloneColumn original new df
+    | null df = throw (EmptyDataSetException "cloneColumn")
+    | otherwise = fromMaybe
+        ( throw $
+            ColumnsNotFoundException [original] "cloneColumn" (M.keys $ columnIndices df)
+        )
+        $ do
+            column <- getColumn original df
+            return $ insertColumn new column df
 
 {- | /O(n)/ Renames a single column.
 
@@ -479,13 +483,15 @@ renameMany = fold (uncurry rename)
 
 renameSafe ::
     T.Text -> T.Text -> DataFrame -> Either DataFrameException DataFrame
-renameSafe orig new df = fromMaybe
-    (Left $ ColumnNotFoundException orig "rename" (M.keys $ columnIndices df))
-    $ do
-        columnIndex <- M.lookup orig (columnIndices df)
-        let origRemoved = M.delete orig (columnIndices df)
-        let newAdded = M.insert new columnIndex origRemoved
-        return (Right df{columnIndices = newAdded})
+renameSafe orig new df
+    | null df = throw (EmptyDataSetException "rename")
+    | otherwise = fromMaybe
+        (Left $ ColumnsNotFoundException [orig] "rename" (M.keys $ columnIndices df))
+        $ do
+            columnIndex <- M.lookup orig (columnIndices df)
+            let origRemoved = M.delete orig (columnIndices df)
+            let newAdded = M.insert new columnIndex origRemoved
+            return (Right df{columnIndices = newAdded})
 
 data ColumnInfo = ColumnInfo
     { nameOfColumn :: !T.Text
@@ -525,11 +531,11 @@ describeColumns df =
             [ColumnInfo]
     indexMap = M.fromList (map (\(a, b) -> (b, a)) $ M.toList (columnIndices df))
     columnName i = M.lookup i indexMap
-    go acc i col@(OptionalColumn (c :: V.Vector a)) =
+    go acc i col@(BoxedColumn _bm (_c :: V.Vector a)) =
         let
             cname = columnName i
             countNulls = nulls col
-            columnType = T.pack $ show $ typeRep @a
+            columnType = T.pack $ columnTypeString col
          in
             if isNothing cname
                 then acc
@@ -540,53 +546,36 @@ describeColumns df =
                         countNulls
                         columnType
                         : acc
-    go acc i col@(BoxedColumn (c :: V.Vector a)) =
+    go acc i col@(UnboxedColumn _bm _c) =
         let
             cname = columnName i
-            columnType = T.pack $ show $ typeRep @a
+            countNulls = nulls col
+            columnType = T.pack $ columnTypeString col
          in
             if isNothing cname
                 then acc
                 else
                     ColumnInfo
                         (fromMaybe "" cname)
-                        (columnLength col)
-                        0
+                        (columnLength col - countNulls)
+                        countNulls
                         columnType
                         : acc
-    go acc i col@(UnboxedColumn c) =
-        let
-            cname = columnName i
-            columnType = T.pack $ columnTypeString col
-         in
-            -- Unboxed columns cannot have nulls since Maybe
-            -- is not an instance of Unbox a
-            if isNothing cname
-                then acc
-                else
-                    ColumnInfo (fromMaybe "" cname) (columnLength col) 0 columnType : acc
 
 nulls :: Column -> Int
-nulls (OptionalColumn xs) = VG.length $ VG.filter isNothing xs
-nulls (BoxedColumn (xs :: V.Vector a)) = case testEquality (typeRep @a) (typeRep @T.Text) of
+nulls (BoxedColumn (Just bm) xs) =
+    -- count null bits in bitmap
+    let n = VG.length xs
+     in n - VU.foldl' (\acc b -> acc + popCount b) 0 bm
+nulls (BoxedColumn Nothing (xs :: V.Vector a)) = case testEquality (typeRep @a) (typeRep @T.Text) of
     Just Refl -> VG.length $ VG.filter isNullish xs
     Nothing -> case testEquality (typeRep @a) (typeRep @String) of
         Just Refl -> VG.length $ VG.filter (isNullish . T.pack) xs
-        Nothing -> case typeRep @a of
-            App t1 t2 -> case eqTypeRep t1 (typeRep @Maybe) of
-                Just HRefl -> VG.length $ VG.filter isNothing xs
-                Nothing -> 0
-            _ -> 0
+        Nothing -> 0
+nulls (UnboxedColumn (Just bm) xs) =
+    let n = VG.length xs
+     in n - VU.foldl' (\acc b -> acc + popCount b) 0 bm
 nulls _ = 0
-
-partiallyParsed :: Column -> Int
-partiallyParsed (BoxedColumn (xs :: V.Vector a)) =
-    case typeRep @a of
-        App (App tycon t1) t2 -> case eqTypeRep tycon (typeRep @Either) of
-            Just HRefl -> VG.length $ VG.filter isLeft xs
-            Nothing -> 0
-        _ -> 0
-partiallyParsed _ = 0
 
 {- | Creates a dataframe from a list of tuples with name and column.
 
@@ -642,7 +631,7 @@ or drop the ones you don't want.
 @
 -}
 fromUnnamedColumns :: [Column] -> DataFrame
-fromUnnamedColumns = fromNamedColumns . zip (map (T.pack . show) [0 ..])
+fromUnnamedColumns = fromNamedColumns . zip (map (T.pack . show) [(0 :: Int) ..])
 
 {- | Create a dataframe from a list of column names and rows.
 
@@ -684,13 +673,15 @@ fromRows names rows =
 -}
 valueCounts ::
     forall a. (Ord a, Columnable a) => Expr a -> DataFrame -> [(a, Int)]
-valueCounts expr df = case columnAsVector expr df of
-    Left e -> throw e
-    Right column' ->
-        let
-            column = V.foldl' (\m v -> MS.insertWith (+) v (1 :: Int) m) M.empty column'
-         in
-            M.toAscList column
+valueCounts expr df
+    | null df = throw (EmptyDataSetException "valueCounts")
+    | otherwise = case columnAsVector expr df of
+        Left e -> throw e
+        Right column' ->
+            let
+                column = V.foldl' (\m v -> MS.insertWith (+) v (1 :: Int) m) M.empty column'
+             in
+                M.toAscList column
 
 {- | O (k * n) Shows the proportions of each value in a given column.
 
@@ -706,16 +697,18 @@ valueCounts expr df = case columnAsVector expr df of
 -}
 valueProportions ::
     forall a. (Ord a, Columnable a) => Expr a -> DataFrame -> [(a, Double)]
-valueProportions expr df = case columnAsVector expr df of
-    Left e -> throw e
-    Right column' ->
-        let
-            counts =
-                M.toAscList
-                    (V.foldl' (\m v -> MS.insertWith (+) v (1 :: Int) m) M.empty column')
-            total = fromIntegral (sum (map snd counts))
-         in
-            map (fmap ((/ total) . fromIntegral)) counts
+valueProportions expr df
+    | null df = throw (EmptyDataSetException "valueCounts")
+    | otherwise = case columnAsVector expr df of
+        Left e -> throw e
+        Right column' ->
+            let
+                counts =
+                    M.toAscList
+                        (V.foldl' (\m v -> MS.insertWith (+) v (1 :: Int) m) M.empty column')
+                total = fromIntegral (sum (map snd counts))
+             in
+                map (fmap ((/ total) . fromIntegral)) counts
 
 {- | A left fold for dataframes that takes the dataframe as the last object.
 This makes it easier to chain operations.
@@ -853,13 +846,17 @@ Right ["Alice", "Bob", "Charlie", ...]
 columnAsVector ::
     forall a.
     (Columnable a) => Expr a -> DataFrame -> Either DataFrameException (V.Vector a)
-columnAsVector (Col name) df = case getColumn name df of
-    Just col -> toVector col
-    Nothing ->
-        Left $ ColumnNotFoundException name "columnAsVector" (M.keys $ columnIndices df)
-columnAsVector expr df = case interpret df expr of
-    Left e -> throw e
-    Right (TColumn col) -> toVector col
+columnAsVector expr df
+    | null df = throw (EmptyDataSetException "columnAsVector")
+    | otherwise = case expr of
+        (Col name) -> case getColumn name df of
+            Just col -> toVector col
+            Nothing ->
+                Left $
+                    ColumnsNotFoundException [name] "columnAsVector" (M.keys $ columnIndices df)
+        _ -> case interpret df expr of
+            Left e -> throw e
+            Right (TColumn col) -> toVector col
 
 {- | Retrieves a column as an unboxed vector of 'Int' values.
 
@@ -873,7 +870,7 @@ columnAsIntVector (Col name) df = case getColumn name df of
     Just col -> toIntVector col
     Nothing ->
         Left $
-            ColumnNotFoundException name "columnAsIntVector" (M.keys $ columnIndices df)
+            ColumnsNotFoundException [name] "columnAsIntVector" (M.keys $ columnIndices df)
 columnAsIntVector expr df = case interpret df expr of
     Left e -> throw e
     Right (TColumn col) -> toIntVector col
@@ -890,7 +887,10 @@ columnAsDoubleVector (Col name) df = case getColumn name df of
     Just col -> toDoubleVector col
     Nothing ->
         Left $
-            ColumnNotFoundException name "columnAsDoubleVector" (M.keys $ columnIndices df)
+            ColumnsNotFoundException
+                [name]
+                "columnAsDoubleVector"
+                (M.keys $ columnIndices df)
 columnAsDoubleVector expr df = case interpret df expr of
     Left e -> throw e
     Right (TColumn col) -> toDoubleVector col
@@ -907,7 +907,10 @@ columnAsFloatVector (Col name) df = case getColumn name df of
     Just col -> toFloatVector col
     Nothing ->
         Left $
-            ColumnNotFoundException name "columnAsFloatVector" (M.keys $ columnIndices df)
+            ColumnsNotFoundException
+                [name]
+                "columnAsFloatVector"
+                (M.keys $ columnIndices df)
 columnAsFloatVector expr df = case interpret df expr of
     Left e -> throw e
     Right (TColumn col) -> toFloatVector col
@@ -920,7 +923,10 @@ columnAsUnboxedVector (Col name) df = case getColumn name df of
     Just col -> toUnboxedVector col
     Nothing ->
         Left $
-            ColumnNotFoundException name "columnAsFloatVector" (M.keys $ columnIndices df)
+            ColumnsNotFoundException
+                [name]
+                "columnAsFloatVector"
+                (M.keys $ columnIndices df)
 columnAsUnboxedVector expr df = case interpret df expr of
     Left e -> throw e
     Right (TColumn col) -> toUnboxedVector col
@@ -952,6 +958,8 @@ columnAsList expr df = either throw V.toList (columnAsVector expr df)
 @(name, expression)@ pairs. Derived columns show their expression;
 raw columns show an identity @col \@type name@ expression.
 -}
+
+-- TODO: mchavinda - Expand out these expressions if possible.
 showDerivedExpressions :: DataFrame -> [NamedExpr]
 showDerivedExpressions df =
     let exprs = derivingExpressions df
@@ -962,7 +970,8 @@ showDerivedExpressions df =
      in map toNamedExpr names
   where
     identityUExpr name = case getColumn name df of
-        Just (BoxedColumn (_ :: V.Vector a)) -> UExpr (Col @a name)
-        Just (UnboxedColumn (_ :: VU.Vector a)) -> UExpr (Col @a name)
-        Just (OptionalColumn (_ :: V.Vector (Maybe a))) -> UExpr (Col @(Maybe a) name)
+        Just (BoxedColumn (Just _) (_ :: V.Vector a)) -> UExpr (Col @(Maybe a) name)
+        Just (BoxedColumn Nothing (_ :: V.Vector a)) -> UExpr (Col @a name)
+        Just (UnboxedColumn (Just _) (_ :: VU.Vector a)) -> UExpr (Col @(Maybe a) name)
+        Just (UnboxedColumn Nothing (_ :: VU.Vector a)) -> UExpr (Col @a name)
         Nothing -> error $ "showDerivedExpressions: column not found: " ++ T.unpack name

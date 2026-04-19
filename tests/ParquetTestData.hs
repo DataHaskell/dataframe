@@ -1,0 +1,727 @@
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TypeApplications #-}
+
+{- | Large DataFrame fixtures used by the Parquet test suite.
+Kept in a separate module to avoid cluttering Parquet.hs.
+-}
+module ParquetTestData (
+    allTypes,
+    tinyPagesLast10,
+    transactions,
+    mtCarsDataset,
+) where
+
+import Data.Int
+import Data.Text (Text)
+import Data.Time
+import qualified DataFrame as D
+
+allTypes :: D.DataFrame
+allTypes =
+    D.fromNamedColumns
+        [ ("id", D.fromList [4 :: Int32, 5, 6, 7, 2, 3, 0, 1])
+        , ("bool_col", D.fromList [True, False, True, False, True, False, True, False])
+        , ("tinyint_col", D.fromList [0 :: Int32, 1, 0, 1, 0, 1, 0, 1])
+        , ("smallint_col", D.fromList [0 :: Int32, 1, 0, 1, 0, 1, 0, 1])
+        , ("int_col", D.fromList [0 :: Int32, 1, 0, 1, 0, 1, 0, 1])
+        , ("bigint_col", D.fromList [0 :: Int64, 10, 0, 10, 0, 10, 0, 10])
+        , ("float_col", D.fromList [0 :: Float, 1.1, 0, 1.1, 0, 1.1, 0, 1.1])
+        , ("double_col", D.fromList [0 :: Double, 10.1, 0, 10.1, 0, 10.1, 0, 10.1])
+        ,
+            ( "date_string_col"
+            , D.fromList
+                [ "03/01/09" :: Text
+                , "03/01/09"
+                , "04/01/09"
+                , "04/01/09"
+                , "02/01/09"
+                , "02/01/09"
+                , "01/01/09"
+                , "01/01/09"
+                ]
+            )
+        , ("string_col", D.fromList (take 8 (cycle ["0" :: Text, "1"])))
+        ,
+            ( "timestamp_col"
+            , D.fromList
+                [ UTCTime{utctDay = fromGregorian 2009 3 1, utctDayTime = secondsToDiffTime 0}
+                , UTCTime{utctDay = fromGregorian 2009 3 1, utctDayTime = secondsToDiffTime 60}
+                , UTCTime{utctDay = fromGregorian 2009 4 1, utctDayTime = secondsToDiffTime 0}
+                , UTCTime{utctDay = fromGregorian 2009 4 1, utctDayTime = secondsToDiffTime 60}
+                , UTCTime{utctDay = fromGregorian 2009 2 1, utctDayTime = secondsToDiffTime 0}
+                , UTCTime{utctDay = fromGregorian 2009 2 1, utctDayTime = secondsToDiffTime 60}
+                , UTCTime{utctDay = fromGregorian 2009 1 1, utctDayTime = secondsToDiffTime 0}
+                , UTCTime{utctDay = fromGregorian 2009 1 1, utctDayTime = secondsToDiffTime 60}
+                ]
+            )
+        ]
+
+tinyPagesLast10 :: D.DataFrame
+tinyPagesLast10 =
+    D.fromNamedColumns
+        [ ("id", D.fromList @Int32 (reverse [6174 .. 6183]))
+        , ("bool_col", D.fromList @Bool (take 10 (cycle [False, True])))
+        , ("tinyint_col", D.fromList @Int32 [3, 2, 1, 0, 9, 8, 7, 6, 5, 4])
+        , ("smallint_col", D.fromList @Int32 [3, 2, 1, 0, 9, 8, 7, 6, 5, 4])
+        , ("int_col", D.fromList @Int32 [3, 2, 1, 0, 9, 8, 7, 6, 5, 4])
+        , ("bigint_col", D.fromList @Int64 [30, 20, 10, 0, 90, 80, 70, 60, 50, 40])
+        ,
+            ( "float_col"
+            , D.fromList @Float [3.3, 2.2, 1.1, 0, 9.9, 8.8, 7.7, 6.6, 5.5, 4.4]
+            )
+        ,
+            ( "date_string_col"
+            , D.fromList @Text
+                [ "09/11/10"
+                , "09/11/10"
+                , "09/11/10"
+                , "09/11/10"
+                , "09/10/10"
+                , "09/10/10"
+                , "09/10/10"
+                , "09/10/10"
+                , "09/10/10"
+                , "09/10/10"
+                ]
+            )
+        ,
+            ( "string_col"
+            , D.fromList @Text ["3", "2", "1", "0", "9", "8", "7", "6", "5", "4"]
+            )
+        ,
+            ( "timestamp_col"
+            , D.fromList @UTCTime
+                [ UTCTime
+                    { utctDay = fromGregorian 2010 9 10
+                    , utctDayTime = secondsToDiffTime 85384
+                    }
+                , UTCTime
+                    { utctDay = fromGregorian 2010 9 10
+                    , utctDayTime = secondsToDiffTime 85324
+                    }
+                , UTCTime
+                    { utctDay = fromGregorian 2010 9 10
+                    , utctDayTime = secondsToDiffTime 85264
+                    }
+                , UTCTime
+                    { utctDay = fromGregorian 2010 9 10
+                    , utctDayTime = secondsToDiffTime 85204
+                    }
+                , UTCTime{utctDay = fromGregorian 2010 9 9, utctDayTime = secondsToDiffTime 85144}
+                , UTCTime{utctDay = fromGregorian 2010 9 9, utctDayTime = secondsToDiffTime 85084}
+                , UTCTime{utctDay = fromGregorian 2010 9 9, utctDayTime = secondsToDiffTime 85024}
+                , UTCTime{utctDay = fromGregorian 2010 9 9, utctDayTime = secondsToDiffTime 84964}
+                , UTCTime{utctDay = fromGregorian 2010 9 9, utctDayTime = secondsToDiffTime 84904}
+                , UTCTime{utctDay = fromGregorian 2010 9 9, utctDayTime = secondsToDiffTime 84844}
+                ]
+            )
+        , ("year", D.fromList @Int32 (replicate 10 2010))
+        , ("month", D.fromList @Int32 (replicate 10 9))
+        ]
+
+transactions :: D.DataFrame
+transactions =
+    D.fromNamedColumns
+        [ ("transaction_id", D.fromList [1 :: Int32, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12])
+        ,
+            ( "event_time"
+            , D.fromList
+                [ UTCTime
+                    { utctDay = fromGregorian 2024 1 3
+                    , utctDayTime = secondsToDiffTime 29564 + picosecondsToDiffTime 2311000000
+                    }
+                , UTCTime
+                    { utctDay = fromGregorian 2024 1 3
+                    , utctDayTime = secondsToDiffTime 35101 + picosecondsToDiffTime 118900000000
+                    }
+                , UTCTime
+                    { utctDay = fromGregorian 2024 1 4
+                    , utctDayTime = secondsToDiffTime 39802 + picosecondsToDiffTime 774512000000
+                    }
+                , UTCTime
+                    { utctDay = fromGregorian 2024 1 5
+                    , utctDayTime = secondsToDiffTime 53739 + picosecondsToDiffTime 1000000
+                    }
+                , UTCTime
+                    { utctDay = fromGregorian 2024 1 6
+                    , utctDayTime = secondsToDiffTime 8278 + picosecondsToDiffTime 543210000000
+                    }
+                , UTCTime
+                    { utctDay = fromGregorian 2024 1 6
+                    , utctDayTime = secondsToDiffTime 8284 + picosecondsToDiffTime 211000000000
+                    }
+                , UTCTime{utctDay = fromGregorian 2024 1 7, utctDayTime = secondsToDiffTime 63000}
+                , UTCTime
+                    { utctDay = fromGregorian 2024 1 8
+                    , utctDayTime = secondsToDiffTime 24259 + picosecondsToDiffTime 390000000000
+                    }
+                , UTCTime
+                    { utctDay = fromGregorian 2024 1 9
+                    , utctDayTime = secondsToDiffTime 48067 + picosecondsToDiffTime 812345000000
+                    }
+                , UTCTime
+                    { utctDay = fromGregorian 2024 1 10
+                    , utctDayTime = secondsToDiffTime 82799 + picosecondsToDiffTime 999999000000
+                    }
+                , UTCTime
+                    { utctDay = fromGregorian 2024 1 11
+                    , utctDayTime = secondsToDiffTime 36000 + picosecondsToDiffTime 100000000000
+                    }
+                , UTCTime
+                    { utctDay = fromGregorian 2024 1 12
+                    , utctDayTime = secondsToDiffTime 56028 + picosecondsToDiffTime 667891000000
+                    }
+                ]
+            )
+        ,
+            ( "user_email"
+            , D.fromList
+                [ "alice@example.com" :: Text
+                , "bob@example.com"
+                , "carol@example.com"
+                , "alice@example.com"
+                , "dave@example.com"
+                , "dave@example.com"
+                , "eve@example.com"
+                , "frank@example.com"
+                , "grace@example.com"
+                , "dave@example.com"
+                , "alice@example.com"
+                , "heidi@example.com"
+                ]
+            )
+        ,
+            ( "transaction_type"
+            , D.fromList
+                [ "purchase" :: Text
+                , "purchase"
+                , "refund"
+                , "purchase"
+                , "purchase"
+                , "purchase"
+                , "purchase"
+                , "withdrawal"
+                , "purchase"
+                , "purchase"
+                , "purchase"
+                , "refund"
+                ]
+            )
+        ,
+            ( "amount"
+            , D.fromList
+                [ 142.50 :: Double
+                , 29.99
+                , 89.00
+                , 2399.00
+                , 15.00
+                , 15.00
+                , 450.75
+                , 200.00
+                , 55.20
+                , 3200.00
+                , 74.99
+                , 120.00
+                ]
+            )
+        ,
+            ( "currency"
+            , D.fromList
+                [ "USD" :: Text
+                , "USD"
+                , "EUR"
+                , "USD"
+                , "GBP"
+                , "GBP"
+                , "USD"
+                , "EUR"
+                , "CAD"
+                , "USD"
+                , "USD"
+                , "GBP"
+                ]
+            )
+        ,
+            ( "status"
+            , D.fromList
+                [ "approved" :: Text
+                , "approved"
+                , "approved"
+                , "declined"
+                , "approved"
+                , "declined"
+                , "approved"
+                , "approved"
+                , "approved"
+                , "flagged"
+                , "approved"
+                , "approved"
+                ]
+            )
+        ,
+            ( "location"
+            , D.fromList
+                [ "New York, US" :: Text
+                , "London, GB"
+                , "Berlin, DE"
+                , "New York, US"
+                , "Manchester, GB"
+                , "Lagos, NG"
+                , "San Francisco, US"
+                , "Paris, FR"
+                , "Toronto, CA"
+                , "New York, US"
+                , "New York, US"
+                , "Edinburgh, GB"
+                ]
+            )
+        ]
+
+mtCarsDataset :: D.DataFrame
+mtCarsDataset =
+    D.fromNamedColumns
+        [
+            ( "model"
+            , D.fromList
+                [ "Mazda RX4" :: Text
+                , "Mazda RX4 Wag"
+                , "Datsun 710"
+                , "Hornet 4 Drive"
+                , "Hornet Sportabout"
+                , "Valiant"
+                , "Duster 360"
+                , "Merc 240D"
+                , "Merc 230"
+                , "Merc 280"
+                , "Merc 280C"
+                , "Merc 450SE"
+                , "Merc 450SL"
+                , "Merc 450SLC"
+                , "Cadillac Fleetwood"
+                , "Lincoln Continental"
+                , "Chrysler Imperial"
+                , "Fiat 128"
+                , "Honda Civic"
+                , "Toyota Corolla"
+                , "Toyota Corona"
+                , "Dodge Challenger"
+                , "AMC Javelin"
+                , "Camaro Z28"
+                , "Pontiac Firebird"
+                , "Fiat X1-9"
+                , "Porsche 914-2"
+                , "Lotus Europa"
+                , "Ford Pantera L"
+                , "Ferrari Dino"
+                , "Maserati Bora"
+                , "Volvo 142E"
+                ]
+            )
+        ,
+            ( "mpg"
+            , D.fromList
+                [ 21.0 :: Double
+                , 21.0
+                , 22.8
+                , 21.4
+                , 18.7
+                , 18.1
+                , 14.3
+                , 24.4
+                , 22.8
+                , 19.2
+                , 17.8
+                , 16.4
+                , 17.3
+                , 15.2
+                , 10.4
+                , 10.4
+                , 14.7
+                , 32.4
+                , 30.4
+                , 33.9
+                , 21.5
+                , 15.5
+                , 15.2
+                , 13.3
+                , 19.2
+                , 27.3
+                , 26.0
+                , 30.4
+                , 15.8
+                , 19.7
+                , 15.0
+                , 21.4
+                ]
+            )
+        ,
+            ( "cyl"
+            , D.fromList
+                [ 6 :: Int32
+                , 6
+                , 4
+                , 6
+                , 8
+                , 6
+                , 8
+                , 4
+                , 4
+                , 6
+                , 6
+                , 8
+                , 8
+                , 8
+                , 8
+                , 8
+                , 8
+                , 4
+                , 4
+                , 4
+                , 4
+                , 8
+                , 8
+                , 8
+                , 8
+                , 4
+                , 4
+                , 4
+                , 8
+                , 6
+                , 8
+                , 4
+                ]
+            )
+        ,
+            ( "disp"
+            , D.fromList
+                [ 160.0 :: Double
+                , 160.0
+                , 108.0
+                , 258.0
+                , 360.0
+                , 225.0
+                , 360.0
+                , 146.7
+                , 140.8
+                , 167.6
+                , 167.6
+                , 275.8
+                , 275.8
+                , 275.8
+                , 472.0
+                , 460.0
+                , 440.0
+                , 78.7
+                , 75.7
+                , 71.1
+                , 120.1
+                , 318.0
+                , 304.0
+                , 350.0
+                , 400.0
+                , 79.0
+                , 120.3
+                , 95.1
+                , 351.0
+                , 145.0
+                , 301.0
+                , 121.0
+                ]
+            )
+        ,
+            ( "hp"
+            , D.fromList
+                [ 110 :: Int32
+                , 110
+                , 93
+                , 110
+                , 175
+                , 105
+                , 245
+                , 62
+                , 95
+                , 123
+                , 123
+                , 180
+                , 180
+                , 180
+                , 205
+                , 215
+                , 230
+                , 66
+                , 52
+                , 65
+                , 97
+                , 150
+                , 150
+                , 245
+                , 175
+                , 66
+                , 91
+                , 113
+                , 264
+                , 175
+                , 335
+                , 109
+                ]
+            )
+        ,
+            ( "drat"
+            , D.fromList
+                [ 3.9 :: Double
+                , 3.9
+                , 3.85
+                , 3.08
+                , 3.15
+                , 2.76
+                , 3.21
+                , 3.69
+                , 3.92
+                , 3.92
+                , 3.92
+                , 3.07
+                , 3.07
+                , 3.07
+                , 2.93
+                , 3.0
+                , 3.23
+                , 4.08
+                , 4.93
+                , 4.22
+                , 3.7
+                , 2.76
+                , 3.15
+                , 3.73
+                , 3.08
+                , 4.08
+                , 4.43
+                , 3.77
+                , 4.22
+                , 3.62
+                , 3.54
+                , 4.11
+                ]
+            )
+        ,
+            ( "wt"
+            , D.fromList
+                [ 2.62 :: Double
+                , 2.875
+                , 2.32
+                , 3.215
+                , 3.44
+                , 3.46
+                , 3.57
+                , 3.19
+                , 3.15
+                , 3.44
+                , 3.44
+                , 4.07
+                , 3.73
+                , 3.78
+                , 5.25
+                , 5.424
+                , 5.345
+                , 2.2
+                , 1.615
+                , 1.835
+                , 2.465
+                , 3.52
+                , 3.435
+                , 3.84
+                , 3.845
+                , 1.935
+                , 2.14
+                , 1.513
+                , 3.17
+                , 2.77
+                , 3.57
+                , 2.78
+                ]
+            )
+        ,
+            ( "qsec"
+            , D.fromList
+                [ 16.46 :: Double
+                , 17.02
+                , 18.61
+                , 19.44
+                , 17.02
+                , 20.22
+                , 15.84
+                , 20.0
+                , 22.9
+                , 18.3
+                , 18.9
+                , 17.4
+                , 17.6
+                , 18.0
+                , 17.98
+                , 17.82
+                , 17.42
+                , 19.47
+                , 18.52
+                , 19.9
+                , 20.01
+                , 16.87
+                , 17.3
+                , 15.41
+                , 17.05
+                , 18.9
+                , 16.7
+                , 16.9
+                , 14.5
+                , 15.5
+                , 14.6
+                , 18.6
+                ]
+            )
+        ,
+            ( "vs"
+            , D.fromList
+                [ 0 :: Int32
+                , 0
+                , 1
+                , 1
+                , 0
+                , 1
+                , 0
+                , 1
+                , 1
+                , 1
+                , 1
+                , 0
+                , 0
+                , 0
+                , 0
+                , 0
+                , 0
+                , 1
+                , 1
+                , 1
+                , 1
+                , 0
+                , 0
+                , 0
+                , 0
+                , 1
+                , 0
+                , 1
+                , 0
+                , 0
+                , 0
+                , 1
+                ]
+            )
+        ,
+            ( "am"
+            , D.fromList
+                [ 1 :: Int32
+                , 1
+                , 1
+                , 0
+                , 0
+                , 0
+                , 0
+                , 0
+                , 0
+                , 0
+                , 0
+                , 0
+                , 0
+                , 0
+                , 0
+                , 0
+                , 0
+                , 1
+                , 1
+                , 1
+                , 0
+                , 0
+                , 0
+                , 0
+                , 0
+                , 1
+                , 1
+                , 1
+                , 1
+                , 1
+                , 1
+                , 1
+                ]
+            )
+        ,
+            ( "gear"
+            , D.fromList
+                [ 4 :: Int32
+                , 4
+                , 4
+                , 3
+                , 3
+                , 3
+                , 3
+                , 4
+                , 4
+                , 4
+                , 4
+                , 3
+                , 3
+                , 3
+                , 3
+                , 3
+                , 3
+                , 4
+                , 4
+                , 4
+                , 3
+                , 3
+                , 3
+                , 3
+                , 3
+                , 4
+                , 5
+                , 5
+                , 5
+                , 5
+                , 5
+                , 4
+                ]
+            )
+        ,
+            ( "carb"
+            , D.fromList
+                [ 4 :: Int32
+                , 4
+                , 1
+                , 1
+                , 2
+                , 1
+                , 4
+                , 2
+                , 2
+                , 4
+                , 4
+                , 3
+                , 3
+                , 3
+                , 4
+                , 4
+                , 4
+                , 1
+                , 2
+                , 1
+                , 1
+                , 2
+                , 2
+                , 4
+                , 2
+                , 1
+                , 2
+                , 2
+                , 4
+                , 6
+                , 8
+                , 2
+                ]
+            )
+        ]

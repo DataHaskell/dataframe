@@ -25,7 +25,7 @@ int96ToUTCTime bytes
 julianDayAndNanosToUTCTime :: Integer -> Word64 -> UTCTime
 julianDayAndNanosToUTCTime julianDay nanosSinceMidnight =
     let day = julianDayToDay julianDay
-        secondsSinceMidnight = fromIntegral nanosSinceMidnight / 1_000_000_000
+        secondsSinceMidnight = fromIntegral nanosSinceMidnight / (1_000_000_000 :: Double)
         diffTime = secondsToDiffTime (floor secondsSinceMidnight)
      in UTCTime day diffTime
 
@@ -47,7 +47,7 @@ julianDayToDay julianDay =
 utcTimeToInt96 :: UTCTime -> BS.ByteString
 utcTimeToInt96 (UTCTime day diffTime) =
     let julianDay = dayToJulianDay day
-        nanosSinceMidnight = floor (realToFrac diffTime * 1_000_000_000)
+        nanosSinceMidnight = floor (realToFrac diffTime * (1_000_000_000 :: Double))
         nanosBytes = word64ToLittleEndian nanosSinceMidnight
         julianBytes = word32ToLittleEndian (fromIntegral julianDay)
      in nanosBytes `BS.append` julianBytes
@@ -55,7 +55,7 @@ utcTimeToInt96 (UTCTime day diffTime) =
 dayToJulianDay :: Day -> Integer
 dayToJulianDay day =
     let (year, month, dayOfMonth) = toGregorian day
-        a = fromIntegral $ (14 - fromIntegral month) `div` 12
+        a = (fromIntegral $ (14 - fromIntegral month) `div` (12 :: Integer)) :: Integer
         y = fromIntegral $ year + 4800 - a
         m = fromIntegral $ month + 12 * fromIntegral a - 3
      in fromIntegral dayOfMonth

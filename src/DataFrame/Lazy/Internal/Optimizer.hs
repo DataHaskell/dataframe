@@ -142,7 +142,7 @@ eliminateDeadColumns plan = go (referencedCols plan) plan
                         (go (Just (S.union cols (S.fromList (uExprCols expr)))) child)
     go needed (Filter p child) =
         Filter p (go (fmap (S.union (S.fromList (E.getColumns p))) needed) child)
-    go needed (Project cols child) =
+    go _needed (Project cols child) =
         Project cols (go (Just (S.fromList cols)) child)
     go needed (Join jt l r left right) =
         let keySet = fmap (S.union (S.fromList [l, r])) needed

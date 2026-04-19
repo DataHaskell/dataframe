@@ -88,12 +88,12 @@ F.col @Int "x" + F.lit @Int 5
 sin (F.col @Double "x") + cos (F.lit @Double 0.5)
 ```
 
-However, for comparison operations we have a special syntax. It's all the regular logical operators preceded by a `.`.
+However, for comparison operations we have a special syntax. Same-type (non-nullable) operators are wrapped in dots on both sides; nullable-aware operators use a single leading dot.
 
 ```haskell
--- Is x greater than 5?
+-- Is x greater than 5? (both sides are non-nullable Int)
 -- The type of this is `Expr Bool`
-F.col @Int "x" .>= F.lit @Int 5
+F.col @Int "x" .>=. F.lit @Int 5
 ```
 
 The expression language eliminates a class of bugs from column operations (like adding a string to an integer).

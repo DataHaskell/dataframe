@@ -5,7 +5,7 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeApplications #-}
 
-module Main where
+module CaliforniaHousing (run) where
 
 import Control.Exception (throw)
 import Control.Monad (when)
@@ -29,8 +29,8 @@ $( F.declareColumnsFromCsvWithOpts
     "../data/housing.csv"
  )
 
-main :: IO ()
-main = do
+run :: IO ()
+run = do
     {- Feature ingestion and engineering -}
     df <- D.readCsv "../data/housing.csv"
 

@@ -10,6 +10,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE UndecidableInstances #-}
+{-# OPTIONS_GHC -Wno-orphans #-}
 
 module DataFrame.Internal.Interpreter (
     -- * New core API
@@ -31,15 +32,236 @@ import Data.Type.Equality (TestEquality (testEquality), type (:~:) (Refl))
 import qualified Data.Vector as V
 import qualified Data.Vector.Generic as VG
 import qualified Data.Vector.Unboxed as VU
+import qualified Data.Vector.Unboxed.Mutable as VUM
 import DataFrame.Errors
 import DataFrame.Internal.Column
 import DataFrame.Internal.DataFrame
 import DataFrame.Internal.Expression
+import qualified DataFrame.Internal.Grouping as G
 import DataFrame.Internal.Types
 import Type.Reflection (
     Typeable,
     typeRep,
  )
+
+import Data.Int (Int16, Int32, Int64, Int8)
+
+-- Specializations for common aggregation types to avoid dictionary overhead.
+-- foldLinearGroups: mean accumulator
+{-# SPECIALIZE foldLinearGroups ::
+    (MeanAcc -> Double -> MeanAcc) ->
+    MeanAcc ->
+    Column ->
+    VU.Vector Int ->
+    Int ->
+    Either DataFrameException Column
+    #-}
+{-# SPECIALIZE foldLinearGroups ::
+    (MeanAcc -> Float -> MeanAcc) ->
+    MeanAcc ->
+    Column ->
+    VU.Vector Int ->
+    Int ->
+    Either DataFrameException Column
+    #-}
+{-# SPECIALIZE foldLinearGroups ::
+    (MeanAcc -> Int -> MeanAcc) ->
+    MeanAcc ->
+    Column ->
+    VU.Vector Int ->
+    Int ->
+    Either DataFrameException Column
+    #-}
+{-# SPECIALIZE foldLinearGroups ::
+    (MeanAcc -> Int8 -> MeanAcc) ->
+    MeanAcc ->
+    Column ->
+    VU.Vector Int ->
+    Int ->
+    Either DataFrameException Column
+    #-}
+{-# SPECIALIZE foldLinearGroups ::
+    (MeanAcc -> Int16 -> MeanAcc) ->
+    MeanAcc ->
+    Column ->
+    VU.Vector Int ->
+    Int ->
+    Either DataFrameException Column
+    #-}
+{-# SPECIALIZE foldLinearGroups ::
+    (MeanAcc -> Int32 -> MeanAcc) ->
+    MeanAcc ->
+    Column ->
+    VU.Vector Int ->
+    Int ->
+    Either DataFrameException Column
+    #-}
+{-# SPECIALIZE foldLinearGroups ::
+    (MeanAcc -> Int64 -> MeanAcc) ->
+    MeanAcc ->
+    Column ->
+    VU.Vector Int ->
+    Int ->
+    Either DataFrameException Column
+    #-}
+-- foldLinearGroups: count accumulator
+{-# SPECIALIZE foldLinearGroups ::
+    (Int -> Double -> Int) ->
+    Int ->
+    Column ->
+    VU.Vector Int ->
+    Int ->
+    Either DataFrameException Column
+    #-}
+{-# SPECIALIZE foldLinearGroups ::
+    (Int -> Float -> Int) ->
+    Int ->
+    Column ->
+    VU.Vector Int ->
+    Int ->
+    Either DataFrameException Column
+    #-}
+{-# SPECIALIZE foldLinearGroups ::
+    (Int -> Int -> Int) ->
+    Int ->
+    Column ->
+    VU.Vector Int ->
+    Int ->
+    Either DataFrameException Column
+    #-}
+{-# SPECIALIZE foldLinearGroups ::
+    (Int -> Int8 -> Int) ->
+    Int ->
+    Column ->
+    VU.Vector Int ->
+    Int ->
+    Either DataFrameException Column
+    #-}
+{-# SPECIALIZE foldLinearGroups ::
+    (Int -> Int16 -> Int) ->
+    Int ->
+    Column ->
+    VU.Vector Int ->
+    Int ->
+    Either DataFrameException Column
+    #-}
+{-# SPECIALIZE foldLinearGroups ::
+    (Int -> Int32 -> Int) ->
+    Int ->
+    Column ->
+    VU.Vector Int ->
+    Int ->
+    Either DataFrameException Column
+    #-}
+{-# SPECIALIZE foldLinearGroups ::
+    (Int -> Int64 -> Int) ->
+    Int ->
+    Column ->
+    VU.Vector Int ->
+    Int ->
+    Either DataFrameException Column
+    #-}
+-- foldLinearGroups: sum/min/max (acc == elem)
+{-# SPECIALIZE foldLinearGroups ::
+    (Double -> Double -> Double) ->
+    Double ->
+    Column ->
+    VU.Vector Int ->
+    Int ->
+    Either DataFrameException Column
+    #-}
+{-# SPECIALIZE foldLinearGroups ::
+    (Float -> Float -> Float) ->
+    Float ->
+    Column ->
+    VU.Vector Int ->
+    Int ->
+    Either DataFrameException Column
+    #-}
+{-# SPECIALIZE foldLinearGroups ::
+    (Int8 -> Int8 -> Int8) ->
+    Int8 ->
+    Column ->
+    VU.Vector Int ->
+    Int ->
+    Either DataFrameException Column
+    #-}
+{-# SPECIALIZE foldLinearGroups ::
+    (Int16 -> Int16 -> Int16) ->
+    Int16 ->
+    Column ->
+    VU.Vector Int ->
+    Int ->
+    Either DataFrameException Column
+    #-}
+{-# SPECIALIZE foldLinearGroups ::
+    (Int32 -> Int32 -> Int32) ->
+    Int32 ->
+    Column ->
+    VU.Vector Int ->
+    Int ->
+    Either DataFrameException Column
+    #-}
+{-# SPECIALIZE foldLinearGroups ::
+    (Int64 -> Int64 -> Int64) ->
+    Int64 ->
+    Column ->
+    VU.Vector Int ->
+    Int ->
+    Either DataFrameException Column
+    #-}
+
+-- mapColumn: finalize
+{-# SPECIALIZE mapColumn ::
+    (MeanAcc -> Double) -> Column -> Either DataFrameException Column
+    #-}
+{-# SPECIALIZE mapColumn ::
+    (Double -> Double) -> Column -> Either DataFrameException Column
+    #-}
+{-# SPECIALIZE mapColumn ::
+    (Float -> Float) -> Column -> Either DataFrameException Column
+    #-}
+{-# SPECIALIZE mapColumn ::
+    (Int -> Int) -> Column -> Either DataFrameException Column
+    #-}
+
+-- zipWithColumns: binary ops
+{-# SPECIALIZE zipWithColumns ::
+    (Double -> Double -> Double) ->
+    Column ->
+    Column ->
+    Either DataFrameException Column
+    #-}
+{-# SPECIALIZE zipWithColumns ::
+    (Float -> Float -> Float) ->
+    Column ->
+    Column ->
+    Either DataFrameException Column
+    #-}
+{-# SPECIALIZE zipWithColumns ::
+    (Int -> Int -> Int) -> Column -> Column -> Either DataFrameException Column
+    #-}
+{-# SPECIALIZE zipWithColumns ::
+    (Int8 -> Int8 -> Int8) -> Column -> Column -> Either DataFrameException Column
+    #-}
+{-# SPECIALIZE zipWithColumns ::
+    (Int16 -> Int16 -> Int16) ->
+    Column ->
+    Column ->
+    Either DataFrameException Column
+    #-}
+{-# SPECIALIZE zipWithColumns ::
+    (Int32 -> Int32 -> Int32) ->
+    Column ->
+    Column ->
+    Either DataFrameException Column
+    #-}
+{-# SPECIALIZE zipWithColumns ::
+    (Int64 -> Int64 -> Int64) ->
+    Column ->
+    Column ->
+    Either DataFrameException Column
+    #-}
 
 -------------------------------------------------------------------------------
 -- Value: the unified result type
@@ -212,18 +434,21 @@ input — the sort happens once, not per-group.
 -}
 sliceGroups :: Column -> VU.Vector Int -> VU.Vector Int -> V.Vector Column
 sliceGroups col os indices = case col of
-    BoxedColumn vec ->
-        let !sorted = V.unsafeBackpermute vec (V.convert indices)
+    BoxedColumn bm vec ->
+        let !sorted =
+                V.generate
+                    (VU.length indices)
+                    ((vec `V.unsafeIndex`) . (indices `VU.unsafeIndex`))
          in V.generate nGroups $ \i ->
-                BoxedColumn (V.unsafeSlice (start i) (len i) sorted)
-    UnboxedColumn vec ->
+                BoxedColumn
+                    (fmap (bitmapSlice (start i) (len i)) bm)
+                    (V.unsafeSlice (start i) (len i) sorted)
+    UnboxedColumn bm vec ->
         let !sorted = VU.unsafeBackpermute vec indices
          in V.generate nGroups $ \i ->
-                UnboxedColumn (VU.unsafeSlice (start i) (len i) sorted)
-    OptionalColumn vec ->
-        let !sorted = V.unsafeBackpermute vec (V.convert indices)
-         in V.generate nGroups $ \i ->
-                OptionalColumn (V.unsafeSlice (start i) (len i) sorted)
+                UnboxedColumn
+                    (fmap (bitmapSlice (start i) (len i)) bm)
+                    (VU.unsafeSlice (start i) (len i) sorted)
   where
     !nGroups = VU.length os - 1
     start i = os `VU.unsafeIndex` i
@@ -232,6 +457,15 @@ sliceGroups col os indices = case col of
 
 numGroups :: GroupedDataFrame -> Int
 numGroups gdf = VU.length (offsets gdf) - 1
+
+-- | Build the inverse of a permutation vector.
+invertPermutation :: VU.Vector Int -> VU.Vector Int
+invertPermutation perm = VU.create $ do
+    let !n = VU.length perm
+    inv <- VUM.new n
+    VU.imapM_ (flip (VUM.unsafeWrite inv)) perm
+    return inv
+{-# INLINE invertPermutation #-}
 
 -------------------------------------------------------------------------------
 -- promoteColumnWith: unified numeric / text coercion for CastWith
@@ -250,7 +484,7 @@ Numeric coercion handles Double, Float, and Int targets.  Text columns
 -}
 promoteColumnWith ::
     forall a b.
-    (Columnable a, Columnable b) =>
+    (Columnable a, Columnable b, Read a) =>
     (Either String a -> b) -> Column -> Either DataFrameException Column
 promoteColumnWith onResult col
     | hasElemType @b col = Right col
@@ -272,7 +506,7 @@ promoteToDoubleWith ::
     (Columnable b) =>
     (Either String Double -> b) -> Column -> Either DataFrameException Column
 promoteToDoubleWith onResult col = case col of
-    UnboxedColumn (v :: VU.Vector c) ->
+    UnboxedColumn Nothing (v :: VU.Vector c) ->
         case sFloating @c of
             STrue ->
                 Right $
@@ -284,35 +518,34 @@ promoteToDoubleWith onResult col = case col of
                         fromVector @b
                             (V.map (onResult . Right . (fromIntegral :: c -> Double)) (VG.convert v))
                 SFalse -> castMismatch @c @b
-    OptionalColumn (v :: V.Vector (Maybe c)) ->
+    UnboxedColumn (Just bm) (v :: VU.Vector c) ->
         case sFloating @c of
             STrue ->
                 Right $
                     fromVector @b
-                        ( V.map
-                            (maybe (onResult (Left "null")) (onResult . Right . (realToFrac :: c -> Double)))
-                            v
+                        ( V.generate (VU.length v) $ \i ->
+                            if bitmapTestBit bm i
+                                then onResult (Right (realToFrac (VU.unsafeIndex v i) :: Double))
+                                else onResult (Left "null")
                         )
             SFalse -> case sIntegral @c of
                 STrue ->
                     Right $
                         fromVector @b
-                            ( V.map
-                                ( maybe
-                                    (onResult (Left "null"))
-                                    (onResult . Right . (fromIntegral :: c -> Double))
-                                )
-                                v
+                            ( V.generate (VU.length v) $ \i ->
+                                if bitmapTestBit bm i
+                                    then onResult (Right (fromIntegral (VU.unsafeIndex v i) :: Double))
+                                    else onResult (Left "null")
                             )
-                SFalse -> tryParseWith @Double onResult col
-    BoxedColumn _ -> tryParseWith @Double onResult col
+                SFalse -> castMismatch @c @b
+    BoxedColumn _ _ -> tryParseWith @Double onResult col
 
 promoteToFloatWith ::
     forall b.
     (Columnable b) =>
     (Either String Float -> b) -> Column -> Either DataFrameException Column
 promoteToFloatWith onResult col = case col of
-    UnboxedColumn (v :: VU.Vector c) ->
+    UnboxedColumn Nothing (v :: VU.Vector c) ->
         case sFloating @c of
             STrue ->
                 Right $
@@ -324,32 +557,34 @@ promoteToFloatWith onResult col = case col of
                         fromVector @b
                             (V.map (onResult . Right . (fromIntegral :: c -> Float)) (VG.convert v))
                 SFalse -> castMismatch @c @b
-    OptionalColumn (v :: V.Vector (Maybe c)) ->
+    UnboxedColumn (Just bm) (v :: VU.Vector c) ->
         case sFloating @c of
             STrue ->
                 Right $
                     fromVector @b
-                        ( V.map
-                            (maybe (onResult (Left "null")) (onResult . Right . (realToFrac :: c -> Float)))
-                            v
+                        ( V.generate (VU.length v) $ \i ->
+                            if bitmapTestBit bm i
+                                then onResult (Right (realToFrac (VU.unsafeIndex v i) :: Float))
+                                else onResult (Left "null")
                         )
             SFalse -> case sIntegral @c of
                 STrue ->
                     Right $
                         fromVector @b
-                            ( V.map
-                                (maybe (onResult (Left "null")) (onResult . Right . (fromIntegral :: c -> Float)))
-                                v
+                            ( V.generate (VU.length v) $ \i ->
+                                if bitmapTestBit bm i
+                                    then onResult (Right (fromIntegral (VU.unsafeIndex v i) :: Float))
+                                    else onResult (Left "null")
                             )
-                SFalse -> tryParseWith @Float onResult col
-    BoxedColumn _ -> tryParseWith @Float onResult col
+                SFalse -> castMismatch @c @b
+    BoxedColumn _ _ -> tryParseWith @Float onResult col
 
 promoteToIntWith ::
     forall b.
     (Columnable b) =>
     (Either String Int -> b) -> Column -> Either DataFrameException Column
 promoteToIntWith onResult col = case col of
-    UnboxedColumn (v :: VU.Vector c) ->
+    UnboxedColumn Nothing (v :: VU.Vector c) ->
         case sFloating @c of
             STrue ->
                 Right $
@@ -361,28 +596,27 @@ promoteToIntWith onResult col = case col of
                         fromVector @b
                             (V.map (onResult . Right . (fromIntegral :: c -> Int)) (VG.convert v))
                 SFalse -> castMismatch @c @b
-    OptionalColumn (v :: V.Vector (Maybe c)) ->
+    UnboxedColumn (Just bm) (v :: VU.Vector c) ->
         case sFloating @c of
             STrue ->
                 Right $
                     fromVector @b
-                        ( V.map
-                            ( maybe
-                                (onResult (Left "null"))
-                                (onResult . Right . (round . (realToFrac :: c -> Double)))
-                            )
-                            v
+                        ( V.generate (VU.length v) $ \i ->
+                            if bitmapTestBit bm i
+                                then onResult (Right (round (realToFrac (VU.unsafeIndex v i) :: Double)))
+                                else onResult (Left "null")
                         )
             SFalse -> case sIntegral @c of
                 STrue ->
                     Right $
                         fromVector @b
-                            ( V.map
-                                (maybe (onResult (Left "null")) (onResult . Right . (fromIntegral :: c -> Int)))
-                                v
+                            ( V.generate (VU.length v) $ \i ->
+                                if bitmapTestBit bm i
+                                    then onResult (Right (fromIntegral (VU.unsafeIndex v i) :: Int))
+                                    else onResult (Left "null")
                             )
-                SFalse -> tryParseWith @Int onResult col
-    BoxedColumn _ -> tryParseWith @Int onResult col
+                SFalse -> castMismatch @c @b
+    BoxedColumn _ _ -> tryParseWith @Int onResult col
 
 -- | Single parse primitive: apply @onResult@ to the result of 'reads'.
 parseWith :: (Read a) => (Either String a -> b) -> String -> b
@@ -392,30 +626,37 @@ parseWith f s = case reads s of
 
 tryParseWith ::
     forall a b.
-    (Columnable a, Columnable b) =>
+    (Columnable a, Columnable b, Read a) =>
     (Either String a -> b) -> Column -> Either DataFrameException Column
 tryParseWith onResult col = case col of
-    BoxedColumn (v :: V.Vector c) ->
+    BoxedColumn bm (v :: V.Vector c) ->
         case testEquality (typeRep @c) (typeRep @String) of
-            Just Refl -> Right $ fromVector @b $ V.map (parseWith onResult) v
+            Just Refl -> case bm of
+                Nothing -> Right $ fromVector @b $ V.map (parseWith onResult) v
+                Just bitmap ->
+                    Right $
+                        fromVector @b $
+                            V.imap
+                                ( \i x ->
+                                    if bitmapTestBit bitmap i then parseWith onResult x else onResult (Left "null")
+                                )
+                                v
             Nothing ->
                 case testEquality (typeRep @c) (typeRep @T.Text) of
-                    Just Refl -> Right $ fromVector @b $ V.map (parseWith onResult . T.unpack) v
+                    Just Refl -> case bm of
+                        Nothing -> Right $ fromVector @b $ V.map (parseWith onResult . T.unpack) v
+                        Just bitmap ->
+                            Right $
+                                fromVector @b $
+                                    V.imap
+                                        ( \i x ->
+                                            if bitmapTestBit bitmap i
+                                                then parseWith onResult (T.unpack x)
+                                                else onResult (Left "null")
+                                        )
+                                        v
                     Nothing -> castMismatch @c @b
-    OptionalColumn (v :: V.Vector (Maybe c)) ->
-        case testEquality (typeRep @c) (typeRep @String) of
-            Just Refl ->
-                Right $
-                    fromVector @b $
-                        V.map (maybe (onResult (Left "null")) (parseWith onResult)) v
-            Nothing ->
-                case testEquality (typeRep @c) (typeRep @T.Text) of
-                    Just Refl ->
-                        Right $
-                            fromVector @b $
-                                V.map (maybe (onResult (Left "null")) (parseWith onResult . T.unpack)) v
-                    Nothing -> castMismatch @c @b
-    UnboxedColumn (_ :: VU.Vector c) -> castMismatch @c @b
+    UnboxedColumn _ (_ :: VU.Vector c) -> castMismatch @c @b
 
 {- | When the output type @b@ is @Maybe c@ (or @Maybe (Maybe c)@) and the
 column stores plain @c@ values, wrap each element in 'Just'.
@@ -430,16 +671,15 @@ tryMaybeWrap ::
     (Columnable a, Columnable b) =>
     (Either String a -> b) -> Column -> Maybe (Either DataFrameException Column)
 tryMaybeWrap _onResult col = case col of
-    UnboxedColumn (v :: VU.Vector c) ->
+    UnboxedColumn Nothing (v :: VU.Vector c) ->
         let wrapped = V.map Just (VG.convert v) :: V.Vector (Maybe c)
          in case testEquality (typeRep @b) (typeRep @(Maybe c)) of
                 Just Refl -> Just $ Right $ fromVector @b wrapped
                 Nothing ->
-                    -- join: b = Maybe (Maybe c) → produce Maybe c column
                     case testEquality (typeRep @b) (typeRep @(Maybe (Maybe c))) of
                         Just _ -> Just $ Right $ fromVector @(Maybe c) wrapped
                         Nothing -> Nothing
-    BoxedColumn (v :: V.Vector c) ->
+    BoxedColumn Nothing (v :: V.Vector c) ->
         let wrapped = V.map Just v :: V.Vector (Maybe c)
          in case testEquality (typeRep @b) (typeRep @(Maybe c)) of
                 Just Refl -> Just $ Right $ fromVector @b wrapped
@@ -447,7 +687,6 @@ tryMaybeWrap _onResult col = case col of
                     case testEquality (typeRep @b) (typeRep @(Maybe (Maybe c))) of
                         Just _ -> Just $ Right $ fromVector @(Maybe c) wrapped
                         Nothing -> Nothing
-    -- OptionalColumn and NullableColumn are already handled by the hasElemType guards above.
     _ -> Nothing
 
 castMismatch ::
@@ -482,7 +721,7 @@ eval _ (Lit v) = Right (Scalar v)
 eval (FlatCtx df) (Col name) =
     case getColumn name df of
         Nothing ->
-            Left $ ColumnNotFoundException name "" (M.keys $ columnIndices df)
+            Left $ ColumnsNotFoundException [name] "" (M.keys $ columnIndices df)
         Just c
             | hasElemType @a c -> Right (Flat c)
             | otherwise ->
@@ -500,8 +739,8 @@ eval (GroupCtx gdf) (Col name) =
     case getColumn name (fullDataframe gdf) of
         Nothing ->
             Left $
-                ColumnNotFoundException
-                    name
+                ColumnsNotFoundException
+                    [name]
                     ""
                     (M.keys $ columnIndices $ fullDataframe gdf)
         Just c
@@ -524,14 +763,14 @@ eval (FlatCtx df) (CastWith name _tag onResult) =
     case getColumn name df of
         Nothing ->
             Left $
-                ColumnNotFoundException name "" (M.keys $ columnIndices df)
+                ColumnsNotFoundException [name] "" (M.keys $ columnIndices df)
         Just c -> Flat <$> promoteColumnWith onResult c
 eval (GroupCtx gdf) (CastWith name _tag onResult) =
     case getColumn name (fullDataframe gdf) of
         Nothing ->
             Left $
-                ColumnNotFoundException
-                    name
+                ColumnsNotFoundException
+                    [name]
                     ""
                     (M.keys $ columnIndices $ fullDataframe gdf)
         Just c -> do
@@ -570,6 +809,29 @@ eval ctx expr@(If cond l r) = addContext expr $ do
     rv <- eval @a ctx r
     branchValue c lv rv
 
+-- Over (window function) -------------------------------------------------
+
+eval (FlatCtx df) expr@(Over keys inner) = addContext expr $ do
+    let gdf = G.groupBy keys df
+    v <- eval (GroupCtx gdf) inner
+    case v of
+        Scalar s ->
+            Right (Scalar s)
+        Flat groupCol ->
+            -- Scalar agg (mean, sum, median): one value per group.
+            -- Broadcast via rowToGroup: row i gets value at group rowToGroup[i].
+            Right (Flat (atIndicesStable (rowToGroup gdf) groupCol))
+        Group groupCols -> do
+            -- Concatenate in sorted order, then unsort to original row order.
+            sorted <- V.fold1M' concatColumns groupCols
+            let inv = invertPermutation (valueIndices gdf)
+            Right (Flat (atIndicesStable inv sorted))
+eval (GroupCtx _) expr@(Over _ _) =
+    addContext expr $
+        Left
+            ( InternalException
+                "Over (window function) is not supported inside a grouped context"
+            )
 -- Fast path: FoldAgg (seeded) on a bare Col in GroupCtx.
 -- Avoids the O(n) backpermute in sliceGroups by folding directly over
 -- permuted indices.  Only matches when inner is exactly (Col name).
@@ -579,8 +841,8 @@ eval (GroupCtx gdf) expr@(Agg (FoldAgg _ (Just seed) (f :: a -> b -> a)) (Col na
         case getColumn name (fullDataframe gdf) of
             Nothing ->
                 Left $
-                    ColumnNotFoundException
-                        name
+                    ColumnsNotFoundException
+                        [name]
                         ""
                         (M.keys $ columnIndices $ fullDataframe gdf)
             Just col ->
@@ -599,13 +861,12 @@ eval (GroupCtx gdf) expr@(Agg (FoldAgg _ Nothing (f :: a -> b -> a)) (Col name :
                 case getColumn name (fullDataframe gdf) of
                     Nothing ->
                         Left $
-                            ColumnNotFoundException
-                                name
+                            ColumnsNotFoundException
+                                [name]
                                 ""
                                 (M.keys $ columnIndices $ fullDataframe gdf)
                     Just col ->
-                        Flat . fromVector
-                            <$> foldl1DirectGroups @b f col (valueIndices gdf) (offsets gdf)
+                        Flat <$> foldl1DirectGroups @b f col (valueIndices gdf) (offsets gdf)
 -- Fast path: MergeAgg on a bare Col in GroupCtx.
 
 eval
@@ -618,8 +879,8 @@ eval
             case getColumn name (fullDataframe gdf) of
                 Nothing ->
                     Left $
-                        ColumnNotFoundException
-                            name
+                        ColumnsNotFoundException
+                            [name]
                             ""
                             (M.keys $ columnIndices $ fullDataframe gdf)
                 Just col ->
@@ -675,10 +936,10 @@ eval
                         InternalException
                             "Cannot apply a merge aggregation to a scalar"
                 Flat col ->
-                    Scalar . finalize <$> foldlColumnWith @b step seed col
+                    Scalar . finalize <$> foldlColumn @b step seed col
                 Group gs ->
                     Flat . fromVector
-                        <$> V.mapM (fmap finalize . foldlColumnWith @b step seed) gs
+                        <$> V.mapM (fmap finalize . foldlColumn @b step seed) gs
 
 -- Aggregation: FoldAgg without seed (fold1) ------------------------------
 
@@ -767,4 +1028,4 @@ interpretAggregation gdf expr = do
             -- The Column payload is intentionally unused — the only
             -- call-site ('aggregate') immediately throws
             -- 'UnaggregatedException' on this constructor.
-            Right $ UnAggregated $ BoxedColumn @T.Text V.empty
+            Right $ UnAggregated $ BoxedColumn @T.Text Nothing V.empty

@@ -1,4 +1,3 @@
-{-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE TypeApplications #-}
 
 module DataFrame.IO.Parquet.Page where
@@ -24,13 +23,13 @@ import qualified Snappy
 
 isDataPage :: Page -> Bool
 isDataPage page = case pageTypeHeader (pageHeader page) of
-    DataPageHeader{..} -> True
-    DataPageHeaderV2{..} -> True
+    DataPageHeader{} -> True
+    DataPageHeaderV2{} -> True
     _ -> False
 
 isDictionaryPage :: Page -> Bool
 isDictionaryPage page = case pageTypeHeader (pageHeader page) of
-    DictionaryPageHeader{..} -> True
+    DictionaryPageHeader{} -> True
     _ -> False
 
 decompressData :: CompressionCodec -> BS.ByteString -> IO BS.ByteString
@@ -61,15 +60,15 @@ readPage c columnBytes =
     if BS.null columnBytes
         then pure (Nothing, BS.empty)
         else do
-            let (hdr, rem) = readPageHeader emptyPageHeader columnBytes 0
+            let (hdr, remainder) = readPageHeader emptyPageHeader columnBytes 0
 
-            let compressed = BS.take (fromIntegral $ compressedPageSize hdr) rem
+            let compressed = BS.take (fromIntegral $ compressedPageSize hdr) remainder
 
             fullData <- decompressData c compressed
 
             pure
                 ( Just $ Page hdr fullData
-                , BS.drop (fromIntegral $ compressedPageSize hdr) rem
+                , BS.drop (fromIntegral $ compressedPageSize hdr) remainder
                 )
 
 readPageHeader ::
@@ -83,53 +82,62 @@ readPageHeader hdr xs lastFieldId =
              in
                 case fieldContents of
                     Nothing -> (hdr, BS.drop 1 xs)
-                    Just (rem, elemType, identifier) -> case identifier of
+                    Just (remainder, _elemType, identifier) -> case identifier of
                         1 ->
                             let
-                                (pType, rem') = readInt32FromBytes rem
-                             in
-                                readPageHeader (hdr{pageHeaderPageType = pageTypeFromInt pType}) rem' identifier
-                        2 ->
-                            let
-                                (uncompressedPageSize, rem') = readInt32FromBytes rem
+                                (pType, remainder') = readInt32FromBytes remainder
                              in
                                 readPageHeader
-                                    (hdr{uncompressedPageSize = uncompressedPageSize})
-                                    rem'
+                                    (hdr{pageHeaderPageType = pageTypeFromInt pType})
+                                    remainder'
+                                    identifier
+                        2 ->
+                            let
+                                (parsedUncompressedPageSize, remainder') = readInt32FromBytes remainder
+                             in
+                                readPageHeader
+                                    (hdr{uncompressedPageSize = parsedUncompressedPageSize})
+                                    remainder'
                                     identifier
                         3 ->
                             let
-                                (compressedPageSize, rem') = readInt32FromBytes rem
+                                (parsedCompressedPageSize, remainder') = readInt32FromBytes remainder
                              in
-                                readPageHeader (hdr{compressedPageSize = compressedPageSize}) rem' identifier
+                                readPageHeader
+                                    (hdr{compressedPageSize = parsedCompressedPageSize})
+                                    remainder'
+                                    identifier
                         4 ->
                             let
-                                (crc, rem') = readInt32FromBytes rem
+                                (crc, remainder') = readInt32FromBytes remainder
                              in
-                                readPageHeader (hdr{pageHeaderCrcChecksum = crc}) rem' identifier
+                                readPageHeader (hdr{pageHeaderCrcChecksum = crc}) remainder' identifier
                         5 ->
                             let
-                                (dataPageHeader, rem') = readPageTypeHeader emptyDataPageHeader rem 0
+                                (dataPageHeader, remainder') = readPageTypeHeader emptyDataPageHeader remainder 0
                              in
-                                readPageHeader (hdr{pageTypeHeader = dataPageHeader}) rem' identifier
+                                readPageHeader (hdr{pageTypeHeader = dataPageHeader}) remainder' identifier
                         6 -> error "Index page header not supported"
                         7 ->
                             let
-                                (dictionaryPageHeader, rem') = readPageTypeHeader emptyDictionaryPageHeader rem 0
+                                (dictionaryPageHeader, remainder') = readPageTypeHeader emptyDictionaryPageHeader remainder 0
                              in
-                                readPageHeader (hdr{pageTypeHeader = dictionaryPageHeader}) rem' identifier
+                                readPageHeader
+                                    (hdr{pageTypeHeader = dictionaryPageHeader})
+                                    remainder'
+                                    identifier
                         8 ->
                             let
-                                (dataPageHeaderV2, rem') = readPageTypeHeader emptyDataPageHeaderV2 rem 0
+                                (dataPageHeaderV2, remainder') = readPageTypeHeader emptyDataPageHeaderV2 remainder 0
                              in
-                                readPageHeader (hdr{pageTypeHeader = dataPageHeaderV2}) rem' identifier
+                                readPageHeader (hdr{pageTypeHeader = dataPageHeaderV2}) remainder' identifier
                         n -> error $ "Unknown page header field " ++ show n
 
 readPageTypeHeader ::
     PageTypeHeader -> BS.ByteString -> Int16 -> (PageTypeHeader, BS.ByteString)
 readPageTypeHeader INDEX_PAGE_HEADER _ _ = error "readPageTypeHeader: unsupported INDEX_PAGE_HEADER"
 readPageTypeHeader PAGE_TYPE_HEADER_UNKNOWN _ _ = error "readPageTypeHeader: unsupported PAGE_TYPE_HEADER_UNKNOWN"
-readPageTypeHeader hdr@(DictionaryPageHeader{..}) xs lastFieldId =
+readPageTypeHeader hdr@(DictionaryPageHeader{}) xs lastFieldId =
     if BS.null xs
         then (hdr, BS.empty)
         else
@@ -138,26 +146,26 @@ readPageTypeHeader hdr@(DictionaryPageHeader{..}) xs lastFieldId =
              in
                 case fieldContents of
                     Nothing -> (hdr, BS.drop 1 xs)
-                    Just (rem, elemType, identifier) -> case identifier of
+                    Just (remainder, _elemType, identifier) -> case identifier of
                         1 ->
                             let
-                                (numValues, rem') = readInt32FromBytes rem
+                                (numValues, remainder') = readInt32FromBytes remainder
                              in
                                 readPageTypeHeader
                                     (hdr{dictionaryPageHeaderNumValues = numValues})
-                                    rem'
+                                    remainder'
                                     identifier
                         2 ->
                             let
-                                (enc, rem') = readInt32FromBytes rem
+                                (enc, remainder') = readInt32FromBytes remainder
                              in
                                 readPageTypeHeader
                                     (hdr{dictionaryPageHeaderEncoding = parquetEncodingFromInt enc})
-                                    rem'
+                                    remainder'
                                     identifier
                         3 ->
                             let
-                                isSorted = fromMaybe (error "readPageTypeHeader: not enough bytes") (rem BS.!? 0)
+                                isSorted = fromMaybe (error "readPageTypeHeader: not enough bytes") (remainder BS.!? 0)
                              in
                                 readPageTypeHeader
                                     (hdr{dictionaryPageIsSorted = isSorted == compactBooleanTrue})
@@ -167,11 +175,11 @@ readPageTypeHeader hdr@(DictionaryPageHeader{..}) xs lastFieldId =
                                     -- But in other cases you do.
                                     -- This might become a problem later but in the mean
                                     -- time I'm not dropping (this assumes this is the common case).
-                                    rem
+                                    remainder
                                     identifier
                         n ->
                             error $ "readPageTypeHeader: unsupported identifier " ++ show n
-readPageTypeHeader hdr@(DataPageHeader{..}) xs lastFieldId =
+readPageTypeHeader hdr@(DataPageHeader{}) xs lastFieldId =
     if BS.null xs
         then (hdr, BS.empty)
         else
@@ -180,43 +188,46 @@ readPageTypeHeader hdr@(DataPageHeader{..}) xs lastFieldId =
              in
                 case fieldContents of
                     Nothing -> (hdr, BS.drop 1 xs)
-                    Just (rem, elemType, identifier) -> case identifier of
+                    Just (remainder, _elemType, identifier) -> case identifier of
                         1 ->
                             let
-                                (numValues, rem') = readInt32FromBytes rem
+                                (numValues, remainder') = readInt32FromBytes remainder
                              in
-                                readPageTypeHeader (hdr{dataPageHeaderNumValues = numValues}) rem' identifier
+                                readPageTypeHeader
+                                    (hdr{dataPageHeaderNumValues = numValues})
+                                    remainder'
+                                    identifier
                         2 ->
                             let
-                                (enc, rem') = readInt32FromBytes rem
+                                (enc, remainder') = readInt32FromBytes remainder
                              in
                                 readPageTypeHeader
                                     (hdr{dataPageHeaderEncoding = parquetEncodingFromInt enc})
-                                    rem'
+                                    remainder'
                                     identifier
                         3 ->
                             let
-                                (enc, rem') = readInt32FromBytes rem
+                                (enc, remainder') = readInt32FromBytes remainder
                              in
                                 readPageTypeHeader
                                     (hdr{definitionLevelEncoding = parquetEncodingFromInt enc})
-                                    rem'
+                                    remainder'
                                     identifier
                         4 ->
                             let
-                                (enc, rem') = readInt32FromBytes rem
+                                (enc, remainder') = readInt32FromBytes remainder
                              in
                                 readPageTypeHeader
                                     (hdr{repetitionLevelEncoding = parquetEncodingFromInt enc})
-                                    rem'
+                                    remainder'
                                     identifier
                         5 ->
                             let
-                                (stats, rem') = readStatisticsFromBytes emptyColumnStatistics rem 0
+                                (stats, remainder') = readStatisticsFromBytes emptyColumnStatistics remainder 0
                              in
-                                readPageTypeHeader (hdr{dataPageHeaderStatistics = stats}) rem' identifier
+                                readPageTypeHeader (hdr{dataPageHeaderStatistics = stats}) remainder' identifier
                         n -> error $ show n
-readPageTypeHeader hdr@(DataPageHeaderV2{..}) xs lastFieldId =
+readPageTypeHeader hdr@(DataPageHeaderV2{}) xs lastFieldId =
     if BS.null xs
         then (hdr, BS.empty)
         else
@@ -225,57 +236,66 @@ readPageTypeHeader hdr@(DataPageHeaderV2{..}) xs lastFieldId =
              in
                 case fieldContents of
                     Nothing -> (hdr, BS.drop 1 xs)
-                    Just (rem, elemType, identifier) -> case identifier of
+                    Just (remainder, _elemType, identifier) -> case identifier of
                         1 ->
                             let
-                                (numValues, rem') = readInt32FromBytes rem
+                                (numValues, remainder') = readInt32FromBytes remainder
                              in
-                                readPageTypeHeader (hdr{dataPageHeaderV2NumValues = numValues}) rem' identifier
+                                readPageTypeHeader
+                                    (hdr{dataPageHeaderV2NumValues = numValues})
+                                    remainder'
+                                    identifier
                         2 ->
                             let
-                                (numNulls, rem') = readInt32FromBytes rem
+                                (numNulls, remainder') = readInt32FromBytes remainder
                              in
-                                readPageTypeHeader (hdr{dataPageHeaderV2NumNulls = numNulls}) rem' identifier
+                                readPageTypeHeader
+                                    (hdr{dataPageHeaderV2NumNulls = numNulls})
+                                    remainder'
+                                    identifier
                         3 ->
                             let
-                                (numRows, rem') = readInt32FromBytes rem
+                                (parsedNumRows, remainder') = readInt32FromBytes remainder
                              in
-                                readPageTypeHeader (hdr{dataPageHeaderV2NumRows = numRows}) rem' identifier
+                                readPageTypeHeader
+                                    (hdr{dataPageHeaderV2NumRows = parsedNumRows})
+                                    remainder'
+                                    identifier
                         4 ->
                             let
-                                (enc, rem') = readInt32FromBytes rem
+                                (enc, remainder') = readInt32FromBytes remainder
                              in
                                 readPageTypeHeader
                                     (hdr{dataPageHeaderV2Encoding = parquetEncodingFromInt enc})
-                                    rem'
+                                    remainder'
                                     identifier
                         5 ->
                             let
-                                (n, rem') = readInt32FromBytes rem
+                                (n, remainder') = readInt32FromBytes remainder
                              in
-                                readPageTypeHeader (hdr{definitionLevelByteLength = n}) rem' identifier
+                                readPageTypeHeader (hdr{definitionLevelByteLength = n}) remainder' identifier
                         6 ->
                             let
-                                (n, rem') = readInt32FromBytes rem
+                                (n, remainder') = readInt32FromBytes remainder
                              in
-                                readPageTypeHeader (hdr{repetitionLevelByteLength = n}) rem' identifier
+                                readPageTypeHeader (hdr{repetitionLevelByteLength = n}) remainder' identifier
                         7 ->
                             let
-                                (isCompressed, rem') = case BS.uncons rem of
+                                (isCompressed, remainder') = case BS.uncons remainder of
                                     Just (b, bytes) -> ((b .&. 0x0f) == compactBooleanTrue, bytes)
                                     Nothing -> (True, BS.empty)
                              in
                                 readPageTypeHeader
                                     (hdr{dataPageHeaderV2IsCompressed = isCompressed})
-                                    rem'
+                                    remainder'
                                     identifier
                         8 ->
                             let
-                                (stats, rem') = readStatisticsFromBytes emptyColumnStatistics rem 0
+                                (stats, remainder') = readStatisticsFromBytes emptyColumnStatistics remainder 0
                              in
                                 readPageTypeHeader
                                     (hdr{dataPageHeaderV2Statistics = stats})
-                                    rem'
+                                    remainder'
                                     identifier
                         n -> error $ show n
 
@@ -287,12 +307,12 @@ readField' bs lastFieldId = case BS.uncons bs of
             then Nothing
             else
                 let modifier = fromIntegral ((x .&. 0xf0) `shiftR` 4) :: Int16
-                    (identifier, rem) =
+                    (identifier, remainder) =
                         if modifier == 0
                             then readIntFromBytes @Int16 xs
                             else (lastFieldId + modifier, xs)
                     elemType = toTType (x .&. 0x0f)
-                 in Just (rem, elemType, identifier)
+                 in Just (remainder, elemType, identifier)
 
 readAllPages :: CompressionCodec -> BS.ByteString -> IO [Page]
 readAllPages codec bytes = go bytes []
@@ -301,10 +321,10 @@ readAllPages codec bytes = go bytes []
         if BS.null bs
             then return (reverse acc)
             else do
-                (maybePage, remaining) <- readPage codec bs
+                (maybePage, remainderaining) <- readPage codec bs
                 case maybePage of
                     Nothing -> return (reverse acc)
-                    Just page -> go remaining (page : acc)
+                    Just page -> go remainderaining (page : acc)
 
 -- | Read n Int32 values directly into an unboxed vector (no intermediate list).
 readNInt32Vec :: Int -> BS.ByteString -> VU.Vector Int32
@@ -398,53 +418,56 @@ readStatisticsFromBytes cs xs lastFieldId =
      in
         case fieldContents of
             Nothing -> (cs, BS.drop 1 xs)
-            Just (rem, elemType, identifier) -> case identifier of
+            Just (remainder, _elemType, identifier) -> case identifier of
                 1 ->
                     let
-                        (maxInBytes, rem') = readByteStringFromBytes rem
+                        (maxInBytes, remainder') = readByteStringFromBytes remainder
                      in
-                        readStatisticsFromBytes (cs{columnMax = maxInBytes}) rem' identifier
+                        readStatisticsFromBytes (cs{columnMax = maxInBytes}) remainder' identifier
                 2 ->
                     let
-                        (minInBytes, rem') = readByteStringFromBytes rem
+                        (minInBytes, remainder') = readByteStringFromBytes remainder
                      in
-                        readStatisticsFromBytes (cs{columnMin = minInBytes}) rem' identifier
+                        readStatisticsFromBytes (cs{columnMin = minInBytes}) remainder' identifier
                 3 ->
                     let
-                        (nullCount, rem') = readIntFromBytes @Int64 rem
+                        (nullCount, remainder') = readIntFromBytes @Int64 remainder
                      in
-                        readStatisticsFromBytes (cs{columnNullCount = nullCount}) rem' identifier
+                        readStatisticsFromBytes (cs{columnNullCount = nullCount}) remainder' identifier
                 4 ->
                     let
-                        (distinctCount, rem') = readIntFromBytes @Int64 rem
+                        (distinctCount, remainder') = readIntFromBytes @Int64 remainder
                      in
-                        readStatisticsFromBytes (cs{columnDistictCount = distinctCount}) rem' identifier
+                        readStatisticsFromBytes
+                            (cs{columnDistictCount = distinctCount})
+                            remainder'
+                            identifier
                 5 ->
                     let
-                        (maxInBytes, rem') = readByteStringFromBytes rem
+                        (maxInBytes, remainder') = readByteStringFromBytes remainder
                      in
-                        readStatisticsFromBytes (cs{columnMaxValue = maxInBytes}) rem' identifier
+                        readStatisticsFromBytes (cs{columnMaxValue = maxInBytes}) remainder' identifier
                 6 ->
                     let
-                        (minInBytes, rem') = readByteStringFromBytes rem
+                        (minInBytes, remainder') = readByteStringFromBytes remainder
                      in
-                        readStatisticsFromBytes (cs{columnMinValue = minInBytes}) rem' identifier
+                        readStatisticsFromBytes (cs{columnMinValue = minInBytes}) remainder' identifier
                 7 ->
-                    case BS.uncons rem of
+                    case BS.uncons remainder of
                         Nothing ->
                             error "readStatisticsFromBytes: not enough bytes"
-                        Just (isMaxValueExact, rem') ->
+                        Just (isMaxValueExact, remainder') ->
                             readStatisticsFromBytes
                                 (cs{isColumnMaxValueExact = isMaxValueExact == compactBooleanTrue})
-                                rem'
+                                remainder'
                                 identifier
                 8 ->
-                    case BS.uncons rem of
+                    case BS.uncons remainder of
                         Nothing ->
                             error "readStatisticsFromBytes: not enough bytes"
-                        Just (isMinValueExact, rem') ->
+                        Just (isMinValueExact, remainder') ->
                             readStatisticsFromBytes
                                 (cs{isColumnMinValueExact = isMinValueExact == compactBooleanTrue})
-                                rem'
+                                remainder'
                                 identifier
                 n -> error $ show n

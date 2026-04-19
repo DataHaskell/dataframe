@@ -35,13 +35,11 @@ library
     exposed-modules: DataFrame.IO.Persistent,
                     DataFrame.IO.Persistent.TH
     build-depends:    base >= 4 && <5,
-                      bytestring >= 0.11 && < 0.13,
                       containers >= 0.6.7 && < 0.9,
-                      dataframe ^>= 0.6,
+                      dataframe ^>= 1.1,
                       persistent >= 2.14 && < 3,
                       template-haskell >= 2.0 && < 3,
                       text >= 2.0 && < 3,
-                      time >= 1.12 && < 2,
                       transformers >= 0.5 && < 0.7,
                       vector ^>= 0.13
     hs-source-dirs:   src
@@ -53,7 +51,7 @@ test-suite dataframe-persistent-tests
     main-is: Main.hs
     other-modules: PersistentTests
     build-depends:  base >= 4 && < 5,
-                    dataframe ^>= 0.4,
+                    dataframe ^>= 1.1,
                     dataframe-persistent,
                     HUnit ^>= 1.6,
                     monad-logger >= 0.3 && < 0.4,

@@ -13,7 +13,6 @@ module DataFrame.IO.CSV where
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as C
 import qualified Data.ByteString.Lazy as BL
-import qualified Data.List as L
 import qualified Data.Map.Strict as M
 import qualified Data.Proxy as P
 import qualified Data.Text as T
@@ -27,18 +26,19 @@ import qualified Data.Vector.Unboxed.Mutable as VUM
 import Data.Csv.Streaming (Records (..))
 import qualified Data.Csv.Streaming as CsvStream
 
+import Control.DeepSeq
+import Control.Exception (SomeException, catch)
 import Control.Monad
 import Data.Char
 import qualified Data.Csv as Csv
 import Data.Either
-import Data.Function (on)
 import Data.Functor
 import Data.IORef
 import Data.Maybe
 import Data.Type.Equality (TestEquality (testEquality))
 import Data.Word (Word8)
 import DataFrame.Internal.Column
-import DataFrame.Internal.DataFrame (DataFrame (..))
+import DataFrame.Internal.DataFrame (DataFrame (..), toSeparated)
 import DataFrame.Internal.Parsing
 import DataFrame.Internal.Schema
 import DataFrame.Operations.Typing
@@ -178,8 +178,12 @@ data ReadOptions = ReadOptions
     -- ^ Where to get the headers from. (default: UseFirstRow)
     , typeSpec :: TypeSpec
     -- ^ Whether/how to infer types. (default: InferFromSample 100)
-    , safeRead :: Bool
-    -- ^ Whether to partially parse values into `Maybe`/`Either`. (default: True)
+    , safeRead :: SafeReadMode
+    {- ^ Default 'SafeReadMode' for columns without an entry in
+    'safeReadOverrides'. (default: 'NoSafeRead')
+    -}
+    , safeReadOverrides :: [(T.Text, SafeReadMode)]
+    -- ^ Per-column 'SafeReadMode' overrides; takes precedence over 'safeRead'.
     , dateFormat :: String
     {- ^ Format of date fields as recognized by the Data.Time.Format module.
 
@@ -219,7 +223,8 @@ defaultReadOptions =
     ReadOptions
         { headerSpec = UseFirstRow
         , typeSpec = InferFromSample 100
-        , safeRead = True
+        , safeRead = NoSafeRead
+        , safeReadOverrides = []
         , dateFormat = "%Y-%m-%d"
         , columnSeparator = ','
         , numColumns = Nothing
@@ -272,7 +277,7 @@ readSeparated :: ReadOptions -> FilePath -> IO DataFrame
 readSeparated opts !path = do
     let stripUtf8Bom bs = fromMaybe bs (BL.stripPrefix "\xEF\xBB\xBF" bs)
     csvData <- stripUtf8Bom <$> BL.readFile path
-    decodeSeparated opts csvData
+    fmap force (decodeSeparated opts csvData)
 
 decodeSeparated :: ReadOptions -> BL.ByteString -> IO DataFrame
 decodeSeparated !opts csvData = do
@@ -304,13 +309,23 @@ decodeSeparated !opts csvData = do
     (sampleRow, _) <- peekStream rowsToProcess
     builderCols <- initializeColumns columnNames (V.toList sampleRow) opts
     let !builderColsV = V.fromList builderCols
-    processStream
-        (missingIndicators opts)
-        rowsToProcess
-        builderColsV
-        (numColumns opts)
+    let colNamesV = V.fromList columnNames
+        resolveMode =
+            effectiveSafeRead
+                (safeRead opts)
+                (safeReadOverrides opts)
+        -- If ANY column is EitherRead we keep every raw cell (including
+        -- "N/A" etc.) verbatim; otherwise the missing-indicator list applies.
+        anyEither =
+            any (\n -> resolveMode n == EitherRead) columnNames
+        missing = if anyEither then [] else missingIndicators opts
+    processStream missing rowsToProcess builderColsV (numColumns opts)
 
-    frozenCols <- V.mapM (finalizeBuilderColumn opts) builderColsV
+    frozenCols <-
+        V.zipWithM
+            (\name bc -> finalizeBuilderColumn (resolveMode name) opts bc)
+            colNamesV
+            builderColsV
     let numRows = maybe 0 columnLength (frozenCols V.!? 0)
 
     let df =
@@ -319,11 +334,11 @@ decodeSeparated !opts csvData = do
                 (M.fromList (zip columnNames [0 ..]))
                 (numRows, V.length frozenCols)
                 M.empty -- TODO give typed column references
-    pure $ parseWithTypes (safeRead opts) (schemaTypeMap (typeSpec opts)) df
+    pure $ parseWithTypes resolveMode (schemaTypeMap (typeSpec opts)) df
 
 initializeColumns ::
     [T.Text] -> [BL.ByteString] -> ReadOptions -> IO [BuilderColumn]
-initializeColumns names row opts = zipWithM initColumn names (map lookupType names)
+initializeColumns names _row opts = zipWithM initColumn names (map lookupType names)
   where
     typeMap = schemaTypeMap (typeSpec opts)
     -- Return Nothing for columns that should be inferred from BS
@@ -332,7 +347,12 @@ initializeColumns names row opts = zipWithM initColumn names (map lookupType nam
         SpecifyTypes _ fallback -> shouldInferFromSample fallback
         NoInference -> False
     lookupType name = M.lookup name typeMap
+    resolveMode =
+        effectiveSafeRead (safeRead opts) (safeReadOverrides opts)
     initColumn :: T.Text -> Maybe SchemaType -> IO BuilderColumn
+    initColumn name _ | resolveMode name == EitherRead = do
+        validityRef <- newPagedUnboxedVector
+        BuilderBS <$> newPagedVector <*> pure validityRef
     initColumn _ Nothing | shouldInfer = do
         validityRef <- newPagedUnboxedVector
         BuilderBS <$> newPagedVector <*> pure validityRef
@@ -356,8 +376,8 @@ processStream _ _ _ (Just 0) = return ()
 processStream missing (Cons (Right row) rest) cols n =
     processRow missing row cols
         >> processStream missing rest cols (fmap (flip (-) 1) n)
-processStream missing (Cons (Left err) _) _ _ = error ("CSV Parse Error: " ++ err)
-processStream missing (Nil _ _) _ _ = return ()
+processStream _missing (Cons (Left err) _) _ _ = error ("CSV Parse Error: " ++ err)
+processStream _missing (Nil _ _) _ _ = return ()
 
 processRow ::
     [T.Text] -> V.Vector BL.ByteString -> V.Vector BuilderColumn -> IO ()
@@ -374,61 +394,116 @@ processRow missing !vals !cols = V.zipWithM_ processValue vals cols
                 Nothing -> appendPagedUnboxedVector gv 0.0 >> appendPagedUnboxedVector valid 0
             BuilderText gv valid -> do
                 let !val = T.strip (TE.decodeUtf8Lenient bs')
-                if val `elem` missing
-                    then appendPagedVector gv T.empty >> appendPagedUnboxedVector valid 0
-                    else appendPagedVector gv val >> appendPagedUnboxedVector valid 1
+                appendPagedVector gv val
+                appendPagedUnboxedVector valid (if val `elem` missing then 0 else 1)
             BuilderBS gv valid -> do
                 let !bs'' = C.strip bs'
-                if TE.decodeUtf8Lenient bs'' `elem` missing
-                    then appendPagedVector gv BS.empty >> appendPagedUnboxedVector valid 0
-                    else appendPagedVector gv bs'' >> appendPagedUnboxedVector valid 1
+                appendPagedVector gv bs''
+                appendPagedUnboxedVector
+                    valid
+                    (if TE.decodeUtf8Lenient bs'' `elem` missing then 0 else 1)
 
 freezeBuilderColumn :: BuilderColumn -> IO Column
 freezeBuilderColumn (BuilderInt gv validRef) = do
     vec <- freezePagedUnboxedVector gv
     valid <- freezePagedUnboxedVector validRef
     if VU.all (== 1) valid
-        then return $! UnboxedColumn vec
+        then return $! UnboxedColumn Nothing vec
         else constructOptional vec valid
 freezeBuilderColumn (BuilderDouble gv validRef) = do
     vec <- freezePagedUnboxedVector gv
     valid <- freezePagedUnboxedVector validRef
     if VU.all (== 1) valid
-        then return $! UnboxedColumn vec
+        then return $! UnboxedColumn Nothing vec
         else constructOptional vec valid
 freezeBuilderColumn (BuilderText gv validRef) = do
     vec <- freezePagedVector gv
     valid <- freezePagedUnboxedVector validRef
     if VU.all (== 1) valid
-        then return $! BoxedColumn vec
+        then return $! BoxedColumn Nothing vec
         else constructOptionalBoxed vec valid
 freezeBuilderColumn (BuilderBS _ _) =
     error
         "freezeBuilderColumn: BuilderBS must be finalized via finalizeBuilderColumn"
 
-finalizeBuilderColumn :: ReadOptions -> BuilderColumn -> IO Column
-finalizeBuilderColumn opts (BuilderBS gv validRef) = do
-    vec <- freezePagedVector gv
-    valid <- freezePagedUnboxedVector validRef
-    return $! inferColumnFromBS opts vec valid
-finalizeBuilderColumn _ bc = freezeBuilderColumn bc
+finalizeBuilderColumn ::
+    SafeReadMode -> ReadOptions -> BuilderColumn -> IO Column
+finalizeBuilderColumn mode opts bc = do
+    col <- case bc of
+        BuilderBS gv validRef -> do
+            vec <- freezePagedVector gv
+            valid <- freezePagedUnboxedVector validRef
+            return $! inferColumnFromBS mode opts vec valid
+        _ -> freezeBuilderColumn bc
+    return $! case mode of
+        NoSafeRead -> col
+        MaybeRead -> ensureOptional col
+        EitherRead -> col
 
 inferColumnFromBS ::
-    ReadOptions -> V.Vector BS.ByteString -> VU.Vector Word8 -> Column
-inferColumnFromBS opts vec valid =
+    SafeReadMode ->
+    ReadOptions ->
+    V.Vector BS.ByteString ->
+    VU.Vector Word8 ->
+    Column
+inferColumnFromBS mode opts vec valid =
     let sampleN = let n = typeInferenceSampleSize (typeSpec opts) in if n == 0 then 100 else n
         dfmt = dateFormat opts
         asMaybeFull = V.generate (V.length vec) $ \i ->
             if valid VU.! i == 1 then Just (vec V.! i) else Nothing
         samples = V.take sampleN asMaybeFull
         assumption = makeParsingAssumptionBS dfmt samples
-     in case assumption of
-            IntAssumption -> handleBSInt dfmt asMaybeFull
-            DoubleAssumption -> handleBSDouble asMaybeFull
-            BoolAssumption -> handleBSBool asMaybeFull
-            DateAssumption -> handleBSDate dfmt asMaybeFull
-            TextAssumption -> handleBSText asMaybeFull
-            NoAssumption -> handleBSNo dfmt asMaybeFull
+     in case mode of
+            EitherRead -> handleBSEither dfmt assumption vec valid
+            _ -> case assumption of
+                IntAssumption -> handleBSInt dfmt asMaybeFull
+                DoubleAssumption -> handleBSDouble asMaybeFull
+                BoolAssumption -> handleBSBool asMaybeFull
+                DateAssumption -> handleBSDate dfmt asMaybeFull
+                TextAssumption -> handleBSText asMaybeFull
+                NoAssumption -> handleBSNo dfmt asMaybeFull
+
+{- | 'EitherRead' wrap for the ByteString inference path: produce an
+@Either Text a@ column. Raw input bytes are preserved verbatim; rows that were
+marked invalid by the builder (e.g. empty cells before EitherRead disabled
+missing-indicator detection) become @Left \"\"@.
+-}
+handleBSEither ::
+    String ->
+    ParsingAssumption ->
+    V.Vector BS.ByteString ->
+    VU.Vector Word8 ->
+    Column
+handleBSEither dfmt assumption vec valid = case assumption of
+    BoolAssumption -> wrap readByteStringBool
+    IntAssumption -> wrap readByteStringInt
+    DoubleAssumption -> wrap readByteStringDouble
+    DateAssumption -> wrap (readByteStringDate dfmt)
+    -- Text / No assumption: column is Either Text Text; empty cells become
+    -- Left "" to keep the "Left means missing/failure" convention.
+    TextAssumption -> fromVector (V.imap textEither vec)
+    NoAssumption -> fromVector (V.imap textEither vec)
+  where
+    wrap ::
+        forall a. (Columnable a) => (BS.ByteString -> Maybe a) -> Column
+    wrap p = fromVector (V.imap (toEither p) vec)
+
+    toEither ::
+        forall a.
+        (BS.ByteString -> Maybe a) ->
+        Int ->
+        BS.ByteString ->
+        Either T.Text a
+    toEither p i bs
+        | valid VU.! i == 0 = Left (TE.decodeUtf8Lenient bs)
+        | otherwise = case p bs of
+            Just v -> Right v
+            Nothing -> Left (TE.decodeUtf8Lenient bs)
+
+    textEither :: Int -> BS.ByteString -> Either T.Text T.Text
+    textEither i bs =
+        let t = TE.decodeUtf8Lenient bs
+         in if valid VU.! i == 0 || T.null t then Left t else Right t
 
 makeParsingAssumptionBS ::
     String -> V.Vector (Maybe BS.ByteString) -> ParsingAssumption
@@ -457,7 +532,7 @@ handleBSBool asMaybe
     parsableAsBool = vecSameConstructor asMaybe asMaybeBool
 
 handleBSInt :: String -> V.Vector (Maybe BS.ByteString) -> Column
-handleBSInt dfmt asMaybe
+handleBSInt _dfmt asMaybe
     | parsableAsInt =
         maybe (fromVector asMaybeInt) fromVector (sequenceA asMaybeInt)
     | parsableAsDouble =
@@ -522,23 +597,13 @@ handleBSNo dfmt asMaybe
 constructOptional ::
     (VU.Unbox a, Columnable a) => VU.Vector a -> VU.Vector Word8 -> IO Column
 constructOptional vec valid = do
-    let size = VU.length vec
-    mvec <- VM.new size
-    forM_ [0 .. size - 1] $ \i ->
-        if (valid VU.! i) == 0
-            then VM.write mvec i Nothing
-            else VM.write mvec i (Just (vec VU.! i))
-    OptionalColumn <$> V.freeze mvec
+    let bm = buildBitmapFromValid valid
+    pure $ UnboxedColumn (Just bm) vec
 
 constructOptionalBoxed :: V.Vector T.Text -> VU.Vector Word8 -> IO Column
 constructOptionalBoxed vec valid = do
-    let size = V.length vec
-    mvec <- VM.new size
-    forM_ [0 .. size - 1] $ \i ->
-        if (valid VU.! i) == 0
-            then VM.write mvec i Nothing
-            else VM.write mvec i (Just (vec V.! i))
-    OptionalColumn <$> V.freeze mvec
+    let bm = buildBitmapFromValid valid
+    pure $ BoxedColumn (Just bm) vec
 
 writeCsv :: FilePath -> DataFrame -> IO ()
 writeCsv = writeSeparated ','
@@ -553,61 +618,18 @@ writeSeparated ::
     FilePath ->
     DataFrame ->
     IO ()
-writeSeparated c filepath df = withFile filepath WriteMode $ \handle -> do
-    let (rows, _) = dataframeDimensions df
-    let headers = map fst (L.sortBy (compare `on` snd) (M.toList (columnIndices df)))
-    TIO.hPutStrLn handle (T.intercalate "," headers)
-    forM_ [0 .. (rows - 1)] $ \i -> do
-        let row = getRowAsText df i
-        TIO.hPutStrLn handle (T.intercalate "," row)
+writeSeparated c filepath df = TIO.writeFile filepath (toSeparated c df)
 
-getRowAsText :: DataFrame -> Int -> [T.Text]
-getRowAsText df i = V.ifoldr go [] (columns df)
-  where
-    indexMap = M.fromList (map (\(a, b) -> (b, a)) $ M.toList (columnIndices df))
-    go k (BoxedColumn (c :: V.Vector a)) acc = case c V.!? i of
-        Just e -> textRep : acc
-          where
-            textRep = case testEquality (typeRep @a) (typeRep @T.Text) of
-                Just Refl -> e
-                Nothing -> case typeRep @a of
-                    App t1 t2 -> case eqTypeRep t1 (typeRep @Maybe) of
-                        Just HRefl -> case testEquality t2 (typeRep @T.Text) of
-                            Just Refl -> fromMaybe "null" e
-                            Nothing -> (fromOptional . T.pack . show) e
-                              where
-                                fromOptional s
-                                    | T.isPrefixOf "Just " s = T.drop (T.length "Just ") s
-                                    | otherwise = "null"
-                        Nothing -> (T.pack . show) e
-                    _ -> (T.pack . show) e
-        Nothing ->
-            error $
-                "Column "
-                    ++ T.unpack (indexMap M.! k)
-                    ++ " has less items than "
-                    ++ "the other columns at index "
-                    ++ show i
-    go k (UnboxedColumn c) acc = case c VU.!? i of
-        Just e -> T.pack (show e) : acc
-        Nothing ->
-            error $
-                "Column "
-                    ++ T.unpack (indexMap M.! k)
-                    ++ " has less items than "
-                    ++ "the other columns at index "
-                    ++ show i
-    go k (OptionalColumn (c :: V.Vector (Maybe a))) acc = case c V.!? i of
-        Just e -> case testEquality (typeRep @a) (typeRep @T.Text) of
-            Just Refl -> fromMaybe T.empty e : acc
-            Nothing -> maybe T.empty (T.pack . show) e : acc
-        Nothing ->
-            error $
-                "Column "
-                    ++ T.unpack (indexMap M.! k)
-                    ++ " has less items than "
-                    ++ "the other columns at index "
-                    ++ show i
+-- | Parse a CSV string into a DataFrame using default options.
+fromCsv :: String -> IO (Either String DataFrame)
+fromCsv s = do
+    let bs = BL.fromStrict (TE.encodeUtf8 (T.pack s))
+    (Right <$> decodeSeparated defaultReadOptions bs)
+        `catch` (\(e :: SomeException) -> pure (Left (show e)))
+
+-- | Parse a lazy 'ByteString' containing CSV data into a DataFrame using default options.
+fromCsvBytes :: BL.ByteString -> IO DataFrame
+fromCsvBytes = decodeSeparated defaultReadOptions
 
 stripQuotes :: T.Text -> T.Text
 stripQuotes txt =

@@ -2,7 +2,7 @@
 {-# LANGUAGE Strict #-}
 {-# LANGUAGE TypeApplications #-}
 
-module Main where
+module OneBillionRowChallenge (run) where
 
 import qualified Data.Map as M
 import qualified DataFrame as D
@@ -14,8 +14,8 @@ import Data.Time
 import DataFrame.Internal.Schema (Schema (..), schemaType)
 import DataFrame.Operators
 
-main :: IO ()
-main = do
+run :: IO ()
+run = do
     let city = F.col @Text "names"
     let measurement = F.col @Double "temperature"
     let schema =
@@ -27,7 +27,7 @@ main = do
 
     startCalculation <- getCurrentTime
     df <-
-        L.scanCsv schema "../../1brc/measurements_1B.txt"
+        L.scanCsv schema "../../1brc/measurements.txt"
             |> L.groupBy
                 [F.name city]
                 [ F.minimum measurement `as` "minimum"

@@ -47,7 +47,7 @@ groupByColumnDoesNotExist =
     TestCase
         ( assertExpectException
             "[Error Case]"
-            (D.columnNotFound "[\"test0\"]" "groupBy" (D.columnNames testData))
+            (D.columnsNotFound ["test0"] "groupBy" (D.columnNames testData))
             (print $ D.groupBy ["test0"] testData)
         )
 

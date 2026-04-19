@@ -1,5 +1,6 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE TypeApplications #-}
+{-# OPTIONS_GHC -Wno-orphans #-}
 
 module GenDataFrame where
 
@@ -14,9 +15,9 @@ import Test.QuickCheck
 genColumn :: Int -> Gen Column
 genColumn len =
     oneof
-        [ BoxedColumn . V.fromList <$> vectorOf len (arbitrary @Int)
-        , UnboxedColumn . VU.fromList <$> vectorOf len (arbitrary @Double)
-        , OptionalColumn . V.fromList <$> vectorOf len (arbitrary @(Maybe Int))
+        [ BoxedColumn Nothing . V.fromList <$> vectorOf len (arbitrary @Int)
+        , UnboxedColumn Nothing . VU.fromList <$> vectorOf len (arbitrary @Double)
+        , fromVector . V.fromList <$> vectorOf len (arbitrary @(Maybe Int))
         ]
 
 genDataFrame :: Gen DataFrame
@@ -39,4 +40,4 @@ genUniqueColName = T.pack <$> listOf1 (elements ['a' .. 'z'])
 
 instance Arbitrary DataFrame where
     arbitrary = genDataFrame
-    shrink df = []
+    shrink _df = []

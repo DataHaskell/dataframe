@@ -173,14 +173,14 @@ instance
     (Columnable a, Columnable (Maybe a)) =>
     NullableArithOp (Maybe a) a (Maybe a)
     where
-    nullArithOp f Nothing _ = Nothing
+    nullArithOp _f Nothing _ = Nothing
     nullArithOp f (Just x) y = Just (f x y)
 
 instance
     (Columnable a, Columnable (Maybe a), Columnable (Maybe Bool)) =>
     NullableCmpOp (Maybe a) a (Maybe Bool)
     where
-    nullCmpOp f Nothing _ = Nothing
+    nullCmpOp _f Nothing _ = Nothing
     nullCmpOp f (Just x) y = Just (f x y)
 
 -- | Non-nullable × Nullable: 'Nothing' short-circuits.
@@ -191,7 +191,7 @@ instance
     ) =>
     NullableArithOp a (Maybe a) (Maybe a)
     where
-    nullArithOp f _ Nothing = Nothing
+    nullArithOp _f _ Nothing = Nothing
     nullArithOp f x (Just y) = Just (f x y)
 
 instance
@@ -202,7 +202,7 @@ instance
     ) =>
     NullableCmpOp a (Maybe a) (Maybe Bool)
     where
-    nullCmpOp f _ Nothing = Nothing
+    nullCmpOp _f _ Nothing = Nothing
     nullCmpOp f x (Just y) = Just (f x y)
 
 -- | Nullable × Nullable: either 'Nothing' short-circuits.
@@ -211,8 +211,8 @@ instance
     (Columnable a, Columnable (Maybe a)) =>
     NullableArithOp (Maybe a) (Maybe a) (Maybe a)
     where
-    nullArithOp f Nothing _ = Nothing
-    nullArithOp f _ Nothing = Nothing
+    nullArithOp _f Nothing _ = Nothing
+    nullArithOp _f _ Nothing = Nothing
     nullArithOp f (Just x) (Just y) = Just (f x y)
 
 instance
@@ -220,8 +220,8 @@ instance
     (Columnable a, Columnable (Maybe a), Columnable (Maybe Bool)) =>
     NullableCmpOp (Maybe a) (Maybe a) (Maybe Bool)
     where
-    nullCmpOp f Nothing _ = Nothing
-    nullCmpOp f _ Nothing = Nothing
+    nullCmpOp _f Nothing _ = Nothing
+    nullCmpOp _f _ Nothing = Nothing
     nullCmpOp f (Just x) (Just y) = Just (f x y)
 
 -- ---------------------------------------------------------------------------

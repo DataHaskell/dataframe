@@ -31,3 +31,6 @@ flake.lock
 tags
 __pycache__
 venv
+1brc
+benchmarks/
+uci_datasets/

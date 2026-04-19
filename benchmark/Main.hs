@@ -43,7 +43,7 @@ explorer = do
 
 groupByHaskell :: IO ()
 groupByHaskell = do
-    df <- D.fastReadCsvUnstable "./data/housing.csv"
+    df <- D.readCsv "./data/housing.csv"
     print $
         df
             |> D.groupBy ["ocean_proximity"]
@@ -83,12 +83,6 @@ groupByExplorer = do
 
 parseFile :: String -> IO ()
 parseFile = void . D.readCsv
-
-parseFileUnstable :: String -> IO ()
-parseFileUnstable = void . D.readCsvUnstable
-
-parseFileUnstableSIMD :: String -> IO ()
-parseFileUnstableSIMD = void . D.fastReadCsvUnstable
 
 parseHousingCSV :: IO ()
 parseHousingCSV = parseFile "./data/housing.csv"
@@ -215,22 +209,12 @@ main = do
         , bgroup
             "housing.csv (1.4 MB)"
             [ bench "Attoparsec" $ nfIO $ parseFile "./data/housing.csv"
-            , bench "Native Haskell" $ nfIO $ parseFileUnstable "./data/housing.csv"
-            , bench "SIMD" $ nfIO $ parseFileUnstableSIMD "./data/housing.csv"
             ]
         , bgroup
             "effects-of-covid-19-on-trade-at-15-december-2021-provisional.csv (9.1 MB)"
             [ bench "Attoparsec" $
                 nfIO $
                     parseFile
-                        "./data/effects-of-covid-19-on-trade-at-15-december-2021-provisional.csv"
-            , bench "Native Haskell" $
-                nfIO $
-                    parseFileUnstable
-                        "./data/effects-of-covid-19-on-trade-at-15-december-2021-provisional.csv"
-            , bench "SIMD" $
-                nfIO $
-                    parseFileUnstableSIMD
                         "./data/effects-of-covid-19-on-trade-at-15-december-2021-provisional.csv"
             ]
         , bgroup

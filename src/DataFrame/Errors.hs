@@ -11,6 +11,7 @@ import qualified Data.Vector.Unboxed as VU
 
 import Control.Exception
 import Data.Array
+import qualified Data.List as L
 import Data.Typeable (Typeable)
 import DataFrame.Display.Terminal.Colours
 import Type.Reflection (TypeRep)
@@ -29,7 +30,7 @@ data DataFrameException where
         TypeErrorContext a b ->
         DataFrameException
     AggregatedAndNonAggregatedException :: T.Text -> T.Text -> DataFrameException
-    ColumnNotFoundException :: T.Text -> T.Text -> [T.Text] -> DataFrameException
+    ColumnsNotFoundException :: [T.Text] -> T.Text -> [T.Text] -> DataFrameException
     EmptyDataSetException :: T.Text -> DataFrameException
     InternalException :: T.Text -> DataFrameException
     NonColumnReferenceException :: T.Text -> DataFrameException
@@ -51,7 +52,7 @@ instance Show DataFrameException where
                 (errorColumnName context)
                 (callingFunctionName context)
                 errorString
-    show (ColumnNotFoundException columnName callPoint availableColumns) = columnNotFound columnName callPoint availableColumns
+    show (ColumnsNotFoundException columnNames callPoint availableColumns) = columnsNotFound columnNames callPoint availableColumns
     show (EmptyDataSetException callPoint) = emptyDataSetError callPoint
     show (WrongQuantileNumberException q) = wrongQuantileNumberError q
     show (WrongQuantileIndexException qs q) = wrongQuantileIndexError qs q
@@ -65,25 +66,56 @@ instance Show DataFrameException where
             ++ T.unpack expr2
 
 columnNotFound :: T.Text -> T.Text -> [T.Text] -> String
-columnNotFound name callPoint columns =
+columnNotFound missingColumn = columnsNotFound [missingColumn]
+
+columnsNotFound :: [T.Text] -> T.Text -> [T.Text] -> String
+columnsNotFound missingColumns callPoint availableColumns =
     red "\n\n[ERROR] "
-        ++ "Column not found: "
-        ++ T.unpack name
+        ++ missingColumnsLabel missingColumns
+        ++ ": "
+        ++ T.unpack (T.intercalate ", " missingColumns)
         ++ " for operation "
         ++ T.unpack callPoint
-        ++ "\n\tDid you mean "
-        ++ T.unpack (guessColumnName name columns)
-        ++ "?\n\n"
+        ++ formatSuggestions missingColumns availableColumns
+        ++ "\n\n"
+  where
+    missingColumnsLabel [_] = "Column not found"
+    missingColumnsLabel _ = "Columns not found"
+
+    formatSuggestions [missingColumn] columns =
+        case guessColumnName missingColumn columns of
+            "" -> ""
+            guessed ->
+                "\n\tDid you mean "
+                    ++ T.unpack guessed
+                    ++ "?"
+    formatSuggestions names columns =
+        case traverse (`suggestColumnName` columns) names of
+            Just guessedColumns
+                | not (null guessedColumns) ->
+                    "\n\tDid you mean "
+                        ++ formatColumnSuggestions guessedColumns
+                        ++ "?"
+            _ -> ""
+
+    suggestColumnName missingColumn columns = case guessColumnName missingColumn columns of
+        "" -> Nothing
+        guessed -> Just guessed
+
+    formatColumnSuggestions guessedColumns =
+        "["
+            ++ L.intercalate ", " (map (show . T.unpack) guessedColumns)
+            ++ "]"
 
 typeMismatchError :: String -> String -> String
-typeMismatchError givenType expectedType =
+typeMismatchError givenType expType =
     red $
         red "\n\n[Error]: Type Mismatch"
             ++ "\n\tWhile running your code I tried to "
             ++ "get a column of type: "
             ++ red (show givenType)
             ++ " but the column in the dataframe was actually of type: "
-            ++ green (show expectedType)
+            ++ green (show expType)
 
 emptyDataSetError :: T.Text -> String
 emptyDataSetError callPoint =
