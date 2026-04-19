@@ -3,9 +3,8 @@
 module DataFrame.IO.Utils.RandomAccess where
 
 import Control.Monad.IO.Class (MonadIO (..))
-import Data.ByteString (ByteString, hGet)
+import Data.ByteString (ByteString)
 import Data.ByteString.Internal (ByteString (PS))
-import Data.Functor ((<&>))
 import qualified Data.Vector.Storable as VS
 import Data.Word (Word8)
 import DataFrame.IO.Parquet.Seeking (
@@ -16,22 +15,12 @@ import DataFrame.IO.Parquet.Seeking (
  )
 import Foreign (castForeignPtr)
 import System.IO (
-    SeekMode (AbsoluteSeek, SeekFromEnd),
-    hFileSize,
-    hSeek,
- )
-import System.IO.MMap (
-    Mode (ReadOnly),
-    mmapFileForeignPtr,
+    SeekMode (AbsoluteSeek),
  )
 
 uncurry3 :: (a -> b -> c -> d) -> (a, b, c) -> d
 uncurry3 f (a, b, c) = f a b c
 
-mmapFileVector :: FilePath -> IO (VS.Vector Word8)
-mmapFileVector filepath =
-    mmapFileForeignPtr filepath ReadOnly Nothing
-        <&> uncurry3 VS.unsafeFromForeignPtr
 
 data Range = Range {offset :: !Integer, length :: !Int} deriving (Eq, Show)
 
@@ -65,17 +54,18 @@ instance MonadIO (ReaderIO r) where
 type LocalFile = ReaderIO FileBufferedOrSeekable
 
 instance RandomAccess LocalFile where
-    readBytes (Range offset length) = ReaderIO $ \handle -> do
-        fSeek handle AbsoluteSeek offset
-        fGet handle length
+    readBytes (Range offset' length') = ReaderIO $ \handle -> do
+        fSeek handle AbsoluteSeek offset'
+        fGet handle length'
     readSuffix n = ReaderIO (readLastBytes $ fromIntegral n)
 
 type MMappedFile = ReaderIO (VS.Vector Word8)
 
+-- The instance exists but we don't have the means to mmap the file currently
 instance RandomAccess MMappedFile where
-    readBytes (Range offset length) =
+    readBytes (Range offset' length') =
         ReaderIO $
-            pure . unsafeToByteString . VS.slice (fromInteger offset) length
+            pure . unsafeToByteString . VS.slice (fromInteger offset') length'
     readSuffix n =
         ReaderIO $ \v ->
             let len = VS.length v
@@ -84,6 +74,6 @@ instance RandomAccess MMappedFile where
              in pure . unsafeToByteString $ VS.slice start n' v
 
 unsafeToByteString :: VS.Vector Word8 -> ByteString
-unsafeToByteString v = PS (castForeignPtr ptr) offset len
+unsafeToByteString v = PS (castForeignPtr ptr) offset' len
   where
-    (ptr, offset, len) = VS.unsafeToForeignPtr v
+    (ptr, offset', len) = VS.unsafeToForeignPtr v
