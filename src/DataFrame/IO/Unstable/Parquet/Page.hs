@@ -287,13 +287,19 @@ readPages description codec pType decoder = mkUnfoldM step inject
                     (pageData, rest') = BS.splitAt compSz rest
                 case unField hdr.ph_type of
                     DICTIONARY_PAGE _ -> do
-                        let Just dictHdr = unField hdr.ph_dictionary_page_header
+                        let dictHdr =
+                                fromMaybe
+                                    (error "DICTIONARY_PAGE: missing dictionary page header")
+                                    (unField hdr.ph_dictionary_page_header)
                             numVals = unField dictHdr.diph_num_values
                         decompressed <- decompressData uncmpSz codec pageData
                         let d = readDictVals pType decompressed (Just numVals)
                         return $ Skip (Just d, rest')
                     DATA_PAGE _ -> do
-                        let Just dph = unField hdr.ph_data_page_header
+                        let dph =
+                                fromMaybe
+                                    (error "DATA_PAGE: missing data page header")
+                                    (unField hdr.ph_data_page_header)
                             n = fromIntegral . unField $ dph.dph_num_values
                             enc = unField dph.dph_encoding
                         decompressed <- decompressData uncmpSz codec pageData
@@ -302,7 +308,10 @@ readPages description codec pType decoder = mkUnfoldM step inject
                             triple = (decoder dict enc nPresent valBytes, defLvls, repLvls)
                         return $ Yield triple (dict, rest')
                     DATA_PAGE_V2 _ -> do
-                        let Just dph2 = unField hdr.ph_data_page_header_v2
+                        let dph2 =
+                                fromMaybe
+                                    (error "DATA_PAGE_V2: missing data page header v2")
+                                    (unField hdr.ph_data_page_header_v2)
                             n = fromIntegral . unField $ dph2.dph2_num_values
                             enc = unField dph2.dph2_encoding
                             defLen = unField dph2.dph2_definition_levels_byte_length

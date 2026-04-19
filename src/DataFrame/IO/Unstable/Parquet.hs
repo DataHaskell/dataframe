@@ -9,7 +9,7 @@ import Control.Monad.IO.Class (MonadIO (..))
 import Data.Bits (Bits (shiftL), (.|.))
 import qualified Data.ByteString as BS
 import Data.Functor ((<&>))
-import Data.List (transpose)
+import Data.List (foldl', transpose)
 import qualified Data.Map as Map
 import Data.Text (Text)
 import qualified Data.Vector as Vector
