@@ -1,3 +1,4 @@
+{-# LANGUAGE MonoLocalBinds #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE ScopedTypeVariables #-}
@@ -8,9 +9,8 @@ import Control.Monad.IO.Class (MonadIO (..))
 import Data.Bits (Bits (shiftL), (.|.))
 import qualified Data.ByteString as BS
 import Data.Functor ((<&>))
-import Data.List (foldl', transpose)
+import Data.List (transpose)
 import qualified Data.Map as Map
-import Data.Maybe (isNothing)
 import Data.Text (Text)
 import qualified Data.Vector as Vector
 import DataFrame.IO.Parquet.Seeking (withFileBufferedOrSeekable)
@@ -32,7 +32,6 @@ import DataFrame.IO.Unstable.Parquet.Thrift (
     ColumnChunk (..),
     FileMetadata (..),
     RowGroup (..),
-    SchemaElement (..),
     ThriftType (..),
     unField,
  )
@@ -64,12 +63,12 @@ parseParquet = do
     let vectorLength = fromIntegral . unField $ metadata.num_rows :: Int
         columnActions = parseColumns metadata
     columnList <- sequence columnActions
-    let columns = Vector.fromListN (length columnList) columnList
+    let columnVector = Vector.fromListN (length columnList) columnList
         columnNames :: [Text]
         columnNames = getColumnNames (drop 1 $ unField metadata.schema)
-        columnIndices = Map.fromList $ zip columnNames [0 ..]
-        dataframeDimensions = (vectorLength, length columnActions)
-    return $ DataFrame columns columnIndices dataframeDimensions Map.empty
+        indices = Map.fromList $ zip columnNames [0 ..]
+        dimensions = (vectorLength, length columnActions)
+    return $ DataFrame columnVector indices dimensions Map.empty
 
 parseFileMetadata ::
     (RandomAccess m) => m FileMetadata
