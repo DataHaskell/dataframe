@@ -8,6 +8,12 @@ import Data.ByteString.Internal (ByteString (PS))
 import Data.Functor ((<&>))
 import qualified Data.Vector.Storable as VS
 import Data.Word (Word8)
+import DataFrame.IO.Parquet.Seeking (
+    FileBufferedOrSeekable,
+    fGet,
+    fSeek,
+    readLastBytes,
+ )
 import Foreign (castForeignPtr)
 import System.IO (
     SeekMode (AbsoluteSeek, SeekFromEnd),
@@ -18,11 +24,6 @@ import System.IO.MMap (
     Mode (ReadOnly),
     mmapFileForeignPtr,
  )
-import DataFrame.IO.Parquet.Seeking (
-    FileBufferedOrSeekable,
-    fSeek,
-    fGet, readLastBytes,
-  )
 
 uncurry3 :: (a -> b -> c -> d) -> (a, b, c) -> d
 uncurry3 f (a, b, c) = f a b c

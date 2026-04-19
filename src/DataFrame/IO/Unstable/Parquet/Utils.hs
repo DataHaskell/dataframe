@@ -5,26 +5,21 @@ module DataFrame.IO.Unstable.Parquet.Utils (
     ParquetType (..),
     parquetTypeFromInt,
     ColumnDescription (..),
-    PageDescription (..),
     generateColumnDescriptions,
     foldColumns,
 ) where
 
 import Control.Monad.IO.Class (MonadIO (..))
-import qualified Data.ByteString as BS
-import Data.Int (Int32)
+import Data.Int (Int32, Int8)
 import Data.Maybe (fromMaybe)
 import DataFrame.IO.Parquet.Types (
-    DictVals,
     ParquetType (..),
     parquetTypeFromInt,
  )
 import DataFrame.IO.Unstable.Parquet.Thrift (
-    CompressionCodec,
     ConvertedType (..),
     FieldRepetitionType (..),
     LogicalType (..),
-    PageHeader,
     SchemaElement (..),
     unField,
  )
@@ -42,23 +37,14 @@ import Streamly.Data.Stream (Stream)
 import qualified Streamly.Data.Stream as Stream
 
 data ColumnDescription = ColumnDescription
-    { colElementType :: !ParquetType
+    { colElementType :: !Int8
     , maxDefinitionLevel :: !Int32
     , maxRepetitionLevel :: !Int32
     , colLogicalType :: !(Maybe LogicalType)
     , colConvertedType :: !(Maybe ConvertedType)
+    , typeLength :: !(Maybe Int32)
     }
     deriving (Show, Eq)
-
-data PageDescription
-    = PageDescription
-    { rawBytes :: BS.ByteString
-    , header :: PageHeader
-    , codec :: CompressionCodec
-    , dictionary :: Maybe DictVals
-    , parquetType :: Int
-    }
-    deriving (Eq, Show)
 
 {- | How much each repetition type contributes to def/rep levels.
   REQUIRED contributes nothing; OPTIONAL adds a def level;
@@ -102,14 +88,15 @@ collectLeaves defAcc repAcc (SchemaTree se children) =
             [] ->
                 -- leaf: emit a description
                 let pType = case unField (schematype se) of
-                        Just t -> parquetTypeFromInt (fromIntegral t)
-                        Nothing -> PARQUET_TYPE_UNKNOWN
+                        Just t -> t
+                        Nothing -> -1
                  in [ ColumnDescription
                         pType
                         (fromIntegral defLevel)
                         (fromIntegral repLevel)
                         (unField (logicalType se))
                         (unField (converted_type se))
+                        (unField (type_length se))
                     ]
             _ ->
                 -- internal node: recurse into children

@@ -138,13 +138,13 @@ fSeek (FileBuffered i bs) SeekFromEnd seekTo = writeIORef i (fromIntegral $ BS.l
 fGet :: FileBufferedOrSeekable -> Int -> IO BS.ByteString
 fGet (FileSeekable (SeekableHandle h)) n = BS.hGet h n
 fGet (FileBuffered iRef bs) n
-  | n == 0  = pure BS.empty
-  | n >  0  = do
-    i <- fromIntegral <$> readIORef iRef 
-    if (BS.length bs - i) < n
-              then if i <= BS.length bs then pure $ unsafeDrop i bs else pure BS.empty
-              else pure . unsafeTake n . unsafeDrop i $ bs
-  | otherwise = error "Can't read a negative number of bytes"
+    | n == 0 = pure BS.empty
+    | n > 0 = do
+        i <- fromIntegral <$> readIORef iRef
+        if (BS.length bs - i) < n
+            then if i <= BS.length bs then pure $ unsafeDrop i bs else pure BS.empty
+            else pure . unsafeTake n . unsafeDrop i $ bs
+    | otherwise = error "Can't read a negative number of bytes"
 
 fRead :: (MonadIO m) => FileBufferedOrSeekable -> Stream m Word8
 fRead (FileSeekable (SeekableHandle h)) = SHandle.read h
