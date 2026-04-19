@@ -132,17 +132,21 @@ decodeRLEBitPackedHybrid :: Int -> BS.ByteString -> ([Word32], BS.ByteString)
 decodeRLEBitPackedHybrid bitWidth bs
     | bitWidth == 0 = ([0], bs)
     | BS.null bs = ([], bs)
-    | isPacked =
-        let groups = fromIntegral (hdr64 `shiftR` 1) :: Int
-            totalVals = groups * 8
-         in unpackBitPacked bitWidth totalVals afterHdr
     | otherwise =
-        let mask = if bitWidth == 32 then maxBound else (1 `shiftL` bitWidth) - 1
-            runLen = fromIntegral (hdr64 `shiftR` 1) :: Int
-            nBytes = (bitWidth + 7) `div` 8 :: Int
-            word32 = littleEndianWord32 (BS.take 4 afterHdr)
-            value = word32 .&. mask
-         in (replicate runLen value, BS.drop nBytes afterHdr)
-  where
-    (hdr64, afterHdr) = readUVarInt bs
-    isPacked = (hdr64 .&. 1) == 1
+        -- readUVarInt is evaluated here, inside the guard that has already
+        -- confirmed bs is non-empty.  Keeping it in a where clause would cause
+        -- it to be forced before the BS.null guard under {-# LANGUAGE Strict #-}.
+        let (hdr64, afterHdr) = readUVarInt bs
+            isPacked = (hdr64 .&. 1) == 1
+        in if isPacked
+               then
+                   let groups = fromIntegral (hdr64 `shiftR` 1) :: Int
+                       totalVals = groups * 8
+                   in unpackBitPacked bitWidth totalVals afterHdr
+               else
+                   let mask = if bitWidth == 32 then maxBound else (1 `shiftL` bitWidth) - 1
+                       runLen = fromIntegral (hdr64 `shiftR` 1) :: Int
+                       nBytes = (bitWidth + 7) `div` 8 :: Int
+                       word32 = littleEndianWord32 (BS.take 4 afterHdr)
+                       value = word32 .&. mask
+                   in (replicate runLen value, BS.drop nBytes afterHdr)

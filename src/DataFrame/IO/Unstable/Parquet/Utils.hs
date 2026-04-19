@@ -1,43 +1,64 @@
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE GADTs #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeApplications #-}
 
 module DataFrame.IO.Unstable.Parquet.Utils (
     ParquetType (..),
     parquetTypeFromInt,
     ColumnDescription (..),
     generateColumnDescriptions,
-    foldColumns,
+    getColumnNames,
+    foldNonNullable,
+    foldNullable,
+    foldRepeated,
 ) where
 
 import Control.Monad.IO.Class (MonadIO (..))
-import Data.Int (Int32, Int8)
+import Control.Monad.ST (runST)
+import Data.Int (Int32)
 import Data.Maybe (fromMaybe)
+import Data.Text (Text)
+import qualified Data.Text as T
+import qualified Data.Vector as VB
+import qualified Data.Vector.Mutable as VBM
+import qualified Data.Vector.Unboxed as VU
+import qualified Data.Vector.Unboxed.Mutable as VUM
+import Data.Word (Word8)
 import DataFrame.IO.Parquet.Types (
     ParquetType (..),
     parquetTypeFromInt,
+ )
+import DataFrame.IO.Unstable.Parquet.Levels (
+    stitchList2V,
+    stitchList3V,
+    stitchListV,
  )
 import DataFrame.IO.Unstable.Parquet.Thrift (
     ConvertedType (..),
     FieldRepetitionType (..),
     LogicalType (..),
     SchemaElement (..),
+    ThriftType,
     unField,
  )
 import DataFrame.IO.Utils.RandomAccess (RandomAccess)
 import DataFrame.Internal.Column (
+    Bitmap,
     Column (..),
-    MutableColumn (..),
-    columnLength,
-    copyIntoMutableColumn,
-    freezeMutableColumn,
-    newMutableColumn,
+    Columnable,
+    buildBitmapFromValid,
+    fromList,
+    fromVector,
  )
-import qualified Streamly.Data.Fold as Fold
+import DataFrame.Internal.Types (SBool (..), sUnbox)
 import Streamly.Data.Stream (Stream)
 import qualified Streamly.Data.Stream as Stream
 
 data ColumnDescription = ColumnDescription
-    { colElementType :: !Int8
+    { colElementType :: !(Maybe ThriftType)
     , maxDefinitionLevel :: !Int32
     , maxRepetitionLevel :: !Int32
     , colLogicalType :: !(Maybe LogicalType)
@@ -46,39 +67,37 @@ data ColumnDescription = ColumnDescription
     }
     deriving (Show, Eq)
 
-{- | How much each repetition type contributes to def/rep levels.
-  REQUIRED contributes nothing; OPTIONAL adds a def level;
-  REPEATED adds both a def and a rep level.
--}
 levelContribution :: Maybe FieldRepetitionType -> (Int, Int)
 levelContribution = \case
     Just (REPEATED _) -> (1, 1)
     Just (OPTIONAL _) -> (1, 0)
     _ -> (0, 0) -- REQUIRED or absent
 
-{- | Build a forest from a flat, depth-first schema list,
-  consuming elements and returning (tree, remaining).
--}
 data SchemaTree = SchemaTree SchemaElement [SchemaTree]
 
-buildForest :: [SchemaElement] -> ([SchemaTree], [SchemaElement])
-buildForest [] = ([], [])
-buildForest (se : rest) =
+buildTree :: [SchemaElement] -> (SchemaTree, [SchemaElement])
+buildTree [] = error "buildTree: schema ended unexpectedly"
+buildTree (se : rest) =
     let n = fromIntegral $ fromMaybe 0 (unField (num_children se)) :: Int
         (children, rest') = buildChildren n rest
-        (siblings, rest'') = buildForest rest'
-     in (SchemaTree se children : siblings, rest'')
+     in (SchemaTree se children, rest')
 
+-- | Build a forest of sibling trees from a flat depth-first element list.
+buildForest :: [SchemaElement] -> ([SchemaTree], [SchemaElement])
+buildForest [] = ([], [])
+buildForest xs =
+    let (tree, rest') = buildTree xs
+        (siblings, rest'') = buildForest rest'
+     in (tree : siblings, rest'')
+
+-- | Build exactly @n@ child trees, each consuming only its own subtree.
 buildChildren :: Int -> [SchemaElement] -> ([SchemaTree], [SchemaElement])
 buildChildren 0 xs = ([], xs)
 buildChildren n xs =
-    let (child, rest') = buildForest xs -- one subtree
-        (children, rest'') = buildChildren (n - 1) rest'
-     in (take 1 child <> children, rest'') -- safe: buildForest >=1 result
+    let (child, rest') = buildTree xs
+        (siblings, rest'') = buildChildren (n - 1) rest'
+     in (child : siblings, rest'')
 
-{- | Recursively collect leaf ColumnDescriptions, threading
-  accumulated def/rep levels down the path.
--}
 collectLeaves :: Int -> Int -> SchemaTree -> [ColumnDescription]
 collectLeaves defAcc repAcc (SchemaTree se children) =
     let (dInc, rInc) = levelContribution (unField (repetition_type se))
@@ -87,9 +106,7 @@ collectLeaves defAcc repAcc (SchemaTree se children) =
      in case children of
             [] ->
                 -- leaf: emit a description
-                let pType = case unField (schematype se) of
-                        Just t -> t
-                        Nothing -> -1
+                let pType = unField (schematype se)
                  in [ ColumnDescription
                         pType
                         (fromIntegral defLevel)
@@ -102,9 +119,6 @@ collectLeaves defAcc repAcc (SchemaTree se children) =
                 -- internal node: recurse into children
                 concatMap (collectLeaves defLevel repLevel) children
 
-{- | Entry point: skip the message-type root (first element),
-  then walk the schema forest.
--}
 generateColumnDescriptions :: [SchemaElement] -> [ColumnDescription]
 generateColumnDescriptions [] = []
 generateColumnDescriptions (_ : rest) =
@@ -112,26 +126,133 @@ generateColumnDescriptions (_ : rest) =
     let (forest, _) = buildForest rest
      in concatMap (collectLeaves 0 0) forest
 
-foldColumns :: (RandomAccess r, MonadIO r) => Int -> Stream r Column -> r Column
-foldColumns size stream = do
-    chunk <- Stream.uncons stream
-    case chunk of
-        Nothing -> error "Empty Column Stream"
-        Just (initialChunk, stream') -> do
-            mutableColumn <- liftIO $ newMutableColumn size initialChunk
-            liftIO $ copyIntoMutableColumn mutableColumn 0 initialChunk
-            foldStream <- foldStreamM (mutableColumn, columnLength initialChunk)
-            (mutableColumn, _) <- Stream.fold foldStream stream'
-            liftIO $ freezeMutableColumn mutableColumn
+getColumnNames :: [SchemaElement] -> [Text]
+getColumnNames [] = []
+getColumnNames schemaElements =
+    let (forest, _) = buildForest schemaElements
+     in go forest [] False
   where
-    foldStreamM ::
-        (RandomAccess r, MonadIO r) =>
-        (MutableColumn, Int) -> r (Fold.Fold r Column (MutableColumn, Int))
-    foldStreamM (mutableColumn, offset) = do
-        return $ Fold.foldlM' f (pure (mutableColumn, offset))
-    f ::
-        (RandomAccess r, MonadIO r) =>
-        (MutableColumn, Int) -> Column -> r (MutableColumn, Int)
-    f (accumulator, offset) columnChunk = do
-        liftIO $ copyIntoMutableColumn accumulator offset columnChunk
-        return (accumulator, offset + columnLength columnChunk)
+    isRepeated se = case unField (repetition_type se) of
+        Just (REPEATED _) -> True
+        _ -> False
+
+    go [] _ _ = []
+    go (SchemaTree se children : rest) path skipThis =
+        case children of
+            -- Leaf node
+            [] ->
+                let newPath = if skipThis then path else path ++ [unField (name se)]
+                    fullName = T.intercalate "." newPath
+                 in fullName : go rest path skipThis
+            -- REPEATED intermediate: skip this name; skip single child too
+            _
+                | isRepeated se ->
+                    let skipChildren = length children == 1
+                        childLeaves = go children path skipChildren
+                     in childLeaves ++ go rest path skipThis
+            -- Name-skipped intermediate: recurse with skip cleared
+            _
+                | skipThis ->
+                    let childLeaves = go children path False
+                     in childLeaves ++ go rest path skipThis
+            -- Normal intermediate: add name to path, recurse
+            _ ->
+                let subPath = path ++ [unField (name se)]
+                    childLeaves = go children subPath False
+                 in childLeaves ++ go rest path skipThis
+
+{- | Fold a stream of value vectors into a non-nullable 'Column'.
+Concatenates all vectors and calls 'fromVector'.
+-}
+foldNonNullable ::
+    forall m a.
+    (RandomAccess m, MonadIO m, Columnable a) =>
+    Stream m (VB.Vector a) ->
+    m Column
+foldNonNullable stream = do
+    vecs <- Stream.toList stream
+    return $ fromVector (VB.concat vecs)
+
+foldNullable ::
+    forall m a.
+    (RandomAccess m, MonadIO m, Columnable a) =>
+    Int ->
+    Stream m (VB.Vector a, VU.Vector Int) ->
+    m Column
+foldNullable maxDef stream = do
+    chunks <- Stream.toList stream
+    let allVals = VB.concat (map fst chunks)
+        allDefs = VU.concat (map snd chunks)
+        nRows = VU.length allDefs
+        validVec :: VU.Vector Word8
+        validVec = VU.map (\d -> if d == maxDef then 1 else 0) allDefs
+        maybeBm :: Maybe Bitmap
+        maybeBm =
+            if VU.all (== 1) validVec
+                then Nothing
+                else Just (buildBitmapFromValid validVec)
+    return $ case sUnbox @a of
+        STrue ->
+            -- Unboxed path: scatter present values to the right positions.
+            -- Null slots keep the zero-initialised default; the bitmap
+            -- guards them from being read.
+            let dat = runST $ do
+                    mv <- VUM.new nRows
+                    let go i j
+                            | i >= nRows = pure ()
+                            | VU.unsafeIndex validVec i == 1 = do
+                                VUM.unsafeWrite mv i (VB.unsafeIndex allVals j)
+                                go (i + 1) (j + 1)
+                            | otherwise = go (i + 1) j
+                    go 0 0
+                    VU.unsafeFreeze mv
+             in UnboxedColumn maybeBm dat
+        SFalse ->
+            -- Boxed path: same scatter, null slots hold an error thunk
+            -- that is never evaluated (guarded by the bitmap).
+            let dat = runST $ do
+                    mv <- VBM.replicate nRows (error "parquet: null slot accessed")
+                    let go i j
+                            | i >= nRows = pure ()
+                            | VU.unsafeIndex validVec i == 1 = do
+                                VBM.unsafeWrite mv i (VB.unsafeIndex allVals j)
+                                go (i + 1) (j + 1)
+                            | otherwise = go (i + 1) j
+                    go 0 0
+                    VB.unsafeFreeze mv
+             in BoxedColumn maybeBm dat
+
+{- | Fold a stream of (values, def-levels, rep-levels) triples into a
+repeated (list) 'Column' using Dremel-style level stitching.
+
+The stitching function is selected by @maxRep@:
+
+  * @maxRep == 1@  →  'stitchListV'   → @[Maybe [Maybe a]]@
+  * @maxRep == 2@  →  'stitchList2V'  → @[Maybe [Maybe [Maybe a]]]@
+  * @maxRep >= 3@  →  'stitchList3V'  → @[Maybe [Maybe [Maybe [Maybe a]]]]@
+
+Threshold formula: @defT_r = maxDef - 2 * (maxRep - r)@.
+-}
+foldRepeated ::
+    forall m a.
+    ( RandomAccess m
+    , MonadIO m
+    , Columnable a
+    , Columnable (Maybe [Maybe a])
+    , Columnable (Maybe [Maybe [Maybe a]])
+    , Columnable (Maybe [Maybe [Maybe [Maybe a]]])
+    ) =>
+    Int ->
+    Int ->
+    Stream m (VB.Vector a, VU.Vector Int, VU.Vector Int) ->
+    m Column
+foldRepeated maxRep maxDef stream = do
+    chunks <- Stream.toList stream
+    let allVals = VB.concat [vs | (vs, _, _) <- chunks]
+        allDefs = VU.concat [ds | (_, ds, _) <- chunks]
+        allReps = VU.concat [rs | (_, _, rs) <- chunks]
+    return $ case maxRep of
+        2 -> fromList (stitchList2V (maxDef - 2) maxDef allReps allDefs allVals)
+        3 ->
+            fromList (stitchList3V (maxDef - 4) (maxDef - 2) maxDef allReps allDefs allVals)
+        _ -> fromList (stitchListV maxDef allReps allDefs allVals)

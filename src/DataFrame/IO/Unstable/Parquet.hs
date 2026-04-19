@@ -1,8 +1,6 @@
-{-# LANGUAGE ExplicitForAll #-}
 {-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE GADTs #-}
 {-# LANGUAGE OverloadedRecordDot #-}
-{-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 module DataFrame.IO.Unstable.Parquet (readParquetUnstable) where
 
@@ -15,65 +13,66 @@ import qualified Data.Map as Map
 import Data.Maybe (isNothing)
 import Data.Text (Text)
 import qualified Data.Vector as Vector
+import DataFrame.IO.Parquet.Seeking (withFileBufferedOrSeekable)
 import DataFrame.IO.Unstable.Parquet.Page (
-    boolReader,
-    doubleReader,
-    floatReader,
-    int32Reader,
-    int64Reader,
-    int96Reader,
-    nonNullableStream,
+    PageDecoder,
+    boolDecoder,
+    byteArrayDecoder,
+    doubleDecoder,
+    fixedLenByteArrayDecoder,
+    floatDecoder,
+    int32Decoder,
+    int64Decoder,
+    int96Decoder,
+    nonNullableChunk,
+    nullableChunk,
+    repeatedChunk,
  )
 import DataFrame.IO.Unstable.Parquet.Thrift (
     ColumnChunk (..),
     FileMetadata (..),
     RowGroup (..),
     SchemaElement (..),
+    ThriftType (..),
     unField,
  )
 import DataFrame.IO.Unstable.Parquet.Utils (
-    ColumnDescription,
-    foldColumns,
+    ColumnDescription (..),
+    foldNonNullable,
+    foldNullable,
+    foldRepeated,
     generateColumnDescriptions,
+    getColumnNames,
  )
 import DataFrame.IO.Utils.RandomAccess (
     RandomAccess (..),
     ReaderIO (runReaderIO),
  )
+import DataFrame.Internal.Column (Column, Columnable)
 import DataFrame.Internal.DataFrame (DataFrame (..))
 import qualified Pinch
-import Streamly.Data.Stream (Stream)
 import qualified Streamly.Data.Stream as Stream
-import Streamly.Data.Unfold (Unfold)
-import Streamly.Internal.Data.Unfold ()
 import qualified System.IO as IO
 
 readParquetUnstable :: FilePath -> IO DataFrame
-readParquetUnstable filepath = IO.withFile filepath IO.ReadMode $ \handle -> do
+readParquetUnstable filepath = withFileBufferedOrSeekable Nothing filepath IO.ReadMode $ \handle -> do
     runReaderIO parseParquet handle
 
-parseParquet :: (RandomAccess r, MonadIO r) => r DataFrame
+parseParquet :: (RandomAccess m, MonadIO m) => m DataFrame
 parseParquet = do
     metadata <- parseFileMetadata
     let vectorLength = fromIntegral . unField $ metadata.num_rows :: Int
-        columnStreams = parseColumns metadata
-    columnList <- mapM (foldColumns vectorLength) columnStreams
+        columnActions = parseColumns metadata
+    columnList <- sequence columnActions
     let columns = Vector.fromListN (length columnList) columnList
         columnNames :: [Text]
-        columnNames =
-            map (unField . name)
-                . filter
-                    ( \se ->
-                        (isNothing $ unField $ num_children se)
-                            || unField se.num_children == Just 0
-                    )
-                $ unField metadata.schema
+        columnNames = getColumnNames (drop 1 $ unField metadata.schema)
         columnIndices = Map.fromList $ zip columnNames [0 ..]
-        dataframeDimensions = (vectorLength, length columnStreams)
+        dataframeDimensions = (vectorLength, length columnActions)
     return $ DataFrame columns columnIndices dataframeDimensions Map.empty
 
 parseFileMetadata ::
-    (RandomAccess r) => r FileMetadata
+    (RandomAccess m) => m FileMetadata
 parseFileMetadata = do
     footerOffset <- readSuffix 8
     let size = getMetadataSize footerOffset
@@ -87,7 +86,7 @@ parseFileMetadata = do
             sizes = map (fromIntegral . BS.index footer) [0 .. 3]
          in foldl' (.|.) 0 $ zipWith shiftL sizes [0, 8 .. 24]
 
-parseColumns :: (RandomAccess r, MonadIO r) => FileMetadata -> [Stream r a]
+parseColumns :: (RandomAccess m, MonadIO m) => FileMetadata -> [m Column]
 parseColumns metadata =
     let columnDescriptions = generateColumnDescriptions $ unField $ schema metadata
         colChunks = columnChunks metadata
@@ -103,41 +102,121 @@ parseColumns metadata =
                         <> " columns"
             else zipWith parse colChunks columnDescriptions
   where
-    columnChunks :: (RandomAccess r) => FileMetadata -> [Stream r ColumnChunk]
+    -- One list of ColumnChunks per column (across all row groups).
+    columnChunks :: FileMetadata -> [[ColumnChunk]]
     columnChunks =
-        map Stream.fromList
-            . transpose
+        transpose
             . map (unField . rg_columns)
             . unField
             . row_groups
-    getColumnUnfold description
-        | description.maxRepetitionLevel == 0 && description.maxDefinitionLevel == 0 =
-            getNonNullableUnfold description
-        | description.maxRepetitionLevel == 0 = error "TODO: implement nullable stream"
-        | otherwise = error "TODO: implement maxRep > 0"
+
     parse ::
         (RandomAccess m, MonadIO m) =>
-        Stream m ColumnChunk -> ColumnDescription -> Stream m a
-    parse columnChunkStream description = case getColumnUnfold description of
-        (ColumnUnfold columnUnfold) -> Stream.unfoldEach columnUnfold columnChunkStream
+        [ColumnChunk] ->
+        ColumnDescription ->
+        m Column
+    parse chunks description
+        | description.maxRepetitionLevel == 0 && description.maxDefinitionLevel == 0 =
+            getNonNullableColumn description chunks
+        | description.maxRepetitionLevel == 0 =
+            getNullableColumn description chunks
+        | otherwise = getRepeatedColumn description chunks
 
-data ColumnUnfold where
-    ColumnUnfold ::
-        (RandomAccess m, MonadIO m) =>
-        (forall a. Unfold m ColumnChunk a) -> ColumnUnfold
-
-getNonNullableUnfold :: ColumnDescription -> ColumnUnfold
-getNonNullableUnfold description = case description.colElementType of
-    0 -> ColumnUnfold $ stream boolReader
-    1 -> ColumnUnfold $ stream int32Reader
-    2 -> ColumnUnfold $ stream int64Reader
-    3 -> ColumnUnfold $ stream int96Reader
-    4 -> ColumnUnfold $ stream floatReader
-    5 -> ColumnUnfold $ stream doubleReader
-    6 -> ColumnUnfold $ stream byteArrayReader
-    7 -> case description.typeLength of
-        Nothing -> error "FIXED_LEN_BYTE_ARRAY Requires type_length to be set"
-        Just tl -> ColumnUnfold $ stream (fixedLenByteArrayReader tl)
-    _ -> error "Unknown Parquet Type"
+getNonNullableColumn ::
+    forall m.
+    (RandomAccess m, MonadIO m) =>
+    ColumnDescription ->
+    [ColumnChunk] ->
+    m Column
+getNonNullableColumn description chunks =
+    case description.colElementType of
+        Just (BOOLEAN _) -> go boolDecoder
+        Just (INT32 _) -> go int32Decoder
+        Just (INT64 _) -> go int64Decoder
+        Just (INT96 _) -> go int96Decoder
+        Just (FLOAT _) -> go floatDecoder
+        Just (DOUBLE _) -> go doubleDecoder
+        Just (BYTE_ARRAY _) -> go byteArrayDecoder
+        Just (FIXED_LEN_BYTE_ARRAY _) -> case description.typeLength of
+            Nothing -> error "FIXED_LEN_BYTE_ARRAY requires type_length to be set"
+            Just tl -> go (fixedLenByteArrayDecoder (fromIntegral tl))
+        Nothing -> error "Column has no Parquet type"
   where
-    stream = nonNullableStream description
+    go ::
+        forall a.
+        (Columnable a) =>
+        PageDecoder a ->
+        m Column
+    go decoder =
+        foldNonNullable $
+            Stream.mapM (nonNullableChunk description decoder) (Stream.fromList chunks)
+
+getNullableColumn ::
+    forall m.
+    (RandomAccess m, MonadIO m) =>
+    ColumnDescription ->
+    [ColumnChunk] ->
+    m Column
+getNullableColumn description chunks =
+    case description.colElementType of
+        Just (BOOLEAN _) -> go boolDecoder
+        Just (INT32 _) -> go int32Decoder
+        Just (INT64 _) -> go int64Decoder
+        Just (INT96 _) -> go int96Decoder
+        Just (FLOAT _) -> go floatDecoder
+        Just (DOUBLE _) -> go doubleDecoder
+        Just (BYTE_ARRAY _) -> go byteArrayDecoder
+        Just (FIXED_LEN_BYTE_ARRAY _) -> case description.typeLength of
+            Nothing -> error "FIXED_LEN_BYTE_ARRAY requires type_length to be set"
+            Just tl -> go (fixedLenByteArrayDecoder (fromIntegral tl))
+        Nothing -> error "Column has no Parquet type"
+  where
+    maxDef :: Int
+    maxDef = fromIntegral description.maxDefinitionLevel
+
+    go ::
+        forall a.
+        (Columnable a) =>
+        PageDecoder a ->
+        m Column
+    go decoder =
+        foldNullable maxDef $
+            Stream.mapM (nullableChunk description decoder) (Stream.fromList chunks)
+
+getRepeatedColumn ::
+    forall m.
+    (RandomAccess m, MonadIO m) =>
+    ColumnDescription ->
+    [ColumnChunk] ->
+    m Column
+getRepeatedColumn description chunks =
+    case description.colElementType of
+        Just (BOOLEAN _) -> go boolDecoder
+        Just (INT32 _) -> go int32Decoder
+        Just (INT64 _) -> go int64Decoder
+        Just (INT96 _) -> go int96Decoder
+        Just (FLOAT _) -> go floatDecoder
+        Just (DOUBLE _) -> go doubleDecoder
+        Just (BYTE_ARRAY _) -> go byteArrayDecoder
+        Just (FIXED_LEN_BYTE_ARRAY _) -> case description.typeLength of
+            Nothing -> error "FIXED_LEN_BYTE_ARRAY requires type_length to be set"
+            Just tl -> go (fixedLenByteArrayDecoder (fromIntegral tl))
+        Nothing -> error "Column has no Parquet type"
+  where
+    maxRep :: Int
+    maxRep = fromIntegral description.maxRepetitionLevel
+    maxDef :: Int
+    maxDef = fromIntegral description.maxDefinitionLevel
+
+    go ::
+        forall a.
+        ( Columnable a
+        , Columnable (Maybe [Maybe a])
+        , Columnable (Maybe [Maybe [Maybe a]])
+        , Columnable (Maybe [Maybe [Maybe [Maybe a]]])
+        ) =>
+        PageDecoder a ->
+        m Column
+    go decoder =
+        foldRepeated maxRep maxDef $
+            Stream.mapM (repeatedChunk description decoder) (Stream.fromList chunks)

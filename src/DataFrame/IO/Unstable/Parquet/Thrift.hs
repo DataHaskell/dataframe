@@ -7,9 +7,6 @@ module DataFrame.IO.Unstable.Parquet.Thrift where
 import Data.ByteString (ByteString)
 import Data.Int (Int16, Int32, Int64, Int8)
 import Data.Text (Text)
-import qualified Data.Text as T
-import Data.Time
-import qualified Data.Vector as V
 import GHC.Generics (Generic)
 import GHC.TypeLits (KnownNat)
 import Pinch (Enumeration, Field, Pinchable (..))
@@ -281,7 +278,7 @@ instance Pinchable ConvertedType
 -- https://github.com/apache/parquet-format/blob/master/src/main/thrift/parquet.thrift#L505
 data SchemaElement
     = SchemaElement
-    { schematype :: Field 1 (Maybe Int8) -- called just type in parquet.thrift
+    { schematype :: Field 1 (Maybe ThriftType) -- called just type in parquet.thrift
     , type_length :: Field 2 (Maybe Int32)
     , repetition_type :: Field 3 (Maybe FieldRepetitionType)
     , name :: Field 4 Text

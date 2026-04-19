@@ -81,6 +81,8 @@ library
                     DataFrame.IO.CSV,
                     DataFrame.IO.JSON,
                     DataFrame.IO.Unstable.Parquet.Utils,
+                    DataFrame.IO.Unstable.Parquet.Encoding,
+                    DataFrame.IO.Unstable.Parquet.Levels,
                     DataFrame.IO.Unstable.Parquet.Dictionary,
                     DataFrame.IO.Unstable.Parquet.Time,
                     DataFrame.IO.Unstable.Parquet.Thrift,
