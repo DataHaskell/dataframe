@@ -138,15 +138,15 @@ decodeRLEBitPackedHybrid bitWidth bs
         -- it to be forced before the BS.null guard under {-# LANGUAGE Strict #-}.
         let (hdr64, afterHdr) = readUVarInt bs
             isPacked = (hdr64 .&. 1) == 1
-        in if isPacked
-               then
-                   let groups = fromIntegral (hdr64 `shiftR` 1) :: Int
-                       totalVals = groups * 8
-                   in unpackBitPacked bitWidth totalVals afterHdr
-               else
-                   let mask = if bitWidth == 32 then maxBound else (1 `shiftL` bitWidth) - 1
-                       runLen = fromIntegral (hdr64 `shiftR` 1) :: Int
-                       nBytes = (bitWidth + 7) `div` 8 :: Int
-                       word32 = littleEndianWord32 (BS.take 4 afterHdr)
-                       value = word32 .&. mask
-                   in (replicate runLen value, BS.drop nBytes afterHdr)
+         in if isPacked
+                then
+                    let groups = fromIntegral (hdr64 `shiftR` 1) :: Int
+                        totalVals = groups * 8
+                     in unpackBitPacked bitWidth totalVals afterHdr
+                else
+                    let mask = if bitWidth == 32 then maxBound else (1 `shiftL` bitWidth) - 1
+                        runLen = fromIntegral (hdr64 `shiftR` 1) :: Int
+                        nBytes = (bitWidth + 7) `div` 8 :: Int
+                        word32 = littleEndianWord32 (BS.take 4 afterHdr)
+                        value = word32 .&. mask
+                     in (replicate runLen value, BS.drop nBytes afterHdr)

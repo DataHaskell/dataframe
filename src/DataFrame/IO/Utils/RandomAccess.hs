@@ -21,7 +21,6 @@ import System.IO (
 uncurry3 :: (a -> b -> c -> d) -> (a, b, c) -> d
 uncurry3 f (a, b, c) = f a b c
 
-
 data Range = Range {offset :: !Integer, length :: !Int} deriving (Eq, Show)
 
 class (Monad m) => RandomAccess m where

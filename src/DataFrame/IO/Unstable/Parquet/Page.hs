@@ -30,13 +30,13 @@ import Data.Text.Encoding (decodeUtf8Lenient)
 import Data.Time (UTCTime)
 import qualified Data.Vector as VB
 import qualified Data.Vector.Unboxed as VU
-import DataFrame.IO.Unstable.Parquet.Encoding (decodeDictIndicesV)
-import DataFrame.IO.Unstable.Parquet.Levels (readLevelsV1V, readLevelsV2V)
 import DataFrame.IO.Unstable.Parquet.Decompress (decompressData)
 import DataFrame.IO.Unstable.Parquet.Dictionary (
     DictVals (..),
     readDictVals,
  )
+import DataFrame.IO.Unstable.Parquet.Encoding (decodeDictIndicesV)
+import DataFrame.IO.Unstable.Parquet.Levels (readLevelsV1V, readLevelsV2V)
 import DataFrame.IO.Unstable.Parquet.Thrift (
     ColumnChunk (..),
     ColumnMetaData (..),
@@ -50,6 +50,7 @@ import DataFrame.IO.Unstable.Parquet.Thrift (
     ThriftType (..),
     unField,
  )
+import DataFrame.IO.Unstable.Parquet.Time (int96ToUTCTime)
 import DataFrame.IO.Unstable.Parquet.Utils (ColumnDescription (..))
 import DataFrame.IO.Utils.RandomAccess (RandomAccess (..), Range (Range))
 import DataFrame.Internal.Binary (
@@ -60,18 +61,19 @@ import DataFrame.Internal.Binary (
 import GHC.Float (castWord32ToFloat, castWord64ToDouble)
 import Pinch (decodeWithLeftovers)
 import qualified Pinch
-import Streamly.Internal.Data.Unfold (Unfold, Step (..), mkUnfoldM)
 import qualified Streamly.Data.Stream as Stream
-import DataFrame.IO.Unstable.Parquet.Time (int96ToUTCTime)
+import Streamly.Internal.Data.Unfold (Step (..), Unfold, mkUnfoldM)
 
 -- ---------------------------------------------------------------------------
 -- Types
 -- ---------------------------------------------------------------------------
 
--- | A type-specific page decoder.
--- Given the optional dictionary, the page encoding, the number of present
--- values, and the decompressed value bytes, returns exactly @nPresent@ values.
-type PageDecoder a = Maybe DictVals -> Encoding -> Int -> BS.ByteString -> VB.Vector a
+{- | A type-specific page decoder.
+Given the optional dictionary, the page encoding, the number of present
+values, and the decompressed value bytes, returns exactly @nPresent@ values.
+-}
+type PageDecoder a =
+    Maybe DictVals -> Encoding -> Int -> BS.ByteString -> VB.Vector a
 
 -- ---------------------------------------------------------------------------
 -- Per-type decoders
@@ -157,8 +159,9 @@ fixedLenByteArrayDecoder len mDict enc nPresent bs = case enc of
     getText (DText ds) i = ds VB.! i
     getText d _ = error ("fixedLenByteArrayDecoder: wrong dict type, got " ++ show d)
 
--- | Shared dictionary-path helper: decode @nPresent@ RLE/bit-packed indices
--- and look each one up in the dictionary.
+{- | Shared dictionary-path helper: decode @nPresent@ RLE/bit-packed indices
+and look each one up in the dictionary.
+-}
 lookupDict ::
     Maybe DictVals ->
     Int ->
@@ -184,12 +187,15 @@ nonNullableChunk ::
     m (VB.Vector a)
 nonNullableChunk description decoder columnChunk = do
     (codec, pType, rawBytes) <- readChunkBytes columnChunk
-    pages <- liftIO $ Stream.toList $
-        Stream.unfold (readPages description codec pType decoder) rawBytes
+    pages <-
+        liftIO $
+            Stream.toList $
+                Stream.unfold (readPages description codec pType decoder) rawBytes
     return $ VB.concat [vs | (vs, _, _) <- pages]
 
--- | Process one @ColumnChunk@ into (values, definition levels) for nullable
--- columns (@maxDef > 0@, @maxRep == 0@).
+{- | Process one @ColumnChunk@ into (values, definition levels) for nullable
+columns (@maxDef > 0@, @maxRep == 0@).
+-}
 nullableChunk ::
     (RandomAccess m, MonadIO m) =>
     ColumnDescription ->
@@ -198,15 +204,18 @@ nullableChunk ::
     m (VB.Vector a, VU.Vector Int)
 nullableChunk description decoder columnChunk = do
     (codec, pType, rawBytes) <- readChunkBytes columnChunk
-    pages <- liftIO $ Stream.toList $
-        Stream.unfold (readPages description codec pType decoder) rawBytes
+    pages <-
+        liftIO $
+            Stream.toList $
+                Stream.unfold (readPages description codec pType decoder) rawBytes
     return
         ( VB.concat [vs | (vs, _, _) <- pages]
         , VU.concat [ds | (_, ds, _) <- pages]
         )
 
--- | Process one @ColumnChunk@ into (values, definition levels, repetition
--- levels) for repeated columns (@maxRep > 0@).
+{- | Process one @ColumnChunk@ into (values, definition levels, repetition
+levels) for repeated columns (@maxRep > 0@).
+-}
 repeatedChunk ::
     (RandomAccess m, MonadIO m) =>
     ColumnDescription ->
@@ -215,8 +224,10 @@ repeatedChunk ::
     m (VB.Vector a, VU.Vector Int, VU.Vector Int)
 repeatedChunk description decoder columnChunk = do
     (codec, pType, rawBytes) <- readChunkBytes columnChunk
-    pages <- liftIO $ Stream.toList $
-        Stream.unfold (readPages description codec pType decoder) rawBytes
+    pages <-
+        liftIO $
+            Stream.toList $
+                Stream.unfold (readPages description codec pType decoder) rawBytes
     return
         ( VB.concat [vs | (vs, _, _) <- pages]
         , VU.concat [ds | (_, ds, _) <- pages]
@@ -243,15 +254,16 @@ readChunkBytes columnChunk = do
     rawBytes <- readBytes (Range offset compLen)
     return (codec, pType, rawBytes)
 
--- | An 'Unfold' over the pages of a column chunk.
---
--- Seed: the raw (possibly compressed) bytes starting at the first page.
--- Yields one @(values, defLevels, repLevels)@ triple per data page.
--- Dictionary pages are consumed silently and update the running dictionary
--- that is threaded through the unfold state.
---
--- The internal state is @(Maybe DictVals, BS.ByteString)@: current dictionary
--- and remaining bytes.
+{- | An 'Unfold' over the pages of a column chunk.
+
+Seed: the raw (possibly compressed) bytes starting at the first page.
+Yields one @(values, defLevels, repLevels)@ triple per data page.
+Dictionary pages are consumed silently and update the running dictionary
+that is threaded through the unfold state.
+
+The internal state is @(Maybe DictVals, BS.ByteString)@: current dictionary
+and remaining bytes.
+-}
 readPages ::
     ColumnDescription ->
     CompressionCodec ->
@@ -271,7 +283,7 @@ readPages description codec pType decoder = mkUnfoldM step inject
         | otherwise = case parsePageHeader bs of
             Left e -> error ("readPages: failed to parse page header: " ++ e)
             Right (rest, hdr) -> do
-                let compSz  = fromIntegral . unField $ hdr.ph_compressed_page_size
+                let compSz = fromIntegral . unField $ hdr.ph_compressed_page_size
                     uncmpSz = fromIntegral . unField $ hdr.ph_uncompressed_page_size
                     (pageData, rest') = BS.splitAt compSz rest
                 case unField hdr.ph_type of
@@ -283,8 +295,8 @@ readPages description codec pType decoder = mkUnfoldM step inject
                         return $ Skip (Just d, rest')
                     DATA_PAGE _ -> do
                         let Just dph = unField hdr.ph_data_page_header
-                            n       = fromIntegral . unField $ dph.dph_num_values
-                            enc     = unField dph.dph_encoding
+                            n = fromIntegral . unField $ dph.dph_num_values
+                            enc = unField dph.dph_encoding
                         decompressed <- decompressData uncmpSz codec pageData
                         let (defLvls, repLvls, nPresent, valBytes) =
                                 readLevelsV1V n maxDef maxRep decompressed
@@ -292,10 +304,10 @@ readPages description codec pType decoder = mkUnfoldM step inject
                         return $ Yield triple (dict, rest')
                     DATA_PAGE_V2 _ -> do
                         let Just dph2 = unField hdr.ph_data_page_header_v2
-                            n       = fromIntegral . unField $ dph2.dph2_num_values
-                            enc     = unField dph2.dph2_encoding
-                            defLen  = unField dph2.dph2_definition_levels_byte_length
-                            repLen  = unField dph2.dph2_repetition_levels_byte_length
+                            n = fromIntegral . unField $ dph2.dph2_num_values
+                            enc = unField dph2.dph2_encoding
+                            defLen = unField dph2.dph2_definition_levels_byte_length
+                            repLen = unField dph2.dph2_repetition_levels_byte_length
                             -- V2: levels are never compressed; only the value
                             -- payload is (optionally) compressed.
                             isCompressed = fromMaybe True (unField dph2.dph2_is_compressed)
@@ -358,4 +370,5 @@ readNTexts n bs =
 readNFixedTexts :: Int -> Int -> BS.ByteString -> [T.Text]
 readNFixedTexts _ 0 _ = []
 readNFixedTexts len n bs =
-    decodeUtf8Lenient (BS.take len bs) : readNFixedTexts len (n - 1) (BS.drop len bs)
+    decodeUtf8Lenient (BS.take len bs)
+        : readNFixedTexts len (n - 1) (BS.drop len bs)
