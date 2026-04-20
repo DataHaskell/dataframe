@@ -80,7 +80,6 @@ executable examples
                    DataFrame.Lazy.Internal.Executor,
                    DataFrame.Monad,
                    DataFrame.Hasktorch,
-                   DataFrame.IO.Parquet.Seeking,
                    DataFrame.Internal.Binary,
                    DataFrame.Internal.Nullable,
                    DataFrame.Operators,
