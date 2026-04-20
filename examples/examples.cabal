@@ -133,6 +133,7 @@ executable examples
                       stm >= 2.5 && < 3,
                       filepath >= 1.4 && < 2,
                       Glob >= 0.10 && < 1,
+                      pinch >= 0.5.1.0 && <= 0.5.2.0,
     if impl(ghc >= 9.12)
       build-depends: ghc-typelits-natnormalise == 0.9.3
     else
