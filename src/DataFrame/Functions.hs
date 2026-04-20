@@ -55,7 +55,6 @@ import DataFrame.Internal.Nullable (
     NullLift2Result,
  )
 import DataFrame.Operators
-import Debug.Trace (trace)
 import Language.Haskell.TH
 import qualified Language.Haskell.TH.Syntax as TH
 import System.Directory (doesDirectoryExist)
@@ -71,7 +70,10 @@ lift f =
 
 lift2 ::
     (Columnable c, Columnable b, Columnable a) =>
-    (c -> b -> a) -> Expr c -> Expr b -> Expr a
+    (c -> b -> a) ->
+    Expr c ->
+    Expr b ->
+    Expr a
 lift2 f =
     Binary
         ( MkBinaryOp
@@ -161,7 +163,9 @@ unsafeCast colName =
 
 castExpr ::
     forall b src.
-    (Columnable b, Columnable src, Read b) => Expr src -> Expr (Maybe b)
+    (Columnable b, Columnable src, Read b) =>
+    Expr src ->
+    Expr (Maybe b)
 castExpr = CastExprWith @b @(Maybe b) @src "castExpr" (either (const Nothing) Just)
 
 castExprWithDefault ::
@@ -173,7 +177,9 @@ castExprWithDefault def =
 
 castExprEither ::
     forall b src.
-    (Columnable b, Columnable src, Read b) => Expr src -> Expr (Either T.Text b)
+    (Columnable b, Columnable src, Read b) =>
+    Expr src ->
+    Expr (Either T.Text b)
 castExprEither =
     CastExprWith @b @(Either T.Text b) @src
         "castExprEither"
@@ -454,7 +460,11 @@ max = lift2Decorated Prelude.max "max" Nothing True 1
 
 reduce ::
     forall a b.
-    (Columnable a, Columnable b) => Expr b -> a -> (a -> b -> a) -> Expr a
+    (Columnable a, Columnable b) =>
+    Expr b ->
+    a ->
+    (a -> b -> a) ->
+    Expr a
 reduce expr start f = Agg (FoldAgg "foldUdf" (Just start) f) expr
 {-# INLINEABLE reduce #-}
 
@@ -492,21 +502,29 @@ fromJust = liftDecorated Maybe.fromJust "fromJust" Nothing
 
 whenPresent ::
     forall a b.
-    (Columnable a, Columnable b) => (a -> b) -> Expr (Maybe a) -> Expr (Maybe b)
+    (Columnable a, Columnable b) =>
+    (a -> b) ->
+    Expr (Maybe a) ->
+    Expr (Maybe b)
 whenPresent f = liftDecorated (fmap f) "whenPresent" Nothing
 {-# INLINEABLE whenPresent #-}
 
 whenBothPresent ::
     forall a b c.
     (Columnable a, Columnable b, Columnable c) =>
-    (a -> b -> c) -> Expr (Maybe a) -> Expr (Maybe b) -> Expr (Maybe c)
+    (a -> b -> c) ->
+    Expr (Maybe a) ->
+    Expr (Maybe b) ->
+    Expr (Maybe c)
 whenBothPresent f = lift2Decorated (\l r -> f <$> l <*> r) "whenBothPresent" Nothing False 0
 {-# INLINEABLE whenBothPresent #-}
 
 recode ::
     forall a b.
     (Columnable a, Columnable b, Show (a, b)) =>
-    [(a, b)] -> Expr a -> Expr (Maybe b)
+    [(a, b)] ->
+    Expr a ->
+    Expr (Maybe b)
 recode mapping =
     Unary
         ( MkUnaryOp
@@ -519,13 +537,20 @@ recode mapping =
 recodeWithCondition ::
     forall a b.
     (Columnable a, Columnable b) =>
-    Expr b -> [(Expr a -> Expr Bool, b)] -> Expr a -> Expr b
+    Expr b ->
+    [(Expr a -> Expr Bool, b)] ->
+    Expr a ->
+    Expr b
 recodeWithCondition fallback [] _val = fallback
 recodeWithCondition fallback ((cond, val) : rest) expr = ifThenElse (cond expr) (lit val) (recodeWithCondition fallback rest expr)
 
 recodeWithDefault ::
     forall a b.
-    (Columnable a, Columnable b, Show (a, b)) => b -> [(a, b)] -> Expr a -> Expr b
+    (Columnable a, Columnable b, Show (a, b)) =>
+    b ->
+    [(a, b)] ->
+    Expr a ->
+    Expr b
 recodeWithDefault d mapping =
     Unary
         ( MkUnaryOp
@@ -579,7 +604,9 @@ daysBetween =
 bind ::
     forall a b m.
     (Columnable a, Columnable (m a), Monad m, Columnable b, Columnable (m b)) =>
-    (a -> m b) -> Expr (m a) -> Expr (m b)
+    (a -> m b) ->
+    Expr (m a) ->
+    Expr (m b)
 bind f = liftDecorated (>>= f) "bind" Nothing
 
 {- | Window function: evaluate an expression partitioned by the given columns.
@@ -726,9 +753,7 @@ declareColumnsFromParquetFile path = do
                 , let nc :: Int64
                       nc = case unField (cmd_statistics cm) of
                         Nothing -> 0
-                        Just stats -> case unField (stats_null_count stats) of
-                            Nothing -> 0
-                            Just n -> n
+                        Just stats -> Maybe.fromMaybe 0 (unField $ stats_null_count stats)
                 , nc > 0
                 ]
     let df =
@@ -740,7 +765,7 @@ declareColumnsFromParquetFile path = do
 
 schemaToEmptyDataFrame :: S.Set T.Text -> [SchemaElement] -> DataFrame
 schemaToEmptyDataFrame nullableCols elems =
-    let leafElems = filter (\e -> maybe 0 id (unField e.num_children) == 0) elems
+    let leafElems = filter (\e -> Maybe.fromMaybe 0 (unField e.num_children) == 0) elems
      in fromNamedColumns (map (schemaElemToColumn nullableCols) leafElems)
 
 schemaElemToColumn :: S.Set T.Text -> SchemaElement -> (T.Text, Column)
@@ -802,8 +827,6 @@ declareColumnsWithPrefix' prefix df =
      in
         fmap concat $ forM specs $ \(raw, nm, tyStr) -> do
             ty <- typeFromString (words tyStr)
-            let tyDisplay = if ' ' `elem` tyStr then "(" <> T.pack tyStr <> ")" else T.pack tyStr
-            trace (T.unpack (nm <> " :: Expr " <> tyDisplay)) pure ()
             let n = mkName (T.unpack nm)
             sig <- sigD n [t|Expr $(pure ty)|]
             val <- valD (varP n) (normalB [|col $(TH.lift raw)|]) []
