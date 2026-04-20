@@ -217,7 +217,6 @@ module DataFrame (
     -- * I/O
     module CSV,
     module Parquet,
-    module UnstableParquet,
 
     -- * Type conversion
     module Typing,
@@ -267,9 +266,6 @@ import DataFrame.IO.Parquet as Parquet (
     readParquetFiles,
     readParquetFilesWithOpts,
     readParquetWithOpts,
- )
-import DataFrame.IO.Unstable.Parquet as UnstableParquet (
-    readParquetUnstable,
  )
 import DataFrame.Internal.Column as Column (
     Column,

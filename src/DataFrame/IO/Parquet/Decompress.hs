@@ -1,11 +1,11 @@
-module DataFrame.IO.Unstable.Parquet.Decompress where
+module DataFrame.IO.Parquet.Decompress where
 
 import qualified Codec.Compression.GZip as GZip
 import qualified Codec.Compression.Zstd.Base as Zstd
 import qualified Data.ByteString as BS
 import qualified Data.ByteString as LB
 import Data.ByteString.Internal (createAndTrim, toForeignPtr)
-import DataFrame.IO.Unstable.Parquet.Thrift (CompressionCodec (..))
+import DataFrame.IO.Parquet.Thrift (CompressionCodec (..))
 import Foreign.ForeignPtr (withForeignPtr)
 import Foreign.Ptr (plusPtr)
 import qualified Snappy

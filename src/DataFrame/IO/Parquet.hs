@@ -1,6 +1,8 @@
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE MonoLocalBinds #-}
 {-# LANGUAGE NumericUnderscores #-}
+{-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 
@@ -8,34 +10,69 @@ module DataFrame.IO.Parquet where
 
 import Control.Exception (throw, try)
 import Control.Monad
-import qualified Data.ByteString as BSO
-import Data.Either
-import Data.IORef
-import Data.Int
+import Control.Monad.IO.Class (MonadIO (..))
+import Data.Aeson (FromJSON (..), eitherDecodeStrict, withObject, (.:))
+import Data.Bits (Bits (shiftL), (.|.))
+import qualified Data.ByteString as BS
+import Data.Either (fromRight)
+import Data.Functor ((<&>))
+import Data.Int (Int32, Int64)
+import Data.List (foldl', transpose)
 import qualified Data.List as L
-import qualified Data.Map.Strict as M
-import qualified Data.Set as S
+import qualified Data.Map as Map
 import qualified Data.Text as T
-import Data.Text.Encoding
-import Data.Time
+import Data.Text.Encoding (encodeUtf8)
+import Data.Time (UTCTime)
 import Data.Time.Clock.POSIX (posixSecondsToUTCTime)
-import qualified Data.Vector as V
+import qualified Data.Vector as Vector
+import qualified Data.Vector.Unboxed as VU
 import DataFrame.Errors (DataFrameException (ColumnsNotFoundException))
-import DataFrame.Internal.Binary (littleEndianWord32)
+import DataFrame.IO.Parquet.Page (
+    PageDecoder,
+    boolDecoder,
+    byteArrayDecoder,
+    doubleDecoder,
+    fixedLenByteArrayDecoder,
+    floatDecoder,
+    int32Decoder,
+    int64Decoder,
+    int96Decoder,
+    readPages,
+ )
+import DataFrame.IO.Parquet.Seeking (
+    FileBufferedOrSeekable,
+    ForceNonSeekable,
+    withFileBufferedOrSeekable,
+ )
+import DataFrame.IO.Parquet.Thrift (
+    ColumnChunk (..),
+    DecimalType (..),
+    FileMetadata (..),
+    LogicalType (..),
+    RowGroup (..),
+    ThriftType (..),
+    TimeUnit (..),
+    TimestampType (..),
+    unField,
+ )
+import DataFrame.IO.Parquet.Utils (
+    ColumnDescription (..),
+    foldNonNullable,
+    foldNullable,
+    foldRepeated,
+    generateColumnDescriptions,
+    getColumnNames,
+ )
+import DataFrame.IO.Utils.RandomAccess (
+    RandomAccess (..),
+    ReaderIO (runReaderIO),
+ )
+import DataFrame.Internal.Column (Column, Columnable)
 import qualified DataFrame.Internal.Column as DI
-import DataFrame.Internal.DataFrame (DataFrame, columns)
+import DataFrame.Internal.DataFrame (DataFrame (..))
 import DataFrame.Internal.Expression (Expr, getColumns)
-import qualified DataFrame.Operations.Core as DI
 import DataFrame.Operations.Merge ()
 import qualified DataFrame.Operations.Subset as DS
-import System.FilePath.Glob (compile, glob, match)
-
-import Data.Aeson (FromJSON (..), eitherDecodeStrict, withObject, (.:))
-import DataFrame.IO.Parquet.Dictionary
-import DataFrame.IO.Parquet.Levels
-import DataFrame.IO.Parquet.Page
-import DataFrame.IO.Parquet.Thrift
-import DataFrame.IO.Parquet.Types
 import Network.HTTP.Simple (
     getResponseBody,
     getResponseStatusCode,
@@ -43,16 +80,16 @@ import Network.HTTP.Simple (
     parseRequest,
     setRequestHeader,
  )
+import qualified Pinch
+import qualified Streamly.Data.Stream as Stream
 import System.Directory (
     doesDirectoryExist,
     getHomeDirectory,
     getTemporaryDirectory,
  )
 import System.Environment (lookupEnv)
-
-import qualified Data.Vector.Unboxed as VU
-import DataFrame.IO.Parquet.Seeking
 import System.FilePath ((</>))
+import System.FilePath.Glob (compile, glob, match)
 import System.IO (IOMode (ReadMode))
 
 -- Options -----------------------------------------------------------------
@@ -128,28 +165,6 @@ ghci|   "./tests/data/alltypes_plain.parquet"
 When @selectedColumns@ is set and @predicate@ references other columns, those predicate columns
 are auto-included for decoding, then projected back to the requested output columns.
 -}
-
-{- | Strip Parquet encoding artifact names (REPEATED wrappers and their single
-  list-element children) from a raw column path, leaving user-visible names.
--}
-cleanColPath :: [SNode] -> [String] -> [String]
-cleanColPath nodes path = go nodes path False
-  where
-    go _ [] _ = []
-    go ns (p : ps) skipThis =
-        case L.find (\n -> sName n == p) ns of
-            Nothing -> []
-            Just n
-                | sRep n == REPEATED && not (null (sChildren n)) ->
-                    let skipChildren = length (sChildren n) == 1
-                     in go (sChildren n) ps skipChildren
-                | skipThis ->
-                    go (sChildren n) ps False
-                | null (sChildren n) ->
-                    [p]
-                | otherwise ->
-                    p : go (sChildren n) ps False
-
 readParquetWithOpts :: ParquetReadOptions -> FilePath -> IO DataFrame
 readParquetWithOpts opts path
     | isHFUri path = do
@@ -159,131 +174,12 @@ readParquetWithOpts opts path
         pure (applyRowRange opts (mconcat dfs))
     | otherwise = _readParquetWithOpts Nothing opts path
 
--- | Internal function to pass testing parameters
+-- | Internal entry point used by tests to force non-seekable mode.
 _readParquetWithOpts ::
     ForceNonSeekable -> ParquetReadOptions -> FilePath -> IO DataFrame
-_readParquetWithOpts extraConfig opts path = withFileBufferedOrSeekable extraConfig path ReadMode $ \file -> do
-    fileMetadata <- readMetadataFromHandle file
-    let columnPaths = getColumnPaths (drop 1 $ schema fileMetadata)
-    let columnNames = map fst columnPaths
-    let leafNames = map (last . T.splitOn ".") columnNames
-    let availableSelectedColumns = L.nub leafNames
-    let predicateColumns = maybe [] (L.nub . getColumns) (predicate opts)
-    let selectedColumnsForRead = case selectedColumns opts of
-            Nothing -> Nothing
-            Just selected -> Just (L.nub (selected ++ predicateColumns))
-    let selectedColumnSet = S.fromList <$> selectedColumnsForRead
-    let shouldReadColumn colName _ =
-            case selectedColumnSet of
-                Nothing -> True
-                Just selected -> colName `S.member` selected
-
-    case selectedColumnsForRead of
-        Nothing -> pure ()
-        Just requested ->
-            let missing = requested L.\\ availableSelectedColumns
-             in unless
-                    (L.null missing)
-                    ( throw
-                        ( ColumnsNotFoundException
-                            missing
-                            "readParquetWithOpts"
-                            availableSelectedColumns
-                        )
-                    )
-
-    -- Collect per-column chunk lists; concatenate at the end to preserve bitmaps.
-    colListMap <- newIORef (M.empty :: M.Map T.Text [DI.Column])
-    lTypeMap <- newIORef (M.empty :: M.Map T.Text LogicalType)
-
-    let schemaElements = schema fileMetadata
-    let sNodes = parseAll (drop 1 schemaElements)
-    let getTypeLength :: [String] -> Maybe Int32
-        getTypeLength colPath = findTypeLength schemaElements colPath (0 :: Int)
-          where
-            findTypeLength [] _ _ = Nothing
-            findTypeLength (s : ss) targetPath depth
-                | map T.unpack (pathToElement s ss depth) == targetPath
-                    && elementType s == STRING
-                    && typeLength s > 0 =
-                    Just (typeLength s)
-                | otherwise =
-                    findTypeLength ss targetPath (if numChildren s > 0 then depth + 1 else depth)
-
-            pathToElement _ _ _ = []
-
-    forM_ (rowGroups fileMetadata) $ \rowGroup -> do
-        forM_ (zip (rowGroupColumns rowGroup) [(0 :: Int) ..]) $ \(colChunk, colIdx) -> do
-            let metadata = columnMetaData colChunk
-            let colPath = columnPathInSchema metadata
-            let cleanPath = cleanColPath sNodes colPath
-            let colLeafName =
-                    if null cleanPath
-                        then T.pack $ "col_" ++ show colIdx
-                        else T.pack $ last cleanPath
-            let colFullName =
-                    if null cleanPath
-                        then colLeafName
-                        else T.intercalate "." $ map T.pack cleanPath
-
-            when (shouldReadColumn colLeafName colPath) $ do
-                let colDataPageOffset = columnDataPageOffset metadata
-                let colDictionaryPageOffset = columnDictionaryPageOffset metadata
-                let colStart =
-                        if colDictionaryPageOffset > 0 && colDataPageOffset > colDictionaryPageOffset
-                            then colDictionaryPageOffset
-                            else colDataPageOffset
-                let colLength = columnTotalCompressedSize metadata
-
-                columnBytes <-
-                    seekAndReadBytes
-                        (Just (AbsoluteSeek, fromIntegral colStart))
-                        (fromIntegral colLength)
-                        file
-
-                pages <- readAllPages (columnCodec metadata) columnBytes
-
-                let maybeTypeLength =
-                        if columnType metadata == PFIXED_LEN_BYTE_ARRAY
-                            then getTypeLength colPath
-                            else Nothing
-
-                let primaryEncoding = maybe EPLAIN fst (L.uncons (columnEncodings metadata))
-
-                let schemaTail = drop 1 (schema fileMetadata)
-                let (maxDef, maxRep) = levelsForPath schemaTail colPath
-                let lType =
-                        maybe
-                            LOGICAL_TYPE_UNKNOWN
-                            logicalType
-                            (findLeafSchema schemaTail colPath)
-                column <-
-                    processColumnPages
-                        (maxDef, maxRep)
-                        pages
-                        (columnType metadata)
-                        primaryEncoding
-                        maybeTypeLength
-                        lType
-
-                modifyIORef' colListMap (M.insertWith (++) colFullName [column])
-                modifyIORef' lTypeMap (M.insert colFullName lType)
-
-    finalListMap <- readIORef colListMap
-    -- Reverse the accumulated lists (they were prepended) and concat columns per-name,
-    -- preserving bitmaps correctly via concatManyColumns.
-    let finalColMap = M.map (DI.concatManyColumns . reverse) finalListMap
-    finalLTypeMap <- readIORef lTypeMap
-    let orderedColumns =
-            map
-                ( \name ->
-                    ( name
-                    , applyLogicalType (finalLTypeMap M.! name) $ finalColMap M.! name
-                    )
-                )
-                (filter (`M.member` finalColMap) columnNames)
-
-    pure $ applyReadOptions opts (DI.fromNamedColumns orderedColumns)
+_readParquetWithOpts extraConfig opts path =
+    withFileBufferedOrSeekable extraConfig path ReadMode $ \file ->
+        runReaderIO (parseParquetWithOpts opts) file
 
 {- | Read Parquet files from a directory or glob path.
 
@@ -331,6 +227,248 @@ readParquetFilesWithOpts opts path
                 dfs <- mapM (readParquetWithOpts optsWithoutRowRange) files
                 pure (applyRowRange opts (mconcat dfs))
 
+-- Core parsing pipeline ---------------------------------------------------
+
+{- | Parse a Parquet file via the 'RandomAccess' handle, applying all
+read options. This is the central parsing entry point used by
+'_readParquetWithOpts'.
+-}
+parseParquetWithOpts ::
+    (RandomAccess m, MonadIO m) =>
+    ParquetReadOptions ->
+    m DataFrame
+parseParquetWithOpts opts = do
+    metadata <- parseFileMetadata
+
+    let schemaElems = unField metadata.schema
+        allNames = getColumnNames (drop 1 schemaElems)
+        leafNames = L.nub (map (last . T.splitOn ".") allNames)
+        predicateColumns = maybe [] (L.nub . getColumns) (predicate opts)
+        selectedColumnsForRead = case selectedColumns opts of
+            Nothing -> Nothing
+            Just selected -> Just (L.nub (selected ++ predicateColumns))
+
+    -- TODO: When selectedColumnsForRead is Just, pass the set of required
+    -- column indices into the chunk parsers so that RandomAccess reads are
+    -- skipped for columns not in the selection, rather than decoding all
+    -- columns and projecting afterward.
+
+    -- TODO: When rowRange is set, compute cumulative row offsets from
+    -- rg_num_rows in each RowGroup and skip any group whose row interval does
+    -- not overlap the requested range, avoiding all decoding for those groups.
+
+    -- TODO: When predicate is set, inspect cmd_statistics min/max values for
+    -- predicate-referenced columns in each RowGroup and skip groups where
+    -- statistics prove the predicate cannot be satisfied.
+
+    -- Validate selected columns
+    case selectedColumnsForRead of
+        Nothing -> pure ()
+        Just requested ->
+            let missing = requested L.\\ leafNames
+             in unless (L.null missing) $
+                    liftIO $
+                        throw
+                            ( ColumnsNotFoundException
+                                missing
+                                "readParquetWithOpts"
+                                leafNames
+                            )
+
+    let descriptions = generateColumnDescriptions schemaElems
+        chunks = columnChunksForAll metadata
+        nCols = length chunks
+        nDescs = length descriptions
+
+    unless (nCols == nDescs) $
+        error $
+            "Column count mismatch: got "
+                <> show nCols
+                <> " columns but schema implied "
+                <> show nDescs
+                <> " columns"
+
+    -- Some files omit the top-level num_rows field; fall back to summing row-group counts.
+    let topLevelRows = fromIntegral . unField $ metadata.num_rows :: Int
+        rgRows =
+            sum $ map (fromIntegral . unField . rg_num_rows) (unField metadata.row_groups) ::
+                Int
+        vectorLength = if topLevelRows > 0 then topLevelRows else rgRows
+
+    rawCols <- zipWithM (parseColumnChunks vectorLength) chunks descriptions
+
+    let finalCols = zipWith applyDescLogicalType descriptions rawCols
+        indices = Map.fromList $ zip allNames [0 ..]
+        dimensions = (vectorLength, length finalCols)
+
+    let df =
+            DataFrame
+                (Vector.fromListN (length finalCols) finalCols)
+                indices
+                dimensions
+                Map.empty
+
+    return (applyReadOptions opts df)
+
+{- | Parse the file-level Thrift metadata from the Parquet file footer.
+Validates the trailing 4-byte magic marker (\"PAR1\") before decoding.
+-}
+parseFileMetadata :: (RandomAccess m) => m FileMetadata
+parseFileMetadata = do
+    footerBytes <- readSuffix 8
+    let magic = BS.drop 4 footerBytes
+    when (magic /= "PAR1") $
+        error
+            ( "Not a valid Parquet file: expected magic bytes \"PAR1\", got "
+                ++ show magic
+            )
+    let size = getMetadataSize footerBytes
+    rawMetadata <- readSuffix (size + 8) <&> BS.take size
+    case Pinch.decode Pinch.compactProtocol rawMetadata of
+        Left e -> error $ "Failed to parse Parquet metadata: " ++ show e
+        Right metadata -> return metadata
+  where
+    getMetadataSize footer =
+        let sizes :: [Int]
+            sizes = map (fromIntegral . BS.index footer) [0 .. 3]
+         in foldl' (.|.) 0 $ zipWith shiftL sizes [0, 8 .. 24]
+
+-- | Read the file metadata from a Parquet file at the given path.
+readMetadataFromPath :: FilePath -> IO FileMetadata
+readMetadataFromPath path =
+    withFileBufferedOrSeekable Nothing path ReadMode $
+        runReaderIO parseFileMetadata
+
+-- | Read only the file metadata from an open 'FileBufferedOrSeekable' handle.
+readMetadataFromHandle :: FileBufferedOrSeekable -> IO FileMetadata
+readMetadataFromHandle = runReaderIO parseFileMetadata
+
+-- | Collect column chunks per column (transposed across all row groups).
+columnChunksForAll :: FileMetadata -> [[ColumnChunk]]
+columnChunksForAll =
+    transpose . map (unField . rg_columns) . unField . row_groups
+
+-- | Dispatch a column's chunks to the correct decoder path.
+parseColumnChunks ::
+    (RandomAccess m, MonadIO m) =>
+    Int ->
+    [ColumnChunk] ->
+    ColumnDescription ->
+    m Column
+parseColumnChunks totalRows chunks description
+    | description.maxRepetitionLevel == 0 && description.maxDefinitionLevel == 0 =
+        getNonNullableColumn totalRows description chunks
+    | description.maxRepetitionLevel == 0 =
+        getNullableColumn totalRows description chunks
+    | otherwise =
+        getRepeatedColumn description chunks
+
+-- | Decode a required (non-nullable, non-repeated) column.
+getNonNullableColumn ::
+    forall m.
+    (RandomAccess m, MonadIO m) =>
+    Int ->
+    ColumnDescription ->
+    [ColumnChunk] ->
+    m Column
+getNonNullableColumn totalRows description chunks =
+    case description.colElementType of
+        Just (BOOLEAN _) -> go boolDecoder
+        Just (INT32 _) -> go int32Decoder
+        Just (INT64 _) -> go int64Decoder
+        Just (INT96 _) -> go int96Decoder
+        Just (FLOAT _) -> go floatDecoder
+        Just (DOUBLE _) -> go doubleDecoder
+        Just (BYTE_ARRAY _) -> go byteArrayDecoder
+        Just (FIXED_LEN_BYTE_ARRAY _) -> case description.typeLength of
+            Nothing -> error "FIXED_LEN_BYTE_ARRAY requires type_length to be set"
+            Just tl -> go (fixedLenByteArrayDecoder (fromIntegral tl))
+        Nothing -> error "Column has no Parquet type"
+  where
+    go ::
+        forall a.
+        (Columnable a) =>
+        PageDecoder a ->
+        m Column
+    go decoder =
+        foldNonNullable totalRows $
+            fmap (\(vs, _, _) -> vs) $
+                Stream.unfoldEach (readPages description decoder) (Stream.fromList chunks)
+
+-- | Decode an optional (nullable) column.
+getNullableColumn ::
+    forall m.
+    (RandomAccess m, MonadIO m) =>
+    Int ->
+    ColumnDescription ->
+    [ColumnChunk] ->
+    m Column
+getNullableColumn totalRows description chunks =
+    case description.colElementType of
+        Just (BOOLEAN _) -> go boolDecoder
+        Just (INT32 _) -> go int32Decoder
+        Just (INT64 _) -> go int64Decoder
+        Just (INT96 _) -> go int96Decoder
+        Just (FLOAT _) -> go floatDecoder
+        Just (DOUBLE _) -> go doubleDecoder
+        Just (BYTE_ARRAY _) -> go byteArrayDecoder
+        Just (FIXED_LEN_BYTE_ARRAY _) -> case description.typeLength of
+            Nothing -> error "FIXED_LEN_BYTE_ARRAY requires type_length to be set"
+            Just tl -> go (fixedLenByteArrayDecoder (fromIntegral tl))
+        Nothing -> error "Column has no Parquet type"
+  where
+    maxDef :: Int
+    maxDef = fromIntegral description.maxDefinitionLevel
+
+    go ::
+        forall a.
+        (Columnable a) =>
+        PageDecoder a ->
+        m Column
+    go decoder =
+        foldNullable maxDef totalRows $
+            fmap (\(vs, ds, _) -> (vs, ds)) $
+                Stream.unfoldEach (readPages description decoder) (Stream.fromList chunks)
+
+-- | Decode a repeated (list/nested) column.
+getRepeatedColumn ::
+    forall m.
+    (RandomAccess m, MonadIO m) =>
+    ColumnDescription ->
+    [ColumnChunk] ->
+    m Column
+getRepeatedColumn description chunks =
+    case description.colElementType of
+        Just (BOOLEAN _) -> go boolDecoder
+        Just (INT32 _) -> go int32Decoder
+        Just (INT64 _) -> go int64Decoder
+        Just (INT96 _) -> go int96Decoder
+        Just (FLOAT _) -> go floatDecoder
+        Just (DOUBLE _) -> go doubleDecoder
+        Just (BYTE_ARRAY _) -> go byteArrayDecoder
+        Just (FIXED_LEN_BYTE_ARRAY _) -> case description.typeLength of
+            Nothing -> error "FIXED_LEN_BYTE_ARRAY requires type_length to be set"
+            Just tl -> go (fixedLenByteArrayDecoder (fromIntegral tl))
+        Nothing -> error "Column has no Parquet type"
+  where
+    maxRep :: Int
+    maxRep = fromIntegral description.maxRepetitionLevel
+    maxDef :: Int
+    maxDef = fromIntegral description.maxDefinitionLevel
+
+    go ::
+        forall a.
+        ( Columnable a
+        , Columnable (Maybe [Maybe a])
+        , Columnable (Maybe [Maybe [Maybe a]])
+        , Columnable (Maybe [Maybe [Maybe [Maybe a]]])
+        ) =>
+        PageDecoder a ->
+        m Column
+    go decoder =
+        foldRepeated maxRep maxDef $
+            Stream.unfoldEach (readPages description decoder) (Stream.fromList chunks)
+
 -- Options application -----------------------------------------------------
 
 applyRowRange :: ParquetReadOptions -> DataFrame -> DataFrame
@@ -347,7 +485,7 @@ applyPredicate opts df =
 
 applySafeRead :: ParquetReadOptions -> DataFrame -> DataFrame
 applySafeRead opts df
-    | safeColumns opts = df{columns = V.map DI.ensureOptional (columns df)}
+    | safeColumns opts = df{columns = Vector.map DI.ensureOptional (columns df)}
     | otherwise = df
 
 applyReadOptions :: ParquetReadOptions -> DataFrame -> DataFrame
@@ -357,275 +495,49 @@ applyReadOptions opts =
         . applySelectedColumns opts
         . applyPredicate opts
 
--- File and metadata parsing -----------------------------------------------
-
--- | read the file in memory at once, parse magicString and return the entire file ByteString
-readMetadataFromPath :: FilePath -> IO (FileMetadata, BSO.ByteString)
-readMetadataFromPath path = do
-    contents <- BSO.readFile path
-    let (size, magicString) = readMetadataSizeFromFooter contents
-    when (magicString /= "PAR1") $ error "Invalid Parquet file"
-    meta <- readMetadata contents size
-    pure (meta, contents)
-
--- | read from the end of the file, parse magicString and return the entire file ByteString
-readMetadataFromHandle :: FileBufferedOrSeekable -> IO FileMetadata
-readMetadataFromHandle sh = do
-    footerBs <- readLastBytes (fromIntegral footerSize) sh
-    let (size, magicString) = readMetadataSizeFromFooterSlice footerBs
-    when (magicString /= "PAR1") $ error "Invalid Parquet file"
-    readMetadataByHandleMetaSize sh size
-
--- | Takes the last 8 bit of the file to parse metadata size and magic string
-readMetadataSizeFromFooterSlice :: BSO.ByteString -> (Int, BSO.ByteString)
-readMetadataSizeFromFooterSlice contents =
-    let
-        size = fromIntegral (littleEndianWord32 contents)
-        magicString = BSO.take 4 (BSO.drop 4 contents)
-     in
-        (size, magicString)
-
-readMetadataSizeFromFooter :: BSO.ByteString -> (Int, BSO.ByteString)
-readMetadataSizeFromFooter = readMetadataSizeFromFooterSlice . BSO.takeEnd 8
-
--- Schema navigation -------------------------------------------------------
-
-getColumnPaths :: [SchemaElement] -> [(T.Text, Int)]
-getColumnPaths schemaElements =
-    let nodes = parseAll schemaElements
-     in go nodes 0 [] False
-  where
-    go [] _ _ _ = []
-    go (n : ns) idx path skipThis
-        | null (sChildren n) =
-            let newPath = if skipThis then path else path ++ [T.pack (sName n)]
-                fullPath = T.intercalate "." newPath
-             in (fullPath, idx) : go ns (idx + 1) path skipThis
-        | sRep n == REPEATED =
-            let skipChildren = length (sChildren n) == 1
-                childLeaves = go (sChildren n) idx path skipChildren
-             in childLeaves ++ go ns (idx + length childLeaves) path skipThis
-        | skipThis =
-            let childLeaves = go (sChildren n) idx path False
-             in childLeaves ++ go ns (idx + length childLeaves) path skipThis
-        | otherwise =
-            let subPath = path ++ [T.pack (sName n)]
-                childLeaves = go (sChildren n) idx subPath False
-             in childLeaves ++ go ns (idx + length childLeaves) path skipThis
-
-findLeafSchema :: [SchemaElement] -> [String] -> Maybe SchemaElement
-findLeafSchema elems path =
-    case go (parseAll elems) path of
-        Just node -> L.find (\e -> T.unpack (elementName e) == sName node) elems
-        Nothing -> Nothing
-  where
-    go [] _ = Nothing
-    go _ [] = Nothing
-    go nodes [p] = L.find (\n -> sName n == p) nodes
-    go nodes (p : ps) = L.find (\n -> sName n == p) nodes >>= \n -> go (sChildren n) ps
-
--- Page decoding -----------------------------------------------------------
-
-processColumnPages ::
-    (Int, Int) ->
-    [Page] ->
-    ParquetType ->
-    ParquetEncoding ->
-    Maybe Int32 ->
-    LogicalType ->
-    IO DI.Column
-processColumnPages (maxDef, maxRep) pages pType _ maybeTypeLength _lType = do
-    let dictPages = filter isDictionaryPage pages
-    let dataPages = filter isDataPage pages
-
-    let dictValsM =
-            case dictPages of
-                [] -> Nothing
-                (dictPage : _) ->
-                    case pageTypeHeader (pageHeader dictPage) of
-                        DictionaryPageHeader{..} ->
-                            let countForBools =
-                                    if pType == PBOOLEAN
-                                        then Just dictionaryPageHeaderNumValues
-                                        else maybeTypeLength
-                             in Just (readDictVals pType (pageBytes dictPage) countForBools)
-                        _ -> Nothing
-
-    cols <- forM dataPages $ \page -> do
-        let bs0 = pageBytes page
-        case pageTypeHeader (pageHeader page) of
-            DataPageHeader{..} -> do
-                let n = fromIntegral dataPageHeaderNumValues
-                    (defLvls, repLvls, afterLvls) = readLevelsV1 n maxDef maxRep bs0
-                    nPresent = length (filter (== maxDef) defLvls)
-                decodePageData
-                    dictValsM
-                    (maxDef, maxRep)
-                    pType
-                    maybeTypeLength
-                    dataPageHeaderEncoding
-                    defLvls
-                    repLvls
-                    nPresent
-                    afterLvls
-                    "v1"
-            DataPageHeaderV2{..} -> do
-                let n = fromIntegral dataPageHeaderV2NumValues
-                    (defLvls, repLvls, afterLvls) =
-                        readLevelsV2
-                            n
-                            maxDef
-                            maxRep
-                            definitionLevelByteLength
-                            repetitionLevelByteLength
-                            bs0
-                    nPresent
-                        | dataPageHeaderV2NumNulls > 0 =
-                            fromIntegral (dataPageHeaderV2NumValues - dataPageHeaderV2NumNulls)
-                        | otherwise = length (filter (== maxDef) defLvls)
-                decodePageData
-                    dictValsM
-                    (maxDef, maxRep)
-                    pType
-                    maybeTypeLength
-                    dataPageHeaderV2Encoding
-                    defLvls
-                    repLvls
-                    nPresent
-                    afterLvls
-                    "v2"
-
-            -- Cannot happen as these are filtered out by isDataPage above
-            DictionaryPageHeader{} -> error "processColumnPages: impossible DictionaryPageHeader"
-            INDEX_PAGE_HEADER -> error "processColumnPages: impossible INDEX_PAGE_HEADER"
-            PAGE_TYPE_HEADER_UNKNOWN -> error "processColumnPages: impossible PAGE_TYPE_HEADER_UNKNOWN"
-    pure $ DI.concatManyColumns cols
-
-decodePageData ::
-    Maybe DictVals ->
-    (Int, Int) ->
-    ParquetType ->
-    Maybe Int32 ->
-    ParquetEncoding ->
-    [Int] ->
-    [Int] ->
-    Int ->
-    BSO.ByteString ->
-    String ->
-    IO DI.Column
-decodePageData dictValsM (maxDef, maxRep) pType maybeTypeLength encoding defLvls repLvls nPresent afterLvls versionLabel =
-    case encoding of
-        EPLAIN ->
-            case pType of
-                PBOOLEAN ->
-                    let (vals, _) = readNBool nPresent afterLvls
-                     in pure $
-                            if maxRep > 0
-                                then stitchForRepBool maxRep maxDef repLvls defLvls vals
-                                else toMaybeBool maxDef defLvls vals
-                PINT32
-                    | maxDef == 0
-                    , maxRep == 0 ->
-                        pure $ DI.fromUnboxedVector (readNInt32Vec nPresent afterLvls)
-                PINT32 ->
-                    let (vals, _) = readNInt32 nPresent afterLvls
-                     in pure $
-                            if maxRep > 0
-                                then stitchForRepInt32 maxRep maxDef repLvls defLvls vals
-                                else toMaybeInt32 maxDef defLvls vals
-                PINT64
-                    | maxDef == 0
-                    , maxRep == 0 ->
-                        pure $ DI.fromUnboxedVector (readNInt64Vec nPresent afterLvls)
-                PINT64 ->
-                    let (vals, _) = readNInt64 nPresent afterLvls
-                     in pure $
-                            if maxRep > 0
-                                then stitchForRepInt64 maxRep maxDef repLvls defLvls vals
-                                else toMaybeInt64 maxDef defLvls vals
-                PINT96 ->
-                    let (vals, _) = readNInt96Times nPresent afterLvls
-                     in pure $
-                            if maxRep > 0
-                                then stitchForRepUTCTime maxRep maxDef repLvls defLvls vals
-                                else toMaybeUTCTime maxDef defLvls vals
-                PFLOAT
-                    | maxDef == 0
-                    , maxRep == 0 ->
-                        pure $ DI.fromUnboxedVector (readNFloatVec nPresent afterLvls)
-                PFLOAT ->
-                    let (vals, _) = readNFloat nPresent afterLvls
-                     in pure $
-                            if maxRep > 0
-                                then stitchForRepFloat maxRep maxDef repLvls defLvls vals
-                                else toMaybeFloat maxDef defLvls vals
-                PDOUBLE
-                    | maxDef == 0
-                    , maxRep == 0 ->
-                        pure $ DI.fromUnboxedVector (readNDoubleVec nPresent afterLvls)
-                PDOUBLE ->
-                    let (vals, _) = readNDouble nPresent afterLvls
-                     in pure $
-                            if maxRep > 0
-                                then stitchForRepDouble maxRep maxDef repLvls defLvls vals
-                                else toMaybeDouble maxDef defLvls vals
-                PBYTE_ARRAY ->
-                    let (raws, _) = readNByteArrays nPresent afterLvls
-                        texts = map decodeUtf8Lenient raws
-                     in pure $
-                            if maxRep > 0
-                                then stitchForRepText maxRep maxDef repLvls defLvls texts
-                                else toMaybeText maxDef defLvls texts
-                PFIXED_LEN_BYTE_ARRAY ->
-                    case maybeTypeLength of
-                        Just len ->
-                            let (raws, _) = splitFixed nPresent (fromIntegral len) afterLvls
-                                texts = map decodeUtf8Lenient raws
-                             in pure $
-                                    if maxRep > 0
-                                        then stitchForRepText maxRep maxDef repLvls defLvls texts
-                                        else toMaybeText maxDef defLvls texts
-                        Nothing -> error "FIXED_LEN_BYTE_ARRAY requires type length"
-                PARQUET_TYPE_UNKNOWN -> error "Cannot read unknown Parquet type"
-        ERLE_DICTIONARY -> decodeDictV1 dictValsM maxDef maxRep repLvls defLvls nPresent afterLvls
-        EPLAIN_DICTIONARY -> decodeDictV1 dictValsM maxDef maxRep repLvls defLvls nPresent afterLvls
-        other -> error ("Unsupported " ++ versionLabel ++ " encoding: " ++ show other)
-
 -- Logical type conversion -------------------------------------------------
 
-applyLogicalType :: LogicalType -> DI.Column -> DI.Column
-applyLogicalType (TimestampType _ unit) col =
-    fromRight col $
-        DI.mapColumn
-            (microsecondsToUTCTime . (* (1_000_000 `div` unitDivisor unit)))
-            col
-applyLogicalType (DecimalType precision scale) col
-    | precision <= 9 = case DI.toVector @Int32 @VU.Vector col of
-        Right xs ->
-            DI.fromUnboxedVector $
-                VU.map (\raw -> fromIntegral @Int32 @Double raw / 10 ^ scale) xs
-        Left _ -> col
-    | precision <= 18 = case DI.toVector @Int64 @VU.Vector col of
-        Right xs ->
-            DI.fromUnboxedVector $
-                VU.map (\raw -> fromIntegral @Int64 @Double raw / 10 ^ scale) xs
-        Left _ -> col
-    | otherwise = col
+{- | Apply a column-description's logical type annotation to convert raw
+decoded values (e.g. millisecond integers → 'UTCTime').
+-}
+applyDescLogicalType :: ColumnDescription -> DI.Column -> DI.Column
+applyDescLogicalType desc = applyLogicalType (colLogicalType desc)
+
+applyLogicalType :: Maybe LogicalType -> DI.Column -> DI.Column
+applyLogicalType (Just (LT_TIMESTAMP f)) col =
+    let ts = unField f
+        unit = unField ts.timestamp_unit
+        divisor = case unit of
+            MILLIS _ -> 1_000
+            MICROS _ -> 1_000_000
+            NANOS _ -> 1_000_000_000
+     in fromRight col $
+            DI.mapColumn
+                (microsecondsToUTCTime . (* (1_000_000 `div` divisor)))
+                col
+applyLogicalType (Just (LT_DECIMAL f)) col =
+    let dt = unField f
+        scale = unField dt.decimal_scale
+        precision = unField dt.decimal_precision
+     in if precision <= 9
+            then case DI.toVector @Int32 @VU.Vector col of
+                Right xs ->
+                    DI.fromUnboxedVector $
+                        VU.map (\raw -> fromIntegral @Int32 @Double raw / 10 ^ scale) xs
+                Left _ -> col
+            else
+                if precision <= 18
+                    then case DI.toVector @Int64 @VU.Vector col of
+                        Right xs ->
+                            DI.fromUnboxedVector $
+                                VU.map (\raw -> fromIntegral @Int64 @Double raw / 10 ^ scale) xs
+                        Left _ -> col
+                    else col
 applyLogicalType _ col = col
 
 microsecondsToUTCTime :: Int64 -> UTCTime
 microsecondsToUTCTime us =
     posixSecondsToUTCTime (fromIntegral us / 1_000_000)
-
-unitDivisor :: TimeUnit -> Int64
-unitDivisor MILLISECONDS = 1_000
-unitDivisor MICROSECONDS = 1_000_000
-unitDivisor NANOSECONDS = 1_000_000_000
-unitDivisor TIME_UNIT_UNKNOWN = 1
-
-applyScale :: Int32 -> Int32 -> Double
-applyScale scale rawValue =
-    fromIntegral rawValue / (10 ^ scale)
 
 -- HuggingFace support -----------------------------------------------------
 
@@ -670,7 +582,7 @@ parseHFUri path =
             _ ->
                 Left $ "Invalid hf:// URI (expected hf://datasets/owner/dataset/glob): " ++ path
 
-getHFToken :: IO (Maybe BSO.ByteString)
+getHFToken :: IO (Maybe BS.ByteString)
 getHFToken = do
     envToken <- lookupEnv "HF_TOKEN"
     case envToken of
@@ -678,9 +590,9 @@ getHFToken = do
         Nothing -> do
             home <- getHomeDirectory
             let tokenPath = home </> ".cache" </> "huggingface" </> "token"
-            result <- try (BSO.readFile tokenPath) :: IO (Either IOError BSO.ByteString)
+            result <- try (BS.readFile tokenPath) :: IO (Either IOError BS.ByteString)
             case result of
-                Right bs -> pure (Just (BSO.takeWhile (/= 10) bs))
+                Right bs -> pure (Just (BS.takeWhile (/= 10) bs))
                 Left _ -> pure Nothing
 
 {- | Extract the repo-relative path from a HuggingFace download URL.
@@ -700,7 +612,7 @@ hfUrlRepoPath f =
 matchesGlob :: T.Text -> HFParquetFile -> Bool
 matchesGlob g f = match (compile (T.unpack g)) (hfUrlRepoPath f)
 
-resolveHFUrls :: Maybe BSO.ByteString -> HFRef -> IO [HFParquetFile]
+resolveHFUrls :: Maybe BS.ByteString -> HFRef -> IO [HFParquetFile]
 resolveHFUrls mToken ref = do
     let dataset = hfOwner ref <> "/" <> hfDataset ref
     let apiUrl = "https://datasets-server.huggingface.co/parquet?dataset=" ++ T.unpack dataset
@@ -721,7 +633,7 @@ resolveHFUrls mToken ref = do
         Left err -> ioError $ userError $ "Failed to parse HF API response: " ++ err
         Right hfResp -> pure $ filter (matchesGlob (hfGlob ref)) (hfParquetFiles hfResp)
 
-downloadHFFiles :: Maybe BSO.ByteString -> [HFParquetFile] -> IO [FilePath]
+downloadHFFiles :: Maybe BS.ByteString -> [HFParquetFile] -> IO [FilePath]
 downloadHFFiles mToken files = do
     tmpDir <- getTemporaryDirectory
     forM files $ \f -> do
@@ -740,7 +652,7 @@ downloadHFFiles mToken files = do
             ioError $
                 userError $
                     "Failed to download " ++ T.unpack (hfpUrl f) ++ " (HTTP " ++ show status ++ ")"
-        BSO.writeFile destPath (getResponseBody resp)
+        BS.writeFile destPath (getResponseBody resp)
         pure destPath
 
 -- | True when the path contains glob wildcard characters.

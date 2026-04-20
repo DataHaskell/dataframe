@@ -6,6 +6,7 @@
 {-# LANGUAGE InstanceSigs #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
@@ -42,11 +43,10 @@ import qualified Data.Text as T
 import Data.Time
 import qualified Data.Vector as V
 import qualified Data.Vector.Unboxed as VU
-import Data.Word
 import qualified DataFrame.IO.CSV as CSV
 import qualified DataFrame.IO.Parquet as Parquet
 import DataFrame.IO.Parquet.Thrift
-import DataFrame.IO.Parquet.Types (columnNullCount)
+
 import DataFrame.Internal.Nullable (
     BaseType,
     NullLift1Op (applyNull1),
@@ -712,65 +712,69 @@ declareColumnsFromParquetFile path = do
     let pat = if isDir then path </> "*.parquet" else path
     matches <- liftIO $ glob pat
     files <- liftIO $ filterM (fmap Prelude.not . doesDirectoryExist) matches
-    metas <- liftIO $ mapM (fmap fst . Parquet.readMetadataFromPath) files
+    metas <- liftIO $ mapM Parquet.readMetadataFromPath files
     let nullableCols :: S.Set T.Text
         nullableCols =
             S.fromList
                 [ T.pack (last colPath)
                 | meta <- metas
-                , rg <- rowGroups meta
-                , cc <- rowGroupColumns rg
-                , let cm = columnMetaData cc
-                      colPath = columnPathInSchema cm
+                , rg <- unField (row_groups meta)
+                , cc <- unField (rg_columns rg)
+                , Just cm <- [unField (cc_meta_data cc)]
+                , let colPath = map T.unpack (unField (cmd_path_in_schema cm))
                 , Prelude.not (null colPath)
-                , columnNullCount (columnStatistics cm) > 0
+                , let nc :: Int64
+                      nc = case unField (cmd_statistics cm) of
+                        Nothing -> 0
+                        Just stats -> case unField (stats_null_count stats) of
+                            Nothing -> 0
+                            Just n -> n
+                , nc > 0
                 ]
     let df =
             foldl
-                (\acc meta -> acc <> schemaToEmptyDataFrame nullableCols (schema meta))
+                (\acc meta -> acc <> schemaToEmptyDataFrame nullableCols (unField (schema meta)))
                 DataFrame.Internal.DataFrame.empty
                 metas
     declareColumns df
 
 schemaToEmptyDataFrame :: S.Set T.Text -> [SchemaElement] -> DataFrame
 schemaToEmptyDataFrame nullableCols elems =
-    let leafElems = filter (\e -> numChildren e == 0) elems
+    let leafElems = filter (\e -> maybe 0 id (unField e.num_children) == 0) elems
      in fromNamedColumns (map (schemaElemToColumn nullableCols) leafElems)
 
 schemaElemToColumn :: S.Set T.Text -> SchemaElement -> (T.Text, Column)
 schemaElemToColumn nullableCols element =
-    let colName = elementName element
+    let colName = unField element.name
         isNull = colName `S.member` nullableCols
         column =
             if isNull
-                then emptyNullableColumnForType (elementType element)
-                else emptyColumnForType (elementType element)
+                then emptyNullableColumnForType (unField element.schematype)
+                else emptyColumnForType (unField element.schematype)
      in (colName, column)
 
-emptyColumnForType :: TType -> Column
+emptyColumnForType :: Maybe ThriftType -> Column
 emptyColumnForType = \case
-    BOOL -> fromList @Bool []
-    BYTE -> fromList @Word8 []
-    I16 -> fromList @Int16 []
-    I32 -> fromList @Int32 []
-    I64 -> fromList @Int64 []
-    I96 -> fromList @Int64 []
-    FLOAT -> fromList @Float []
-    DOUBLE -> fromList @Double []
-    STRING -> fromList @T.Text []
+    Just (BOOLEAN _) -> fromList @Bool []
+    Just (INT32 _) -> fromList @Int32 []
+    Just (INT64 _) -> fromList @Int64 []
+    Just (INT96 _) -> fromList @Int64 []
+    Just (FLOAT _) -> fromList @Float []
+    Just (DOUBLE _) -> fromList @Double []
+    Just (BYTE_ARRAY _) -> fromList @T.Text []
+    Just (FIXED_LEN_BYTE_ARRAY _) -> fromList @T.Text []
     other -> error $ "Unsupported parquet type for column: " <> show other
 
-emptyNullableColumnForType :: TType -> Column
+emptyNullableColumnForType :: Maybe ThriftType -> Column
 emptyNullableColumnForType = \case
-    BOOL -> fromList @(Maybe Bool) []
-    BYTE -> fromList @(Maybe Word8) []
-    I16 -> fromList @(Maybe Int16) []
-    I32 -> fromList @(Maybe Int32) []
-    I64 -> fromList @(Maybe Int64) []
-    I96 -> fromList @(Maybe Int64) []
-    FLOAT -> fromList @(Maybe Float) []
-    DOUBLE -> fromList @(Maybe Double) []
-    STRING -> fromList @(Maybe T.Text) []
+    Just (BOOLEAN _) -> fromList @(Maybe Bool) []
+    Just (INT32 _) -> fromList @(Maybe Int32) []
+    Just (INT64 _) -> fromList @(Maybe Int64) []
+    Just (INT96 _) -> fromList @(Maybe Int64) []
+    Just (FLOAT _) -> fromList @(Maybe Float) []
+    Just (DOUBLE _) -> fromList @(Maybe Double) []
+    Just (BYTE_ARRAY _) -> fromList @(Maybe T.Text) []
+    Just (FIXED_LEN_BYTE_ARRAY _) -> fromList @(Maybe T.Text) []
     other -> error $ "Unsupported parquet type for column: " <> show other
 
 declareColumnsFromCsvWithOpts :: CSV.ReadOptions -> String -> DecsQ
