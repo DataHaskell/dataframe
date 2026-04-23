@@ -26,9 +26,8 @@ executable examples
     ghc-options:   -O2 -threaded -rtsopts -with-rtsopts=-N
     default-extensions: Strict
     other-modules: Chipotle,
-                   CaliforniaHousing,
                    OneBillionRowChallenge,
-                   Iris,
+                   TypedHousingMini,
                    DataFrame,
                    DataFrame.Lazy,
                    DataFrame.Functions,
@@ -43,6 +42,7 @@ executable examples
                    DataFrame.Display.Terminal.PrettyPrint,
                    DataFrame.Display.Terminal.Colours,
                    DataFrame.Internal.DataFrame,
+                   DataFrame.Internal.Grouping,
                    DataFrame.Internal.Row,
                    DataFrame.Internal.Schema,
                    DataFrame.Errors,
@@ -78,7 +78,6 @@ executable examples
                    DataFrame.Lazy.Internal.Optimizer,
                    DataFrame.Lazy.Internal.Executor,
                    DataFrame.Monad,
-                   DataFrame.Hasktorch,
                    DataFrame.IO.Parquet.Seeking,
                    DataFrame.Internal.Binary,
                    DataFrame.Internal.Nullable,
@@ -95,8 +94,7 @@ executable examples
                    DataFrame.Typed.Expr,
                    DataFrame.Typed
     hs-source-dirs:   .,
-                      ../src,
-                      ../dataframe-hasktorch/src
+                      ../src
     build-depends:    base >= 4 && <5,
                       binary >= 0.8 && < 1,
                       aeson >= 0.11.0.0 && < 3,
@@ -110,7 +108,6 @@ executable examples
                       directory >= 1.3.0.0 && < 2,
                       granite ^>= 0.4,
                       hashable >= 1.2 && < 2,
-                      hasktorch,
                       http-conduit,
                       process ^>= 1.6,
                       snappy-hs ^>= 0.1,
@@ -133,6 +130,12 @@ executable examples
                       stm >= 2.5 && < 3,
                       filepath >= 1.4 && < 2,
                       Glob >= 0.10 && < 1,
+    if !os(windows)
+      other-modules: CaliforniaHousing,
+                     Iris,
+                     DataFrame.Hasktorch
+      hs-source-dirs: ../dataframe-hasktorch/src
+      build-depends: hasktorch
     if impl(ghc >= 9.12)
       build-depends: ghc-typelits-natnormalise == 0.9.3
     else
