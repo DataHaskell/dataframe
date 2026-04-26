@@ -284,8 +284,8 @@ implicit: anything between consecutive row terminators is a field.
 -}
 {-# INLINE classifyRowEnds #-}
 classifyRowEnds :: VS.Vector Word8 -> Int -> VS.Vector CSize -> VS.Vector Int
-classifyRowEnds file contentLen delimiters =
-    VS.findIndices isRowBreak delimiters
+classifyRowEnds file contentLen =
+    VS.findIndices isRowBreak
   where
     isRowBreak pos =
         let p = fromIntegral pos :: Int
