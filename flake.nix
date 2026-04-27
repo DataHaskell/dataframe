@@ -14,18 +14,14 @@
           repo = "granite";
           owner = "mchav";
           rev = "main";
-          hash = "sha256-ypDiV99w2J8q7XcMpFWkv0kEm2dtWZduWIkAsuXDHEo=";
+          hash = "sha256-Z/o8gxMOBltKiaL0NEjMUyOvUljRvKErWeM6Ul3GM9k=";
         };
 
-        hsPkgs = pkgs.haskellPackages.extend (self: super: rec {
+        hsPkgs = pkgs.haskellPackages.extend (self: super: {
           granite = self.callCabal2nix "granite" granitePkg { };
-          dataframe-fastcsv = self.callCabal2nix "dataframe-fastcsv" ./dataframe-fastcsv {
-            inherit parallel;
-          };
-          dataframe = self.callCabal2nix "dataframe" ./. {
-            inherit granite;
-          };
-          parallel = super.parallel_3_3_0_0;
+          dataframe-fastcsv = self.callCabal2nix "dataframe-fastcsv" ./dataframe-fastcsv { };
+          dataframe-persistent = self.callCabal2nix "dataframe-fastcsv" ./dataframe-persistent { };
+          dataframe = self.callCabal2nix "dataframe" ./. { };
         });
       in
       {
@@ -33,6 +29,7 @@
           default = hsPkgs.dataframe;
           dataframe = hsPkgs.dataframe;
           dataframe-fastcsv = hsPkgs.dataframe-fastcsv;
+          dataframe-persistent = hsPkgs.dataframe-persistent;
         };
 
         devShells.default = hsPkgs.shellFor {
