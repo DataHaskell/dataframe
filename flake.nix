@@ -17,9 +17,10 @@
           hash = "sha256-Z/o8gxMOBltKiaL0NEjMUyOvUljRvKErWeM6Ul3GM9k=";
         };
 
-        hsPkgs = pkgs.haskellPackages.extend (self: super: rec {
+        hsPkgs = pkgs.haskellPackages.extend (self: super: {
           granite = self.callCabal2nix "granite" granitePkg { };
           dataframe-fastcsv = self.callCabal2nix "dataframe-fastcsv" ./dataframe-fastcsv { };
+          dataframe-persistent = self.callCabal2nix "dataframe-fastcsv" ./dataframe-persistent { };
           dataframe = self.callCabal2nix "dataframe" ./. { };
         });
       in
@@ -28,6 +29,7 @@
           default = hsPkgs.dataframe;
           dataframe = hsPkgs.dataframe;
           dataframe-fastcsv = hsPkgs.dataframe-fastcsv;
+          dataframe-persistent = hsPkgs.dataframe-persistent;
         };
 
         devShells.default = hsPkgs.shellFor {
