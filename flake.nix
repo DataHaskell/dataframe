@@ -14,7 +14,7 @@
           repo = "granite";
           owner = "mchav";
           rev = "main";
-          hash = "sha256-ypDiV99w2J8q7XcMpFWkv0kEm2dtWZduWIkAsuXDHEo=";
+          hash = "sha256-Z/o8gxMOBltKiaL0NEjMUyOvUljRvKErWeM6Ul3GM9k=";
         };
 
         hsPkgs = pkgs.haskellPackages.extend (self: super: rec {
