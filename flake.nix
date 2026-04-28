@@ -20,7 +20,7 @@
         hsPkgs = pkgs.haskellPackages.extend (self: super: {
           granite = self.callCabal2nix "granite" granitePkg { };
           dataframe-fastcsv = self.callCabal2nix "dataframe-fastcsv" ./dataframe-fastcsv { };
-          dataframe-persistent = self.callCabal2nix "dataframe-fastcsv" ./dataframe-persistent { };
+          dataframe-persistent = self.callCabal2nix "dataframe-persistent" ./dataframe-persistent { };
           dataframe = self.callCabal2nix "dataframe" ./. { };
         });
       in
