@@ -7,7 +7,7 @@ synopsis: Persistent database integration for the dataframe library
 description: This package provides integration between the dataframe library and the Persistent database library, allowing you to load database entities into DataFrames and save DataFrames back to the database.
 
 bug-reports: https://github.com/mchav/dataframe/issues
-license:            GPL-3.0-or-later
+license:            MIT
 license-file:       ./LICENSE
 author:             Michael Chavinda, Junji Hashimoto
 maintainer:         mschavinda@gmail.com
