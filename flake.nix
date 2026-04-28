@@ -20,7 +20,8 @@
         hsPkgs = pkgs.haskellPackages.extend (self: super: {
           granite = self.callCabal2nix "granite" granitePkg { };
           dataframe-fastcsv = self.callCabal2nix "dataframe-fastcsv" ./dataframe-fastcsv { };
-          dataframe-persistent = self.callCabal2nix "dataframe-fastcsv" ./dataframe-persistent { };
+          dataframe-persistent = self.callCabal2nix "dataframe-persistent" ./dataframe-persistent { };
+          dataframe-hasktorch = self.callCabal2nix "dataframe-hasktorch" ./dataframe-hasktorch { };
           dataframe = self.callCabal2nix "dataframe" ./. { };
         });
       in
@@ -29,11 +30,17 @@
           default = hsPkgs.dataframe;
           dataframe = hsPkgs.dataframe;
           dataframe-fastcsv = hsPkgs.dataframe-fastcsv;
+          dataframe-hasktorch = hsPkgs.dataframe-hasktorch;
           dataframe-persistent = hsPkgs.dataframe-persistent;
         };
 
         devShells.default = hsPkgs.shellFor {
-          packages = ps: [ ps.dataframe ps.dataframe-fastcsv ];
+          packages = ps: [
+            ps.dataframe
+            ps.dataframe-fastcsv
+            ps.dataframe-persistent
+            ps.dataframe-hasktorch
+          ];
           nativeBuildInputs = with hsPkgs; [
             ghc
             cabal-install
