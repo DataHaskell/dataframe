@@ -1,6 +1,6 @@
 cabal-version:      3.0
 name:               dataframe-hasktorch
-version:            0.1.0.2
+version:            0.1.0.3
 synopsis:           Converts between dataframes and hasktorch tensors
 
 description:        
@@ -37,7 +37,7 @@ library
 
     build-depends:    base >= 4.11 && < 5,
                       vector ^>= 0.13,
-                      dataframe ^>= 1.1,
+                      dataframe >= 1 && < 2,
                       hasktorch >= 0.2.1.6 && < 0.3
     if impl(ghc >= 9.12)
       build-depends: ghc-typelits-natnormalise == 0.9.3
