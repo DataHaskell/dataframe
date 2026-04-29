@@ -34,3 +34,8 @@ venv
 1brc
 benchmarks/
 uci_datasets/
+dataframe-fusion/rust/dfusion-bridge/target
+Cargo.lock
+*.dylib
+*.so
+*.dll
