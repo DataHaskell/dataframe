@@ -45,7 +45,7 @@ module DataFrame.IR.ExprJson (
     withRealTypeTag,
 ) where
 
-import Data.Aeson (Value (..), object, (.:), (.=))
+import Data.Aeson (object, (.:), (.=))
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Types as Aeson
 import qualified Data.ByteString as BS
@@ -234,7 +234,7 @@ names (binaryUdf, unaryUdf, …).
 encodeExpr :: forall a. (Columnable a) => Expr a -> Either String Aeson.Value
 encodeExpr expr = case expr of
     Col name -> do
-        outTag <- requireTag @a
+        outTag <- requireTypeTag @a
         Right $
             object
                 [ "node" .= ("col" :: T.Text)
@@ -242,7 +242,7 @@ encodeExpr expr = case expr of
                 , "name" .= name
                 ]
     Lit v -> do
-        outTag <- requireTag @a
+        outTag <- requireTypeTag @a
         litVal <- encodeLit @a v
         Right $
             object
@@ -251,8 +251,8 @@ encodeExpr expr = case expr of
                 , "value" .= litVal
                 ]
     Unary op (arg :: Expr b) -> do
-        outTag <- requireTag @a
-        argTag <- requireTag @b
+        outTag <- requireTypeTag @a
+        argTag <- requireTypeTag @b
         opTag <- recognizeUnary (unaryName op)
         argEnc <- encodeExpr arg
         Right $
@@ -264,8 +264,8 @@ encodeExpr expr = case expr of
                 , "arg" .= argEnc
                 ]
     Binary op (lhs :: Expr c) (rhs :: Expr b) -> do
-        outTag <- requireTag @a
-        argTag <- requireTag @c
+        outTag <- requireTypeTag @a
+        argTag <- requireTypeTag @c
         opTag <- recognizeBinary (binaryName op)
         lEnc <- encodeExpr lhs
         rEnc <- encodeExpr rhs
@@ -279,7 +279,7 @@ encodeExpr expr = case expr of
                 , "rhs" .= rEnc
                 ]
     If cond th el -> do
-        outTag <- requireTag @a
+        outTag <- requireTypeTag @a
         cEnc <- encodeExpr cond
         tEnc <- encodeExpr th
         eEnc <- encodeExpr el
@@ -298,8 +298,8 @@ encodeExpr expr = case expr of
         Left
             "DataFrame.IR.ExprJson.encodeExpr: CastExprWith is not supported in the wire format"
     Agg (strat :: F.AggStrategy a b) (inner :: F.Expr b) -> do
-        outTag <- requireTag @a
-        argTag <- requireTag @b
+        outTag <- requireTypeTag @a
+        argTag <- requireTypeTag @b
         innerEnc <- encodeExpr inner
         Right $
             object
@@ -310,7 +310,7 @@ encodeExpr expr = case expr of
                 , "arg" .= innerEnc
                 ]
     Over names inner -> do
-        outTag <- requireTag @a
+        outTag <- requireTypeTag @a
         innerEnc <- encodeExpr inner
         Right $
             object
@@ -320,8 +320,8 @@ encodeExpr expr = case expr of
                 , "arg" .= innerEnc
                 ]
   where
-    requireTag :: forall x. (Typeable x) => Either String T.Text
-    requireTag = case typeTagOf @x of
+    requireTypeTag :: forall x. (Typeable x) => Either String T.Text
+    requireTypeTag = case typeTagOf @x of
         Just t -> Right t
         Nothing ->
             Left $

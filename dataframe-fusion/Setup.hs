@@ -1,4 +1,5 @@
 {-# LANGUAGE CPP #-}
+{-# LANGUAGE DataKinds #-}
 
 -- Custom Setup hook for dataframe-fusion.
 --
@@ -23,7 +24,13 @@ import Distribution.Simple
 import Distribution.Simple.UserHooks (UserHooks (..))
 import Distribution.Types.CondTree (CondBranch (..), CondTree (..))
 #if MIN_VERSION_Cabal(3,14,0)
-import Distribution.Utils.Path (makeSymbolicPath)
+import Distribution.Utils.Path (
+    FileOrDir (Dir),
+    Lib,
+    Pkg,
+    SymbolicPath,
+    makeSymbolicPath,
+ )
 #endif
 import Distribution.Verbosity (normal)
 import System.Directory (
@@ -170,7 +177,7 @@ addExtra p bi = bi{extraLibDirs = mkLibDir p : extraLibDirs bi}
 
 -- | In Cabal 3.14+, extraLibDirs holds 'SymbolicPath' values, not 'FilePath'.
 #if MIN_VERSION_Cabal(3,14,0)
-mkLibDir :: FilePath -> _
+mkLibDir :: FilePath -> SymbolicPath Pkg ('Dir Lib)
 mkLibDir = makeSymbolicPath
 #else
 mkLibDir :: FilePath -> FilePath

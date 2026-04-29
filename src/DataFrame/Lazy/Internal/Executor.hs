@@ -1,7 +1,6 @@
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE ExplicitNamespaces #-}
 {-# LANGUAGE GADTs #-}
-
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TupleSections #-}
@@ -31,6 +30,7 @@ import Control.Monad (filterM, forM, forM_, when)
 import qualified Data.ByteString as BS
 import Data.IORef
 import qualified Data.Map as M
+import qualified Data.Maybe
 import qualified Data.Set as S
 import qualified Data.Text as T
 import Data.Type.Equality (TestEquality (testEquality), type (:~:) (Refl))

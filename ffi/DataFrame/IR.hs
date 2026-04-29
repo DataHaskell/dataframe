@@ -29,14 +29,20 @@ import Data.Type.Equality (
  )
 import qualified Data.Vector as V
 import qualified Data.Vector.Unboxed as VU
-import Data.Word (Word, Word16, Word32, Word64, Word8)
+import Data.Word (Word16, Word32, Word64, Word8)
 import Foreign (wordPtrToPtr)
 import Type.Reflection (SomeTypeRep (..), eqTypeRep, typeRep)
 
 import DataFrame.Functions (count, mean, meanMaybe, sumMaybe)
 import qualified DataFrame.Functions as Functions
 import DataFrame.IO.Arrow (arrowToDataframe)
-import DataFrame.IO.CSV (CsvReader, defaultReadOptions, readSeparated, readTsv, writeCsv, writeSeparated)
+import DataFrame.IO.CSV (
+    CsvReader,
+    defaultReadOptions,
+    readSeparated,
+    readTsv,
+    writeCsv,
+ )
 import DataFrame.IO.JSON (readJSON)
 import qualified DataFrame.IO.Parquet as Parquet
 import DataFrame.IR.ExprJson (SomeExpr (..), decodeExprAny, decodeExprAt)
@@ -385,7 +391,7 @@ sumExpr name colName (BoxedColumn (Just _) (_ :: V.Vector a))
         return $ name .= sumMaybe (Col @(Maybe Int) colName)
     | Just Refl <- testEquality (typeRep @a) (typeRep @Double) =
         return $ name .= sumMaybe (Col @(Maybe Double) colName)
-sumExpr name colName _ =
+sumExpr _ colName _ =
     ioError $
         userError $
             "DataFrame.IR: sum: unsupported column type for '" ++ T.unpack colName ++ "'"
@@ -409,7 +415,7 @@ meanExpr name colName (BoxedColumn (Just _) (_ :: V.Vector a))
         return $ name .= meanMaybe (Col @(Maybe Double) colName)
     | Just Refl <- testEquality (typeRep @a) (typeRep @Int) =
         return $ name .= meanMaybe (Col @(Maybe Int) colName)
-meanExpr name colName _ =
+meanExpr _ colName _ =
     ioError $
         userError $
             "DataFrame.IR: mean: unsupported column type for '" ++ T.unpack colName ++ "'"
