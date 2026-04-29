@@ -80,7 +80,7 @@ data ParquetReadOptions = ParquetReadOptions
     , safeColumns :: Bool
     -- ^ When True, every column is promoted to OptionalColumn after read, regardless of nullability in the schema.
     }
-    deriving (Eq, Show)
+    deriving (Show)
 
 {- | Default Parquet read options.
 

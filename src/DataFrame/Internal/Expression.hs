@@ -287,33 +287,30 @@ compareExpr e1 e2 = compare (exprKey e1) (exprKey e2)
     exprKey (Agg (MergeAgg name _ _ _ _) e) = "5:" ++ T.unpack name ++ exprKey e
     exprKey (Over keys e) = "6:over:" ++ show keys ++ exprKey e
 
-instance (Ord a, Columnable a) => Ord (Expr a) where
-    compare l r = compareExpr (normalize l) (normalize r)
-
-instance (Eq a, Columnable a) => Eq (Expr a) where
-    (==) l r = eqNormalized (normalize l) (normalize r)
-      where
-        exprEq :: (Columnable b, Columnable c) => Expr b -> Expr c -> Bool
-        exprEq e1 e2 = case testEquality (typeOf e1) (typeOf e2) of
-            Just Refl -> e1 == e2
-            Nothing -> False
-        eqNormalized :: Expr a -> Expr a -> Bool
-        eqNormalized (Col n1) (Col n2) = n1 == n2
-        eqNormalized (CastWith n1 t1 _) (CastWith n2 t2 _) = n1 == n2 && t1 == t2
-        eqNormalized (CastExprWith t1 _ e1) (CastExprWith t2 _ e2) = t1 == t2 && e1 `exprEq` e2
-        eqNormalized (Lit v1) (Lit v2) = v1 == v2
-        eqNormalized (If c1 t1 e1) (If c2 t2 e2) =
-            c1 == c2 && t1 `exprEq` t2 && e1 `exprEq` e2
-        eqNormalized (Unary op1 e1) (Unary op2 e2) = unaryName op1 == unaryName op2 && e1 `exprEq` e2
-        eqNormalized (Binary op1 e1a e1b) (Binary op2 e2a e2b) = binaryName op1 == binaryName op2 && e1a `exprEq` e2a && e1b `exprEq` e2b
-        eqNormalized (Agg (CollectAgg n1 _) e1) (Agg (CollectAgg n2 _) e2) =
-            n1 == n2 && e1 `exprEq` e2
-        eqNormalized (Agg (FoldAgg n1 _ _) e1) (Agg (FoldAgg n2 _ _) e2) =
-            n1 == n2 && e1 `exprEq` e2
-        eqNormalized (Agg (MergeAgg n1 _ _ _ _) e1) (Agg (MergeAgg n2 _ _ _ _) e2) =
-            n1 == n2 && e1 `exprEq` e2
-        eqNormalized (Over k1 e1) (Over k2 e2) = k1 == k2 && e1 `exprEq` e2
-        eqNormalized _ _ = False
+eqExpr :: forall a. (Columnable a) => Expr a -> Expr a -> Bool
+eqExpr l r = eqNormalized (normalize l) (normalize r)
+  where
+    exprEq :: (Columnable b, Columnable c) => Expr b -> Expr c -> Bool
+    exprEq e1 e2 = case testEquality (typeOf e1) (typeOf e2) of
+        Just Refl -> eqExpr e1 e2
+        Nothing -> False
+    eqNormalized :: Expr a -> Expr a -> Bool
+    eqNormalized (Col n1) (Col n2) = n1 == n2
+    eqNormalized (CastWith n1 t1 _) (CastWith n2 t2 _) = n1 == n2 && t1 == t2
+    eqNormalized (CastExprWith t1 _ e1) (CastExprWith t2 _ e2) = t1 == t2 && e1 `exprEq` e2
+    eqNormalized (Lit v1) (Lit v2) = v1 == v2
+    eqNormalized (If c1 t1 e1) (If c2 t2 e2) =
+        eqExpr c1 c2 && t1 `exprEq` t2 && e1 `exprEq` e2
+    eqNormalized (Unary op1 e1) (Unary op2 e2) = unaryName op1 == unaryName op2 && e1 `exprEq` e2
+    eqNormalized (Binary op1 e1a e1b) (Binary op2 e2a e2b) = binaryName op1 == binaryName op2 && e1a `exprEq` e2a && e1b `exprEq` e2b
+    eqNormalized (Agg (CollectAgg n1 _) e1) (Agg (CollectAgg n2 _) e2) =
+        n1 == n2 && e1 `exprEq` e2
+    eqNormalized (Agg (FoldAgg n1 _ _) e1) (Agg (FoldAgg n2 _ _) e2) =
+        n1 == n2 && e1 `exprEq` e2
+    eqNormalized (Agg (MergeAgg n1 _ _ _ _) e1) (Agg (MergeAgg n2 _ _ _ _) e2) =
+        n1 == n2 && e1 `exprEq` e2
+    eqNormalized (Over k1 e1) (Over k2 e2) = k1 == k2 && e1 `exprEq` e2
+    eqNormalized _ _ = False
 
 replaceExpr ::
     forall a b c.
@@ -321,7 +318,7 @@ replaceExpr ::
     Expr a -> Expr b -> Expr c -> Expr c
 replaceExpr new old expr = case testEquality (typeRep @b) (typeRep @c) of
     Just Refl -> case testEquality (typeRep @a) (typeRep @c) of
-        Just Refl -> if old == expr then new else replace'
+        Just Refl -> if eqExpr old expr then new else replace'
         Nothing -> expr
     Nothing -> replace'
   where

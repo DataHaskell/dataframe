@@ -9,7 +9,7 @@ import qualified DataFrame as D
 import DataFrame.DecisionTree
 import qualified DataFrame.Functions as F
 import qualified DataFrame.Internal.Column as DI
-import DataFrame.Internal.Expression (Expr (..))
+import DataFrame.Internal.Expression (Expr (..), eqExpr)
 import DataFrame.Internal.Interpreter (interpret)
 import DataFrame.Operators
 
@@ -634,8 +634,8 @@ probExprsLeaf :: Test
 probExprsLeaf = TestCase $ do
     let pt = Leaf (M.fromList [("A", 0.75), ("B", 0.25)]) :: ProbTree T.Text
         pe = probExprs pt
-    assertEqual "A expr is Lit 0.75" (Lit 0.75) (pe M.! "A")
-    assertEqual "B expr is Lit 0.25" (Lit 0.25) (pe M.! "B")
+    assertBool "A expr is Lit 0.75" (eqExpr (Lit 0.75) (pe M.! "A"))
+    assertBool "B expr is Lit 0.25" (eqExpr (Lit 0.25) (pe M.! "B"))
 
 -- probExprs: class absent from one leaf gets Lit 0.0 on that side
 probExprsMissingClass :: Test
@@ -647,14 +647,12 @@ probExprsMissingClass = TestCase $ do
                 (Leaf (M.fromList [("B", 1.0)])) ::
                 ProbTree T.Text
         pe = probExprs pt
-    assertEqual
+    assertBool
         "A expr: If cond (Lit 1.0) (Lit 0.0)"
-        (F.ifThenElse splitCond (Lit 1.0) (Lit 0.0))
-        (pe M.! "A")
-    assertEqual
+        (eqExpr (F.ifThenElse splitCond (Lit 1.0) (Lit 0.0)) (pe M.! "A"))
+    assertBool
         "B expr: If cond (Lit 0.0) (Lit 1.0)"
-        (F.ifThenElse splitCond (Lit 0.0) (Lit 1.0))
-        (pe M.! "B")
+        (eqExpr (F.ifThenElse splitCond (Lit 0.0) (Lit 1.0)) (pe M.! "B"))
 
 -- probExprs: keys equal all classes that appear across any leaf
 probExprsAllClasses :: Test

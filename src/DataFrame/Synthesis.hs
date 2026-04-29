@@ -20,6 +20,7 @@ import DataFrame.Internal.DataFrame (
 import DataFrame.Internal.Expression (
     Expr (..),
     eSize,
+    eqExpr,
  )
 import DataFrame.Internal.Interpreter (interpret)
 import DataFrame.Internal.Statistics
@@ -48,7 +49,7 @@ generateConditions labels conds ps df =
             [ p .<= q
             | p <- filter (not . isLiteral) ps
             , q <- ps
-            , p /= q
+            , Prelude.not (eqExpr p q)
             ]
                 ++ [ F.not p
                    | p <- conds
@@ -56,8 +57,8 @@ generateConditions labels conds ps df =
         expandedConds =
             conds
                 ++ newConds
-                ++ [p .&& q | p <- newConds, q <- conds, p /= q]
-                ++ [p .|| q | p <- newConds, q <- conds, p /= q]
+                ++ [p .&& q | p <- newConds, q <- conds, Prelude.not (eqExpr p q)]
+                ++ [p .|| q | p <- newConds, q <- conds, Prelude.not (eqExpr p q)]
      in
         pickTopNBool df labels (deduplicate df expandedConds)
 
@@ -114,7 +115,7 @@ generatePrograms includeConds conds vars constants ps =
                         , (j, q) <- zip [(0 :: Int) ..] existingPrograms
                         , Prelude.not (isLiteral p && isLiteral q)
                         , Prelude.not (isConditional p || isConditional q)
-                        , p /= q
+                        , Prelude.not (eqExpr p q)
                         , i > j
                         ]
                             ++ [ F.max p q
@@ -122,7 +123,7 @@ generatePrograms includeConds conds vars constants ps =
                                , (j, q) <- zip [(0 :: Int) ..] existingPrograms
                                , Prelude.not (isLiteral p && isLiteral q)
                                , Prelude.not (isConditional p || isConditional q)
-                               , p /= q
+                               , Prelude.not (eqExpr p q)
                                , i > j
                                ]
                             ++ [ F.ifThenElse cond r s
@@ -130,7 +131,7 @@ generatePrograms includeConds conds vars constants ps =
                                , r <- existingPrograms
                                , s <- existingPrograms
                                , Prelude.not (isConditional r || isConditional s)
-                               , r /= s
+                               , Prelude.not (eqExpr r s)
                                ]
                     else []
                )
@@ -146,7 +147,7 @@ generatePrograms includeConds conds vars constants ps =
                , q <- existingPrograms
                , Prelude.not (isLiteral p && isLiteral q)
                , Prelude.not (isConditional p || isConditional q)
-               , p /= q
+               , Prelude.not (eqExpr p q)
                ]
 
 isLiteral :: Expr a -> Bool
@@ -163,7 +164,7 @@ deduplicate ::
     DataFrame ->
     [Expr a] ->
     [(Expr a, TypedColumn a)]
-deduplicate df = go [] . L.nub . L.sortBy (\e1 e2 -> compare (eSize e1) (eSize e2))
+deduplicate df = go [] . L.nubBy eqExpr . L.sortBy (\e1 e2 -> compare (eSize e1) (eSize e2))
   where
     go _ [] = []
     go seen (x : xs)
