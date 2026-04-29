@@ -1,0 +1,80 @@
+cabal-version:      3.0
+name:               dataframe-fusion
+version:            0.1.0.0
+
+synopsis: Apache DataFusion backend for the dataframe typed API.
+
+description: A typed, plan-based wrapper around Apache DataFusion. Mirrors
+             the DataFrame.Typed.Lazy surface but lowers each operation to
+             a DataFusion logical plan via a Rust bridge crate. Results are
+             returned via the Arrow C Data Interface and reconstructed as
+             ordinary TypedDataFrames in Haskell.
+
+bug-reports: https://github.com/mchav/dataframe/issues
+license:            MIT
+author:             Michael Chavinda
+maintainer:         mschavinda@gmail.com
+
+copyright: (c) 2024-2026 Michael Chavinda
+category: Data
+build-type: Custom
+
+extra-source-files: cbits/dfusion_bridge.h
+                    rust/dfusion-bridge/Cargo.toml
+                    rust/dfusion-bridge/src/lib.rs
+
+-- The license is the same as the parent dataframe package.
+
+custom-setup
+    setup-depends: base       >= 4   && < 5,
+                   Cabal      >= 3.0 && < 4,
+                   directory  >= 1.3 && < 2,
+                   filepath   >= 1.4 && < 2,
+                   process    >= 1.6 && < 2
+
+common warnings
+    ghc-options:
+        -Wincomplete-patterns
+        -Wincomplete-uni-patterns
+        -Wunused-imports
+        -Wunused-local-binds
+
+library
+    import: warnings
+    exposed-modules:  DataFrame.Fusion.FFI
+                      DataFrame.Fusion.Plan
+                      DataFrame.Fusion.Typed
+    build-depends:    base       >= 4    && < 5,
+                      bytestring >= 0.11 && < 0.13,
+                      aeson      >= 0.11 && < 3,
+                      containers >= 0.6.7 && < 0.9,
+                      dataframe  ^>= 1.1,
+                      dataframe:arrow-bridge,
+                      text       >= 2.0  && < 3,
+                      vector     ^>= 0.13
+    hs-source-dirs:   src
+    include-dirs:     cbits
+    includes:         dfusion_bridge.h
+    install-includes: dfusion_bridge.h
+    extra-libraries:  dfusion_bridge bz2 lzma z iconv
+    if os(darwin)
+        ld-options: -framework CoreFoundation -framework Security -framework SystemConfiguration
+    default-language: Haskell2010
+
+test-suite tests
+    import: warnings
+    type: exitcode-stdio-1.0
+    main-is: Main.hs
+    build-depends:    base       >= 4    && < 5,
+                      dataframe  ^>= 1.1,
+                      dataframe-fusion,
+                      directory  >= 1.3  && < 2,
+                      filepath   >= 1.4  && < 2,
+                      HUnit      ^>= 1.6,
+                      text       >= 2.0  && < 3,
+                      vector     ^>= 0.13
+    hs-source-dirs:   tests
+    extra-libraries:  dfusion_bridge bz2 lzma z iconv
+    if os(darwin)
+        ld-options: -framework CoreFoundation -framework Security -framework SystemConfiguration
+    default-language: Haskell2010

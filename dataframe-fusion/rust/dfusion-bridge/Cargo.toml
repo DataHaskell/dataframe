@@ -1,0 +1,24 @@
+[package]
+name = "dfusion-bridge"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+name = "dfusion_bridge"
+# `cdylib` for `cabal repl` (GHCi can only load shared libraries) and for
+# executables that link dynamically. `staticlib` is kept so static linking
+# remains an option (e.g. for distribution as a self-contained binary).
+crate-type = ["cdylib", "staticlib"]
+
+[dependencies]
+datafusion = "45"
+arrow = { version = "54", features = ["ffi"] }
+arrow-schema = "54"
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

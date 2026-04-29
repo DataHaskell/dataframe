@@ -1,0 +1,8 @@
+pyarrow>=10.0
+
+[polars]
+polars>=0.18
+
+[test]
+pytest>=7
+polars>=0.18

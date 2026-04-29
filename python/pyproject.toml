@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hyrax"
+version = "0.1.0"
+description = "DataFrame operations and decision-tree training in Python, backed by the Haskell `dataframe` library"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.9"
+authors = [{ name = "Michael Chavinda", email = "mschavinda@gmail.com" }]
+keywords = ["dataframe", "decision-tree", "arrow", "data-analysis", "haskell"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Scientific/Engineering :: Information Analysis",
+]
+dependencies = ["pyarrow>=10.0"]
+
+[project.optional-dependencies]
+polars = ["polars>=0.18"]
+test = ["pytest>=7", "polars>=0.18"]
+
+[project.urls]
+Homepage = "https://github.com/mchav/dataframe"
+Repository = "https://github.com/mchav/dataframe"
+Issues = "https://github.com/mchav/dataframe/issues"
+
+[tool.setuptools]
+packages = ["hyrax"]
+include-package-data = true
+
+[tool.setuptools.package-data]
+hyrax = ["*.dylib", "*.so", "*.dll"]

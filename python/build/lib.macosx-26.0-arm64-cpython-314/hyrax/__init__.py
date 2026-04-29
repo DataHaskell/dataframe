@@ -337,7 +337,6 @@ class _Then:
             "else": else_e._plan,
         })
 
-
 def _ensure_expr(value, hint=None) -> Expr:
     """Coerce a Python value into an Expr, lifting raw values via :func:`lit`."""
     if isinstance(value, Expr):
@@ -413,7 +412,6 @@ def _coerce_pair(lhs, rhs):
         return lhs_e, rhs, rhs.out_type
     raise TypeError("hyrax: at least one operand must be an Expr")
 
-
 class AggExpr:
     """Aggregation expression for use in ``GroupedEagerFrame.aggregate``.
     Distinct from :class:`Expr` — group-by aggregates use a flat
@@ -468,7 +466,6 @@ def variance(expr: ColExpr) -> AggExpr:
 def std(expr: ColExpr) -> AggExpr:
     """Standard deviation = sqrt(variance) (returns Double)."""
     return AggExpr("std", expr)
-
 
 class EagerFrame:
     """Holds a query plan dict; terminal operations (``collect``,
@@ -1173,7 +1170,8 @@ class DecisionTreeClassifier:
         rb = self.predict(df, name).select([name]).collect()
         return rb.column(0)
 
-## | Top-level constructors.
+
+## Top level constructors
 def read_csv(path: str) -> EagerFrame:
     """Create an EagerFrame that reads a CSV file."""
     return EagerFrame({"op": "ReadCsv", "path": path})

@@ -1,7 +1,7 @@
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE ExplicitNamespaces #-}
 {-# LANGUAGE GADTs #-}
-{-# LANGUAGE NumericUnderscores #-}
+
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TupleSections #-}
@@ -16,18 +16,18 @@ output.  HashAggregate uses streaming partial aggregation when all aggregate
 expressions support it.
 -}
 module DataFrame.Lazy.Internal.Executor (
-    ExecutorConfig (..),
-    defaultExecutorConfig,
+    CsvReader,
     execute,
     foldBatches,
 ) where
 
-import Control.Concurrent (forkIO)
+import Control.Concurrent (forkIO, getNumCapabilities)
+import Control.Concurrent.Async (mapConcurrently)
 import Control.Concurrent.STM (atomically)
 import Control.Concurrent.STM.TBQueue (newTBQueueIO, readTBQueue, writeTBQueue)
 import Control.DeepSeq (force)
 import Control.Exception (evaluate)
-import Control.Monad (filterM, when)
+import Control.Monad (filterM, forM, forM_, when)
 import qualified Data.ByteString as BS
 import Data.IORef
 import qualified Data.Map as M
@@ -35,13 +35,14 @@ import qualified Data.Set as S
 import qualified Data.Text as T
 import Data.Type.Equality (TestEquality (testEquality), type (:~:) (Refl))
 import qualified Data.Vector.Unboxed as VU
+import Data.Word (Word8)
+import DataFrame.IO.CSV (CsvReader)
 import qualified DataFrame.IO.Parquet as Parquet
 import qualified DataFrame.Internal.Column as C
 import qualified DataFrame.Internal.DataFrame as D
 import qualified DataFrame.Internal.Expression as E
 import DataFrame.Internal.Schema (elements)
 import qualified DataFrame.Lazy.IO.Binary as Bin
-import qualified DataFrame.Lazy.IO.CSV as LCSV
 import DataFrame.Lazy.Internal.LogicalPlan (DataSource (..), SortOrder (..))
 import DataFrame.Lazy.Internal.PhysicalPlan
 import qualified DataFrame.Operations.Aggregation as Agg
@@ -51,30 +52,11 @@ import DataFrame.Operations.Merge ()
 import qualified DataFrame.Operations.Permutation as Perm
 import qualified DataFrame.Operations.Subset as Sub
 import qualified DataFrame.Operations.Transformations as Trans
-import System.Directory (doesDirectoryExist)
+import System.Directory (doesDirectoryExist, removeFile)
 import System.FilePath ((</>))
 import System.FilePath.Glob (glob)
-import System.IO (hClose)
+import System.IO.Temp (emptySystemTempFile)
 import Type.Reflection (typeRep)
-
--- ---------------------------------------------------------------------------
--- Configuration
--- ---------------------------------------------------------------------------
-
-data ExecutorConfig = ExecutorConfig
-    { memoryBudgetBytes :: !Int
-    -- ^ Per-node spill threshold (currently informational; not enforced yet).
-    , spillDirectory :: FilePath
-    , defaultBatchSize :: !Int
-    }
-
-defaultExecutorConfig :: ExecutorConfig
-defaultExecutorConfig =
-    ExecutorConfig
-        { memoryBudgetBytes = 512 * 1_048_576 -- 512 MiB
-        , spillDirectory = "/tmp"
-        , defaultBatchSize = 1_000_000
-        }
 
 -- ---------------------------------------------------------------------------
 -- Stream abstraction
@@ -102,16 +84,16 @@ collectStream stream = go D.empty
 {- | Execute a physical plan, returning the complete result as a single
 'DataFrame'.
 -}
-execute :: PhysicalPlan -> ExecutorConfig -> IO D.DataFrame
-execute plan cfg = buildStream plan cfg >>= collectStream
+execute :: PhysicalPlan -> IO D.DataFrame
+execute plan = buildStream plan >>= collectStream
 
 {- | Fold a function over every batch produced by a physical plan.
 The fold is strict in the accumulator; each batch is discarded after folding.
 -}
 foldBatches ::
-    (b -> D.DataFrame -> IO b) -> b -> PhysicalPlan -> ExecutorConfig -> IO b
-foldBatches f seed plan cfg = do
-    stream <- buildStream plan cfg
+    (b -> D.DataFrame -> IO b) -> b -> PhysicalPlan -> IO b
+foldBatches f seed plan = do
+    stream <- buildStream plan
     let loop !acc = do
             mb <- pullBatch stream
             case mb of
@@ -125,14 +107,14 @@ foldBatches f seed plan cfg = do
 -- Per-operator stream builders
 -- ---------------------------------------------------------------------------
 
-buildStream :: PhysicalPlan -> ExecutorConfig -> IO Stream
+buildStream :: PhysicalPlan -> IO Stream
 -- Scan -----------------------------------------------------------------------
-buildStream (PhysicalScan (CsvSource path sep) cfg) _ =
-    executeCsvScan path sep cfg
-buildStream (PhysicalScan (ParquetSource path) cfg) _ =
+buildStream (PhysicalScan (CsvSource path sep reader) cfg) =
+    executeCsvScan path sep reader cfg
+buildStream (PhysicalScan (ParquetSource path) cfg) =
     executeParquetScan path cfg
-buildStream (PhysicalSpill child path) execCfg = do
-    df <- execute child execCfg
+buildStream (PhysicalSpill child path) = do
+    df <- execute child
     Bin.spillToDisk path df
     df' <- Bin.readSpilled path
     ref <- newIORef (Just df')
@@ -143,32 +125,32 @@ buildStream (PhysicalSpill child path) execCfg = do
             return mb
         )
 -- Filter ---------------------------------------------------------------------
-buildStream (PhysicalFilter p child) execCfg = do
-    childStream <- buildStream child execCfg
+buildStream (PhysicalFilter p child) = do
+    childStream <- buildStream child
     return . Stream $
         ( do
             mb <- pullBatch childStream
             return $ fmap (Sub.filterWhere p) mb
         )
 -- Project --------------------------------------------------------------------
-buildStream (PhysicalProject cols child) execCfg = do
-    childStream <- buildStream child execCfg
+buildStream (PhysicalProject cols child) = do
+    childStream <- buildStream child
     return . Stream $
         ( do
             mb <- pullBatch childStream
             return $ fmap (Sub.select cols) mb
         )
 -- Derive ---------------------------------------------------------------------
-buildStream (PhysicalDerive name uexpr child) execCfg = do
-    childStream <- buildStream child execCfg
+buildStream (PhysicalDerive name uexpr child) = do
+    childStream <- buildStream child
     return . Stream $
         ( do
             mb <- pullBatch childStream
             return $ fmap (Trans.deriveMany [(name, uexpr)]) mb
         )
 -- Limit ----------------------------------------------------------------------
-buildStream (PhysicalLimit n child) execCfg = do
-    childStream <- buildStream child execCfg
+buildStream (PhysicalLimit n child) = do
+    childStream <- buildStream child
     countRef <- newIORef (0 :: Int)
     return . Stream $
         ( do
@@ -185,8 +167,8 @@ buildStream (PhysicalLimit n child) execCfg = do
                             return $ Just (Sub.take toTake df)
         )
 -- Sort (blocking) ------------------------------------------------------------
-buildStream (PhysicalSort cols child) execCfg = do
-    df <- execute child execCfg
+buildStream (PhysicalSort cols child) = do
+    df <- execute child
     let sortOrds = fmap toPermSortOrder cols
     let sorted = Perm.sortBy sortOrds df
     ref <- newIORef (Just sorted)
@@ -197,34 +179,31 @@ buildStream (PhysicalSort cols child) execCfg = do
             return mb
         )
 -- HashAggregate --------------------------------------------------------------
-buildStream (PhysicalHashAggregate keys aggs child) execCfg = do
-    childStream <- buildStream child execCfg
+buildStream (PhysicalHashAggregate keys aggs child) = do
+    childStream <- buildStream child
     if all (isStreamableAgg . snd) aggs
         then do
-            -- Streaming partial aggregation: O(|groups|) memory
+            -- Parallel streaming partial aggregation:
+            --   * N workers, each pulls batches from the child stream and
+            --     maintains its own local accumulator.
+            --   * Once the stream is drained, the N partials are merged
+            --     sequentially using the same merge expression.
+            --   * O(|groups| × N) memory in flight, then O(|groups|).
             let (partialAggs, mergeAggs, finalizer) = buildAggPlan aggs
-            accRef <- newIORef (Nothing :: Maybe D.DataFrame)
-            let loop = do
-                    mb <- pullBatch childStream
-                    case mb of
-                        Nothing -> return ()
-                        Just batch -> do
-                            -- Force to NF so the batch DataFrame can be GC'd immediately.
-                            -- evaluate . force breaks the thunk chain that would otherwise
-                            -- keep every batch (~60 MB each) alive until the end = OOM.
-                            !partial <-
-                                evaluate . force $ Agg.aggregate partialAggs (Agg.groupBy keys batch)
-                            mAcc <- readIORef accRef
-                            !newAcc <- case mAcc of
-                                Nothing -> return partial
-                                Just acc ->
-                                    evaluate . force $
-                                        Agg.aggregate mergeAggs $
-                                            Agg.groupBy keys (acc <> partial)
-                            writeIORef accRef (Just newAcc)
-                            loop
-            loop
-            mFinal <- fmap (fmap finalizer) (readIORef accRef)
+            nCaps <- getNumCapabilities
+            let workers = max 1 nCaps
+            partials <-
+                mapConcurrently
+                    (\_ -> workerLoop childStream keys partialAggs mergeAggs)
+                    [1 .. workers]
+            mFinal <-
+                let nonEmpty = Data.Maybe.catMaybes partials
+                 in case nonEmpty of
+                        [] -> return Nothing
+                        [single] -> return (Just (finalizer single))
+                        (a : rest) -> do
+                            !merged <- mergePartials keys mergeAggs a rest
+                            return (Just (finalizer merged))
             ref <- newIORef mFinal
             return . Stream $ do
                 mb <- readIORef ref
@@ -240,9 +219,8 @@ buildStream (PhysicalHashAggregate keys aggs child) execCfg = do
                 writeIORef ref Nothing
                 return mb
 -- SourceDF (split pre-loaded DataFrame into batches) -------------------------
-buildStream (PhysicalSourceDF df) execCfg = do
-    let bs = defaultBatchSize execCfg
-        total = Core.nRows df
+buildStream (PhysicalSourceDF bs df) = do
+    let total = Core.nRows df
     posRef <- newIORef (0 :: Int)
     return . Stream $ do
         i <- readIORef posRef
@@ -254,14 +232,14 @@ buildStream (PhysicalSourceDF df) execCfg = do
                 writeIORef posRef (i + n)
                 return (Just batch)
 -- HashJoin — streaming probe (INNER/LEFT) or blocking fallback ----------------
-buildStream (PhysicalHashJoin jt leftKey rightKey leftPlan rightPlan) execCfg =
+buildStream (PhysicalHashJoin jt leftKey rightKey leftPlan rightPlan) =
     case jt of
         Join.INNER -> streamingHashJoin assembleInnerBatch
         Join.LEFT -> streamingHashJoin assembleLeftBatch
         _ -> do
             -- Blocking fallback for RIGHT / FULL_OUTER
-            leftDf <- execute leftPlan execCfg
-            rightDf <- execute rightPlan execCfg
+            leftDf <- execute leftPlan
+            rightDf <- execute rightPlan
             let result = performJoin jt leftKey rightKey leftDf rightDf
             ref <- newIORef (Just result)
             return . Stream $ do
@@ -271,7 +249,7 @@ buildStream (PhysicalHashJoin jt leftKey rightKey leftPlan rightPlan) execCfg =
   where
     streamingHashJoin assembleFn = do
         -- Materialise build (right) side once and build the compact index.
-        rightDf <- execute rightPlan execCfg
+        rightDf <- execute rightPlan
         let rightDf' =
                 if leftKey == rightKey
                     then rightDf
@@ -281,7 +259,7 @@ buildStream (PhysicalHashJoin jt leftKey rightKey leftPlan rightPlan) execCfg =
             rightHashes = Join.buildHashColumn [joinKey] rightDf'
             ci = Join.buildCompactIndex rightHashes
         -- Stream probe (left) side batch by batch.
-        leftStream <- buildStream leftPlan execCfg
+        leftStream <- buildStream leftPlan
         return . Stream $ do
             mBatch <- pullBatch leftStream
             case mBatch of
@@ -307,9 +285,9 @@ buildStream (PhysicalHashJoin jt leftKey rightKey leftPlan rightPlan) execCfg =
     assembleInnerBatch = Join.assembleInner
 
 -- SortMergeJoin (blocking on both sides) -------------------------------------
-buildStream (PhysicalSortMergeJoin jt leftKey rightKey leftPlan rightPlan) execCfg = do
-    leftDf <- execute leftPlan execCfg
-    rightDf <- execute rightPlan execCfg
+buildStream (PhysicalSortMergeJoin jt leftKey rightKey leftPlan rightPlan) = do
+    leftDf <- execute leftPlan
+    rightDf <- execute rightPlan
     let result = performJoin jt leftKey rightKey leftDf rightDf
     ref <- newIORef (Just result)
     return . Stream $
@@ -326,6 +304,51 @@ buildStream (PhysicalSortMergeJoin jt leftKey rightKey leftPlan rightPlan) execC
 {- | True when an aggregate expression can be computed incrementally
 (i.e., partial results can be merged without materialising all rows).
 -}
+
+{- | One worker's loop: pull batches off the shared child stream until
+exhausted, building up a per-worker accumulator.
+-}
+workerLoop ::
+    Stream ->
+    [T.Text] ->
+    [E.NamedExpr] ->
+    [E.NamedExpr] ->
+    IO (Maybe D.DataFrame)
+workerLoop childStream keys partialAggs mergeAggs = loop Nothing
+  where
+    loop !acc = do
+        mb <- pullBatch childStream
+        case mb of
+            Nothing -> return acc
+            Just batch -> do
+                !partial <-
+                    evaluate . force $
+                        Agg.aggregate partialAggs (Agg.groupBy keys batch)
+                !next <- case acc of
+                    Nothing -> return (Just partial)
+                    Just a -> do
+                        !merged <-
+                            evaluate . force $
+                                Agg.aggregate mergeAggs (Agg.groupBy keys (a <> partial))
+                        return (Just merged)
+                loop next
+
+-- | Merge a head accumulator with the rest of the workers' partials.
+mergePartials ::
+    [T.Text] ->
+    [E.NamedExpr] ->
+    D.DataFrame ->
+    [D.DataFrame] ->
+    IO D.DataFrame
+mergePartials keys mergeAggs = go
+  where
+    go !acc [] = return acc
+    go !acc (p : ps) = do
+        !merged <-
+            evaluate . force $
+                Agg.aggregate mergeAggs (Agg.groupBy keys (acc <> p))
+        go merged ps
+
 isStreamableAgg :: E.UExpr -> Bool
 isStreamableAgg (E.UExpr (E.Agg (E.CollectAgg _ _) _)) = False
 isStreamableAgg (E.UExpr (E.Agg (E.FoldAgg _ Nothing (_ :: a -> b -> a)) _)) =
@@ -523,26 +546,37 @@ executeHFParquetScan path cfg = do
 -- CSV scan implementation
 -- ---------------------------------------------------------------------------
 
-{- | CSV scan with pipeline parallelism: a dedicated reader thread fills a
-bounded queue while the caller's thread applies pushdown predicates and
-delivers batches to the rest of the pipeline.  The queue depth of 8 keeps
-at most eight raw batches in flight, bounding memory while hiding I/O latency.
+{- | CSV scan, SIMD-parallel.
+
+The file is read once into memory, split at newline boundaries into N
+ByteString slices (N = RTS capabilities), and each slice is parsed in
+parallel with the SIMD reader from "DataFrame.IO.CSV.Fast" via the
+in-memory entry point — no temp-file roundtrip.  The resulting per-chunk
+DataFrames are sliced into batches and a dedicated thread feeds them
+into a bounded queue.  Pushdown predicates are applied per batch by the
+consumer.
 -}
-executeCsvScan :: FilePath -> Char -> ScanConfig -> IO Stream
-executeCsvScan path sep cfg = do
-    (handle, colSpec) <- LCSV.openCsvStream sep (scanSchema cfg) path
-    -- Queue carries raw batches; Nothing is the end-of-stream sentinel.
-    -- Depth 2: each batch holds ~60 MB (1M Text + Double columns); 8 would be ~480 MB.
-    queue <- newTBQueueIO 2
+executeCsvScan :: FilePath -> Char -> CsvReader -> ScanConfig -> IO Stream
+executeCsvScan path _sep reader cfg = do
+    nCaps <- getNumCapabilities
+    chunkPaths <- splitCsvAtNewlines (max 1 nCaps) path
+
+    -- Each chunk parses in parallel via the reader carried on the
+    -- 'CsvSource' plan node.  Parsing and queue-feeding stay disjoint to
+    -- avoid 14 producers all hammering a shared TBQueue (STM contention
+    -- dominates throughput).
+    let schema = scanSchema cfg
+        batchSz = scanBatchSize cfg
+    chunkDfs <- mapConcurrently (reader schema) chunkPaths
+    mapM_ removeFile chunkPaths
+
+    -- Bounded queue with a single writer, N concurrent readers.
+    queue <- newTBQueueIO (fromIntegral (max 4 (2 * nCaps)))
     _ <- forkIO $ do
-        let loop lo = do
-                result <- LCSV.readBatch sep colSpec (scanBatchSize cfg) lo handle
-                case result of
-                    Nothing ->
-                        hClose handle >> atomically (writeTBQueue queue Nothing)
-                    Just (df, lo') ->
-                        atomically (writeTBQueue queue (Just df)) >> loop lo'
-        loop BS.empty
+        forM_ chunkDfs $ \df ->
+            forM_ (sliceIntoBatches batchSz df) $ \b ->
+                atomically (writeTBQueue queue (Just b))
+        atomically (writeTBQueue queue Nothing)
     return . Stream $
         ( do
             mb <- atomically (readTBQueue queue)
@@ -555,6 +589,46 @@ executeCsvScan path sep cfg = do
                             Just p -> Sub.filterWhere p df
                      in return (Just df')
         )
+
+-- | Slice a 'DataFrame' into row-bounded batches of at most @n@ rows.
+sliceIntoBatches :: Int -> D.DataFrame -> [D.DataFrame]
+sliceIntoBatches n df =
+    let total = Core.nRows df
+        starts = [0, n .. total - 1]
+     in [Sub.range (s, min (s + n) total) df | s <- starts]
+
+{- | Split a CSV file at newline boundaries into @n@ temp files, each
+carrying the original header followed by an aligned-at-newlines slice
+of the body. Returns the temp file paths; the caller is responsible
+for removing them after use. The path-based 'fastReadCsvWithSchema'
+mmap's each file, so we get OS-paged reads instead of a single
+monolithic 'BS.readFile' of the whole input.
+-}
+splitCsvAtNewlines :: Int -> FilePath -> IO [FilePath]
+splitCsvAtNewlines n path = do
+    bs <- BS.readFile path
+    let (header, rest) = BS.break (== nl) bs
+        body = BS.drop 1 rest
+        bodyLen = BS.length body
+        rawOffsets = [(bodyLen * i) `div` n | i <- [0 .. n]]
+        snapped = 0 : map (snap body) (init (drop 1 rawOffsets)) ++ [bodyLen]
+        ranges = zip snapped (drop 1 snapped)
+        slices =
+            [ BS.take (hi - lo) (BS.drop lo body)
+            | (lo, hi) <- ranges
+            , hi > lo
+            ]
+    forM slices $ \chunk -> do
+        p <- emptySystemTempFile "lazy_csv_chunk_.csv"
+        BS.writeFile p (header <> BS.singleton nl <> chunk)
+        return p
+  where
+    nl :: Word8
+    nl = 0x0A
+    snap body off =
+        case BS.elemIndex nl (BS.drop off body) of
+            Just i -> off + i + 1
+            Nothing -> BS.length body
 
 -- ---------------------------------------------------------------------------
 -- Join helper

@@ -3,3 +3,5 @@ packages:
     dataframe-fastcsv
     dataframe-hasktorch
     dataframe-persistent
+    dataframe-arrow
+    dataframe-fusion

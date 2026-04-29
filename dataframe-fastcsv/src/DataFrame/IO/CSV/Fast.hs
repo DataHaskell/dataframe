@@ -11,7 +11,10 @@ module DataFrame.IO.CSV.Fast (
     fastReadTsvWithOpts,
     fastReadCsvWithSchema,
     fastReadCsvProj,
+    fastReadCsvFromBytes,
+    fastReadCsvFromBytesWithSchema,
     readSeparated,
+    readSeparatedFromBytes,
     getDelimiterIndices,
     CsvParseError (..),
 ) where
@@ -35,12 +38,15 @@ import Foreign (
     castForeignPtr,
     castPtr,
  )
+import qualified Foreign
 import Foreign.C.Types
 import Foreign.Marshal.Alloc (alloca)
+import Foreign.Marshal.Utils (copyBytes)
 import Foreign.Storable (peek, poke)
 
 import qualified Data.ByteString as BS
 import Data.ByteString.Internal (ByteString (PS))
+import qualified Data.ByteString.Internal as BSI
 import qualified Data.Map as M
 import Data.Text (Text)
 import qualified Data.Text as Text
@@ -121,6 +127,20 @@ file, but 'extractField' and 'parseFromExamples' are skipped for
 unreferenced columns, so the end-to-end cost scales with the size of
 the projection rather than the row width.
 -}
+
+-- | In-memory version of 'fastReadCsv'.
+fastReadCsvFromBytes :: BS.ByteString -> IO DataFrame
+fastReadCsvFromBytes = readSeparatedFromBytes comma defaultReadOptions
+
+fastReadCsvFromBytesWithSchema :: Schema -> BS.ByteString -> IO DataFrame
+fastReadCsvFromBytesWithSchema schema =
+    readSeparatedFromBytes
+        comma
+        defaultReadOptions
+            { typeSpec =
+                SpecifyTypes (M.toList (elements schema)) (typeSpec defaultReadOptions)
+            }
+
 fastReadCsvProj :: [Text] -> FilePath -> IO DataFrame
 fastReadCsvProj projection path = do
     df <- fastReadCsv path
@@ -153,6 +173,39 @@ readSeparated separator opts filePath = do
             WriteCopy
             Nothing
     let mutableFile = unsafeFromForeignPtr bufferPtr offset len
+    readSeparatedFromMVec separator opts mutableFile len
+
+{- | Identical to 'readSeparated' but takes an already-loaded byte buffer
+(e.g. a slice of a memory-mapped file).  The bytes are copied once into
+a fresh mutable storable vector so the SIMD code can grow it by 64
+bytes of trailing padding without disturbing the caller's input.
+-}
+readSeparatedFromBytes ::
+    Word8 ->
+    ReadOptions ->
+    BS.ByteString ->
+    IO DataFrame
+readSeparatedFromBytes separator opts bs = do
+    let len = BS.length bs
+    mvec <- VSM.unsafeNew len
+    -- Copy ByteString → mutable vector (one pass, ~1 ns/byte).
+    let (fp, off, _) = BSI.toForeignPtr bs
+    Foreign.withForeignPtr fp $ \srcPtr ->
+        VSM.unsafeWith mvec $ \dstPtr ->
+            copyBytes (castPtr dstPtr) (srcPtr `Foreign.plusPtr` off) len
+    readSeparatedFromMVec separator opts mvec len
+
+{- | Shared core: takes a mutable storable vector containing exactly @len@
+bytes of CSV (no trailing padding required by the caller — it is added
+here) and produces a 'DataFrame'.
+-}
+readSeparatedFromMVec ::
+    Word8 ->
+    ReadOptions ->
+    VSM.IOVector Word8 ->
+    Int ->
+    IO DataFrame
+readSeparatedFromMVec separator opts mutableFile len = do
     paddedMutableFile <- grow mutableFile 64
     paddedCSVFileRaw <- VS.unsafeFreeze paddedMutableFile
     let (paddedCSVFile, bomLen) = stripBom paddedCSVFileRaw

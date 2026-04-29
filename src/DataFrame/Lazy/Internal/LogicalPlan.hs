@@ -3,6 +3,7 @@
 module DataFrame.Lazy.Internal.LogicalPlan where
 
 import qualified Data.Text as T
+import DataFrame.IO.CSV (CsvReader)
 import qualified DataFrame.Internal.DataFrame as D
 import qualified DataFrame.Internal.Expression as E
 import DataFrame.Internal.Schema (Schema)
@@ -10,10 +11,14 @@ import DataFrame.Operations.Join (JoinType)
 
 -- | Data source for a scan node.
 data DataSource
-    = -- | path, separator
-      CsvSource FilePath Char
+    = -- | path, separator, CSV reader (e.g. attoparsec or SIMD)
+      CsvSource FilePath Char CsvReader
     | ParquetSource FilePath
-    deriving (Show)
+
+instance Show DataSource where
+    show (CsvSource path sep _) =
+        "CsvSource " ++ show path ++ " " ++ show sep ++ " <reader>"
+    show (ParquetSource path) = "ParquetSource " ++ show path
 
 -- | Sort direction used in Sort nodes and the public API.
 data SortOrder = Ascending | Descending

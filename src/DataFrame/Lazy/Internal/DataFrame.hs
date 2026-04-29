@@ -8,15 +8,12 @@
 module DataFrame.Lazy.Internal.DataFrame where
 
 import qualified Data.Text as T
+import DataFrame.IO.CSV (CsvReader, readCsvWithSchema)
 import qualified DataFrame.Internal.Column as C
 import qualified DataFrame.Internal.DataFrame as D
 import qualified DataFrame.Internal.Expression as E
 import DataFrame.Internal.Schema (Schema)
-import DataFrame.Lazy.Internal.Executor (
-    ExecutorConfig (..),
-    defaultExecutorConfig,
-    execute,
- )
+import DataFrame.Lazy.Internal.Executor (execute)
 import DataFrame.Lazy.Internal.LogicalPlan (
     DataSource (..),
     LogicalPlan (..),
@@ -46,11 +43,11 @@ instance Show LazyDataFrame where
 
 {- | Execute the lazy query: optimise the logical plan, then stream-execute
 the resulting physical plan, returning a fully-materialised 'D.DataFrame'.
+The CSV reader (default: attoparsec) is set per scan via 'scanCsv' /
+'scanCsvWith'.
 -}
 runDataFrame :: LazyDataFrame -> IO D.DataFrame
-runDataFrame ldf = do
-    let physPlan = Opt.optimize (batchSize ldf) (plan ldf)
-    execute physPlan defaultExecutorConfig{defaultBatchSize = batchSize ldf}
+runDataFrame ldf = execute (Opt.optimize (batchSize ldf) (plan ldf))
 
 -- ---------------------------------------------------------------------------
 -- Builders that construct the logical plan tree
@@ -60,19 +57,32 @@ runDataFrame ldf = do
 fromDataFrame :: D.DataFrame -> LazyDataFrame
 fromDataFrame df = LazyDataFrame{plan = SourceDF df, batchSize = 1_000_000}
 
--- | Scan a CSV file with the default comma separator.
+{- | Scan a CSV file with the default comma separator and the in-tree
+attoparsec reader.  For the SIMD reader use 'scanCsvWith'.
+-}
 scanCsv :: Schema -> T.Text -> LazyDataFrame
-scanCsv schema path =
+scanCsv = scanCsvWith readCsvWithSchema
+
+{- | Like 'scanCsv' but with an explicit CSV reader (e.g. the SIMD reader
+@fastReadCsvWithSchema@ from @dataframe-fastcsv@).
+-}
+scanCsvWith :: CsvReader -> Schema -> T.Text -> LazyDataFrame
+scanCsvWith reader schema path =
     LazyDataFrame
-        { plan = Scan (CsvSource (T.unpack path) ',') schema
+        { plan = Scan (CsvSource (T.unpack path) ',' reader) schema
         , batchSize = 1_000_000
         }
 
--- | Scan a character-separated file.
+-- | Scan a character-separated file with the default attoparsec reader.
 scanSeparated :: Char -> Schema -> T.Text -> LazyDataFrame
-scanSeparated sep schema path =
+scanSeparated = scanSeparatedWith readCsvWithSchema
+
+-- | Like 'scanSeparated' but with an explicit CSV reader.
+scanSeparatedWith ::
+    CsvReader -> Char -> Schema -> T.Text -> LazyDataFrame
+scanSeparatedWith reader sep schema path =
     LazyDataFrame
-        { plan = Scan (CsvSource (T.unpack path) sep) schema
+        { plan = Scan (CsvSource (T.unpack path) sep reader) schema
         , batchSize = 1_000_000
         }
 

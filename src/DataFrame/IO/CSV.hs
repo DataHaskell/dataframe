@@ -291,6 +291,28 @@ ghci> D.readCsv ".\/data\/taxi.csv"
 readCsv :: FilePath -> IO DataFrame
 readCsv = readSeparated defaultReadOptions
 
+type CsvReader = Schema -> FilePath -> IO DataFrame
+
+{- | Schema-driven attoparsec CSV reader.  Coerces each column to the
+type declared in 'Schema'; columns absent from the schema fall back to
+the default inference path.  Defined in terms of 'readSeparated' with
+the 'TypeSpec' filled in.
+
+@
+import qualified DataFrame as D
+df <- D.readCsvWithSchema schema "input.csv"
+@
+-}
+readCsvWithSchema :: CsvReader
+readCsvWithSchema schema =
+    readSeparated
+        defaultReadOptions
+            { typeSpec =
+                SpecifyTypes
+                    (M.toList (elements schema))
+                    (typeSpec defaultReadOptions)
+            }
+
 {- | Read CSV file from path and load it into a dataframe.
 
 ==== __Example__
