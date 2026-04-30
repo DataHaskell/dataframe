@@ -239,7 +239,7 @@ foldNullable ::
     Stream m (VB.Vector a, VU.Vector Int) ->
     m Column
 foldNullable maxDef totalRows stream = do
-    -- Boxed: null slots hold an error thunk, guarded by bitmap.
+    -- null slots hold an error thunk, guarded by bitmap.
     --
     -- IMPORTANT: 'VBM.unsafeWrite' for boxed vectors stores a *pointer* to
     -- the value without evaluating it, so unsupported-encoding error thunks
@@ -285,7 +285,7 @@ foldNullableUnboxed ::
     Stream m (VU.Vector a, VU.Vector Int) ->
     m Column
 foldNullableUnboxed maxDef totalRows stream = do
-    -- Unboxed: zero-init means null slots silently hold 0, guarded by bitmap.
+    -- zero-init means null slots silently hold 0, guarded by bitmap.
     mvDat <- liftIO $ VUM.new totalRows
     mvValid <- liftIO (VUM.new totalRows :: IO (VUM.IOVector Word8))
     (_, hasNull) <-
