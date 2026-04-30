@@ -104,9 +104,18 @@ module DataFrame.Typed (
     DataFrame.Typed.Expr.sum,
     mean,
     count,
+    countAll,
     DataFrame.Typed.Expr.minimum,
     DataFrame.Typed.Expr.maximum,
     collect,
+    over,
+
+    -- * Cast / coercion expressions
+    castExpr,
+    castExprWithDefault,
+    castExprEither,
+    unsafeCastExpr,
+    toDouble,
 
     -- * Typed sort orders
     TSortOrder (..),

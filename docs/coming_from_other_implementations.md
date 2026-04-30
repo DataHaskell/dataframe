@@ -10,18 +10,18 @@ Before diving into specific examples, it's important to understand the core phil
 2. **Explicit Operations**: Rather than overloading operators like `[]`, we provide explicit functions for each operation
 3. **Functional Composition**: Operations are designed to chain together using `|>` (pipe operator) or function composition
 4. **Immutability**: All operations return new DataFrames rather than modifying existing ones
-5. **No Implicit Conversions**: Type conversions and transformations must be explicit
+5. **Opt-in to Implicit Conversions**: Type conversions and transformations must be explicit
 
 ## Three APIs, One Library
 
-The library ships three complementary API layers. You can mix them freely — they all operate on the
+The library ships three complementary API layers. You can mix them freely. They all operate on the
 same underlying `DataFrame` type at runtime.
 
-| Layer | Import | Best for |
-|---|---|---|
-| **Untyped** | `import qualified DataFrame as D` | Exploration, scripting, one-off analysis |
-| **Frame monad** | `import DataFrame.Monad` | Sequential pipelines where an intermediate column feeds later steps |
-| **Typed** | `import qualified DataFrame.Typed as T` | Production code, libraries, anywhere a schema change should be a compile error |
+| Layer | Eager DataFrame | Lazy DataFrame | Best for |
+|---|---|---|---|
+| **Untyped** | x | x | Exploration, scripting, one-off analysis |
+| **Frame monad** | x | - | Sequential pipelines where an intermediate column feeds later steps |
+| **Typed** | x | x | Production code, libraries, anywhere a schema change should be a compile error |
 
 **Untyped** is what most of this guide uses: expressions built with `F.col @Type "name"` and
 operations like `D.derive`, `D.filterWhere`, `D.groupBy`.  Column names are strings — typos only
@@ -53,7 +53,7 @@ We'll port over concepts from [10 minutes to Pandas](https://pandas.pydata.org/d
 
 A pandas `Series` is an indexable (labelled) array. In our library, these map to `Column` values. However, we currently don't support row indexing, so `Column`s aren't typically manipulated directly—instead, you work with them through DataFrame operations.
 
-**pandas DataFrame → DataFrame DataFrame**
+**pandas DataFrame -> DataFrame DataFrame**
 
 Both use the name `DataFrame`, but the internal representation differs. Our DataFrames are essentially lists of `Vector`s with metadata for managing state and type information. This means operations are designed to work efficiently with columnar data.
 
@@ -141,22 +141,15 @@ python> df
 In Haskell, we need to be more explicit, but we gain type safety:
 
 ```haskell
-dataframe> import qualified Data.Vector as V
-dataframe> import System.Random (randomRIO)
-dataframe> import Control.Monad (replicateM)
+dataframe> import System.Random (mkStdGen)
 dataframe> import Data.List (foldl')
 dataframe> :set -XOverloadedStrings
 
--- Start with a DataFrame containing just the date column
 dataframe> initDf = D.fromNamedColumns [("date", dates)]
 
--- Generate 4 columns of 6 random numbers each
-dataframe> ns <- replicateM 4 (replicateM 6 (randomRIO (-2.0, 2.0)))
-
--- Add each column to the DataFrame
-dataframe> df = foldl' (\d (name, col) -> D.insert name col d) 
-                  initDf 
-                  (zip ["A","B","C","D"] ns)
+-- Create 4 random columns from seeds 42 to 45.
+dataframe> df = foldl' (\d (name, seed) -> D.insertColumn name (D.mkRandom (mkStdGen seed) 6 (0 :: Double) 4) d) 
+                  initDf (zip ["A","B","C","D"] [42..])
 dataframe> df
 -----------------------------------------------------------------------------------------------------
     date    |          A          |          B           |          C           |          D         
@@ -1435,6 +1428,355 @@ example tdf =
 using it in an arithmetic expression just works.  Before the strip, `T.col @"height"` has type
 `TExpr cols (Maybe Double)`, so the same arithmetic expression would be a type error.  The
 compiler enforces that you handle missing values before doing math on them.
+
+---
+
+## Coming from Frames
+
+[Frames](https://hackage.haskell.org/package/Frames) is a Haskell library for working with tabular
+data using vinyl records.  It's well-engineered and type-safe, but its reliance on vinyl's
+type-level record machinery and map-reduce folds makes routine data wrangling verbose.
+
+This section uses the purchases dataset from
+[Rasmus Bååth's blog post](https://www.sumsar.net/blog/pandas-feels-clunky-when-coming-from-r/)
+comparing R and pandas — and a
+[Frames attempt at the same examples](https://github.com/acowley/Frames/issues/185) — to show how
+our library compares.
+
+### The dataset
+
+```
+country,amount,discount
+USA,2000,10
+USA,3500,15
+USA,3000,20
+Canada,120,12
+Canada,180,18
+Canada,3100,21
+Australia,200,20
+...
+```
+
+32 rows, 11 countries.
+
+### Loading data
+
+**R:**
+
+```r
+library(tidyverse)
+purchases <- read_csv("purchases.csv")
+purchases |> head()
+```
+
+**Frames:**
+
+```haskell
+{-# LANGUAGE TypeApplications, TemplateHaskell, DataKinds       #-}
+{-# LANGUAGE FlexibleContexts, FlexibleInstances                #-}
+{-# LANGUAGE OverloadedStrings, TypeOperators                    #-}
+{-# LANGUAGE ScopedTypeVariables, TypeFamilies                   #-}
+
+import           Frames
+import           Lens.Micro.Extras
+import qualified Control.Foldl as Foldl
+import qualified Frames.MapReduce as FMR
+import qualified Frames.Folds as FF
+
+tableTypes "Purchases" "purchases.csv"
+
+loadBenchmarks :: IO (Frame Purchases)
+loadBenchmarks = inCoreAoS (readTable "purchases.csv")
+```
+
+Eight language extensions, three extra imports, Template Haskell to generate the record type, and a
+streaming-to-in-memory load before you've done anything with the data.
+
+**dataframe:**
+
+```haskell
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TypeApplications #-}
+
+import qualified DataFrame as D
+import qualified DataFrame.Functions as F
+import DataFrame.Operators
+
+main :: IO ()
+main = do
+    df <- D.readCsv "purchases.csv"
+    D.take 6 df
+```
+
+Two extensions, three imports. You're looking at your data.
+
+### Total sales
+
+How much did we sell?
+
+**R:**
+
+```r
+purchases$amount |> sum()
+```
+
+**dataframe:**
+
+```haskell
+D.sum (F.col @Int "amount") df
+-- 17210
+```
+
+### GroupBy + Sum
+
+Total amount per country.
+
+**R:**
+
+```r
+purchases |>
+  group_by(country) |>
+  summarize(total = sum(amount))
+```
+
+**Frames (using Frames-map-reduce):**
+
+```haskell
+unpack :: FMR.Unpack Purchases Purchases
+unpack = FMR.unpackFilterOnField @Country (const True)
+
+assign :: FMR.Assign (Record '[Country]) Purchases (Record '[Amount, Discount])
+assign = FMR.splitOnKeys @'[Country]
+
+reduce :: FMR.Reduce (Record '[Country])
+                     (Record '[Amount, Discount])
+                     (Frame Purchases)
+reduce = FMR.foldAndAddKey $ (FF.foldAllConstrained @Num @'[Amount, Discount]) Foldl.sum
+
+mrFold :: FMR.Fold Purchases (Frame Purchases)
+mrFold = FMR.concatFold $ FMR.mapReduceFold unpack assign reduce
+
+main :: IO ()
+main = do
+    ms <- loadBenchmarks
+    let result = FMR.fold mrFold ms
+    mapM_ print (F.toList result)
+```
+
+An unpack step (even though it does nothing here), an assign step to split the key columns from
+value columns, a reduce step using `Foldl`, and a top-level fold that wires them together.  Four
+definitions, each with a substantial type signature, to express "group by country, sum amount."
+
+**dataframe:**
+
+```haskell
+df |> D.groupBy ["country"]
+   |> D.aggregate [F.sum (F.col @Int "amount") `as` "total"]
+```
+
+```
+-----------------
+ country | total
+---------|------
+  Text   |  Int
+---------|------
+ USA     | 8500
+ Canada  | 3400
+ ...
+```
+
+Two lines. Same result.
+
+### Sum after deducting discounts
+
+**R:**
+
+```r
+purchases |>
+  group_by(country) |>
+  summarize(total = sum(amount - discount))
+```
+
+**Frames:**
+
+```haskell
+aggDataFold :: FMR.Fold (Record '[Amount, Discount]) (Record '[Amount, Discount])
+aggDataFold =
+  let t = Foldl.premap (\r -> rgetField @Amount r - rgetField @Discount r) Foldl.sum
+      d = Foldl.premap (rgetField @Discount) Foldl.sum
+  in FF.sequenceRecFold $ FF.toFoldRecord t V.:&
+                          FF.toFoldRecord d V.:&
+                          V.RNil
+```
+
+You can't easily name the result column `"total"` — the output record has the same field names as
+the input (`Amount`, `Discount`), and adding a new field requires more type-level machinery.
+
+**dataframe:**
+
+```haskell
+df |> D.derive "net" (F.col @Int "amount" - F.col @Int "discount")
+   |> D.groupBy ["country"]
+   |> D.aggregate [F.sum (F.col @Int "net") `as` "total"]
+```
+
+```
+--------------------
+ country  |  total
+----------|--------
+   Text   |  Int
+----------|--------
+ Australia | 540
+ Brazil    | 414
+ Canada    | 3349
+ ...
+ USA       | 8455
+```
+
+`derive` creates a new column inline and `as` names the aggregation result — both things that
+require extra type-level work in Frames.
+
+### Filter outliers, then aggregate
+
+Remove purchases where the amount exceeds 10x the global median, then sum by country.
+
+**R:**
+
+```r
+purchases |>
+  filter(amount <= median(amount) * 10) |>
+  group_by(country) |>
+  summarize(total = sum(amount - discount))
+```
+
+**pandas (for comparison — this is where it gets clunky):**
+
+```python
+(purchases
+  .query("amount <= amount.median() * 10")
+  .groupby("country")
+  .apply(lambda df: (df["amount"] - df["discount"]).sum())
+  .reset_index()
+  .rename(columns={0: "total"})
+)
+```
+
+**dataframe:**
+
+```haskell
+let med = D.median (F.col @Double "amount") df
+
+df |> D.filterWhere (F.col @Double "amount" .<=. F.lit (med * 10))
+   |> D.derive "net" (F.col @Int "amount" - F.col @Int "discount")
+   |> D.groupBy ["country"]
+   |> D.aggregate [F.sum (F.col @Int "net") `as` "total"]
+```
+
+### Filter within groups
+
+The trickiest R example: filter by each country's own median, not the global one.
+
+**R:**
+
+```r
+purchases |>
+  group_by(country) |>
+  filter(amount <= median(amount) * 10) |>
+  summarize(total = sum(amount - discount))
+```
+
+**Frames:**
+
+```haskell
+let groupedByCountry :: Map.Map (Record '[Country]) (Frame Purchases)
+    groupedByCountry = FL.fold (FL.groupBy (rcast @'[Country]) frame) ms
+
+    countryMean :: Map.Map (Record '[Country]) Double
+    countryMean =
+      Map.map (\ns -> FL.fold FL.mean (fmap fromIntegral $ (^. amount) <$> ns))
+              groupedByCountry
+
+    filteredGroupByCountry :: Map.Map (Record '[Country]) (Frame Purchases)
+    filteredGroupByCountry =
+      Map.map (uncurry f) (Map.intersectionWith (,) groupedByCountry countryMean)
+      where
+        f :: Frame Purchases -> Double -> Frame Purchases
+        f df' m = filterFrame (\r -> fromIntegral (r ^. amount) <= 10.0 * m) df'
+```
+
+You need to manually group into a `Map`, compute the statistic per group, zip the map with the
+original grouped data, and filter each group separately. This is the point in the
+[Frames issue](https://github.com/acowley/Frames/issues/185) where the author wrote
+"it does feel clunky."
+
+**dataframe:**
+
+```haskell
+-- Compute each country's median and join it back
+let medians = df
+        |> D.groupBy ["country"]
+        |> D.aggregate [F.median (F.col @Double "amount") `as` "country_median"]
+
+D.innerJoin ["country"] df medians
+   |> D.filterWhere (F.col @Double "amount" .<=. F.col @Double "country_median" * 10)
+   |> D.derive "net" (F.col @Int "amount" - F.col @Int "discount")
+   |> D.groupBy ["country"]
+   |> D.aggregate [F.sum (F.col @Int "net") `as` "total"]
+```
+
+Not quite as concise as R (which has implicit grouped-filter semantics), but still a
+straightforward pipeline — no manual `Map` operations or type-level record gymnastics.
+
+### Same examples, typed API
+
+If you want compile-time column checking on these examples, the typed API gets you there without
+the vinyl overhead:
+
+```haskell
+{-# LANGUAGE DataKinds, TypeApplications, OverloadedStrings #-}
+
+import qualified DataFrame as D
+import qualified DataFrame.Typed as T
+import Data.Text (Text)
+import DataFrame.Operators
+
+type PurchaseSchema =
+    '[ T.Column "country"  Text
+     , T.Column "amount"   Int
+     , T.Column "discount" Int
+     ]
+
+main :: IO ()
+main = do
+    df <- D.readCsv "purchases.csv"
+    case T.freeze @PurchaseSchema df of
+        Nothing  -> putStrLn "Schema mismatch!"
+        Just tdf -> do
+            let result = T.aggregate
+                    (T.agg @"total" (T.sum (T.col @"amount")) $ T.aggNil)
+                    (T.groupBy @'["country"] tdf)
+            print (T.thaw result)
+```
+
+`T.col @"amount"` is checked against `PurchaseSchema` at compile time — same guarantee as
+Frames' vinyl records, but without the lens imports, `Foldl` plumbing, or map-reduce pipeline.
+
+### Key differences from Frames
+
+| | Frames | dataframe |
+|---|---|---|
+| **Record type** | Vinyl `Record '[Field1, Field2, ...]` | Untyped `DataFrame` or phantom-typed `TypedDataFrame` |
+| **Column access** | Lens (`r ^. amount`) or `rgetField @Amount r` | Expression DSL (`F.col @Int "amount"`) or TH-generated bindings (`amount`) |
+| **GroupBy + aggregate** | Map-reduce fold pipeline (unpack, assign, reduce) | `D.groupBy` + `D.aggregate` |
+| **Naming results** | Output shares input field names; new fields require type-level work | `as "name"` on any aggregation expression |
+| **Deriving columns** | Define new record fields or manipulate type-level lists | `D.derive "name" expr` |
+| **Language extensions** | Typically 8+ (DataKinds, TypeOperators, FlexibleContexts, TypeFamilies, ...) | Typically 2-3 (OverloadedStrings, TypeApplications) |
+| **Learning curve** | Vinyl records + lens + Foldl + type families | Expression DSL + pipe operator |
+| **Type safety** | Always on via vinyl records | Opt-in: untyped for exploration, typed API when you want compile-time checks |
+
+Frames pioneered type-safe tabular data in Haskell. The trade-off is that vinyl's type-level
+machinery is always present — even for a quick one-off analysis. Our library lets you start untyped
+and opt into compile-time types when you need them.
 
 ---
 

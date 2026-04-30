@@ -104,16 +104,20 @@ module DataFrame.Typed.Expr (
     -- * Aggregation combinators
     sum,
     mean,
+    median,
     count,
+    countAll,
     minimum,
     maximum,
     collect,
+    over,
 
     -- * Cast / coercion expressions
     castExpr,
     castExprWithDefault,
     castExprEither,
     unsafeCastExpr,
+    toDouble,
 
     -- * Named expression helper
     as,
@@ -152,10 +156,18 @@ import DataFrame.Internal.Nullable (
     WidenResultDiv,
     divArithOp,
     widenArithOp,
+    widenCmpOp,
  )
 import DataFrame.Internal.Types (Promote, PromoteDiv)
 
-import DataFrame.Typed.Schema (AssertPresent, SafeLookup)
+import qualified Data.Vector.Unboxed as VU
+import DataFrame.Typed.Schema (
+    AllKnownSymbol,
+    AssertAllPresent,
+    AssertPresent,
+    SafeLookup,
+    symbolVals,
+ )
 import DataFrame.Typed.Types (TExpr (..), TSortOrder (..))
 import Prelude hiding (maximum, minimum, sum)
 
@@ -460,59 +472,86 @@ infixl 7 .*, ./
 -- Nullable-aware comparison operators (three-valued logic)
 -------------------------------------------------------------------------------
 
--- | Nullable-aware equality. Returns @Maybe Bool@ when either operand is nullable.
+{- | Nullable-aware equality. Widens numeric operands to their common type,
+so @TExpr cols Double .== TExpr cols Int@ typechecks. Returns @Maybe Bool@
+when either operand is nullable.
+-}
 (.==) ::
-    (NullableCmpOp a b (NullCmpResult a b), Eq (BaseType a)) =>
+    ( NumericWidenOp (BaseType a) (BaseType b)
+    , NullLift2Op a b Bool (NullCmpResult a b)
+    , Eq (Promote (BaseType a) (BaseType b))
+    ) =>
     TExpr cols a ->
     TExpr cols b ->
     TExpr cols (NullCmpResult a b)
 (.==) (TExpr a) (TExpr b) =
-    TExpr (Binary (MkBinaryOp (nullCmpOp (==)) "eq" (Just "==") True 4) a b)
+    TExpr
+        (Binary (MkBinaryOp (applyNull2 (widenCmpOp (==))) "eq" (Just "==") True 4) a b)
 
--- | Nullable-aware inequality.
+-- | Nullable-aware inequality. Widens numeric operands to their common type.
 (./=) ::
-    (NullableCmpOp a b (NullCmpResult a b), Eq (BaseType a)) =>
+    ( NumericWidenOp (BaseType a) (BaseType b)
+    , NullLift2Op a b Bool (NullCmpResult a b)
+    , Eq (Promote (BaseType a) (BaseType b))
+    ) =>
     TExpr cols a ->
     TExpr cols b ->
     TExpr cols (NullCmpResult a b)
 (./=) (TExpr a) (TExpr b) =
-    TExpr (Binary (MkBinaryOp (nullCmpOp (/=)) "neq" (Just "/=") True 4) a b)
+    TExpr
+        (Binary (MkBinaryOp (applyNull2 (widenCmpOp (/=))) "neq" (Just "/=") True 4) a b)
 
--- | Nullable-aware less-than.
+-- | Nullable-aware less-than. Widens numeric operands to their common type.
 (.<) ::
-    (NullableCmpOp a b (NullCmpResult a b), Ord (BaseType a)) =>
+    ( NumericWidenOp (BaseType a) (BaseType b)
+    , NullLift2Op a b Bool (NullCmpResult a b)
+    , Ord (Promote (BaseType a) (BaseType b))
+    ) =>
     TExpr cols a ->
     TExpr cols b ->
     TExpr cols (NullCmpResult a b)
 (.<) (TExpr a) (TExpr b) =
-    TExpr (Binary (MkBinaryOp (nullCmpOp (<)) "lt" (Just "<") False 4) a b)
+    TExpr
+        (Binary (MkBinaryOp (applyNull2 (widenCmpOp (<))) "lt" (Just "<") False 4) a b)
 
--- | Nullable-aware less-than-or-equal.
+-- | Nullable-aware less-than-or-equal. Widens numeric operands to their common type.
 (.<=) ::
-    (NullableCmpOp a b (NullCmpResult a b), Ord (BaseType a)) =>
+    ( NumericWidenOp (BaseType a) (BaseType b)
+    , NullLift2Op a b Bool (NullCmpResult a b)
+    , Ord (Promote (BaseType a) (BaseType b))
+    ) =>
     TExpr cols a ->
     TExpr cols b ->
     TExpr cols (NullCmpResult a b)
 (.<=) (TExpr a) (TExpr b) =
-    TExpr (Binary (MkBinaryOp (nullCmpOp (<=)) "leq" (Just "<=") False 4) a b)
+    TExpr
+        (Binary (MkBinaryOp (applyNull2 (widenCmpOp (<=))) "leq" (Just "<=") False 4) a b)
 
--- | Nullable-aware greater-than-or-equal.
+-- | Nullable-aware greater-than-or-equal. Widens numeric operands to their common type.
 (.>=) ::
-    (NullableCmpOp a b (NullCmpResult a b), Ord (BaseType a)) =>
+    ( NumericWidenOp (BaseType a) (BaseType b)
+    , NullLift2Op a b Bool (NullCmpResult a b)
+    , Ord (Promote (BaseType a) (BaseType b))
+    ) =>
     TExpr cols a ->
     TExpr cols b ->
     TExpr cols (NullCmpResult a b)
 (.>=) (TExpr a) (TExpr b) =
-    TExpr (Binary (MkBinaryOp (nullCmpOp (>=)) "geq" (Just ">=") False 4) a b)
+    TExpr
+        (Binary (MkBinaryOp (applyNull2 (widenCmpOp (>=))) "geq" (Just ">=") False 4) a b)
 
--- | Nullable-aware greater-than.
+-- | Nullable-aware greater-than. Widens numeric operands to their common type.
 (.>) ::
-    (NullableCmpOp a b (NullCmpResult a b), Ord (BaseType a)) =>
+    ( NumericWidenOp (BaseType a) (BaseType b)
+    , NullLift2Op a b Bool (NullCmpResult a b)
+    , Ord (Promote (BaseType a) (BaseType b))
+    ) =>
     TExpr cols a ->
     TExpr cols b ->
     TExpr cols (NullCmpResult a b)
 (.>) (TExpr a) (TExpr b) =
-    TExpr (Binary (MkBinaryOp (nullCmpOp (>)) "gt" (Just ">") False 4) a b)
+    TExpr
+        (Binary (MkBinaryOp (applyNull2 (widenCmpOp (>))) "gt" (Just ">") False 4) a b)
 
 not :: TExpr cols Bool -> TExpr cols Bool
 not (TExpr e) = TExpr (Unary (MkUnaryOp Prelude.not "not" (Just "!")) e)
@@ -527,8 +566,16 @@ sum (TExpr e) = TExpr (F.sum e)
 mean :: (Columnable a, Real a) => TExpr cols a -> TExpr cols Double
 mean (TExpr e) = TExpr (F.mean e)
 
+median ::
+    (Columnable a, Real a, VU.Unbox a) => TExpr cols a -> TExpr cols Double
+median (TExpr e) = TExpr (F.median e)
+
 count :: (Columnable a) => TExpr cols a -> TExpr cols Int
 count (TExpr e) = TExpr (F.count e)
+
+-- | Row count, the equivalent of SQL's @COUNT(*)@.
+countAll :: TExpr cols Int
+countAll = TExpr F.countAll
 
 minimum :: (Columnable a, Ord a) => TExpr cols a -> TExpr cols a
 minimum (TExpr e) = TExpr (F.minimum e)
@@ -538,6 +585,12 @@ maximum (TExpr e) = TExpr (F.maximum e)
 
 collect :: (Columnable a) => TExpr cols a -> TExpr cols [a]
 collect (TExpr e) = TExpr (F.collect e)
+
+over ::
+    forall (names :: [Symbol]) cols a.
+    (Columnable a, AllKnownSymbol names, AssertAllPresent names cols) =>
+    TExpr cols a -> TExpr cols a
+over (TExpr e) = TExpr{unTExpr = F.over (symbolVals @names) e}
 
 -------------------------------------------------------------------------------
 -- Cast / coercion expressions
@@ -583,6 +636,9 @@ unsafeCastExpr (TExpr e) =
             (fromRight (error "unsafeCastExpr: unexpected Nothing in column"))
             e
         )
+
+toDouble :: (Columnable a, Real a) => TExpr cols a -> TExpr cols Double
+toDouble (TExpr e) = TExpr (F.toDouble e)
 
 -------------------------------------------------------------------------------
 -- Named expression helper

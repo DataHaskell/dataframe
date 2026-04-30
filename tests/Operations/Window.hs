@@ -111,7 +111,7 @@ overMeanDeriveTest =
     expectedMeans = [15.0, 15.0, 60.0, 60.0, 60.0] :: [Double]
     actualMeans = case DI.getColumn "group_mean" result of
         Nothing -> error "group_mean column not found"
-        Just col -> DI.toList @Double col
+        Just c -> DI.toList @Double c
 
 overSumTest :: Test
 overSumTest =
@@ -134,7 +134,7 @@ overSumTest =
     expectedSums = [30, 30, 300, 300] :: [Int]
     actualSums = case DI.getColumn "group_sum" result of
         Nothing -> error "group_sum column not found"
-        Just col -> DI.toList @Int col
+        Just c -> DI.toList @Int c
 
 overCountTest :: Test
 overCountTest =
@@ -157,7 +157,7 @@ overCountTest =
     expectedCounts = [3, 3, 3, 2, 2] :: [Int]
     actualCounts = case DI.getColumn "group_count" result of
         Nothing -> error "group_count column not found"
-        Just col -> DI.toList @Int col
+        Just c -> DI.toList @Int c
 
 mixedGlobalAndOverTest :: Test
 mixedGlobalAndOverTest =
@@ -182,7 +182,7 @@ mixedGlobalAndOverTest =
     expectedDeviations = [-5.0, 5.0, -50.0, 50.0] :: [Double]
     actualDeviations = case DI.getColumn "deviation" result of
         Nothing -> error "deviation column not found"
-        Just col -> DI.toList @Double col
+        Just c -> DI.toList @Double c
 
 -- | Example from https://www.sumsar.net/blog/pandas-feels-clunky-when-coming-from-r/
 blogPostExampleGlobal :: Test

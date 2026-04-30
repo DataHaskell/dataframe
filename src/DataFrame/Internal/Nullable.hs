@@ -63,6 +63,7 @@ module DataFrame.Internal.Nullable (
     -- * Numeric widening
     NumericWidenOp (..),
     widenArithOp,
+    widenCmpOp,
     WidenResult,
 
     -- * Division widening (integral × integral → Double)
@@ -379,8 +380,20 @@ instance NumericWidenOp Float Double where widen1 = realToFrac; widen2 = id
 instance NumericWidenOp Double Float where
     widen1 = id
     widen2 = realToFrac
-instance NumericWidenOp Int Float where widen1 = fromIntegral; widen2 = id
-instance NumericWidenOp Float Int where
+instance NumericWidenOp Int32 Float where widen1 = fromIntegral; widen2 = id
+instance NumericWidenOp Float Int32 where
+    widen1 = id
+    widen2 = fromIntegral
+instance NumericWidenOp Int32 Double where widen1 = fromIntegral; widen2 = id
+instance NumericWidenOp Double Int32 where
+    widen1 = id
+    widen2 = fromIntegral
+instance NumericWidenOp Int64 Float where widen1 = fromIntegral; widen2 = id
+instance NumericWidenOp Float Int64 where
+    widen1 = id
+    widen2 = fromIntegral
+instance NumericWidenOp Int64 Double where widen1 = fromIntegral; widen2 = id
+instance NumericWidenOp Double Int64 where
     widen1 = id
     widen2 = fromIntegral
 
@@ -393,6 +406,16 @@ widenArithOp ::
     b ->
     Promote a b
 widenArithOp f x y = f (widen1 @a @b x) (widen2 @a @b y)
+
+-- | Apply a comparison function after widening both operands to their common type.
+widenCmpOp ::
+    forall a b.
+    (NumericWidenOp a b) =>
+    (Promote a b -> Promote a b -> Bool) ->
+    a ->
+    b ->
+    Bool
+widenCmpOp f x y = f (widen1 @a @b x) (widen2 @a @b y)
 
 -- | Result type of a widening binary operator, accounting for nullable wrappers.
 type WidenResult a b = NullLift2Result a b (Promote (BaseType a) (BaseType b))

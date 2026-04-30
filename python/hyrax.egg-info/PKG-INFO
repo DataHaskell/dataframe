@@ -1,0 +1,119 @@
+Metadata-Version: 2.4
+Name: hyrax
+Version: 0.1.0
+Summary: DataFrame operations and decision-tree training in Python, backed by the Haskell `dataframe` library
+Author-email: Michael Chavinda <mschavinda@gmail.com>
+License: MIT
+Project-URL: Homepage, https://github.com/mchav/dataframe
+Project-URL: Repository, https://github.com/mchav/dataframe
+Project-URL: Issues, https://github.com/mchav/dataframe/issues
+Keywords: dataframe,decision-tree,arrow,data-analysis,haskell
+Classifier: Development Status :: 3 - Alpha
+Classifier: Intended Audience :: Developers
+Classifier: Intended Audience :: Science/Research
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Operating System :: MacOS
+Classifier: Operating System :: POSIX :: Linux
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.9
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Classifier: Programming Language :: Python :: 3.13
+Classifier: Topic :: Scientific/Engineering
+Classifier: Topic :: Scientific/Engineering :: Information Analysis
+Requires-Python: >=3.9
+Description-Content-Type: text/markdown
+Requires-Dist: pyarrow>=10.0
+Provides-Extra: polars
+Requires-Dist: polars>=0.18; extra == "polars"
+Provides-Extra: test
+Requires-Dist: pytest>=7; extra == "test"
+Requires-Dist: polars>=0.18; extra == "test"
+
+# hyrax
+
+Python bindings for the Haskell [`dataframe`](https://github.com/mchav/dataframe)
+library. Tabular data ops, statistics, and decision-tree training, ferried
+across the Arrow C Data Interface.
+
+## Install
+
+```bash
+pip install hyrax
+```
+
+The wheel bundles a prebuilt native library (`libdataframe-arrow.dylib` /
+`libdataframe-arrow.so`); only `pyarrow` is installed alongside.
+
+## Quickstart
+
+```python
+import hyrax as hx
+
+# Read a CSV — columns with nulls come back as nullable Arrow types.
+df = hx.read_csv("data/titanic.csv")
+
+# Filter / derive / aggregate. Column types are inferred from the source
+# schema, so `hx.col("Age") >= 18.0` Just Works.
+adults = (df
+    .filter(hx.col("Age") > 0.0)
+    .derive("price_per_class", hx.col("Fare") / hx.col("Pclass"))
+    .groupBy(["Sex"])
+    .aggregate({
+        "n":          hx.count(hx.col("Sex")),
+        "median_age": hx.median(hx.col("Age")),
+        "mean_fare":  hx.mean(hx.col("Fare")),
+    }))
+
+# pyarrow.RecordBatch
+print(adults.to_pandas())
+```
+
+## Decision tree (sklearn-style)
+
+```python
+features = df.filter(hx.col("Age") > 0.0).select(
+    ["Survived", "Pclass", "Sex", "Age", "Fare"]
+)
+
+clf = hx.DecisionTreeClassifier(max_depth=3, min_samples_split=20).fit(
+    features, target="Survived", target_type="int"
+)
+preds = clf.predict_array(features).to_pylist()
+```
+
+`fit` runs the TAO trainer in Haskell and stores the trained tree as a JSON
+expression. `predict` applies it to any frame as a derived column — no
+re-training needed.
+
+## Operations
+
+| Category    | API |
+|-------------|-----|
+| Read        | `read_csv`, `read_tsv`, `read_parquet`, `read_json`, `from_arrow`, `scan_csv`, `scan_parquet` |
+| Project     | `select`, `exclude`, `rename`, `derive` / `with_column` |
+| Filter      | `filter`, `distinct` |
+| Slice       | `limit`, `tail`, `drop_first`, `drop_last`, `slice` |
+| Sort        | `sort` |
+| Group / agg | `groupBy(...).aggregate({...})` with `count`, `sum`, `mean`, `min`, `max`, `median`, `variance`, `std` |
+| Statistics  | `describe`, `correlation`, `frequencies` |
+| Joins       | `join(other, on=..., how="inner"\|"left"\|"right"\|"outer")` |
+| Write       | `write_csv` |
+| ML          | `DecisionTreeClassifier(...).fit(df, target).predict(df)` |
+
+## Expressions
+
+```python
+hx.col("age")                  # type inferred from source schema
+hx.col("price", type=float)    # explicit; Python type or string both work
+hx.lit(0.5)                    # Python literal
+hx.col("a") > hx.col("b") + 1  # comparisons return Bool
+(hx.col("x") > 0) & (hx.col("y") < 0)  # & | ~ for boolean composition
+hx.when(cond).then(a).otherwise(b)
+expr.cast(float)               # toDouble cast
+```
+
+## License
+
+MIT

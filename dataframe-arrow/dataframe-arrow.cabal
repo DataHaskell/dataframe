@@ -1,0 +1,52 @@
+cabal-version:      3.0
+name:               dataframe-arrow
+version:            1.0.0.0
+
+synopsis: Arrow C Data Interface foreign library for the dataframe Python bindings.
+
+description: Native-shared library exposing the dataframe lazy executor to
+             Python via the Arrow C Data Interface.  Defaults to the
+             SIMD CSV reader from @dataframe-fastcsv@.
+             Can be used as a standalone FFI library for other languages as well.
+
+bug-reports: https://github.com/mchav/dataframe/issues
+license:            MIT
+author:             Michael Chavinda
+maintainer:         mschavinda@gmail.com
+
+copyright: (c) 2024-2026 Michael Chavinda
+category: Data
+build-type: Simple
+
+extra-source-files: cbits/arrow_abi.h
+                    cbits/dataframe_arrow.h
+                    cbits/rts_init.c
+
+common warnings
+    ghc-options:
+        -Wincomplete-patterns
+        -Wincomplete-uni-patterns
+        -Wunused-imports
+        -Wunused-local-binds
+
+foreign-library dataframe-arrow
+    import: warnings
+    type:             native-shared
+    hs-source-dirs:   ffi-export
+    other-modules:    DataFrame.FFI
+    build-depends:
+        base                  >= 4   && < 5,
+        dataframe             >= 1 && < 2,
+        dataframe:arrow-bridge,
+        dataframe-fastcsv,
+        text                  >= 2.0 && < 3,
+        aeson                 >= 0.11 && < 3,
+        bytestring            >= 0.11 && < 0.13,
+        containers            >= 0.6.7 && < 0.9,
+        vector                ^>= 0.13
+    c-sources:        cbits/rts_init.c
+    include-dirs:     cbits
+    includes:         arrow_abi.h dataframe_arrow.h
+    install-includes: arrow_abi.h dataframe_arrow.h
+    ghc-options:      -threaded
+    default-language: Haskell2010

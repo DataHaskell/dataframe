@@ -28,6 +28,18 @@
 #define ALL_ONES_MASK ~0ULL
 #define ALL_ZEROS_MASK 0ULL
 
-size_t get_delimiter_indices(uint8_t *buf, size_t len, uint8_t separator, size_t* indices);
+// Status codes reported via the `status` out-parameter of
+// `get_delimiter_indices`.
+#define GDI_OK 0
+#define GDI_UNCLOSED_QUOTE 1
+
+// Sentinel returned by `get_delimiter_indices` when the build lacks
+// SIMD support or the running CPU does not advertise the carryless
+// multiply extensions needed by the fast path.  The caller falls back
+// to the Haskell state machine.
+#define GDI_SIMD_UNAVAILABLE ((size_t)-1)
+
+size_t get_delimiter_indices(uint8_t *buf, size_t len, uint8_t separator,
+                             size_t *indices, int *status);
 
 #endif

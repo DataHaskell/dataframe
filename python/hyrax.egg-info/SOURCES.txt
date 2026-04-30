@@ -1,0 +1,11 @@
+MANIFEST.in
+README.md
+pyproject.toml
+setup.py
+hyrax/__init__.py
+hyrax/libdataframe-arrow.dylib
+hyrax.egg-info/PKG-INFO
+hyrax.egg-info/SOURCES.txt
+hyrax.egg-info/dependency_links.txt
+hyrax.egg-info/requires.txt
+hyrax.egg-info/top_level.txt

@@ -1062,9 +1062,10 @@ showInDefaultBrowser (HtmlPlot p) = do
     putStr "Saving plot to: "
     putStrLn fullPath
     T.writeFile fullPath p
-    if operatingSystem == "mingw32"
-        then openFileSilently "start" fullPath
-        else openFileSilently "xdg-open" fullPath
+    case operatingSystem of
+        "mingw32" -> openFileSilently "start" fullPath
+        "darwin" -> openFileSilently "open" fullPath
+        _ -> openFileSilently "xdg-open" fullPath
     pure ()
 
 openFileSilently :: FilePath -> FilePath -> IO ()

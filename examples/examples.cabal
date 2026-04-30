@@ -39,6 +39,7 @@ executable examples
                    DataFrame.Internal.Interpreter,
                    DataFrame.Internal.Parsing,
                    DataFrame.Internal.Column,
+                   DataFrame.Internal.Grouping,
                    DataFrame.Internal.Statistics,
                    DataFrame.Display.Terminal.PrettyPrint,
                    DataFrame.Display.Terminal.Colours,
@@ -134,12 +135,10 @@ executable examples
                       filepath >= 1.4 && < 2,
                       Glob >= 0.10 && < 1,
                       pinch >= 0.5.1.0 && <= 0.5.2.0,
+                      async >= 2.2 && < 3,
+                      temporary >= 1.3 && < 2,
     if impl(ghc >= 9.12)
       build-depends: ghc-typelits-natnormalise == 0.9.3
     else
       build-depends: ghc-typelits-natnormalise >= 0.7.7 && < 0.9
-    c-sources:        ../cbits/process_csv.c
-    include-dirs:     ../cbits
-    includes:         process_csv.h
-    install-includes: process_csv.h
     default-language: Haskell2010

@@ -1,5 +1,30 @@
 # Revision history for dataframe
 
+## 1.2.0.0
+### Breaking changes
+* Remove `Eq` and `Ord` instances for `Expr` — they were buggy under cross-type comparison. Use `eqExpr` / `compareExpr` from `DataFrame.Internal.Expression` directly.
+* Lazy executor: `ExecutorConfig` removed; `execute` now takes only a `PhysicalPlan`. `CsvSource` carries the `CsvReader` per scan, so the executor no longer has to know about the CSV implementation.
+
+### New features
+* New `dataframe-fusion` package: typed Apache DataFusion-backed query API (`DataFrame.Fusion.Typed`).
+* Can now use any CSV reader for the lazy pipeline.
+* New `readCsvWithSchema :: Schema -> FilePath -> IO DataFrame` for schema-driven CSV reads, plus a `CsvReader` type alias exported from `DataFrame.IO.CSV`.
+* Numeric comparison operators (`.==`, `./=`, `.<`, `.>`, `.<=`, `.>=`) now widen their operands to a common numeric type, so e.g. `Expr Double .== Expr Int` typechecks. Mirrors the existing arithmetic widening.
+
+### Internal
+* Bump `cabal-version` to 3.0; add `dataframe-fastcsv` to the lint targets; nix flake and `cabal.project` improvements.
+* `dataframe-persistent` license corrected to MIT in cabal (#201).
+
+## 1.1.2.1
+* Add `over` and `median` functions to typed API
+* Fix bug opening web plots in MacOS
+
+## 1.1.2.0
+* Safe read can now choose between Either and Maybe for error handling.
+* Add countAll and over (window) functions.
+* Add mkRandom to make random columns.
+* Faster CSV parsing.
+
 ## 1.1.1.0
 ### New features
 * Add `DataFrame.Typed.Lazy` module — a type-safe lazy query pipeline combining compile-time schema tracking with deferred execution.

@@ -171,13 +171,13 @@ at runtime once statistics are available).
 -}
 toPhysical :: Int -> LogicalPlan -> PhysicalPlan
 -- Special case: Filter directly on a Scan → push into ScanConfig.
-toPhysical batchSz (Filter p (Scan (CsvSource path sep) schema)) =
+toPhysical batchSz (Filter p (Scan (CsvSource path sep reader) schema)) =
     PhysicalScan
-        (CsvSource path sep)
+        (CsvSource path sep reader)
         (ScanConfig batchSz sep schema (Just p))
-toPhysical batchSz (Scan (CsvSource path sep) schema) =
+toPhysical batchSz (Scan (CsvSource path sep reader) schema) =
     PhysicalScan
-        (CsvSource path sep)
+        (CsvSource path sep reader)
         (ScanConfig batchSz sep schema Nothing)
 toPhysical batchSz (Filter p (Scan (ParquetSource path) schema)) =
     PhysicalScan
@@ -206,4 +206,4 @@ toPhysical batchSz (Sort cols child) =
     PhysicalSort cols (toPhysical batchSz child)
 toPhysical batchSz (Limit n child) =
     PhysicalLimit n (toPhysical batchSz child)
-toPhysical _ (SourceDF df) = PhysicalSourceDF df
+toPhysical batchSz (SourceDF df) = PhysicalSourceDF batchSz df

@@ -4,10 +4,10 @@ This guide ports and extends Wes McKinney's [Python for Data Analysis](https://w
 
 
 ```haskell
--- cabal: build-depends: dataframe-0.7.0.0, text, granite
+-- cabal: build-depends: dataframe, text, granite
 -- cabal: default-extensions: TemplateHaskell, TypeApplications, OverloadedStrings, DataKinds
 :set -package granite
-:set -package dataframe-0.7.0.0
+:set -package dataframe
 import qualified DataFrame as D
 import qualified DataFrame.Functions as F
 import qualified Data.Text.IO as TIO

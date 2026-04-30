@@ -44,6 +44,50 @@ foldAggregation =
             )
         )
 
+countAllAggregation :: Test
+countAllAggregation =
+    TestCase
+        ( assertEqual
+            "countAll gives per-group row counts without a column argument"
+            ( D.fromNamedColumns
+                [ ("test1", DI.fromList [1 :: Int, 2, 3])
+                , ("n", DI.fromList [6 :: Int, 3, 3])
+                ]
+            )
+            ( testData
+                & D.groupBy ["test1"]
+                & D.aggregate [F.countAll `as` "n"]
+                & D.sortBy [D.Asc (F.col @Int "test1")]
+            )
+        )
+
+countAllAggregationTyped :: Test
+countAllAggregationTyped =
+    TestCase
+        ( assertEqual
+            "Typed countAll gives per-group row counts"
+            ( D.fromNamedColumns
+                [ ("test1", DI.fromList [1 :: Int, 2, 3])
+                , ("n", DI.fromList [6 :: Int, 3, 3])
+                ]
+            )
+            ( testData
+                & either (error . show) id
+                    . DT.freezeWithError
+                        @[ DT.Column "test1" Int
+                         , DT.Column "test2" Int
+                         , DT.Column "test3" Int
+                         , DT.Column "test4" Char
+                         , DT.Column "test5" String
+                         , DT.Column "test6" Integer
+                         ]
+                & DT.groupBy @'["test1"]
+                & DT.aggregate (DT.agg @"n" DT.countAll DT.aggNil)
+                & DT.sortBy [DT.asc (DT.col @"test1")]
+                & DT.thaw
+            )
+        )
+
 foldAggregationTyped :: Test
 foldAggregationTyped =
     TestCase
@@ -283,6 +327,8 @@ groupByOptionalColumn =
 tests :: [Test]
 tests =
     [ TestLabel "foldAggregation" foldAggregation
+    , TestLabel "countAllAggregation" countAllAggregation
+    , TestLabel "countAllAggregationTyped" countAllAggregationTyped
     , TestLabel "foldAggregationTyped" foldAggregationTyped
     , TestLabel "numericAggregation" numericAggregation
     , TestLabel "numericAggregationTyped" numericAggregationTyped

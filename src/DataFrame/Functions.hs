@@ -248,6 +248,11 @@ count = Agg (MergeAgg "count" (0 :: Int) (\c _ -> c + 1) (+) id)
 {-# SPECIALIZE count :: Expr Int64 -> Expr Int #-}
 {-# INLINEABLE count #-}
 
+-- | Row count, the equivalent of SQL's @COUNT(*)@.
+countAll :: Expr Int
+countAll = count (Lit (0 :: Int))
+{-# INLINE countAll #-}
+
 collect :: (Columnable a) => Expr a -> Expr [a]
 collect = Agg (FoldAgg "collect" (Just []) (flip (:)))
 {-# SPECIALIZE collect :: Expr Double -> Expr [Double] #-}

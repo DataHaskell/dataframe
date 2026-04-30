@@ -12,7 +12,7 @@ module DataFrame.DecisionTree where
 import qualified DataFrame.Functions as F
 import DataFrame.Internal.Column
 import DataFrame.Internal.DataFrame (DataFrame (..), unsafeGetColumn)
-import DataFrame.Internal.Expression (Expr (..), eSize, getColumns)
+import DataFrame.Internal.Expression (Expr (..), eSize, eqExpr, getColumns)
 import DataFrame.Internal.Interpreter (interpret)
 import DataFrame.Internal.Statistics (percentileOrd')
 import DataFrame.Internal.Types
@@ -23,9 +23,9 @@ import Control.Exception (throw)
 import Control.Monad (guard)
 import Data.Function (on)
 #if MIN_VERSION_base(4,20,0)
-import Data.List (maximumBy, minimumBy, nub, sort, sortBy)
+import Data.List (maximumBy, minimumBy, nub, nubBy, sort, sortBy)
 #else
-import Data.List (foldl', maximumBy, minimumBy, nub, sort, sortBy)
+import Data.List (foldl', maximumBy, minimumBy, nub, nubBy, sort, sortBy)
 #endif
 import Data.Int (Int16, Int32, Int64, Int8)
 import qualified Data.Map.Strict as M
@@ -149,7 +149,7 @@ defaultTreeConfig =
 data Tree a
     = Leaf !a
     | Branch !(Expr Bool) !(Tree a) !(Tree a)
-    deriving (Eq, Show)
+    deriving (Show)
 
 treeDepth :: Tree a -> Int
 treeDepth (Leaf _) = 0
@@ -171,7 +171,7 @@ fitDecisionTree ::
 fitDecisionTree cfg (Col target) df =
     let
         conds =
-            nub $
+            nubBy eqExpr $
                 numericConditions cfg (exclude [target] df)
                     ++ generateConditionsOld cfg (exclude [target] df)
 
@@ -522,15 +522,15 @@ pruneDead (Branch cond left right) =
      in
         Branch cond left' right'
 
-pruneExpr :: forall a. (Columnable a, Eq a) => Expr a -> Expr a
+pruneExpr :: forall a. (Columnable a) => Expr a -> Expr a
 pruneExpr (If cond trueBranch falseBranch) =
     let t = pruneExpr trueBranch
         f = pruneExpr falseBranch
-     in if t == f
+     in if eqExpr t f
             then t
             else case (t, f) of
-                (If condInner tInner _, _) | cond == condInner -> If cond tInner f
-                (_, If condInner _ fInner) | cond == condInner -> If cond t fInner
+                (If condInner tInner _, _) | eqExpr cond condInner -> If cond tInner f
+                (_, If condInner _ fInner) | eqExpr cond condInner -> If cond t fInner
                 _ -> If cond t f
 pruneExpr (Unary op e) = Unary op (pruneExpr e)
 pruneExpr (Binary op l r) = Binary op (pruneExpr l) (pruneExpr r)
@@ -624,8 +624,8 @@ numExprCols (NDouble e) = getColumns e
 numExprCols (NMaybeDouble e) = getColumns e
 
 numExprEq :: NumExpr -> NumExpr -> Bool
-numExprEq (NDouble e1) (NDouble e2) = e1 == e2
-numExprEq (NMaybeDouble e1) (NMaybeDouble e2) = e1 == e2
+numExprEq (NDouble e1) (NDouble e2) = eqExpr e1 e2
+numExprEq (NMaybeDouble e1) (NMaybeDouble e2) = eqExpr e1 e2
 numExprEq _ _ = False
 
 combineNumExprs :: NumExpr -> NumExpr -> [NumExpr]
@@ -759,7 +759,7 @@ boolExprs df baseExprs prevExprs depth maxDepth
     combinedExprs = do
         e1 <- prevExprs
         e2 <- baseExprs
-        guard (e1 /= e2)
+        guard (Prelude.not (eqExpr e1 e2))
         [F.and e1 e2, F.or e1 e2]
 
 generateConditionsOld :: TreeConfig -> DataFrame -> [Expr Bool]
@@ -770,7 +770,7 @@ generateConditionsOld cfg df =
         genConds colName = case unsafeGetColumn colName df of
             (BoxedColumn Nothing (column :: V.Vector a)) ->
                 case withOrdFrom @a ords (map (Lit . (`percentileOrd'` column)) [1, 25, 75, 99]) of
-                    Just ps -> map (F.lift2 (==) (Col @a colName)) ps
+                    Just ps -> map (\p -> Col @a colName .==. p) ps
                     Nothing -> []
             (BoxedColumn (Just _) (column :: V.Vector a)) -> case sFloating @a of
                 STrue -> [] -- handled by numericCols / numericExprs
@@ -780,7 +780,7 @@ generateConditionsOld cfg df =
                         case withOrdFrom @a
                             ords
                             (map (Lit . Just . (`percentileOrd'` column)) [1, 25, 75, 99]) of
-                            Just ps -> map (F.lift2 (==) (Col @(Maybe a) colName)) ps
+                            Just ps -> map (\p -> Col @(Maybe a) colName .==. p) ps
                             Nothing -> []
             (UnboxedColumn _ (_ :: VU.Vector a)) -> []
 
@@ -803,7 +803,7 @@ generateConditionsOld cfg df =
                     ) ->
                         case testEquality (typeRep @a) (typeRep @b) of
                             Nothing -> []
-                            Just Refl -> [F.lift2 (==) (Col @a l) (Col @a r)]
+                            Just Refl -> [Col @a l .==. Col @a r]
                 (UnboxedColumn _ (_ :: VU.Vector a), UnboxedColumn _ (_ :: VU.Vector b)) -> []
                 ( BoxedColumn (Just _) (_ :: V.Vector a)
                     , BoxedColumn (Just _) (_ :: V.Vector b)
@@ -811,11 +811,11 @@ generateConditionsOld cfg df =
                         Nothing -> []
                         Just Refl -> case testEquality (typeRep @a) (typeRep @T.Text) of
                             Nothing ->
-                                case withOrdFrom @a ords [F.lift2 (<=) (Col @(Maybe a) l) (Col r)] of
+                                case withOrdFrom @a ords [Col @(Maybe a) l .<=. Col @(Maybe a) r] of
                                     Just leExprs ->
-                                        leExprs ++ [F.lift2 (==) (Col @(Maybe a) l) (Col r)]
-                                    Nothing -> [F.lift2 (==) (Col @(Maybe a) l) (Col r)]
-                            Just Refl -> [F.lift2 (==) (Col @(Maybe a) l) (Col r)]
+                                        leExprs ++ [Col @(Maybe a) l .==. Col @(Maybe a) r]
+                                    Nothing -> [Col @(Maybe a) l .==. Col @(Maybe a) r]
+                            Just Refl -> [Col @(Maybe a) l .==. Col @(Maybe a) r]
                 _ -> []
      in
         concatMap genConds (columnNames df) ++ columnConds
@@ -885,7 +885,7 @@ findBestSplit ::
     TreeConfig -> T.Text -> [Expr Bool] -> DataFrame -> Maybe (Expr Bool)
 findBestSplit = findBestGreedySplit @a
 
-pruneTree :: forall a. (Columnable a, Eq a) => Expr a -> Expr a
+pruneTree :: forall a. (Columnable a) => Expr a -> Expr a
 pruneTree = pruneExpr
 
 -- | A tree where each leaf stores a class-probability distribution.
@@ -958,7 +958,7 @@ fitProbTree ::
 fitProbTree cfg (Col target) df =
     let
         conds =
-            nub $
+            nubBy eqExpr $
                 numericConditions cfg (exclude [target] df)
                     ++ generateConditionsOld cfg (exclude [target] df)
         initialTree = buildGreedyTree @a cfg (maxTreeDepth cfg) target conds df

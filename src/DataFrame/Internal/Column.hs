@@ -28,7 +28,7 @@ import qualified Data.Vector.Unboxed.Mutable as VUM
 import Control.DeepSeq (NFData (..), rnf)
 import Control.Exception (throw)
 import Control.Monad (forM_, when)
-import Control.Monad.ST (runST)
+import Control.Monad.ST (ST, runST)
 import Data.Bits (
     complement,
     popCount,
@@ -1740,3 +1740,22 @@ toUnboxedVector column =
                         }
                     )
 {-# INLINE toUnboxedVector #-}
+
+-- Shared finaliser for the two parseUnboxedColumn* helpers.  Freezes
+-- the mutable data vector, and only materialises the bitmap when the
+-- column actually had nulls.
+{-# INLINE finalizeParseResult #-}
+finalizeParseResult ::
+    (VU.Unbox a) =>
+    VUM.STVector s a ->
+    VUM.STVector s Word8 ->
+    Bool ->
+    ST s (Maybe (Maybe Bitmap, VU.Vector a))
+finalizeParseResult values vmask anyNull
+    | anyNull = do
+        vs <- VU.unsafeFreeze values
+        vm <- VU.unsafeFreeze vmask
+        return (Just (Just (buildBitmapFromValid vm), vs))
+    | otherwise = do
+        vs <- VU.unsafeFreeze values
+        return (Just (Nothing, vs))

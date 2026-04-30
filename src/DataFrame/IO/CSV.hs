@@ -29,6 +29,7 @@ import qualified Data.Csv.Streaming as CsvStream
 import Control.DeepSeq
 import Control.Exception (SomeException, catch)
 import Control.Monad
+import Control.Monad.ST (runST)
 import Data.Char
 import qualified Data.Csv as Csv
 import Data.Either
@@ -172,6 +173,37 @@ data TypeSpec
     | SpecifyTypes [(T.Text, SchemaType)] TypeSpec
     | NoInference
 
+{- | How the fast reader should treat a row whose field count does not
+match the header row.  Only consulted by @dataframe-fastcsv@; the pure
+Haskell reader has its own semantics.
+-}
+data RaggedRowPolicy
+    = {- | Fill missing cells with nulls; silently drop extras.
+      Matches pandas / polars lenient defaults.
+      -}
+      PadWithNull
+    | {- | Fill missing cells with nulls; silently drop extras.  Alias
+      kept for ergonomic naming when the caller only cares about the
+      "don't raise, just forget the extras" half of 'PadWithNull'.
+      -}
+      Truncate
+    | {- | Raise a 'DataFrame.IO.CSV.Fast.CsvParseError' on any row whose
+      field count differs from the header.  Matches polars' strict
+      schema-bound mode.
+      -}
+      RaiseOnRagged
+    deriving (Eq, Show)
+
+-- | How the fast reader should treat an unclosed quoted field at EOF.
+data UnclosedQuotePolicy
+    = -- | Raise a 'DataFrame.IO.CSV.Fast.CsvParseError'.  Default.
+      RaiseOnUnclosedQuote
+    | {- | Return whatever rows were parsed before the stray quote; the
+      remainder is silently dropped.
+      -}
+      BestEffort
+    deriving (Eq, Show)
+
 -- | CSV read parameters.
 data ReadOptions = ReadOptions
     { headerSpec :: HeaderSpec
@@ -202,6 +234,19 @@ data ReadOptions = ReadOptions
     -- ^ Number of columns to read.
     , missingIndicators :: [T.Text]
     -- ^ Values that should be read as `Nothing`.
+    , fastCsvOnRaggedRow :: RaggedRowPolicy
+    {- ^ @dataframe-fastcsv@: how to treat rows with a non-header field count.
+    (default: 'PadWithNull')
+    -}
+    , fastCsvOnUnclosedQuote :: UnclosedQuotePolicy
+    {- ^ @dataframe-fastcsv@: how to treat an unclosed quoted field at EOF.
+    (default: 'RaiseOnUnclosedQuote')
+    -}
+    , fastCsvTrimUnquoted :: Bool
+    {- ^ @dataframe-fastcsv@: if 'True', leading/trailing whitespace is
+    stripped from unquoted fields after decoding.  RFC 4180 preserves
+    this whitespace, and that is the default ('False').
+    -}
     }
 
 shouldInferFromSample :: TypeSpec -> Bool
@@ -230,6 +275,9 @@ defaultReadOptions =
         , numColumns = Nothing
         , missingIndicators =
             ["Nothing", "NULL", "", " ", "nan", "null", "N/A", "NaN", "NAN", "NA"]
+        , fastCsvOnRaggedRow = PadWithNull
+        , fastCsvOnUnclosedQuote = RaiseOnUnclosedQuote
+        , fastCsvTrimUnquoted = False
         }
 
 {- | Read CSV file from path and load it into a dataframe.
@@ -242,6 +290,28 @@ ghci> D.readCsv ".\/data\/taxi.csv"
 -}
 readCsv :: FilePath -> IO DataFrame
 readCsv = readSeparated defaultReadOptions
+
+type CsvReader = Schema -> FilePath -> IO DataFrame
+
+{- | Schema-driven attoparsec CSV reader.  Coerces each column to the
+type declared in 'Schema'; columns absent from the schema fall back to
+the default inference path.  Defined in terms of 'readSeparated' with
+the 'TypeSpec' filled in.
+
+@
+import qualified DataFrame as D
+df <- D.readCsvWithSchema schema "input.csv"
+@
+-}
+readCsvWithSchema :: CsvReader
+readCsvWithSchema schema =
+    readSeparated
+        defaultReadOptions
+            { typeSpec =
+                SpecifyTypes
+                    (M.toList (elements schema))
+                    (typeSpec defaultReadOptions)
+            }
 
 {- | Read CSV file from path and load it into a dataframe.
 
@@ -449,19 +519,22 @@ inferColumnFromBS ::
 inferColumnFromBS mode opts vec valid =
     let sampleN = let n = typeInferenceSampleSize (typeSpec opts) in if n == 0 then 100 else n
         dfmt = dateFormat opts
-        asMaybeFull = V.generate (V.length vec) $ \i ->
+        -- The sample IS still Maybe-wrapped; it's bounded at 100 rows
+        -- by default, so the allocation is ignorable.  The previous
+        -- full-column `asMaybeFull = V.generate ...` allocation is
+        -- gone — handlers walk (vec, valid) directly.
+        samples = V.generate (min sampleN (V.length vec)) $ \i ->
             if valid VU.! i == 1 then Just (vec V.! i) else Nothing
-        samples = V.take sampleN asMaybeFull
         assumption = makeParsingAssumptionBS dfmt samples
      in case mode of
             EitherRead -> handleBSEither dfmt assumption vec valid
             _ -> case assumption of
-                IntAssumption -> handleBSInt dfmt asMaybeFull
-                DoubleAssumption -> handleBSDouble asMaybeFull
-                BoolAssumption -> handleBSBool asMaybeFull
-                DateAssumption -> handleBSDate dfmt asMaybeFull
-                TextAssumption -> handleBSText asMaybeFull
-                NoAssumption -> handleBSNo dfmt asMaybeFull
+                IntAssumption -> handleBSInt dfmt vec valid
+                DoubleAssumption -> handleBSDouble vec valid
+                BoolAssumption -> handleBSBool vec valid
+                DateAssumption -> handleBSDate dfmt vec valid
+                TextAssumption -> handleBSText vec valid
+                NoAssumption -> handleBSNo dfmt vec valid
 
 {- | 'EitherRead' wrap for the ByteString inference path: produce an
 @Either Text a@ column. Raw input bytes are preserved verbatim; rows that were
@@ -522,77 +595,157 @@ makeParsingAssumptionBS dfmt asMaybe
     asMaybeDouble = V.map (>>= readByteStringDouble) asMaybe
     asMaybeDate = V.map (>>= readByteStringDate dfmt) asMaybe
 
-handleBSBool :: V.Vector (Maybe BS.ByteString) -> Column
-handleBSBool asMaybe
-    | parsableAsBool =
-        maybe (fromVector asMaybeBool) fromVector (sequenceA asMaybeBool)
-    | otherwise = handleBSText asMaybe
-  where
-    asMaybeBool = V.map (>>= readByteStringBool) asMaybe
-    parsableAsBool = vecSameConstructor asMaybe asMaybeBool
+-- All @handleBS*@ helpers now take the raw @V.Vector BS.ByteString@
+-- plus the builder's @VU.Vector Word8@ validity vector, fusing the
+-- parse + validity check into a single pass via
+-- 'parseUnboxedColumnWithValid'.  The previous @V.Vector (Maybe
+-- BS.ByteString)@ intermediate — allocated upstream in
+-- 'inferColumnFromBS' — is gone, along with the paired Int/Double
+-- parses and the two 'V.zipWith' Bool vectors from
+-- 'vecSameConstructor'.
 
-handleBSInt :: String -> V.Vector (Maybe BS.ByteString) -> Column
-handleBSInt _dfmt asMaybe
-    | parsableAsInt =
-        maybe (fromVector asMaybeInt) fromVector (sequenceA asMaybeInt)
-    | parsableAsDouble =
-        maybe (fromVector asMaybeDouble) fromVector (sequenceA asMaybeDouble)
-    | otherwise = handleBSText asMaybe
-  where
-    asMaybeInt = V.map (>>= readByteStringInt) asMaybe
-    asMaybeDouble = V.map (>>= readByteStringDouble) asMaybe
-    parsableAsInt =
-        vecSameConstructor asMaybe asMaybeInt
-            && vecSameConstructor asMaybe asMaybeDouble
-    parsableAsDouble = vecSameConstructor asMaybe asMaybeDouble
+handleBSBool ::
+    V.Vector BS.ByteString -> VU.Vector Word8 -> Column
+handleBSBool vec valid =
+    case parseUnboxedColumnWithValid False readByteStringBool vec valid of
+        Just (mbm, out) -> UnboxedColumn mbm out
+        Nothing -> handleBSText vec valid
 
-handleBSDouble :: V.Vector (Maybe BS.ByteString) -> Column
-handleBSDouble asMaybe
-    | parsableAsDouble =
-        maybe (fromVector asMaybeDouble) fromVector (sequenceA asMaybeDouble)
-    | otherwise = handleBSText asMaybe
-  where
-    asMaybeDouble = V.map (>>= readByteStringDouble) asMaybe
-    parsableAsDouble = vecSameConstructor asMaybe asMaybeDouble
+handleBSInt ::
+    String -> V.Vector BS.ByteString -> VU.Vector Word8 -> Column
+handleBSInt _dfmt vec valid =
+    case parseUnboxedColumnWithValid 0 readByteStringInt vec valid of
+        Just (mbm, out) -> UnboxedColumn mbm out
+        Nothing -> case parseUnboxedColumnWithValid 0 readByteStringDouble vec valid of
+            Just (mbm, out) -> UnboxedColumn mbm out
+            Nothing -> handleBSText vec valid
 
-handleBSDate :: String -> V.Vector (Maybe BS.ByteString) -> Column
-handleBSDate dfmt asMaybe
-    | parsableAsDate =
-        maybe (fromVector asMaybeDate) fromVector (sequenceA asMaybeDate)
-    | otherwise = handleBSText asMaybe
-  where
-    asMaybeDate = V.map (>>= readByteStringDate dfmt) asMaybe
-    parsableAsDate = vecSameConstructor asMaybe asMaybeDate
+handleBSDouble ::
+    V.Vector BS.ByteString -> VU.Vector Word8 -> Column
+handleBSDouble vec valid =
+    case parseUnboxedColumnWithValid 0 readByteStringDouble vec valid of
+        Just (mbm, out) -> UnboxedColumn mbm out
+        Nothing -> handleBSText vec valid
 
-handleBSText :: V.Vector (Maybe BS.ByteString) -> Column
-handleBSText asMaybe =
-    let asMaybeText = V.map (fmap TE.decodeUtf8Lenient) asMaybe
-     in maybe (fromVector asMaybeText) fromVector (sequenceA asMaybeText)
+-- Dates are boxed ('Day' isn't 'VU.Unbox'), so fuse into a V.Vector
+-- (Maybe Day) in one pass.  Bails on the first non-null cell that
+-- fails to parse.
+handleBSDate ::
+    String -> V.Vector BS.ByteString -> VU.Vector Word8 -> Column
+handleBSDate dfmt vec valid =
+    case parseBoxedMaybeBSColumn valid (readByteStringDate dfmt) vec of
+        Just (anyNull, out)
+            | anyNull -> fromVector out
+            | otherwise -> fromVector (V.mapMaybe id out)
+        Nothing -> handleBSText vec valid
 
-handleBSNo :: String -> V.Vector (Maybe BS.ByteString) -> Column
-handleBSNo dfmt asMaybe
-    | V.all (== Nothing) asMaybe =
-        fromVector (V.map (const (Nothing :: Maybe T.Text)) asMaybe)
-    | parsableAsBool =
-        maybe (fromVector asMaybeBool) fromVector (sequenceA asMaybeBool)
-    | parsableAsInt =
-        maybe (fromVector asMaybeInt) fromVector (sequenceA asMaybeInt)
-    | parsableAsDouble =
-        maybe (fromVector asMaybeDouble) fromVector (sequenceA asMaybeDouble)
-    | parsableAsDate =
-        maybe (fromVector asMaybeDate) fromVector (sequenceA asMaybeDate)
-    | otherwise = handleBSText asMaybe
-  where
-    asMaybeBool = V.map (>>= readByteStringBool) asMaybe
-    asMaybeInt = V.map (>>= readByteStringInt) asMaybe
-    asMaybeDouble = V.map (>>= readByteStringDouble) asMaybe
-    asMaybeDate = V.map (>>= readByteStringDate dfmt) asMaybe
-    parsableAsBool = vecSameConstructor asMaybe asMaybeBool
-    parsableAsInt =
-        vecSameConstructor asMaybe asMaybeInt
-            && vecSameConstructor asMaybe asMaybeDouble
-    parsableAsDouble = vecSameConstructor asMaybe asMaybeDouble
-    parsableAsDate = vecSameConstructor asMaybe asMaybeDate
+-- Fused Text handler: decode each cell's UTF-8 bytes once, mark nulls
+-- directly from the validity vector.  Replaces the two-pass
+-- `V.map (fmap decodeUtf8Lenient) ... sequenceA ...` pattern.
+handleBSText ::
+    V.Vector BS.ByteString -> VU.Vector Word8 -> Column
+handleBSText vec valid
+    | VU.any (== 0) valid =
+        fromVector
+            ( V.imap
+                ( \i bs ->
+                    if valid VU.! i == 0
+                        then Nothing
+                        else Just (TE.decodeUtf8Lenient bs)
+                )
+                vec
+            )
+    | otherwise = fromVector (V.map TE.decodeUtf8Lenient vec)
+
+handleBSNo ::
+    String -> V.Vector BS.ByteString -> VU.Vector Word8 -> Column
+handleBSNo dfmt vec valid
+    | VU.all (== 0) valid =
+        fromVector (V.map (const (Nothing :: Maybe T.Text)) vec)
+    | Just (mbm, out) <-
+        parseUnboxedColumnWithValid False readByteStringBool vec valid =
+        UnboxedColumn mbm out
+    | Just (mbm, out) <- parseUnboxedColumnWithValid 0 readByteStringInt vec valid =
+        UnboxedColumn mbm out
+    | Just (mbm, out) <- parseUnboxedColumnWithValid 0 readByteStringDouble vec valid =
+        UnboxedColumn mbm out
+    | otherwise = case parseBoxedMaybeBSColumn valid (readByteStringDate dfmt) vec of
+        Just (anyNull, out)
+            | anyNull -> fromVector out
+            | otherwise -> fromVector (V.mapMaybe id out)
+        Nothing -> handleBSText vec valid
+
+-- Boxed counterpart to 'parseUnboxedColumnWithValid' for types that
+-- aren't 'VU.Unbox' (e.g. 'Day').  Same one-pass + early-bail shape.
+parseBoxedMaybeBSColumn ::
+    VU.Vector Word8 ->
+    (BS.ByteString -> Maybe a) ->
+    V.Vector BS.ByteString ->
+    Maybe (Bool, V.Vector (Maybe a))
+parseBoxedMaybeBSColumn valid parser vec = runST $ do
+    let n = V.length vec
+    out <- VM.new n
+    let loop !i !anyNull
+            | i >= n = do
+                frozen <- V.unsafeFreeze out
+                return (Just (anyNull, frozen))
+            | VU.unsafeIndex valid i == 0 = do
+                VM.unsafeWrite out i Nothing
+                loop (i + 1) True
+            | otherwise = case parser (V.unsafeIndex vec i) of
+                Just v -> do
+                    VM.unsafeWrite out i (Just v)
+                    loop (i + 1) anyNull
+                Nothing -> return Nothing
+    loop 0 False
+
+{- | One-pass fused parse into a typed unboxed column.  Avoids the
+@V.Vector (Maybe a)@ intermediate that the "parse then 'sequenceA'"
+idiom requires, and avoids the upstream @V.Vector (Maybe src)@
+classification by reading nullability from a precomputed validity
+vector (produced by the CSV builder alongside the raw cells).
+
+Returns @Just (mbm, vec)@ only when every non-null cell parses.  The
+first unparseable cell short-circuits to @Nothing@ so the caller can
+fall back to the next assumption (Int → Double → Text).  @mbm@ is
+@Nothing@ when no nulls exist (the column is non-nullable) and
+@Just bm@ otherwise.
+
+Null slots are filled with @nullValue@; downstream consumers only see
+them through the bitmap, so the sentinel never escapes.
+
+Memory shape for a length-@n@ input:
+
+  * 1 × 'VUM.STVector' of @a@        (final data, @sizeOf a × n@ bytes)
+  * 1 × 'VUM.STVector' of 'Word8'    (per-element validity, @n@ bytes)
+  * 1 × 'Bitmap' (bit-packed, @⌈n\/8⌉@ bytes) — only when nulls exist.
+-}
+parseUnboxedColumnWithValid ::
+    forall src a.
+    (VU.Unbox a) =>
+    a ->
+    (src -> Maybe a) ->
+    V.Vector src ->
+    VU.Vector Word8 ->
+    Maybe (Maybe Bitmap, VU.Vector a)
+parseUnboxedColumnWithValid nullValue parser vec valid = runST $ do
+    let n = V.length vec
+    values <- VUM.unsafeNew n
+    vmask <- VUM.unsafeNew n
+    let go !i !anyNull
+            | i >= n = finalizeParseResult values vmask anyNull
+            | VU.unsafeIndex valid i == 0 = do
+                VUM.unsafeWrite vmask i 0
+                VUM.unsafeWrite values i nullValue
+                go (i + 1) True
+            | otherwise = case parser (V.unsafeIndex vec i) of
+                Just v -> do
+                    VUM.unsafeWrite vmask i 1
+                    VUM.unsafeWrite values i v
+                    go (i + 1) anyNull
+                Nothing -> return Nothing
+    go 0 False
+{-# INLINE parseUnboxedColumnWithValid #-}
 
 constructOptional ::
     (VU.Unbox a, Columnable a) => VU.Vector a -> VU.Vector Word8 -> IO Column

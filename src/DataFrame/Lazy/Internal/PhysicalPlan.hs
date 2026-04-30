@@ -31,6 +31,6 @@ data PhysicalPlan
     | PhysicalLimit Int PhysicalPlan
     | -- | Materialize child to a binary file on disk (used for build sides).
       PhysicalSpill PhysicalPlan FilePath
-    | -- | Emit an already-loaded DataFrame as a stream of batches.
-      PhysicalSourceDF D.DataFrame
+    | -- | Emit an already-loaded DataFrame as a stream of batches of size @n@.
+      PhysicalSourceDF Int D.DataFrame
     deriving (Show)

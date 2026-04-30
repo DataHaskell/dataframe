@@ -17,7 +17,7 @@ Add to your `package.yaml`:
 
 ```yaml
 dependencies:
-- dataframe ^>= 0.4
+- dataframe >= 1 && < 2
 - dataframe-persistent ^>= 0.1
 - persistent >= 2.14
 - persistent-sqlite >= 2.13  # or your preferred backend
@@ -27,7 +27,7 @@ Or to your `.cabal` file:
 
 ```cabal
 build-depends:
-  dataframe ^>= 0.4,
+  dataframe >= 1 && < 2,
   dataframe-persistent ^>= 0.1,
   persistent >= 2.14,
   persistent-sqlite >= 2.13

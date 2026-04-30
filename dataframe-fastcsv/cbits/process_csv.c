@@ -170,7 +170,8 @@ static size_t find_one_indices(size_t start_index, uint64_t bits, size_t *indice
 }
 #endif
 
-size_t get_delimiter_indices(uint8_t *buf, size_t len, uint8_t separator, size_t *indices) {
+size_t get_delimiter_indices(uint8_t *buf, size_t len, uint8_t separator,
+                             size_t *indices, int *status) {
   // Recall we padded our file with 64 empty bytes.
   // So if, for example, we had a file of 187 bytes
   // We pad it with zeros and so we have 251 bytes
@@ -179,6 +180,7 @@ size_t get_delimiter_indices(uint8_t *buf, size_t len, uint8_t separator, size_t
   // below. This way, in ptr + 128 we have 59 bytes of
   // actual data and 5 bytes of zeros. If we didn't do this
   // we'd be reading past the end of file on the last row
+  if (status != NULL) { *status = GDI_OK; }
 #ifdef HAS_SIMD_CSV
   size_t unpaddedLen = len < 64 ? 0 : len - 64;
   uint64_t initial_quoted = 0ULL;
@@ -188,11 +190,17 @@ size_t get_delimiter_indices(uint8_t *buf, size_t len, uint8_t separator, size_t
     uint64_t delimiter_bits = parse_chunk(in, separator, &initial_quoted);
     find_one_indices(i, delimiter_bits, indices, &base);
   }
+  // If the final chunk ends inside a quoted region, the file is
+  // malformed: an opening `"` was never closed.  The PCLMUL XOR chain
+  // leaves initial_quoted set whenever the running parity is odd at EOF.
+  if (initial_quoted != 0ULL && status != NULL) {
+    *status = GDI_UNCLOSED_QUOTE;
+  }
   return base;
 #else
   // SIMD not available or carryless multiplication not supported.
   // Signal fallback to Haskell implementation.
   (void)buf; (void)len; (void)indices;
-  return (size_t)-1;
+  return GDI_SIMD_UNAVAILABLE;
 #endif
 }

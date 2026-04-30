@@ -1,6 +1,7 @@
 /* Auto-initialise / finalise the GHC RTS when the shared library is
    loaded / unloaded.  Required because cabal's native-shared libraries
-   do not run hs_init automatically on macOS. */
+   do not run hs_init automatically on macOS. Haven't tested on other platforms.
+   TODO: mchavinda - Implement platform-specific initialization logic. */
 
 #include <stddef.h>
 #include "HsFFI.h"

@@ -11,7 +11,6 @@ module DataFrame.IO.Arrow (
     dataframeToArrow,
     columnToArrow,
     arrowToDataframe,
-    -- exported only to force linking of release-callback symbols
     releaseSchemaImpl,
     releaseArrayImpl,
 ) where
@@ -24,13 +23,9 @@ import qualified Data.Vector as V
 import qualified Data.Vector.Unboxed as VU
 import qualified DataFrame.Internal.Column as DI
 
-import Control.Monad (foldM_, forM, join, void, when, zipWithM_)
-import Data.Bits (popCount, setBit, testBit)
-import Data.Int (Int32, Int64)
-import Data.Maybe (fromMaybe, isNothing)
+import Control.Monad (foldM_, forM, join, when, zipWithM_)
 import Data.Type.Equality (TestEquality (testEquality), type (:~:) (Refl))
-import Data.Word (Word8)
-import Foreign hiding (void)
+import Foreign
 import Foreign.C.String (CString, newCString, peekCString)
 import Type.Reflection (typeRep)
 
@@ -225,7 +220,7 @@ columnToArrow colName (UnboxedColumn _ (vec :: VU.Vector a))
         sPtr <- makeLeafSchema "g" colName
         aPtr <- makeLeafArray n 0 [nullPtr, castPtr dataPtr] (free dataPtr)
         return (sPtr, aPtr)
-columnToArrow colName (BoxedColumn _ (vec :: V.Vector a))
+columnToArrow colName (BoxedColumn Nothing (vec :: V.Vector a))
     | Just Refl <- testEquality (typeRep @a) (typeRep @T.Text) = do
         let n = V.length vec
             bss = map TE.encodeUtf8 (V.toList vec)
@@ -253,7 +248,7 @@ columnToArrow colName (BoxedColumn _ (vec :: V.Vector a))
                 [nullPtr, castPtr offPtr, castPtr charsPtr]
                 (free offPtr >> free charsPtr)
         return (sPtr, aPtr)
-columnToArrow colName (BoxedColumn _ (vec :: V.Vector a))
+columnToArrow colName (BoxedColumn Nothing (vec :: V.Vector a))
     | Just Refl <- testEquality (typeRep @a) (typeRep @Double) = do
         let n = V.length vec
         dataPtr <- mallocArray (max 1 n) :: IO (Ptr Double)
@@ -261,7 +256,7 @@ columnToArrow colName (BoxedColumn _ (vec :: V.Vector a))
         sPtr <- makeLeafSchema "g" colName
         aPtr <- makeLeafArray n 0 [nullPtr, castPtr dataPtr] (free dataPtr)
         return (sPtr, aPtr)
-columnToArrow colName (BoxedColumn _ (vec :: V.Vector a))
+columnToArrow colName (BoxedColumn Nothing (vec :: V.Vector a))
     | Just Refl <- testEquality (typeRep @a) (typeRep @Int) = do
         let n = V.length vec
         dataPtr <- mallocArray (max 1 n) :: IO (Ptr Int64)
@@ -402,11 +397,6 @@ dataframeToArrow df = do
     topArray `at` _arrayPrivateData $ castStablePtrToPtr cleanupA
 
     return (topSchema, topArray)
-
--- | Test whether bit i is set in a validity bitmap.
-bitmapIsSet :: Ptr Word8 -> Int -> IO Bool
-bitmapIsSet bitmapPtr i =
-    testBit <$> peekElemOff bitmapPtr (i `div` 8) <*> pure (i `mod` 8)
 
 {- | Import an Arrow RecordBatch from raw C Data Interface pointers.
   Copies all data into GC-managed Haskell vectors, then calls the

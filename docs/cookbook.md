@@ -1,6 +1,6 @@
 # Cookbook
 
-The following exercies are adapted from Hackerrank's SQL challenges. They outline how to do basic SQL-like operations using dataframe.
+The following exercises are adapted from Hackerrank's SQL challenges. They outline how to do basic SQL-like operations using dataframe.
 
 ## Working with DataFrames in Haskell
 

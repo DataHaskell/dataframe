@@ -30,12 +30,25 @@ You can see the status of the Haskell kernel on the bottom left. That's it - we 
 
 Let's start by reading the data and showing the first 10 rows.
 
+```haskell
+df <- D.readParquet "./data/iris.parquet"
+D.take 10 df
+```
+
 ![Screenshot of first 10 columns](./_static/first_ten_rows.png)
 
 ## 2) Select the columns you care about
 In early exploration, selecting a few columns makes everything easier to read.
 
 Let's, for some time, just look at the petal columns.
+
+```haskell
+:set -XOverloadedStrings
+import DataFrame.Operators
+
+df |> D.select ["petal.width", "petal.length", "variety"]
+   |> D.take 5
+```
 
 ![Screenshot of a subset of columns](./_static/select_columns.png)
 
@@ -102,9 +115,19 @@ Armed with this knowledge, we can go back and filter all flowers with petal leng
 
 We can see from the sample we printed before that `petal.length` is of type `Double`. We write the expression as follows:
 
+```haskell
+df |> D.filterWhere (F.col @Double "petal.length" .>. F.lit @Double 6)
+   |> D.select ["petal.width", "petal.length", "variety"]
+```
+
 ![Screenshot of filtering with full annotations](./_static/filter_no_declare.png)
 
 Suppose we write out the wrong types in the expression. That is suppose we say that `petal.length` is a `Int` instead. This will cause a runtime failure:
+
+```haskell
+-- This fails at runtime because "petal.length" is Double, not Int:
+df |> D.filterWhere (F.col @Int "petal.length" .>. F.lit @Int 6)
+```
 
 ![Screenshot of filtering with type error](./_static/filter_wrong_type.png)
 
@@ -116,11 +139,21 @@ In our case `petal.width` becomes `petal_width` or if it were `Petal Width (cm)`
 
 Once we run `declareColumns` (which requires `TemplateHaskell` to be enabled) we get the column names as completion options in the notebook.
 
+```haskell
+:set -XTemplateHaskell
+F.declareColumns df
+```
+
 ![Screenshot of filtering with autocomplete](./_static/filter_autocomplete.png)
 
-In fact, we can make this event shorter. Since Haskell knows how to create any num instance from literals, we don't have to write `F.lit @Int 6`. It knows, from the context, to wrap `6` so it's an `Expr Int`. Thus, we can write:
+In fact, we can make this even shorter. Since Haskell knows how to create any num instance from literals, we don't have to write `F.lit @Int 6`. It knows, from the context, to wrap `6` so it's an `Expr Double`. Thus, we can write:
 
-![Screenshot of filtering with automatically derived refernce](./_static/filter_declare.png)
+```haskell
+df |> D.filterWhere (petal_length .>. 6)
+   |> D.select ["petal.width", "petal.length", "variety"]
+```
+
+![Screenshot of filtering with automatically derived reference](./_static/filter_declare.png)
 
 ## 4) Derive new columns (your first "feature engineering" step)
 
@@ -132,26 +165,62 @@ You’ll often want new columns that are:
 
 We can use the `derive` function which takes a column name and an expression. It will evaluate the expression and put the results in a new column with the given name. Again, our type-safe column references make this code safer and easier to write.
 
+```haskell
+df |> D.derive "petal_area" (petal_width * petal_length)
+   |> D.select ["petal.width", "petal.length", "petal_area"]
+   |> D.take 5
+```
+
 ![Screenshot of declaring a single column](./_static/derive_simple.png)
 
 We can also derive many columns at once using a variant called `deriveMany`.
 
-![Screenshot of declaring many column](./_static/derive_many.png)
+```haskell
+df |> D.deriveMany [ "petal_area"  .= petal_width * petal_length
+                   , "sepal_area"  .= sepal_width * sepal_length
+                   , "petal_ratio" .= petal_width / petal_length
+                   ]
+   |> D.select ["petal_area", "sepal_area", "petal_ratio"]
+   |> D.take 5
+```
+
+![Screenshot of declaring many columns](./_static/derive_many.png)
 
 ## 5) User defined functions
 
 You can also use custom Haskell functions to manipulate dataframe columns.
 Say you had the following Haskell function that takes in the petal length and bucketizes it.
 
+```haskell
+let bucketize x
+      | x < 2     = "small"
+      | x < 5     = "medium"
+      | otherwise  = "large"
+
+df |> D.derive "petal_bucket" (F.lift bucketize petal_length)
+   |> D.select ["petal.length", "petal_bucket"]
+   |> D.take 5
+```
+
 ![Screenshot of user defined functions](./_static/lift_custom_function.png)
 
 If we wanted to apply a function that takes in two variables to our columns we would use the `lift2` function. For example, we can define `petal_area` as `"petal_area" .= F.lift2 (*) petal_width petal_length`.
 
-## 7) Group + aggregate (summary stats per species)
+## 6) Group + aggregate (summary stats per species)
 
 Let's create a "report" that computes counts and basic stats per group.
 
 We use the `groupBy` to group by some columns and we use `aggregate` to combine column values.
+
+```haskell
+df |> D.groupBy ["variety"]
+   |> D.aggregate [ "n"      .= F.count petal_length
+                  , "meanPL" .= F.mean petal_length
+                  , "sdPL"   .= F.stddev petal_length
+                  , "minPW"  .= F.minimum petal_width
+                  , "maxPW"  .= F.maximum petal_width
+                  ]
+```
 
 ![Screenshot of aggregations](./_static/aggregation.png)
 
@@ -164,13 +233,17 @@ df |> D.groupBy ["variety"]
 
 All base columns should be aggregated in the final aggregation expression.
 
-## 8) A simple scatter plot
+## 7) A simple scatter plot
 
 We can show the sepal width and length by variety with the following terminal plot:
 
+```haskell
+D.plotScatterBy "sepal.width" "sepal.length" "variety" df
+```
+
 ![Screenshot of plot](./_static/plot.png)
 
-## 9) Save outputs you can share or reuse
+## 8) Save outputs you can share or reuse
 
 Add the following to the end of your notebook:
 

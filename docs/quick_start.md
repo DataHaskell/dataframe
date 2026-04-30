@@ -40,11 +40,11 @@ import DataFrame.Operators
 
 -- Creates the column references used below (namely total_rooms and households)
 -- This gives us type-safe column access.
-$(F.declareColumnsFromCsvFile "/home/yavinda/code/dataframe/data/housing.csv")
+$(F.declareColumnsFromCsvFile "./data/housing.csv")
 
 main :: IO ()
 main = do
-  df <- D.readCsv "./dataframe/data/housing.csv"
+  df <- D.readCsv "./data/housing.csv"
   print (df |> D.derive "rooms_per_household" (total_rooms / households))
 ```
 

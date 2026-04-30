@@ -1,4 +1,5 @@
 {-# LANGUAGE AllowAmbiguousTypes #-}
+{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE OverloadedStrings #-}
@@ -10,18 +11,24 @@ module DataFrame.Operations.Typing where
 import qualified Data.Map as M
 import qualified Data.Text as T
 import qualified Data.Vector as V
+import qualified Data.Vector.Mutable as VM
+import qualified Data.Vector.Unboxed as VU
+import qualified Data.Vector.Unboxed.Mutable as VUM
 
 import Control.Applicative (asum)
 import Control.Monad (join)
+import Control.Monad.ST (runST)
 import Data.Maybe (fromMaybe)
 import qualified Data.Proxy as P
 import Data.Time
 import Data.Type.Equality (TestEquality (..))
 import DataFrame.Internal.Column (
+    Bitmap,
     Column (..),
     Columnable,
     bitmapTestBit,
     ensureOptional,
+    finalizeParseResult,
     fromVector,
  )
 import DataFrame.Internal.DataFrame (DataFrame (..), unsafeGetColumn)
@@ -124,26 +131,29 @@ parseDefault _ column = column
 
 parseFromExamples :: ParseOptions -> V.Vector T.Text -> Column
 parseFromExamples opts cols =
-    let
-        converter = case parseSafe opts of
-            NoSafeRead -> convertOnlyEmpty
-            _ -> convertNullish (missingValues opts)
-        examples = V.map converter (V.take (sampleSize opts) cols)
-        asMaybeText = V.map converter cols
+    let isNull = case parseSafe opts of
+            NoSafeRead -> T.null
+            _ -> isNullishOrMissing (missingValues opts)
+        -- `examples` is small (≤ sampleSize, default 100), so the
+        -- Maybe-wrap allocation here is ignorable.  The full-column
+        -- equivalent (`asMaybeText = V.map ... cols`) has been removed:
+        -- handlers now walk `cols` directly with `isNull`.
+        examples = V.map (classify isNull) (V.take (sampleSize opts) cols)
         dfmt = parseDateFormat opts
         assumption = makeParsingAssumption dfmt examples
-     in
-        case parseSafe opts of
+     in case parseSafe opts of
             EitherRead -> handleEitherAssumption dfmt assumption cols
             mode ->
                 let result = case assumption of
-                        BoolAssumption -> handleBoolAssumption asMaybeText
-                        IntAssumption -> handleIntAssumption asMaybeText
-                        DoubleAssumption -> handleDoubleAssumption asMaybeText
-                        TextAssumption -> handleTextAssumption asMaybeText
-                        DateAssumption -> handleDateAssumption dfmt asMaybeText
-                        NoAssumption -> handleNoAssumption dfmt asMaybeText
+                        BoolAssumption -> handleBoolAssumption isNull cols
+                        IntAssumption -> handleIntAssumption isNull cols
+                        DoubleAssumption -> handleDoubleAssumption isNull cols
+                        TextAssumption -> handleTextAssumption isNull cols
+                        DateAssumption -> handleDateAssumption dfmt isNull cols
+                        NoAssumption -> handleNoAssumption dfmt isNull cols
                  in if mode == MaybeRead then ensureOptional result else result
+  where
+    classify p t = if p t then Nothing else Just t
 
 {- | For 'EitherRead' mode: take the chosen parsing assumption and produce an
 @Either Text a@ column. Successful parses become @Right@; any row that fails
@@ -169,73 +179,150 @@ handleEitherAssumption dfmt assumption raw = case assumption of
     textToEither :: T.Text -> Either T.Text T.Text
     textToEither t = if T.null t then Left t else Right t
 
-handleBoolAssumption :: V.Vector (Maybe T.Text) -> Column
-handleBoolAssumption asMaybeText
-    | parsableAsBool =
-        maybe (fromVector asMaybeBool) fromVector (sequenceA asMaybeBool)
-    | otherwise = maybe (fromVector asMaybeText) fromVector (sequenceA asMaybeText)
-  where
-    asMaybeBool = V.map (>>= readBool) asMaybeText
-    parsableAsBool = vecSameConstructor asMaybeText asMaybeBool
+parseUnboxedColumnWithPred ::
+    forall src a.
+    (VU.Unbox a) =>
+    a ->
+    (src -> Bool) ->
+    (src -> Maybe a) ->
+    V.Vector src ->
+    Maybe (Maybe Bitmap, VU.Vector a)
+parseUnboxedColumnWithPred nullValue isNull parser vec = runST $ do
+    let n = V.length vec
+    values <- VUM.unsafeNew n
+    vmask <- VUM.unsafeNew n
+    let go !i !anyNull
+            | i >= n = finalizeParseResult values vmask anyNull
+            | otherwise =
+                let !src = V.unsafeIndex vec i
+                 in if isNull src
+                        then do
+                            VUM.unsafeWrite vmask i 0
+                            VUM.unsafeWrite values i nullValue
+                            go (i + 1) True
+                        else case parser src of
+                            Just v -> do
+                                VUM.unsafeWrite vmask i 1
+                                VUM.unsafeWrite values i v
+                                go (i + 1) anyNull
+                            Nothing -> return Nothing
+    go 0 False
+{-# INLINE parseUnboxedColumnWithPred #-}
 
-handleIntAssumption :: V.Vector (Maybe T.Text) -> Column
-handleIntAssumption asMaybeText
-    | parsableAsInt =
-        maybe (fromVector asMaybeInt) fromVector (sequenceA asMaybeInt)
-    | parsableAsDouble =
-        maybe (fromVector asMaybeDouble) fromVector (sequenceA asMaybeDouble)
-    | otherwise = maybe (fromVector asMaybeText) fromVector (sequenceA asMaybeText)
-  where
-    asMaybeInt = V.map (>>= readInt) asMaybeText
-    asMaybeDouble = V.map (>>= readDouble) asMaybeText
-    parsableAsInt =
-        vecSameConstructor asMaybeText asMaybeInt
-            && vecSameConstructor asMaybeText asMaybeDouble
-    parsableAsDouble = vecSameConstructor asMaybeText asMaybeDouble
+-- | Wrap a successful 'parseUnboxedColumnWithPred' result as a 'Column'.
+unboxedOrFallback ::
+    (Columnable a, VU.Unbox a) =>
+    Maybe (Maybe Bitmap, VU.Vector a) ->
+    Column ->
+    Column
+unboxedOrFallback (Just (mbm, vec)) _ = UnboxedColumn mbm vec
+unboxedOrFallback Nothing fallback = fallback
 
-handleDoubleAssumption :: V.Vector (Maybe T.Text) -> Column
-handleDoubleAssumption asMaybeText
-    | parsableAsDouble =
-        maybe (fromVector asMaybeDouble) fromVector (sequenceA asMaybeDouble)
-    | otherwise = maybe (fromVector asMaybeText) fromVector (sequenceA asMaybeText)
-  where
-    asMaybeDouble = V.map (>>= readDouble) asMaybeText
-    parsableAsDouble = vecSameConstructor asMaybeText asMaybeDouble
+handleBoolAssumption :: (T.Text -> Bool) -> V.Vector T.Text -> Column
+handleBoolAssumption isNull cols =
+    unboxedOrFallback
+        (parseUnboxedColumnWithPred False isNull readBool cols)
+        (handleTextAssumption isNull cols)
 
-handleDateAssumption :: DateFormat -> V.Vector (Maybe T.Text) -> Column
-handleDateAssumption dateFormat asMaybeText
-    | parsableAsDate =
-        maybe (fromVector asMaybeDate) fromVector (sequenceA asMaybeDate)
-    | otherwise = maybe (fromVector asMaybeText) fromVector (sequenceA asMaybeText)
-  where
-    asMaybeDate = V.map (>>= parseTimeOpt dateFormat) asMaybeText
-    parsableAsDate = vecSameConstructor asMaybeText asMaybeDate
+handleIntAssumption :: (T.Text -> Bool) -> V.Vector T.Text -> Column
+handleIntAssumption isNull cols =
+    case parseUnboxedColumnWithPred 0 isNull readInt cols of
+        Just (mbm, vec) -> UnboxedColumn mbm vec
+        Nothing ->
+            unboxedOrFallback
+                (parseUnboxedColumnWithPred 0 isNull readDouble cols)
+                (handleTextAssumption isNull cols)
 
-handleTextAssumption :: V.Vector (Maybe T.Text) -> Column
-handleTextAssumption asMaybeText = maybe (fromVector asMaybeText) fromVector (sequenceA asMaybeText)
+handleDoubleAssumption :: (T.Text -> Bool) -> V.Vector T.Text -> Column
+handleDoubleAssumption isNull cols =
+    unboxedOrFallback
+        (parseUnboxedColumnWithPred 0 isNull readDouble cols)
+        (handleTextAssumption isNull cols)
 
-handleNoAssumption :: DateFormat -> V.Vector (Maybe T.Text) -> Column
-handleNoAssumption dateFormat asMaybeText
-    -- No need to check for null values. If we are in this condition, that
-    -- means that the examples consisted only of null values, so we can
-    -- confidently know that this column must be an OptionalColumn
-    | V.all (== Nothing) asMaybeText = fromVector asMaybeText
-    | parsableAsBool = fromVector asMaybeBool
-    | parsableAsInt = fromVector asMaybeInt
-    | parsableAsDouble = fromVector asMaybeDouble
-    | parsableAsDate = fromVector asMaybeDate
-    | otherwise = fromVector asMaybeText
-  where
-    asMaybeBool = V.map (>>= readBool) asMaybeText
-    asMaybeInt = V.map (>>= readInt) asMaybeText
-    asMaybeDouble = V.map (>>= readDouble) asMaybeText
-    asMaybeDate = V.map (>>= parseTimeOpt dateFormat) asMaybeText
-    parsableAsBool = vecSameConstructor asMaybeText asMaybeBool
-    parsableAsInt =
-        vecSameConstructor asMaybeText asMaybeInt
-            && vecSameConstructor asMaybeText asMaybeDouble
-    parsableAsDouble = vecSameConstructor asMaybeText asMaybeDouble
-    parsableAsDate = vecSameConstructor asMaybeText asMaybeDate
+{- | Text columns: no parse, just null-marking.  When the whole column
+is non-null we return a plain 'V.Vector T.Text'; otherwise we emit a
+@V.Vector (Maybe T.Text)@ the same shape the old code produced.
+-}
+handleTextAssumption :: (T.Text -> Bool) -> V.Vector T.Text -> Column
+handleTextAssumption isNull cols
+    | V.any isNull cols =
+        fromVector
+            (V.map (\t -> if isNull t then Nothing else Just t) cols)
+    | otherwise = fromVector cols
+
+{- | Date: single parse pass, boxed because 'Day' is not unboxable.
+Bails to 'handleTextAssumption' the moment a non-null cell fails to
+parse as a 'Day'.  Still avoids the outer @V.Vector (Maybe T.Text)@
+allocation — we walk @cols@ directly with @isNull@.
+-}
+handleDateAssumption ::
+    DateFormat -> (T.Text -> Bool) -> V.Vector T.Text -> Column
+handleDateAssumption dateFormat isNull cols =
+    case parseBoxedMaybeColumn isNull (parseTimeOpt dateFormat) cols of
+        Just (anyNull, vec)
+            -- `vec :: V.Vector (Maybe Day)`.  If no nulls, strip the
+            -- outer 'Maybe' (every cell is guaranteed 'Just') so the
+            -- column type stays 'Day' rather than becoming 'Maybe Day'.
+            | anyNull -> fromVector vec
+            | otherwise -> fromVector (V.mapMaybe id vec)
+        Nothing -> handleTextAssumption isNull cols
+
+parseBoxedMaybeColumn ::
+    (T.Text -> Bool) ->
+    (T.Text -> Maybe a) ->
+    V.Vector T.Text ->
+    Maybe (Bool, V.Vector (Maybe a))
+parseBoxedMaybeColumn isNull parser cols = runST $ do
+    let n = V.length cols
+    out <- VM.new n
+    let loop !i !anyNull
+            | i >= n = do
+                frozen <- V.unsafeFreeze out
+                return (Just (anyNull, frozen))
+            | otherwise =
+                let !t = V.unsafeIndex cols i
+                 in if isNull t
+                        then do
+                            VM.unsafeWrite out i Nothing
+                            loop (i + 1) True
+                        else case parser t of
+                            Just v -> do
+                                VM.unsafeWrite out i (Just v)
+                                loop (i + 1) anyNull
+                            Nothing -> return Nothing
+    loop 0 False
+
+handleNoAssumption ::
+    DateFormat -> (T.Text -> Bool) -> V.Vector T.Text -> Column
+handleNoAssumption dateFormat isNull cols
+    -- Only reached when the 100-row sample was all-null.  Try each
+    -- concrete type in turn; fall back to Text otherwise.
+    | V.all isNull cols =
+        fromVector (V.map (const (Nothing :: Maybe T.Text)) cols)
+    | Just (mbm, vec) <- parseUnboxedColumnWithPred False isNull readBool cols =
+        UnboxedColumn mbm vec
+    | Just (mbm, vec) <- parseUnboxedColumnWithPred 0 isNull readInt cols =
+        UnboxedColumn mbm vec
+    | Just (mbm, vec) <- parseUnboxedColumnWithPred 0 isNull readDouble cols =
+        UnboxedColumn mbm vec
+    | otherwise = case parseBoxedMaybeColumn isNull (parseTimeOpt dateFormat) cols of
+        Just (anyNull, vec)
+            -- `vec :: V.Vector (Maybe Day)`.  If no nulls, strip the
+            -- outer 'Maybe' (every cell is guaranteed 'Just') so the
+            -- column type stays 'Day' rather than becoming 'Maybe Day'.
+            | anyNull -> fromVector vec
+            | otherwise -> fromVector (V.mapMaybe id vec)
+        Nothing -> handleTextAssumption isNull cols
+
+{- | Predicate matching what 'parseSafe == NoSafeRead' previously used:
+only empty strings are treated as missing.
+
+We still expose 'convertNullish' \/ 'convertOnlyEmpty' below because
+other parts of the library reference them, but neither is used by
+'parseFromExamples' any longer.
+-}
+isNullishOrMissing :: [T.Text] -> T.Text -> Bool
+isNullishOrMissing missing v = isNullish v || v `elem` missing
 
 convertNullish :: [T.Text] -> T.Text -> Maybe T.Text
 convertNullish missing v = if isNullish v || v `elem` missing then Nothing else Just v

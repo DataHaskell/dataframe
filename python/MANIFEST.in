@@ -1,0 +1,4 @@
+include README.md
+include hyrax/*.dylib
+include hyrax/*.so
+include hyrax/*.dll

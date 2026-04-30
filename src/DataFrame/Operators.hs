@@ -33,6 +33,7 @@ import DataFrame.Internal.Nullable (
     WidenResultDiv,
     divArithOp,
     widenArithOp,
+    widenCmpOp,
  )
 import DataFrame.Internal.Types (Promote, PromoteDiv)
 
@@ -198,53 +199,76 @@ lift2Decorated f opName rep comm prec =
 
 -- Nullable-aware comparison operators (three-valued logic: Nothing if either operand is Nothing)
 
--- | Nullable-aware equality. Returns @Maybe Bool@ when either operand is nullable.
+{- | Nullable-aware equality. Widens numeric operands to their common type,
+so @Expr Double .== Expr Int@ typechecks. Returns @Maybe Bool@ when either
+operand is nullable.
+-}
 (.==) ::
-    (NullableCmpOp a b (NullCmpResult a b), Eq (BaseType a)) =>
+    ( NumericWidenOp (BaseType a) (BaseType b)
+    , NullLift2Op a b Bool (NullCmpResult a b)
+    , Eq (Promote (BaseType a) (BaseType b))
+    ) =>
     Expr a ->
     Expr b ->
     Expr (NullCmpResult a b)
-(.==) = lift2Decorated (nullCmpOp (==)) "eq" (Just ".==") True 4
+(.==) = lift2Decorated (applyNull2 (widenCmpOp (==))) "eq" (Just ".==") True 4
 
--- | Nullable-aware inequality.
+-- | Nullable-aware inequality. Widens numeric operands to their common type.
 (./=) ::
-    (NullableCmpOp a b (NullCmpResult a b), Eq (BaseType a)) =>
+    ( NumericWidenOp (BaseType a) (BaseType b)
+    , NullLift2Op a b Bool (NullCmpResult a b)
+    , Eq (Promote (BaseType a) (BaseType b))
+    ) =>
     Expr a ->
     Expr b ->
     Expr (NullCmpResult a b)
-(./=) = lift2Decorated (nullCmpOp (/=)) "neq" (Just "./=") True 4
+(./=) = lift2Decorated (applyNull2 (widenCmpOp (/=))) "neq" (Just "./=") True 4
 
--- | Nullable-aware less-than.
+-- | Nullable-aware less-than. Widens numeric operands to their common type.
 (.<) ::
-    (NullableCmpOp a b (NullCmpResult a b), Ord (BaseType a)) =>
+    ( NumericWidenOp (BaseType a) (BaseType b)
+    , NullLift2Op a b Bool (NullCmpResult a b)
+    , Ord (Promote (BaseType a) (BaseType b))
+    ) =>
     Expr a ->
     Expr b ->
     Expr (NullCmpResult a b)
-(.<) = lift2Decorated (nullCmpOp (<)) "lt" (Just ".<") False 4
+(.<) = lift2Decorated (applyNull2 (widenCmpOp (<))) "lt" (Just ".<") False 4
 
--- | Nullable-aware greater-than.
+-- | Nullable-aware greater-than. Widens numeric operands to their common type.
 (.>) ::
-    (NullableCmpOp a b (NullCmpResult a b), Ord (BaseType a)) =>
+    ( NumericWidenOp (BaseType a) (BaseType b)
+    , NullLift2Op a b Bool (NullCmpResult a b)
+    , Ord (Promote (BaseType a) (BaseType b))
+    ) =>
     Expr a ->
     Expr b ->
     Expr (NullCmpResult a b)
-(.>) = lift2Decorated (nullCmpOp (>)) "gt" (Just ".>") False 4
+(.>) = lift2Decorated (applyNull2 (widenCmpOp (>))) "gt" (Just ".>") False 4
 
--- | Nullable-aware less-than-or-equal.
+{- | Nullable-aware less-than-or-equal. Widens numeric operands to their
+common type, so @Expr Double .<= Expr Int@ typechecks.
+-}
 (.<=) ::
-    (NullableCmpOp a b (NullCmpResult a b), Ord (BaseType a)) =>
+    ( NumericWidenOp (BaseType a) (BaseType b)
+    , NullLift2Op a b Bool (NullCmpResult a b)
+    , Ord (Promote (BaseType a) (BaseType b))
+    ) =>
     Expr a ->
     Expr b ->
     Expr (NullCmpResult a b)
-(.<=) = lift2Decorated (nullCmpOp (<=)) "leq" (Just ".<=") False 4
+(.<=) = lift2Decorated (applyNull2 (widenCmpOp (<=))) "leq" (Just ".<=") False 4
 
--- | Nullable-aware greater-than-or-equal.
+-- | Nullable-aware greater-than-or-equal. Widens numeric operands to their common type.
 (.>=) ::
-    (NullableCmpOp a b (NullCmpResult a b), Ord (BaseType a)) =>
+    ( NumericWidenOp (BaseType a) (BaseType b)
+    , NullLift2Op a b Bool (NullCmpResult a b)
+    , Ord (Promote (BaseType a) (BaseType b))
+    ) =>
     Expr a ->
     Expr b ->
     Expr (NullCmpResult a b)
-(.>=) = lift2Decorated (nullCmpOp (>=)) "geq" (Just ".>=") False 4
+(.>=) = lift2Decorated (applyNull2 (widenCmpOp (>=))) "geq" (Just ".>=") False 4
 
 (.&&.) :: Expr Bool -> Expr Bool -> Expr Bool
 (.&&.) = lift2Decorated (&&) "and" (Just ".&&.") True 3
