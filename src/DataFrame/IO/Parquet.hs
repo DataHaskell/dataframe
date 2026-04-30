@@ -29,6 +29,7 @@ import qualified Data.Vector.Unboxed as VU
 import DataFrame.Errors (DataFrameException (ColumnsNotFoundException))
 import DataFrame.IO.Parquet.Page (
     PageDecoder,
+    UnboxedPageDecoder,
     boolDecoder,
     byteArrayDecoder,
     doubleDecoder,
@@ -58,8 +59,11 @@ import DataFrame.IO.Parquet.Thrift (
 import DataFrame.IO.Parquet.Utils (
     ColumnDescription (..),
     foldNonNullable,
+    foldNonNullableUnboxed,
     foldNullable,
+    foldNullableUnboxed,
     foldRepeated,
+    foldRepeatedUnboxed,
     generateColumnDescriptions,
     getColumnNames,
  )
@@ -373,12 +377,12 @@ getNonNullableColumn ::
     m Column
 getNonNullableColumn totalRows description chunks =
     case description.colElementType of
-        Just (BOOLEAN _) -> go boolDecoder
-        Just (INT32 _) -> go int32Decoder
-        Just (INT64 _) -> go int64Decoder
+        Just (BOOLEAN _) -> unboxedGo boolDecoder
+        Just (INT32 _) -> unboxedGo int32Decoder
+        Just (INT64 _) -> unboxedGo int64Decoder
         Just (INT96 _) -> go int96Decoder
-        Just (FLOAT _) -> go floatDecoder
-        Just (DOUBLE _) -> go doubleDecoder
+        Just (FLOAT _) -> unboxedGo floatDecoder
+        Just (DOUBLE _) -> unboxedGo doubleDecoder
         Just (BYTE_ARRAY _) -> go byteArrayDecoder
         Just (FIXED_LEN_BYTE_ARRAY _) -> case description.typeLength of
             Nothing -> error "FIXED_LEN_BYTE_ARRAY requires type_length to be set"
@@ -395,6 +399,18 @@ getNonNullableColumn totalRows description chunks =
             fmap (\(vs, _, _) -> vs) $
                 Stream.unfoldEach (readPages description decoder) (Stream.fromList chunks)
 
+    unboxedGo ::
+        forall a.
+        (Columnable a, VU.Unbox a) =>
+        UnboxedPageDecoder a ->
+        m Column
+    unboxedGo decoder =
+        foldNonNullableUnboxed totalRows $
+            fmap (\(vs, _, _) -> vs) $
+                Stream.unfoldEach
+                    (readPages description decoder)
+                    (Stream.fromList chunks)
+
 -- | Decode an optional (nullable) column.
 getNullableColumn ::
     forall m.
@@ -405,12 +421,12 @@ getNullableColumn ::
     m Column
 getNullableColumn totalRows description chunks =
     case description.colElementType of
-        Just (BOOLEAN _) -> go boolDecoder
-        Just (INT32 _) -> go int32Decoder
-        Just (INT64 _) -> go int64Decoder
+        Just (BOOLEAN _) -> unboxedGo boolDecoder
+        Just (INT32 _) -> unboxedGo int32Decoder
+        Just (INT64 _) -> unboxedGo int64Decoder
         Just (INT96 _) -> go int96Decoder
-        Just (FLOAT _) -> go floatDecoder
-        Just (DOUBLE _) -> go doubleDecoder
+        Just (FLOAT _) -> unboxedGo floatDecoder
+        Just (DOUBLE _) -> unboxedGo doubleDecoder
         Just (BYTE_ARRAY _) -> go byteArrayDecoder
         Just (FIXED_LEN_BYTE_ARRAY _) -> case description.typeLength of
             Nothing -> error "FIXED_LEN_BYTE_ARRAY requires type_length to be set"
@@ -429,6 +445,17 @@ getNullableColumn totalRows description chunks =
         foldNullable maxDef totalRows $
             fmap (\(vs, ds, _) -> (vs, ds)) $
                 Stream.unfoldEach (readPages description decoder) (Stream.fromList chunks)
+    unboxedGo ::
+        forall a.
+        (Columnable a, VU.Unbox a) =>
+        UnboxedPageDecoder a ->
+        m Column
+    unboxedGo decoder =
+        foldNullableUnboxed maxDef totalRows $
+            fmap (\(vs, ds, _) -> (vs, ds)) $
+                Stream.unfoldEach
+                    (readPages description decoder)
+                    (Stream.fromList chunks)
 
 -- | Decode a repeated (list/nested) column.
 getRepeatedColumn ::
@@ -439,12 +466,12 @@ getRepeatedColumn ::
     m Column
 getRepeatedColumn description chunks =
     case description.colElementType of
-        Just (BOOLEAN _) -> go boolDecoder
-        Just (INT32 _) -> go int32Decoder
-        Just (INT64 _) -> go int64Decoder
+        Just (BOOLEAN _) -> unboxedGo boolDecoder
+        Just (INT32 _) -> unboxedGo int32Decoder
+        Just (INT64 _) -> unboxedGo int64Decoder
         Just (INT96 _) -> go int96Decoder
-        Just (FLOAT _) -> go floatDecoder
-        Just (DOUBLE _) -> go doubleDecoder
+        Just (FLOAT _) -> unboxedGo floatDecoder
+        Just (DOUBLE _) -> unboxedGo doubleDecoder
         Just (BYTE_ARRAY _) -> go byteArrayDecoder
         Just (FIXED_LEN_BYTE_ARRAY _) -> case description.typeLength of
             Nothing -> error "FIXED_LEN_BYTE_ARRAY requires type_length to be set"
@@ -468,6 +495,22 @@ getRepeatedColumn description chunks =
     go decoder =
         foldRepeated maxRep maxDef $
             Stream.unfoldEach (readPages description decoder) (Stream.fromList chunks)
+
+    unboxedGo ::
+        forall a.
+        ( VU.Unbox a
+        , Columnable a
+        , Columnable (Maybe [Maybe a])
+        , Columnable (Maybe [Maybe [Maybe a]])
+        , Columnable (Maybe [Maybe [Maybe [Maybe a]]])
+        ) =>
+        UnboxedPageDecoder a ->
+        m Column
+    unboxedGo decoder =
+        foldRepeatedUnboxed maxRep maxDef $
+            Stream.unfoldEach
+                (readPages description decoder)
+                (Stream.fromList chunks)
 
 -- Options application -----------------------------------------------------
 

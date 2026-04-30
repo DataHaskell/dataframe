@@ -11,8 +11,11 @@ module DataFrame.IO.Parquet.Utils (
     generateColumnDescriptions,
     getColumnNames,
     foldNonNullable,
+    foldNonNullableUnboxed,
     foldNullable,
+    foldNullableUnboxed,
     foldRepeated,
+    foldRepeatedUnboxed,
 ) where
 
 import Control.Monad.IO.Class (MonadIO (..))
@@ -171,47 +174,51 @@ foldNonNullable ::
     Int ->
     Stream m (VB.Vector a) ->
     m Column
-foldNonNullable totalRows stream = case sUnbox @a of
-    STrue -> do
-        -- Write directly into an unboxed buffer
-        mv <- liftIO $ VUM.unsafeNew totalRows
-        _ <-
-            Stream.fold
-                ( Fold.foldlM'
-                    ( \off chunk -> liftIO $ do
-                        let n = VB.length chunk
-                            go i
-                                | i >= n = return ()
-                                | otherwise = do
-                                    VUM.unsafeWrite
-                                        mv
-                                        (off + i)
-                                        (VB.unsafeIndex chunk i)
-                                    go (i + 1)
-                        go 0
-                        return (off + n)
-                    )
-                    (return 0)
+foldNonNullable totalRows stream = do
+    mv <- liftIO $ VBM.unsafeNew totalRows
+    _ <-
+        Stream.fold
+            ( Fold.foldlM'
+                ( \off chunk -> liftIO $ do
+                    let n = VB.length chunk
+                    VB.copy (VBM.unsafeSlice off n mv) chunk
+                    return (off + n)
                 )
-                stream
-        dat <- liftIO $ VU.unsafeFreeze mv
-        return (UnboxedColumn Nothing dat)
-    SFalse -> do
-        -- Boxed path: bulk-copy each chunk into the pre-allocated buffer.
-        mv <- liftIO $ VBM.unsafeNew totalRows
-        _ <-
-            Stream.fold
-                ( Fold.foldlM'
-                    ( \off chunk -> liftIO $ do
-                        let n = VB.length chunk
-                        VB.copy (VBM.unsafeSlice off n mv) chunk
-                        return (off + n)
-                    )
-                    (return 0)
+                (return 0)
+            )
+            stream
+    v <- liftIO $ VB.unsafeFreeze mv
+    return (BoxedColumn Nothing v)
+
+foldNonNullableUnboxed ::
+    forall m a.
+    (RandomAccess m, MonadIO m, Columnable a, VU.Unbox a) =>
+    Int ->
+    Stream m (VU.Vector a) ->
+    m Column
+foldNonNullableUnboxed totalRows stream = do
+    mv <- liftIO $ VUM.unsafeNew totalRows
+    _ <-
+        Stream.fold
+            ( Fold.foldlM'
+                ( \off chunk -> liftIO $ do
+                    let n = VU.length chunk
+                        go i
+                            | i >= n = return ()
+                            | otherwise = do
+                                VUM.unsafeWrite
+                                    mv
+                                    (off + i)
+                                    (VU.unsafeIndex chunk i)
+                                go (i + 1)
+                    go 0
+                    return (off + n)
                 )
-                stream
-        v <- liftIO $ VB.unsafeFreeze mv
-        return (BoxedColumn Nothing v)
+                (return 0)
+            )
+            stream
+    dat <- liftIO $ VU.unsafeFreeze mv
+    return (UnboxedColumn Nothing dat)
 
 {- | Fold a stream of (values, def-levels) pairs into a nullable 'Column'.
 
@@ -231,78 +238,85 @@ foldNullable ::
     Int ->
     Stream m (VB.Vector a, VU.Vector Int) ->
     m Column
-foldNullable maxDef totalRows stream = case sUnbox @a of
-    STrue -> do
-        -- Unboxed: zero-init means null slots silently hold 0, guarded by bitmap.
-        mvDat <- liftIO $ VUM.new totalRows
-        mvValid <- liftIO (VUM.new totalRows :: IO (VUM.IOVector Word8))
-        (_, hasNull) <-
-            Stream.fold
-                ( Fold.foldlM'
-                    ( \(rowOff, anyNull) (vals, defs) -> liftIO $ do
-                        let nDefs = VU.length defs
-                            go i j acc
-                                | i >= nDefs = return acc
-                                | VU.unsafeIndex defs i == maxDef = do
-                                    VUM.unsafeWrite
-                                        mvDat
-                                        (rowOff + i)
-                                        (VB.unsafeIndex vals j)
-                                    VUM.unsafeWrite mvValid (rowOff + i) 1
-                                    go (i + 1) (j + 1) acc
-                                | otherwise = go (i + 1) j True
-                        newNull <- go 0 0 False
-                        return (rowOff + nDefs, anyNull || newNull)
-                    )
-                    (return (0, False))
+foldNullable maxDef totalRows stream = do
+    -- Boxed: null slots hold an error thunk, guarded by bitmap.
+    --
+    -- IMPORTANT: 'VBM.unsafeWrite' for boxed vectors stores a *pointer* to
+    -- the value without evaluating it, so unsupported-encoding error thunks
+    -- would be silently swallowed into the column data and only fire lazily
+    -- when user code reads a cell. The '!v' bang pattern forces each value
+    -- to WHNF before the write, surfacing decoder errors immediately.
+    mvDat <-
+        liftIO $ VBM.replicate totalRows (error "parquet: null slot accessed")
+    mvValid <- liftIO (VUM.new totalRows :: IO (VUM.IOVector Word8))
+    (_, hasNull) <-
+        Stream.fold
+            ( Fold.foldlM'
+                ( \(rowOff, anyNull) (vals, defs) -> liftIO $ do
+                    let nDefs = VU.length defs
+                        go i j acc
+                            | i >= nDefs = return acc
+                            | VU.unsafeIndex defs i == maxDef = do
+                                let !v = VB.unsafeIndex vals j
+                                VBM.unsafeWrite mvDat (rowOff + i) v
+                                VUM.unsafeWrite mvValid (rowOff + i) 1
+                                go (i + 1) (j + 1) acc
+                            | otherwise = go (i + 1) j True
+                    newNull <- go 0 0 False
+                    return (rowOff + nDefs, anyNull || newNull)
                 )
-                stream
-        dat <- liftIO $ VU.unsafeFreeze mvDat
-        maybeBm <-
-            if hasNull
-                then do
-                    validV <- liftIO $ VU.unsafeFreeze mvValid
-                    return (Just (buildBitmapFromValid validV))
-                else return Nothing
-        return (UnboxedColumn maybeBm dat)
-    SFalse -> do
-        -- Boxed: null slots hold an error thunk, guarded by bitmap.
-        --
-        -- IMPORTANT: 'VBM.unsafeWrite' for boxed vectors stores a *pointer* to
-        -- the value without evaluating it, so unsupported-encoding error thunks
-        -- would be silently swallowed into the column data and only fire lazily
-        -- when user code reads a cell. The '!v' bang pattern forces each value
-        -- to WHNF before the write, surfacing decoder errors immediately.
-        mvDat <-
-            liftIO $ VBM.replicate totalRows (error "parquet: null slot accessed")
-        mvValid <- liftIO (VUM.new totalRows :: IO (VUM.IOVector Word8))
-        (_, hasNull) <-
-            Stream.fold
-                ( Fold.foldlM'
-                    ( \(rowOff, anyNull) (vals, defs) -> liftIO $ do
-                        let nDefs = VU.length defs
-                            go i j acc
-                                | i >= nDefs = return acc
-                                | VU.unsafeIndex defs i == maxDef = do
-                                    let !v = VB.unsafeIndex vals j
-                                    VBM.unsafeWrite mvDat (rowOff + i) v
-                                    VUM.unsafeWrite mvValid (rowOff + i) 1
-                                    go (i + 1) (j + 1) acc
-                                | otherwise = go (i + 1) j True
-                        newNull <- go 0 0 False
-                        return (rowOff + nDefs, anyNull || newNull)
-                    )
-                    (return (0, False))
+                (return (0, False))
+            )
+            stream
+    dat <- liftIO $ VB.unsafeFreeze mvDat
+    maybeBm <-
+        if hasNull
+            then do
+                validV <- liftIO $ VU.unsafeFreeze mvValid
+                return (Just (buildBitmapFromValid validV))
+            else return Nothing
+    return (BoxedColumn maybeBm dat)
+
+foldNullableUnboxed ::
+    forall m a.
+    (RandomAccess m, MonadIO m, Columnable a, VU.Unbox a) =>
+    Int ->
+    Int ->
+    Stream m (VU.Vector a, VU.Vector Int) ->
+    m Column
+foldNullableUnboxed maxDef totalRows stream = do
+    -- Unboxed: zero-init means null slots silently hold 0, guarded by bitmap.
+    mvDat <- liftIO $ VUM.new totalRows
+    mvValid <- liftIO (VUM.new totalRows :: IO (VUM.IOVector Word8))
+    (_, hasNull) <-
+        Stream.fold
+            ( Fold.foldlM'
+                ( \(rowOff, anyNull) (vals, defs) -> liftIO $ do
+                    let nDefs = VU.length defs
+                        go i j acc
+                            | i >= nDefs = return acc
+                            | VU.unsafeIndex defs i == maxDef = do
+                                VUM.unsafeWrite
+                                    mvDat
+                                    (rowOff + i)
+                                    (VU.unsafeIndex vals j)
+                                VUM.unsafeWrite mvValid (rowOff + i) 1
+                                go (i + 1) (j + 1) acc
+                            | otherwise = go (i + 1) j True
+                    newNull <- go 0 0 False
+                    return (rowOff + nDefs, anyNull || newNull)
                 )
-                stream
-        dat <- liftIO $ VB.unsafeFreeze mvDat
-        maybeBm <-
-            if hasNull
-                then do
-                    validV <- liftIO $ VU.unsafeFreeze mvValid
-                    return (Just (buildBitmapFromValid validV))
-                else return Nothing
-        return (BoxedColumn maybeBm dat)
+                (return (0, False))
+            )
+            stream
+    dat <- liftIO $ VU.unsafeFreeze mvDat
+    maybeBm <-
+        if hasNull
+            then do
+                validV <- liftIO $ VU.unsafeFreeze mvValid
+                return (Just (buildBitmapFromValid validV))
+            else return Nothing
+    return (UnboxedColumn maybeBm dat)
 
 {- | Fold a stream of (values, def-levels, rep-levels) triples into a
 repeated (list) 'Column' using Dremel-style level stitching.
@@ -331,6 +345,31 @@ foldRepeated ::
 foldRepeated maxRep maxDef stream = do
     chunks <- Stream.toList stream
     let allVals = VB.concat [vs | (vs, _, _) <- chunks]
+        allDefs = VU.concat [ds | (_, ds, _) <- chunks]
+        allReps = VU.concat [rs | (_, _, rs) <- chunks]
+    return $ case maxRep of
+        2 -> fromList (stitchList2V (maxDef - 2) maxDef allReps allDefs allVals)
+        3 ->
+            fromList (stitchList3V (maxDef - 4) (maxDef - 2) maxDef allReps allDefs allVals)
+        _ -> fromList (stitchListV maxDef allReps allDefs allVals)
+
+foldRepeatedUnboxed ::
+    forall m a.
+    ( RandomAccess m
+    , MonadIO m
+    , Columnable a
+    , VU.Unbox a
+    , Columnable (Maybe [Maybe a])
+    , Columnable (Maybe [Maybe [Maybe a]])
+    , Columnable (Maybe [Maybe [Maybe [Maybe a]]])
+    ) =>
+    Int ->
+    Int ->
+    Stream m (VU.Vector a, VU.Vector Int, VU.Vector Int) ->
+    m Column
+foldRepeatedUnboxed maxRep maxDef stream = do
+    chunks <- Stream.toList stream
+    let allVals = VB.convert $ VU.concat [vs | (vs, _, _) <- chunks]
         allDefs = VU.concat [ds | (_, ds, _) <- chunks]
         allReps = VU.concat [rs | (_, _, rs) <- chunks]
     return $ case maxRep of

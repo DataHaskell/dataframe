@@ -4,6 +4,7 @@
 module DataFrame.IO.Parquet.Page (
     -- Types
     PageDecoder,
+    UnboxedPageDecoder,
     -- Per-type decoders
     boolDecoder,
     int32Decoder,
@@ -26,6 +27,7 @@ import qualified Data.Text as T
 import Data.Text.Encoding (decodeUtf8Lenient)
 import Data.Time (UTCTime)
 import qualified Data.Vector as VB
+import qualified Data.Vector.Generic as VG
 import qualified Data.Vector.Unboxed as VU
 import DataFrame.IO.Parquet.Decompress (decompressData)
 import DataFrame.IO.Parquet.Dictionary (
@@ -71,35 +73,38 @@ values, and the decompressed value bytes, returns exactly @nPresent@ values.
 type PageDecoder a =
     Maybe DictVals -> Encoding -> Int -> BS.ByteString -> VB.Vector a
 
+type UnboxedPageDecoder a =
+    Maybe DictVals -> Encoding -> Int -> BS.ByteString -> VU.Vector a
+
 -- ---------------------------------------------------------------------------
 -- Per-type decoders
 -- ---------------------------------------------------------------------------
 
-boolDecoder :: PageDecoder Bool
+boolDecoder :: UnboxedPageDecoder Bool
 boolDecoder mDict enc nPresent bs = case enc of
-    PLAIN _ -> VB.fromList (readNBool nPresent bs)
-    RLE_DICTIONARY _ -> lookupDict mDict nPresent bs getBool
-    PLAIN_DICTIONARY _ -> lookupDict mDict nPresent bs getBool
+    PLAIN _ -> VU.fromList (readNBool nPresent bs)
+    RLE_DICTIONARY _ -> unboxedLookupDict mDict nPresent bs getBool
+    PLAIN_DICTIONARY _ -> unboxedLookupDict mDict nPresent bs getBool
     _ -> error ("boolDecoder: unsupported encoding " ++ show enc)
   where
     getBool (DBool ds) i = ds VB.! i
     getBool d _ = error ("boolDecoder: wrong dict type, got " ++ show d)
 
-int32Decoder :: PageDecoder Int32
+int32Decoder :: UnboxedPageDecoder Int32
 int32Decoder mDict enc nPresent bs = case enc of
-    PLAIN _ -> VB.convert (readNInt32 nPresent bs)
-    RLE_DICTIONARY _ -> lookupDict mDict nPresent bs getInt32
-    PLAIN_DICTIONARY _ -> lookupDict mDict nPresent bs getInt32
+    PLAIN _ -> VU.convert (readNInt32 nPresent bs)
+    RLE_DICTIONARY _ -> unboxedLookupDict mDict nPresent bs getInt32
+    PLAIN_DICTIONARY _ -> unboxedLookupDict mDict nPresent bs getInt32
     _ -> error ("int32Decoder: unsupported encoding " ++ show enc)
   where
     getInt32 (DInt32 ds) i = ds VB.! i
     getInt32 d _ = error ("int32Decoder: wrong dict type, got " ++ show d)
 
-int64Decoder :: PageDecoder Int64
+int64Decoder :: UnboxedPageDecoder Int64
 int64Decoder mDict enc nPresent bs = case enc of
-    PLAIN _ -> VB.convert (readNInt64 nPresent bs)
-    RLE_DICTIONARY _ -> lookupDict mDict nPresent bs getInt64
-    PLAIN_DICTIONARY _ -> lookupDict mDict nPresent bs getInt64
+    PLAIN _ -> VU.convert (readNInt64 nPresent bs)
+    RLE_DICTIONARY _ -> unboxedLookupDict mDict nPresent bs getInt64
+    PLAIN_DICTIONARY _ -> unboxedLookupDict mDict nPresent bs getInt64
     _ -> error ("int64Decoder: unsupported encoding " ++ show enc)
   where
     getInt64 (DInt64 ds) i = ds VB.! i
@@ -115,21 +120,21 @@ int96Decoder mDict enc nPresent bs = case enc of
     getInt96 (DInt96 ds) i = ds VB.! i
     getInt96 d _ = error ("int96Decoder: wrong dict type, got " ++ show d)
 
-floatDecoder :: PageDecoder Float
+floatDecoder :: UnboxedPageDecoder Float
 floatDecoder mDict enc nPresent bs = case enc of
-    PLAIN _ -> VB.convert (readNFloat nPresent bs)
-    RLE_DICTIONARY _ -> lookupDict mDict nPresent bs getFloat
-    PLAIN_DICTIONARY _ -> lookupDict mDict nPresent bs getFloat
+    PLAIN _ -> VU.convert (readNFloat nPresent bs)
+    RLE_DICTIONARY _ -> unboxedLookupDict mDict nPresent bs getFloat
+    PLAIN_DICTIONARY _ -> unboxedLookupDict mDict nPresent bs getFloat
     _ -> error ("floatDecoder: unsupported encoding " ++ show enc)
   where
     getFloat (DFloat ds) i = ds VB.! i
     getFloat d _ = error ("floatDecoder: wrong dict type, got " ++ show d)
 
-doubleDecoder :: PageDecoder Double
+doubleDecoder :: UnboxedPageDecoder Double
 doubleDecoder mDict enc nPresent bs = case enc of
-    PLAIN _ -> VB.convert (readNDouble nPresent bs)
-    RLE_DICTIONARY _ -> lookupDict mDict nPresent bs getDouble
-    PLAIN_DICTIONARY _ -> lookupDict mDict nPresent bs getDouble
+    PLAIN _ -> VU.convert (readNDouble nPresent bs)
+    RLE_DICTIONARY _ -> unboxedLookupDict mDict nPresent bs getDouble
+    PLAIN_DICTIONARY _ -> unboxedLookupDict mDict nPresent bs getDouble
     _ -> error ("doubleDecoder: unsupported encoding " ++ show enc)
   where
     getDouble (DDouble ds) i = ds VB.! i
@@ -169,6 +174,19 @@ lookupDict mDict nPresent bs f = case mDict of
     Just dict ->
         let (idxs, _) = decodeDictIndicesV nPresent bs
          in VB.generate nPresent (f dict . VU.unsafeIndex idxs)
+
+unboxedLookupDict ::
+    (VU.Unbox a) =>
+    Maybe DictVals ->
+    Int ->
+    BS.ByteString ->
+    (DictVals -> Int -> a) ->
+    VU.Vector a
+unboxedLookupDict mDict nPresent bs f = case mDict of
+    Nothing -> error "Dictionary-encoded page but no dictionary page seen"
+    Just dict ->
+        let (idxs, _) = decodeDictIndicesV nPresent bs
+         in VU.generate nPresent (f dict . VU.unsafeIndex idxs)
 
 -- ---------------------------------------------------------------------------
 -- Core page-iteration loop
@@ -215,10 +233,10 @@ The internal state is
 -- entirely.
 -}
 readPages ::
-    (RandomAccess m, MonadIO m) =>
+    (RandomAccess m, MonadIO m, VG.Vector v a) =>
     ColumnDescription ->
-    PageDecoder a ->
-    Unfold m ColumnChunk (VB.Vector a, VU.Vector Int, VU.Vector Int)
+    (Maybe DictVals -> Encoding -> Int -> BS.ByteString -> v a) ->
+    Unfold m ColumnChunk (v a, VU.Vector Int, VU.Vector Int)
 readPages description decoder = mkUnfoldM step inject
   where
     maxDef = fromIntegral description.maxDefinitionLevel :: Int
