@@ -690,4 +690,3 @@ fetchHFParquetFiles uri = do
             let url = directHFUrl ref
             let filename = last $ T.splitOn "/" (hfGlob ref)
             downloadHFFiles mToken [HFParquetFile url "" "" filename]
-
