@@ -36,10 +36,7 @@ run = do
                 deriveM
                     "item_price"
                     (F.lift (readMaybe @Double . T.unpack . T.drop 1) item_price)
-            totalPrice <-
-                deriveM
-                    "total_price"
-                    (F.whenBothPresent (*) itemPrice (F.lift (Just . fromIntegral) quantity))
+            totalPrice <- deriveM "total_price" (itemPrice .* quantity)
             pure ()
 
     -- sample the dataframe.
