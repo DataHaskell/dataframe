@@ -69,7 +69,7 @@ filterColumnInexistentValues =
         ( assertEqual
             "Non existent filter value returns no rows"
             (0, 8)
-            (D.dimensions $ D.filter (F.col @Int "test1") (< 0) testData)
+            (D.dimensions $ D.filterWhere (F.col @Int "test1" .<. 0) testData)
         )
 
 filterColumnAllValues :: Test
