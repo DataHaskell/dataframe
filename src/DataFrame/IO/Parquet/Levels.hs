@@ -1,3 +1,5 @@
+{-# LANGUAGE BangPatterns #-}
+
 module DataFrame.IO.Parquet.Levels (
     -- Level readers
     readLevelsV1V,
@@ -15,6 +17,7 @@ import Data.Int (Int32)
 import qualified Data.Vector as VB
 import qualified Data.Vector.Mutable as VBM
 import qualified Data.Vector.Unboxed as VU
+import qualified Data.Vector.Unboxed.Mutable as VUM
 import Data.Word (Word32)
 import DataFrame.IO.Parquet.Encoding (
     bitWidthForMaxLevel,
@@ -25,6 +28,27 @@ import DataFrame.Internal.Binary (littleEndianWord32)
 -- ---------------------------------------------------------------------------
 -- Level readers
 -- ---------------------------------------------------------------------------
+
+-- | Convert a 'Word32' level vector to an 'Int' level vector while counting
+-- how many entries equal @maxDef@. Single pass; allocates a single
+-- 'VU.Vector Int' of length @VU.length raw@.
+convertAndCount :: Int -> VU.Vector Word32 -> (VU.Vector Int, Int)
+convertAndCount maxDef raw = runST $ do
+    let !n = VU.length raw
+    mv <- VUM.unsafeNew n
+    let !maxDefW = fromIntegral maxDef :: Word32
+        go !i !nPresent
+            | i >= n = pure nPresent
+            | otherwise = do
+                let !w = VU.unsafeIndex raw i
+                    !d = fromIntegral w :: Int
+                VUM.unsafeWrite mv i d
+                if w == maxDefW
+                    then go (i + 1) (nPresent + 1)
+                    else go (i + 1) nPresent
+    !nPresent <- go 0 0
+    !out <- VU.unsafeFreeze mv
+    pure (out, nPresent)
 
 readLevelsV1V ::
     -- | Total number of values in the page
@@ -38,18 +62,19 @@ readLevelsV1V ::
 readLevelsV1V n maxDef maxRep bs =
     let bwRep = bitWidthForMaxLevel maxRep
         bwDef = bitWidthForMaxLevel maxDef
-        (repVec, afterRep) = decodeLevelBlock bwRep n bs
-        (defVec, afterDef) = decodeLevelBlock bwDef n afterRep
-        nPresent = VU.foldl' (\acc d -> acc + fromEnum (d == maxDef)) 0 defVec
+        (repVec, _, afterRep) = decodeLevelBlock bwRep n bs
+        (defVec, nPresent, afterDef) = decodeLevelBlock bwDef n afterRep
      in (defVec, repVec, nPresent, afterDef)
   where
-    decodeLevelBlock 0 n' buf = (VU.replicate n' 0, buf)
+    -- For rep block we don't need nPresent; we still get one cheaply.
+    decodeLevelBlock 0 n' buf = (VU.replicate n' 0, n' * fromEnum (maxDef == 0), buf)
     decodeLevelBlock bw n' buf =
         let blockLen = fromIntegral (littleEndianWord32 (BS.take 4 buf)) :: Int
             blockData = BS.take blockLen (BS.drop 4 buf)
             after = BS.drop (4 + blockLen) buf
             (raw, _) = decodeRLEBitPackedHybridV bw n' blockData
-         in (VU.map (fromIntegral :: Word32 -> Int) raw, after)
+            (out, np) = convertAndCount maxDef raw
+         in (out, np, after)
 
 readLevelsV2V ::
     -- | Total number of values
@@ -73,13 +98,13 @@ readLevelsV2V n maxDef maxRep repLen defLen bs =
             | bwRep == 0 = VU.replicate n 0
             | otherwise =
                 let (raw, _) = decodeRLEBitPackedHybridV bwRep n repBytes
-                 in VU.map (fromIntegral :: Word32 -> Int) raw
-        defVec
-            | bwDef == 0 = VU.replicate n 0
+                    (out, _) = convertAndCount maxDef raw
+                 in out
+        (defVec, nPresent)
+            | bwDef == 0 = (VU.replicate n 0, n * fromEnum (maxDef == 0))
             | otherwise =
                 let (raw, _) = decodeRLEBitPackedHybridV bwDef n defBytes
-                 in VU.map (fromIntegral :: Word32 -> Int) raw
-        nPresent = VU.foldl' (\acc d -> acc + fromEnum (d == maxDef)) 0 defVec
+                 in convertAndCount maxDef raw
      in (defVec, repVec, nPresent, afterDefBytes)
 
 {- | Build a full-length vector of @Maybe a@ from definition levels and a

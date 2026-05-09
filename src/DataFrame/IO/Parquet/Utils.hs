@@ -287,27 +287,11 @@ foldNullableUnboxed maxDef totalRows stream = do
     -- zero-init means null slots silently hold 0, guarded by bitmap.
     mvDat <- liftIO $ VUM.new totalRows
     mvValid <- liftIO (VUM.new totalRows :: IO (VUM.IOVector Word8))
-    (_, hasNull) <-
-        Stream.fold
-            ( Fold.foldlM'
-                ( \(rowOff, anyNull) (vals, defs) -> liftIO $ do
-                    let nDefs = VU.length defs
-                        go i j acc
-                            | i >= nDefs = return acc
-                            | VU.unsafeIndex defs i == maxDef = do
-                                VUM.unsafeWrite
-                                    mvDat
-                                    (rowOff + i)
-                                    (VU.unsafeIndex vals j)
-                                VUM.unsafeWrite mvValid (rowOff + i) 1
-                                go (i + 1) (j + 1) acc
-                            | otherwise = go (i + 1) j True
-                    newNull <- go 0 0 False
-                    return (rowOff + nDefs, anyNull || newNull)
-                )
-                (return (0, False))
-            )
-            stream
+    -- Drain the stream into a list once, then run a tight IO loop. This
+    -- avoids per-page Streamly polymorphic-monad dispatch in the inner
+    -- scatter loop.
+    chunks <- Stream.toList stream
+    hasNull <- liftIO $ scatterChunks mvDat mvValid maxDef chunks
     dat <- liftIO $ VU.unsafeFreeze mvDat
     maybeBm <-
         if hasNull
@@ -316,6 +300,28 @@ foldNullableUnboxed maxDef totalRows stream = do
                 return (Just (buildBitmapFromValid validV))
             else return Nothing
     return (UnboxedColumn maybeBm dat)
+  where
+    scatterChunks ::
+        VUM.IOVector a ->
+        VUM.IOVector Word8 ->
+        Int ->
+        [(VU.Vector a, VU.Vector Int)] ->
+        IO Bool
+    scatterChunks mvDat mvValid !md = goChunks 0 False
+      where
+        goChunks !_ !anyNull [] = pure anyNull
+        goChunks !rowOff !anyNull ((vals, defs) : rest) = do
+            let !nDefs = VU.length defs
+                go !i !j !acc
+                    | i >= nDefs = pure acc
+                    | VU.unsafeIndex defs i == md = do
+                        VUM.unsafeWrite mvDat (rowOff + i) (VU.unsafeIndex vals j)
+                        VUM.unsafeWrite mvValid (rowOff + i) 1
+                        go (i + 1) (j + 1) acc
+                    | otherwise = go (i + 1) j True
+            !newNull <- go 0 0 False
+            goChunks (rowOff + nDefs) (anyNull || newNull) rest
+{-# INLINE foldNullableUnboxed #-}
 
 {- | Fold a stream of (values, def-levels, rep-levels) triples into a
 repeated (list) 'Column' using Dremel-style level stitching.
