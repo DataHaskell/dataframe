@@ -29,9 +29,10 @@ import DataFrame.Internal.Binary (littleEndianWord32)
 -- Level readers
 -- ---------------------------------------------------------------------------
 
--- | Convert a 'Word32' level vector to an 'Int' level vector while counting
--- how many entries equal @maxDef@. Single pass; allocates a single
--- 'VU.Vector Int' of length @VU.length raw@.
+{- | Convert a 'Word32' level vector to an 'Int' level vector while counting
+how many entries equal @maxDef@. Single pass; allocates a single
+'VU.Vector Int' of length @VU.length raw@.
+-}
 convertAndCount :: Int -> VU.Vector Word32 -> (VU.Vector Int, Int)
 convertAndCount maxDef raw = runST $ do
     let !n = VU.length raw
