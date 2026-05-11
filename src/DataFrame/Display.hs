@@ -4,23 +4,27 @@
 module DataFrame.Display where
 
 import qualified Data.Text.IO as T
+import DataFrame.Display.Terminal.PrettyPrint (RenderFormat (..))
 import qualified DataFrame.Internal.DataFrame as D
-import qualified DataFrame.Operations.Subset as D
-
-import Data.Function
 
 data DisplayOptions = DisplayOptions
-    { {-- | Maximum number of rows to render.
+    { {-- | Controls truncation on all three axes (rows, columns, cell width).
       --
-      --   * If this value is less than or equal to 0, no rows are printed.
-      --   * If it is greater than the number of rows in the frame, all rows are printed.
+      --   * 'Nothing' renders every row and column at full width.
+      --   * 'Just cfg' caps each axis whose limit in @cfg@ is positive.
       --}
-      displayRows :: Int
+      displayTruncate :: Maybe D.TruncateConfig
     }
 
+{- | Defaults aimed at terminal use: 10 rows, plus the standard column and cell
+caps from 'D.defaultTruncateConfig'.
+-}
 defaultDisplayOptions :: DisplayOptions
-defaultDisplayOptions = DisplayOptions 10
+defaultDisplayOptions =
+    DisplayOptions
+        { displayTruncate = Just D.defaultTruncateConfig{D.maxRows = 10}
+        }
 
 -- | Render a 'DataFrame' to stdout according to 'DisplayOptions'.
 display :: DisplayOptions -> D.DataFrame -> IO ()
-display opts df = df & D.take (displayRows opts) & (`D.asText` False) & T.putStrLn
+display opts = T.putStrLn . D.asTextWith Plain (displayTruncate opts)

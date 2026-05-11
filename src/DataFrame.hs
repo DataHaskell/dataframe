@@ -282,6 +282,8 @@ import DataFrame.Internal.Column as Column (
 import DataFrame.Internal.DataFrame as Dataframe (
     DataFrame,
     GroupedDataFrame,
+    TruncateConfig (..),
+    defaultTruncateConfig,
     empty,
     null,
     toCsv,

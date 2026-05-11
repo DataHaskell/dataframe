@@ -18,7 +18,7 @@ import qualified Data.Vector.Unboxed as VU
 import Control.DeepSeq (NFData (..), rnf)
 import Control.Exception (throw)
 import Data.Function (on)
-import Data.List (sortBy, transpose, (\\))
+import Data.List (sortBy, (\\))
 import Data.Maybe (fromMaybe)
 import Data.Type.Equality (
     TestEquality (testEquality),
@@ -87,35 +87,89 @@ instance Eq DataFrame where
 instance Show DataFrame where
     show :: DataFrame -> String
     show d =
-        let
-            rows = 20
-            (r, c) = dataframeDimensions d
-            d' =
-                d
-                    { columns = V.map (takeColumn rows) (columns d)
-                    , dataframeDimensions = (min rows r, c)
-                    }
-            truncationInfo =
-                "\n"
-                    ++ "Showing "
-                    ++ show (min rows r)
-                    ++ " rows out of "
-                    ++ show r
-         in
-            T.unpack (asText d' False) ++ (if r > rows then truncationInfo else "")
+        let (r, _) = dataframeDimensions d
+            cfg = defaultTruncateConfig
+            shown = if maxRows cfg > 0 then min (maxRows cfg) r else r
+            body = asTextWith Plain (Just cfg) d
+            footer
+                | shown < r =
+                    "\nShowing "
+                        <> T.pack (show shown)
+                        <> " rows out of "
+                        <> T.pack (show r)
+                | otherwise = T.empty
+         in T.unpack (body <> footer)
+
+{- | Configures how a 'DataFrame' is rendered as text. A non-positive value on
+any field means \"no limit\" on that axis.
+
+* 'maxRows' — render at most this many rows from the top of the frame.
+* 'maxColumns' — when the frame has more columns than this, the middle columns
+  are collapsed into a single ellipsis column.
+* 'maxCellWidth' — text in any individual cell (including headers and type
+  rows) longer than this is truncated with a trailing ellipsis.
+-}
+data TruncateConfig = TruncateConfig
+    { maxRows :: Int
+    , maxColumns :: Int
+    , maxCellWidth :: Int
+    }
+    deriving (Show, Eq)
+
+-- | Sensible defaults for GHCi: 20 rows, 10 columns, 30 characters per cell.
+defaultTruncateConfig :: TruncateConfig
+defaultTruncateConfig =
+    TruncateConfig{maxRows = 20, maxColumns = 10, maxCellWidth = 30}
+
+-- | Ellipsis character used to mark elided columns and clipped cells.
+ellipsisText :: T.Text
+ellipsisText = "\x2026"
 
 -- | For showing the dataframe as markdown in notebooks.
 toMarkdown :: DataFrame -> T.Text
-toMarkdown df = asText df True
+toMarkdown = asText Markdown
 
 -- | For showing the dataframe as a string markdown in notebooks.
 toMarkdown' :: DataFrame -> String
 toMarkdown' = T.unpack . toMarkdown
 
-asText :: DataFrame -> Bool -> T.Text
-asText d properMarkdown =
-    let header = map fst (sortBy (compare `on` snd) $ M.toList (columnIndices d))
-        types = V.toList $ V.filter (/= "") $ V.map getType (columns d)
+asText :: RenderFormat -> DataFrame -> T.Text
+asText fmt = asTextWith fmt Nothing
+
+asTextWith :: RenderFormat -> Maybe TruncateConfig -> DataFrame -> T.Text
+asTextWith fmt mTrunc d =
+    let allHeaders =
+            map fst (sortBy (compare `on` snd) (M.toList (columnIndices d)))
+        nCols = length allHeaders
+        (totalRows, _) = dataframeDimensions d
+
+        rowCap = case mTrunc of
+            Just cfg | maxRows cfg > 0 -> min totalRows (maxRows cfg)
+            _ -> totalRows
+
+        (visibleHeaders, ellipsisAt) = pickColumns mTrunc nCols allHeaders
+
+        lookupCol name =
+            fmap
+                (takeColumn rowCap)
+                ((V.!?) (columns d) ((M.!) (columnIndices d) name))
+        survivingCols = map lookupCol visibleHeaders
+        survivingTypes = map (maybe "" getType) survivingCols
+        survivingData = map get survivingCols
+
+        clipCell = case mTrunc of
+            Just cfg | maxCellWidth cfg > 0 -> truncateCell (maxCellWidth cfg)
+            _ -> id
+
+        (finalHeaders, finalTypes, finalCols) = case ellipsisAt of
+            Nothing -> (visibleHeaders, survivingTypes, survivingData)
+            Just i ->
+                let ellipsisCol = V.replicate rowCap ellipsisText
+                 in ( insertAt i ellipsisText visibleHeaders
+                    , insertAt i ellipsisText survivingTypes
+                    , insertAt i ellipsisCol survivingData
+                    )
+
         getType :: Column -> T.Text
         showMaybeType :: forall a. (Typeable a) => String
         showMaybeType =
@@ -125,32 +179,68 @@ asText d properMarkdown =
         getType (BoxedColumn (Just _) (_ :: V.Vector a)) = T.pack $ showMaybeType @a
         getType (UnboxedColumn Nothing (_ :: VU.Vector a)) = T.pack $ show (typeRep @a)
         getType (UnboxedColumn (Just _) (_ :: VU.Vector a)) = T.pack $ showMaybeType @a
-        -- Separate out cases dynamically so we don't end up making round trip string
-        -- copies.
+
+        -- Separate out cases dynamically so we don't end up making round trip
+        -- string copies.
         get :: Maybe Column -> V.Vector T.Text
         get (Just (BoxedColumn (Just bm) (column :: V.Vector a))) =
             V.generate (V.length column) $ \i ->
                 if bitmapTestBit bm i
                     then T.pack (show (Just (V.unsafeIndex column i)))
                     else "Nothing"
-        get (Just (BoxedColumn Nothing (column :: V.Vector a))) = case testEquality (typeRep @a) (typeRep @T.Text) of
-            Just Refl -> column
-            Nothing -> case testEquality (typeRep @a) (typeRep @String) of
-                Just Refl -> V.map T.pack column
-                Nothing -> V.map (T.pack . show) column
+        get (Just (BoxedColumn Nothing (column :: V.Vector a))) =
+            case testEquality (typeRep @a) (typeRep @T.Text) of
+                Just Refl -> column
+                Nothing -> case testEquality (typeRep @a) (typeRep @String) of
+                    Just Refl -> V.map T.pack column
+                    Nothing -> V.map (T.pack . show) column
         get (Just (UnboxedColumn (Just bm) column)) =
-            let col = V.convert column
-             in V.generate (V.length col) $ \i ->
-                    if bitmapTestBit bm i
-                        then T.pack (show (Just (V.unsafeIndex col i)))
-                        else "Nothing"
-        get (Just (UnboxedColumn Nothing column)) = V.map (T.pack . show) (V.convert column)
+            V.generate (VU.length column) $ \i ->
+                if bitmapTestBit bm i
+                    then T.pack (show (Just (VU.unsafeIndex column i)))
+                    else "Nothing"
+        get (Just (UnboxedColumn Nothing column)) =
+            V.generate (VU.length column) (T.pack . show . VU.unsafeIndex column)
         get Nothing = V.empty
-        getTextColumnFromFrame _df (_i, name) = get $ (V.!?) (columns d) ((M.!) (columnIndices d) name)
-        rows =
-            transpose $
-                zipWith (curry (V.toList . getTextColumnFromFrame d)) [(0 :: Int) ..] header
-     in showTable properMarkdown header types rows
+     in showTable
+            fmt
+            (map clipCell finalHeaders)
+            (map clipCell finalTypes)
+            (map (V.map clipCell) finalCols)
+
+{- | Decide which columns survive horizontal truncation and where (if anywhere)
+to splice in the ellipsis column. The split puts the extra column on the
+left for odd 'maxColumns'; the ellipsis is only inserted when it actually
+saves space (i.e. the frame has more than 'maxColumns' + 1 columns).
+-}
+pickColumns ::
+    Maybe TruncateConfig ->
+    Int ->
+    [a] ->
+    ([a], Maybe Int)
+pickColumns mTrunc nCols xs = case mTrunc of
+    Just cfg
+        | let c = maxColumns cfg
+        , c > 0
+        , nCols > c + 1 ->
+            let leftN = (c + 1) `div` 2
+                rightN = c - leftN
+             in ( Prelude.take leftN xs ++ Prelude.drop (nCols - rightN) xs
+                , Just leftN
+                )
+    _ -> (xs, Nothing)
+
+-- | Splice @x@ into @xs@ at index @i@ (0-based), shifting later elements right.
+insertAt :: Int -> a -> [a] -> [a]
+insertAt i x xs = let (l, r) = splitAt i xs in l ++ x : r
+
+-- | Cap a single cell's rendered length, appending an ellipsis when shortened.
+truncateCell :: Int -> T.Text -> T.Text
+truncateCell n t
+    | n <= 0 = t
+    | T.compareLength t n /= GT = t
+    | n == 1 = ellipsisText
+    | otherwise = T.take (n - 1) t <> ellipsisText
 
 -- | O(1) Creates an empty dataframe
 empty :: DataFrame
