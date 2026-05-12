@@ -34,8 +34,8 @@ import DataFrame.IO.Parquet.Dictionary (
     DictVals (..),
     readDictVals,
  )
-import DataFrame.IO.Parquet.Encoding (decodeDictIndicesV)
-import DataFrame.IO.Parquet.Levels (readLevelsV1V, readLevelsV2V)
+import DataFrame.IO.Parquet.Encoding (decodeDictIndices)
+import DataFrame.IO.Parquet.Levels (readLevelsV1, readLevelsV2)
 import DataFrame.IO.Parquet.Thrift (
     ColumnChunk (..),
     ColumnMetaData (..),
@@ -172,7 +172,7 @@ lookupDict ::
 lookupDict mDict nPresent bs f = case mDict of
     Nothing -> error "Dictionary-encoded page but no dictionary page seen"
     Just dict ->
-        let (idxs, _) = decodeDictIndicesV nPresent bs
+        let (idxs, _) = decodeDictIndices nPresent bs
          in VB.generate nPresent (f dict . VU.unsafeIndex idxs)
 
 unboxedLookupDict ::
@@ -185,7 +185,7 @@ unboxedLookupDict ::
 unboxedLookupDict mDict nPresent bs f = case mDict of
     Nothing -> error "Dictionary-encoded page but no dictionary page seen"
     Just dict ->
-        let (idxs, _) = decodeDictIndicesV nPresent bs
+        let (idxs, _) = decodeDictIndices nPresent bs
          in VU.generate nPresent (f dict . VU.unsafeIndex idxs)
 
 -- ---------------------------------------------------------------------------
@@ -274,7 +274,7 @@ readPages description decoder = mkUnfoldM step inject
                             enc = unField dph.dph_encoding
                         decompressed <- liftIO $ decompressData uncmpSz codec pageData
                         let (defLvls, repLvls, nPresent, valBytes) =
-                                readLevelsV1V n maxDef maxRep decompressed
+                                readLevelsV1 n maxDef maxRep decompressed
                             triple = (decoder dict enc nPresent valBytes, defLvls, repLvls)
                         return $ Yield triple (dict, rest', codec, pType)
                     DATA_PAGE_V2 _ -> do
@@ -290,7 +290,7 @@ readPages description decoder = mkUnfoldM step inject
                             -- payload is (optionally) compressed.
                             isCompressed = fromMaybe True (unField dph2.dph2_is_compressed)
                             (defLvls, repLvls, nPresent, compValBytes) =
-                                readLevelsV2V n maxDef maxRep repLen defLen pageData
+                                readLevelsV2 n maxDef maxRep repLen defLen pageData
                         valBytes <-
                             if isCompressed
                                 then liftIO $ decompressData uncmpSz codec compValBytes

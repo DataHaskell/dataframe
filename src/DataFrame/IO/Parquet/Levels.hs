@@ -2,26 +2,24 @@
 
 module DataFrame.IO.Parquet.Levels (
     -- Level readers
-    readLevelsV1V,
-    readLevelsV2V,
+    readLevelsV1,
+    readLevelsV2,
     -- Stitch functions
-    stitchNullableV,
-    stitchListV,
-    stitchList2V,
-    stitchList3V,
+    stitchList,
+    stitchList2,
+    stitchList3,
 ) where
 
 import Control.Monad.ST (runST)
 import qualified Data.ByteString as BS
 import Data.Int (Int32)
 import qualified Data.Vector as VB
-import qualified Data.Vector.Mutable as VBM
 import qualified Data.Vector.Unboxed as VU
 import qualified Data.Vector.Unboxed.Mutable as VUM
 import Data.Word (Word32)
 import DataFrame.IO.Parquet.Encoding (
     bitWidthForMaxLevel,
-    decodeRLEBitPackedHybridV,
+    decodeRLEBitPackedHybrid,
  )
 import DataFrame.Internal.Binary (littleEndianWord32)
 
@@ -51,7 +49,7 @@ convertAndCount maxDef raw = runST $ do
     !out <- VU.unsafeFreeze mv
     pure (out, nPresent)
 
-readLevelsV1V ::
+readLevelsV1 ::
     -- | Total number of values in the page
     Int ->
     -- | maxDefinitionLevel
@@ -60,7 +58,7 @@ readLevelsV1V ::
     Int ->
     BS.ByteString ->
     (VU.Vector Int, VU.Vector Int, Int, BS.ByteString)
-readLevelsV1V n maxDef maxRep bs =
+readLevelsV1 n maxDef maxRep bs =
     let bwRep = bitWidthForMaxLevel maxRep
         bwDef = bitWidthForMaxLevel maxDef
         (repVec, _, afterRep) = decodeLevelBlock bwRep n bs
@@ -73,11 +71,11 @@ readLevelsV1V n maxDef maxRep bs =
         let blockLen = fromIntegral (littleEndianWord32 (BS.take 4 buf)) :: Int
             blockData = BS.take blockLen (BS.drop 4 buf)
             after = BS.drop (4 + blockLen) buf
-            (raw, _) = decodeRLEBitPackedHybridV bw n' blockData
+            (raw, _) = decodeRLEBitPackedHybrid bw n' blockData
             (out, np) = convertAndCount maxDef raw
          in (out, np, after)
 
-readLevelsV2V ::
+readLevelsV2 ::
     -- | Total number of values
     Int ->
     -- | maxDefinitionLevel
@@ -90,7 +88,7 @@ readLevelsV2V ::
     Int32 ->
     BS.ByteString ->
     (VU.Vector Int, VU.Vector Int, Int, BS.ByteString)
-readLevelsV2V n maxDef maxRep repLen defLen bs =
+readLevelsV2 n maxDef maxRep repLen defLen bs =
     let (repBytes, afterRepBytes) = BS.splitAt (fromIntegral repLen) bs
         (defBytes, afterDefBytes) = BS.splitAt (fromIntegral defLen) afterRepBytes
         bwRep = bitWidthForMaxLevel maxRep
@@ -98,54 +96,27 @@ readLevelsV2V n maxDef maxRep repLen defLen bs =
         repVec
             | bwRep == 0 = VU.replicate n 0
             | otherwise =
-                let (raw, _) = decodeRLEBitPackedHybridV bwRep n repBytes
+                let (raw, _) = decodeRLEBitPackedHybrid bwRep n repBytes
                     (out, _) = convertAndCount maxDef raw
                  in out
         (defVec, nPresent)
             | bwDef == 0 = (VU.replicate n 0, n * fromEnum (maxDef == 0))
             | otherwise =
-                let (raw, _) = decodeRLEBitPackedHybridV bwDef n defBytes
+                let (raw, _) = decodeRLEBitPackedHybrid bwDef n defBytes
                  in convertAndCount maxDef raw
      in (defVec, repVec, nPresent, afterDefBytes)
-
-{- | Build a full-length vector of @Maybe a@ from definition levels and a
-compact present-values vector.
-
-For each index @i@:
-
-  * @defVec VU.! i == maxDef@  →  @Just (values VB.! j)@, advancing @j@
-  * @defVec VU.! i <  maxDef@  →  @Nothing@
-
-The length of the result equals @VU.length defVec@.
--}
-stitchNullableV ::
-    Int ->
-    VU.Vector Int ->
-    VB.Vector a ->
-    VB.Vector (Maybe a)
-stitchNullableV maxDef defVec values = runST $ do
-    let n = VU.length defVec
-    mv <- VBM.replicate n Nothing
-    let go i j
-            | i >= n = pure ()
-            | VU.unsafeIndex defVec i == maxDef = do
-                VBM.unsafeWrite mv i (Just (VB.unsafeIndex values j))
-                go (i + 1) (j + 1)
-            | otherwise = go (i + 1) j
-    go 0 0
-    VB.unsafeFreeze mv
 
 {- | Stitch a singly-nested list column (@maxRep == 1@) from vector-format
 definition and repetition levels plus a compact present-values vector.
 Returns one @Maybe [Maybe a]@ per top-level row.
 -}
-stitchListV ::
+stitchList ::
     Int ->
     VU.Vector Int ->
     VU.Vector Int ->
     VB.Vector a ->
     [Maybe [Maybe a]]
-stitchListV maxDef repVec defVec values =
+stitchList maxDef repVec defVec values =
     map toRow (splitAtRepBound 0 (pairWithValsV maxDef repVec defVec values))
   where
     toRow [] = Nothing
@@ -155,14 +126,14 @@ stitchListV maxDef repVec defVec values =
 {- | Stitch a doubly-nested list column (@maxRep == 2@).
 @defT1@ is the def threshold at which the depth-1 element is present.
 -}
-stitchList2V ::
+stitchList2 ::
     Int ->
     Int ->
     VU.Vector Int ->
     VU.Vector Int ->
     VB.Vector a ->
     [Maybe [Maybe [Maybe a]]]
-stitchList2V defT1 maxDef repVec defVec values =
+stitchList2 defT1 maxDef repVec defVec values =
     map toRow (splitAtRepBound 0 triplets)
   where
     triplets = pairWithValsV maxDef repVec defVec values
@@ -179,7 +150,7 @@ stitchList2V defT1 maxDef repVec defVec values =
 @defT1@ and @defT2@ are the def thresholds for depth-1 and depth-2
 elements respectively.
 -}
-stitchList3V ::
+stitchList3 ::
     Int ->
     Int ->
     Int ->
@@ -187,7 +158,7 @@ stitchList3V ::
     VU.Vector Int ->
     VB.Vector a ->
     [Maybe [Maybe [Maybe [Maybe a]]]]
-stitchList3V defT1 defT2 maxDef repVec defVec values =
+stitchList3 defT1 defT2 maxDef repVec defVec values =
     map toRow (splitAtRepBound 0 triplets)
   where
     triplets = pairWithValsV maxDef repVec defVec values

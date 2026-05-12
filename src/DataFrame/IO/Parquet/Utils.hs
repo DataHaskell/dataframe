@@ -28,9 +28,9 @@ import qualified Data.Vector.Unboxed as VU
 import qualified Data.Vector.Unboxed.Mutable as VUM
 import Data.Word (Word8)
 import DataFrame.IO.Parquet.Levels (
-    stitchList2V,
-    stitchList3V,
-    stitchListV,
+    stitchList,
+    stitchList2,
+    stitchList3,
  )
 import DataFrame.IO.Parquet.Thrift (
     ConvertedType (..),
@@ -328,9 +328,9 @@ repeated (list) 'Column' using Dremel-style level stitching.
 
 The stitching function is selected by @maxRep@:
 
-  * @maxRep == 1@  →  'stitchListV'   → @[Maybe [Maybe a]]@
-  * @maxRep == 2@  →  'stitchList2V'  → @[Maybe [Maybe [Maybe a]]]@
-  * @maxRep >= 3@  →  'stitchList3V'  → @[Maybe [Maybe [Maybe [Maybe a]]]]@
+  * @maxRep == 1@  →  'stitchList'   → @[Maybe [Maybe a]]@
+  * @maxRep == 2@  →  'stitchList2'  → @[Maybe [Maybe [Maybe a]]]@
+  * @maxRep >= 3@  →  'stitchList3'  → @[Maybe [Maybe [Maybe [Maybe a]]]]@
 
 Threshold formula: @defT_r = maxDef - 2 * (maxRep - r)@.
 -}
@@ -353,10 +353,10 @@ foldRepeated maxRep maxDef stream = do
         allDefs = VU.concat [ds | (_, ds, _) <- chunks]
         allReps = VU.concat [rs | (_, _, rs) <- chunks]
     return $ case maxRep of
-        2 -> fromList (stitchList2V (maxDef - 2) maxDef allReps allDefs allVals)
+        2 -> fromList (stitchList2 (maxDef - 2) maxDef allReps allDefs allVals)
         3 ->
-            fromList (stitchList3V (maxDef - 4) (maxDef - 2) maxDef allReps allDefs allVals)
-        _ -> fromList (stitchListV maxDef allReps allDefs allVals)
+            fromList (stitchList3 (maxDef - 4) (maxDef - 2) maxDef allReps allDefs allVals)
+        _ -> fromList (stitchList maxDef allReps allDefs allVals)
 
 foldRepeatedUnboxed ::
     forall m a.
@@ -378,7 +378,7 @@ foldRepeatedUnboxed maxRep maxDef stream = do
         allDefs = VU.concat [ds | (_, ds, _) <- chunks]
         allReps = VU.concat [rs | (_, _, rs) <- chunks]
     return $ case maxRep of
-        2 -> fromList (stitchList2V (maxDef - 2) maxDef allReps allDefs allVals)
+        2 -> fromList (stitchList2 (maxDef - 2) maxDef allReps allDefs allVals)
         3 ->
-            fromList (stitchList3V (maxDef - 4) (maxDef - 2) maxDef allReps allDefs allVals)
-        _ -> fromList (stitchListV maxDef allReps allDefs allVals)
+            fromList (stitchList3 (maxDef - 4) (maxDef - 2) maxDef allReps allDefs allVals)
+        _ -> fromList (stitchList maxDef allReps allDefs allVals)

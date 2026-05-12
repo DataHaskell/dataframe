@@ -6,10 +6,10 @@ module DataFrame.IO.Parquet.Encoding (
     ceilLog2,
     bitWidthForMaxLevel,
     -- Vector-based RLE/bit-packed decoder (from new parser)
-    decodeRLEBitPackedHybridV,
-    extractBitsIntoV,
+    decodeRLEBitPackedHybrid,
+    extractBitsInto,
     fillRun,
-    decodeDictIndicesV,
+    decodeDictIndices,
 ) where
 
 import Control.Monad.ST (ST, runST)
@@ -41,14 +41,14 @@ bitWidthForMaxLevel maxLevel = ceilLog2 (maxLevel + 1)
 -- Vector-based RLE / bit-packed hybrid decoder
 -- ---------------------------------------------------------------------------
 
-decodeRLEBitPackedHybridV ::
+decodeRLEBitPackedHybrid ::
     -- | Bit width per value (0 = all zeros, use 'VU.replicate')
     Int ->
     -- | Exact number of values to decode
     Int ->
     BS.ByteString ->
     (VU.Vector Word32, BS.ByteString)
-decodeRLEBitPackedHybridV bw need bs
+decodeRLEBitPackedHybrid bw need bs
     | bw == 0 = (VU.replicate need 0, bs)
     | otherwise = runST $ do
         mv <- VUM.new need
@@ -73,7 +73,7 @@ decodeRLEBitPackedHybridV bw need bs
                             -- only need a subset of the values.
                             bytesN = (bw * totalVals + 7) `div` 8
                             (chunk, rest) = BS.splitAt bytesN afterHdr
-                        extractBitsIntoV bw takeN chunk mv filled
+                        extractBitsInto bw takeN chunk mv filled
                         go mv (filled + takeN) rest
                     else do
                         let runLen = fromIntegral (hdr64 `shiftR` 1) :: Int
@@ -83,20 +83,18 @@ decodeRLEBitPackedHybridV bw need bs
                         -- Fill the run directly — no list, no reverse.
                         fillRun mv filled (filled + takeN) val
                         go mv (filled + takeN) (BS.drop nbytes afterHdr)
-{-# INLINE decodeRLEBitPackedHybridV #-}
+{-# INLINE decodeRLEBitPackedHybrid #-}
 
--- | Fill @mv[start..end-1]@ with @val@.
+-- | Fill @mv[start..end-1]@ with @val@ using a bulk @memset@-style write.
 fillRun :: VUM.STVector s Word32 -> Int -> Int -> Word32 -> ST s ()
-fillRun mv !i !end !val
-    | i >= end = return ()
-    | otherwise = VUM.unsafeWrite mv i val >> fillRun mv (i + 1) end val
+fillRun mv i end val = VUM.set (VUM.unsafeSlice i (end - i) mv) val
 {-# INLINE fillRun #-}
 
 {- | Write @count@ bit-width-@bw@ values from @bs@ into @mv@ starting at
 @offset@, reading the byte buffer with a single-pass LSB-first accumulator.
 No intermediate list or ByteString allocation.
 -}
-extractBitsIntoV ::
+extractBitsInto ::
     -- | Bit width
     Int ->
     -- | Number of values to extract
@@ -106,20 +104,20 @@ extractBitsIntoV ::
     -- | Write offset into @mv@
     Int ->
     ST s ()
-extractBitsIntoV bw count bs mv off = go 0 (0 :: Word64) 0 0
+extractBitsInto bw count bs mv off = go 0 (0 :: Word64) 0 0
   where
-    !mask = if bw == 32 then maxBound else (1 `shiftL` bw) - 1 :: Word64
+    !mask = if bw == 32 then maxBound else (1 `unsafeShiftL` bw) - 1 :: Word64
     !len = BS.length bs
     go !byteIdx !acc !accBits !done
         | done >= count = return ()
         | accBits >= bw = do
             VUM.unsafeWrite mv (off + done) (fromIntegral (acc .&. mask))
-            go byteIdx (acc `shiftR` bw) (accBits - bw) (done + 1)
+            go byteIdx (acc `unsafeShiftR` bw) (accBits - bw) (done + 1)
         | byteIdx >= len = return ()
         | otherwise =
             let b = fromIntegral (BSU.unsafeIndex bs byteIdx) :: Word64
-             in go (byteIdx + 1) (acc .|. (b `shiftL` accBits)) (accBits + 8) done
-{-# INLINE extractBitsIntoV #-}
+             in go (byteIdx + 1) (acc .|. (b `unsafeShiftL` accBits)) (accBits + 8) done
+{-# INLINE extractBitsInto #-}
 
 {- | Decode @need@ dictionary indices from a DATA_PAGE bit-width-prefixed
 stream (the first byte encodes the bit-width of all subsequent RLE\/bitpacked
@@ -127,11 +125,11 @@ values).
 
 Returns the index vector (as 'Int') and the unconsumed bytes.
 -}
-decodeDictIndicesV :: Int -> BS.ByteString -> (VU.Vector Int, BS.ByteString)
-decodeDictIndicesV need bs = case BS.uncons bs of
-    Nothing -> error "decodeDictIndicesV: empty stream"
+decodeDictIndices :: Int -> BS.ByteString -> (VU.Vector Int, BS.ByteString)
+decodeDictIndices need bs = case BS.uncons bs of
+    Nothing -> error "decodeDictIndices: empty stream"
     Just (w0, rest0) ->
         let bw = fromIntegral w0 :: Int
-            (raw, rest1) = decodeRLEBitPackedHybridV bw need rest0
+            (raw, rest1) = decodeRLEBitPackedHybrid bw need rest0
          in (VU.map fromIntegral raw, rest1)
-{-# INLINE decodeDictIndicesV #-}
+{-# INLINE decodeDictIndices #-}
