@@ -87,7 +87,7 @@ decodeRLEBitPackedHybrid bw need bs
 
 -- | Fill @mv[start..end-1]@ with @val@ using a bulk @memset@-style write.
 fillRun :: VUM.STVector s Word32 -> Int -> Int -> Word32 -> ST s ()
-fillRun mv i end val = VUM.set (VUM.unsafeSlice i (end - i) mv) val
+fillRun mv i end = VUM.set (VUM.unsafeSlice i (end - i) mv)
 {-# INLINE fillRun #-}
 
 {- | Write @count@ bit-width-@bw@ values from @bs@ into @mv@ starting at
