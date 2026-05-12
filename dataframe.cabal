@@ -78,18 +78,18 @@ library
                     DataFrame.Display.Terminal.Plot,
                     DataFrame.IO.CSV,
                     DataFrame.IO.JSON,
+                    DataFrame.IO.Utils.RandomAccess,
                     DataFrame.IO.Parquet,
                     DataFrame.IO.Parquet.Binary,
                     DataFrame.IO.Parquet.Dictionary,
                     DataFrame.IO.Parquet.Levels,
                     DataFrame.IO.Parquet.Thrift,
-                    DataFrame.IO.Parquet.ColumnStatistics,
-                    DataFrame.IO.Parquet.Compression,
+                    DataFrame.IO.Parquet.Decompress,
                     DataFrame.IO.Parquet.Encoding,
                     DataFrame.IO.Parquet.Page,
+                    DataFrame.IO.Parquet.Utils,
                     DataFrame.IO.Parquet.Seeking,
                     DataFrame.IO.Parquet.Time,
-                    DataFrame.IO.Parquet.Types,
                     DataFrame.Lazy.IO.CSV,
                     DataFrame.Lazy.IO.Binary,
                     DataFrame.Lazy.Internal.DataFrame,
@@ -141,9 +141,11 @@ library
                       stm >= 2.5 && < 3,
                       filepath >= 1.4 && < 2,
                       Glob >= 0.10 && < 1,
-                      http-conduit >= 2.3 && < 3,
+                      http-conduit    >= 2.3 && < 3,
+                      pinch >= 0.5.1.0 && <= 0.5.2.0 ,
                       streamly-core >= 0.2.3 && < 0.4,
                       streamly-bytestring >= 0.2.0 && < 0.4
+
     hs-source-dirs:   src
     default-language: Haskell2010
 

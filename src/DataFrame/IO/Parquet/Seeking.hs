@@ -16,11 +16,14 @@ module DataFrame.IO.Parquet.Seeking (
     seekAndReadBytes,
     seekAndStreamBytes,
     withFileBufferedOrSeekable,
+    fSeek,
+    fGet,
 ) where
 
 import Control.Monad
 import Control.Monad.IO.Class
 import qualified Data.ByteString as BS
+import Data.ByteString.Unsafe (unsafeDrop, unsafeTake)
 import Data.IORef
 import Data.Int
 import Data.Word
@@ -131,6 +134,17 @@ fSeek (FileSeekable (SeekableHandle h)) seekMode seekTo = hSeek h seekMode seekT
 fSeek (FileBuffered i _bs) AbsoluteSeek seekTo = writeIORef i (fromIntegral seekTo)
 fSeek (FileBuffered i _bs) RelativeSeek seekTo = modifyIORef' i (+ fromIntegral seekTo)
 fSeek (FileBuffered i bs) SeekFromEnd seekTo = writeIORef i (fromIntegral $ BS.length bs + fromIntegral seekTo)
+
+fGet :: FileBufferedOrSeekable -> Int -> IO BS.ByteString
+fGet (FileSeekable (SeekableHandle h)) n = BS.hGet h n
+fGet (FileBuffered iRef bs) n
+    | n == 0 = pure BS.empty
+    | n > 0 = do
+        i <- fromIntegral <$> readIORef iRef
+        if (BS.length bs - i) < n
+            then if i <= BS.length bs then pure $ unsafeDrop i bs else pure BS.empty
+            else pure . unsafeTake n . unsafeDrop i $ bs
+    | otherwise = error "Can't read a negative number of bytes"
 
 fRead :: (MonadIO m) => FileBufferedOrSeekable -> Stream m Word8
 fRead (FileSeekable (SeekableHandle h)) = SHandle.read h

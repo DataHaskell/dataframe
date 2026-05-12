@@ -6,6 +6,7 @@
 {-# LANGUAGE InstanceSigs #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
@@ -42,11 +43,10 @@ import qualified Data.Text as T
 import Data.Time
 import qualified Data.Vector as V
 import qualified Data.Vector.Unboxed as VU
-import Data.Word
 import qualified DataFrame.IO.CSV as CSV
 import qualified DataFrame.IO.Parquet as Parquet
 import DataFrame.IO.Parquet.Thrift
-import DataFrame.IO.Parquet.Types (columnNullCount)
+
 import DataFrame.Internal.Nullable (
     BaseType,
     NullLift1Op (applyNull1),
@@ -55,7 +55,6 @@ import DataFrame.Internal.Nullable (
     NullLift2Result,
  )
 import DataFrame.Operators
-import Debug.Trace (trace)
 import Language.Haskell.TH
 import qualified Language.Haskell.TH.Syntax as TH
 import System.Directory (doesDirectoryExist)
@@ -71,7 +70,10 @@ lift f =
 
 lift2 ::
     (Columnable c, Columnable b, Columnable a) =>
-    (c -> b -> a) -> Expr c -> Expr b -> Expr a
+    (c -> b -> a) ->
+    Expr c ->
+    Expr b ->
+    Expr a
 lift2 f =
     Binary
         ( MkBinaryOp
@@ -161,7 +163,9 @@ unsafeCast colName =
 
 castExpr ::
     forall b src.
-    (Columnable b, Columnable src, Read b) => Expr src -> Expr (Maybe b)
+    (Columnable b, Columnable src, Read b) =>
+    Expr src ->
+    Expr (Maybe b)
 castExpr = CastExprWith @b @(Maybe b) @src "castExpr" (either (const Nothing) Just)
 
 castExprWithDefault ::
@@ -173,7 +177,9 @@ castExprWithDefault def =
 
 castExprEither ::
     forall b src.
-    (Columnable b, Columnable src, Read b) => Expr src -> Expr (Either T.Text b)
+    (Columnable b, Columnable src, Read b) =>
+    Expr src ->
+    Expr (Either T.Text b)
 castExprEither =
     CastExprWith @b @(Either T.Text b) @src
         "castExprEither"
@@ -459,7 +465,11 @@ max = lift2Decorated Prelude.max "max" Nothing True 1
 
 reduce ::
     forall a b.
-    (Columnable a, Columnable b) => Expr b -> a -> (a -> b -> a) -> Expr a
+    (Columnable a, Columnable b) =>
+    Expr b ->
+    a ->
+    (a -> b -> a) ->
+    Expr a
 reduce expr start f = Agg (FoldAgg "foldUdf" (Just start) f) expr
 {-# INLINEABLE reduce #-}
 
@@ -497,21 +507,29 @@ fromJust = liftDecorated Maybe.fromJust "fromJust" Nothing
 
 whenPresent ::
     forall a b.
-    (Columnable a, Columnable b) => (a -> b) -> Expr (Maybe a) -> Expr (Maybe b)
+    (Columnable a, Columnable b) =>
+    (a -> b) ->
+    Expr (Maybe a) ->
+    Expr (Maybe b)
 whenPresent f = liftDecorated (fmap f) "whenPresent" Nothing
 {-# INLINEABLE whenPresent #-}
 
 whenBothPresent ::
     forall a b c.
     (Columnable a, Columnable b, Columnable c) =>
-    (a -> b -> c) -> Expr (Maybe a) -> Expr (Maybe b) -> Expr (Maybe c)
+    (a -> b -> c) ->
+    Expr (Maybe a) ->
+    Expr (Maybe b) ->
+    Expr (Maybe c)
 whenBothPresent f = lift2Decorated (\l r -> f <$> l <*> r) "whenBothPresent" Nothing False 0
 {-# INLINEABLE whenBothPresent #-}
 
 recode ::
     forall a b.
     (Columnable a, Columnable b, Show (a, b)) =>
-    [(a, b)] -> Expr a -> Expr (Maybe b)
+    [(a, b)] ->
+    Expr a ->
+    Expr (Maybe b)
 recode mapping =
     Unary
         ( MkUnaryOp
@@ -524,13 +542,20 @@ recode mapping =
 recodeWithCondition ::
     forall a b.
     (Columnable a, Columnable b) =>
-    Expr b -> [(Expr a -> Expr Bool, b)] -> Expr a -> Expr b
+    Expr b ->
+    [(Expr a -> Expr Bool, b)] ->
+    Expr a ->
+    Expr b
 recodeWithCondition fallback [] _val = fallback
 recodeWithCondition fallback ((cond, val) : rest) expr = ifThenElse (cond expr) (lit val) (recodeWithCondition fallback rest expr)
 
 recodeWithDefault ::
     forall a b.
-    (Columnable a, Columnable b, Show (a, b)) => b -> [(a, b)] -> Expr a -> Expr b
+    (Columnable a, Columnable b, Show (a, b)) =>
+    b ->
+    [(a, b)] ->
+    Expr a ->
+    Expr b
 recodeWithDefault d mapping =
     Unary
         ( MkUnaryOp
@@ -584,7 +609,9 @@ daysBetween =
 bind ::
     forall a b m.
     (Columnable a, Columnable (m a), Monad m, Columnable b, Columnable (m b)) =>
-    (a -> m b) -> Expr (m a) -> Expr (m b)
+    (a -> m b) ->
+    Expr (m a) ->
+    Expr (m b)
 bind f = liftDecorated (>>= f) "bind" Nothing
 
 {- | Window function: evaluate an expression partitioned by the given columns.
@@ -717,65 +744,67 @@ declareColumnsFromParquetFile path = do
     let pat = if isDir then path </> "*.parquet" else path
     matches <- liftIO $ glob pat
     files <- liftIO $ filterM (fmap Prelude.not . doesDirectoryExist) matches
-    metas <- liftIO $ mapM (fmap fst . Parquet.readMetadataFromPath) files
+    metas <- liftIO $ mapM Parquet.readMetadataFromPath files
     let nullableCols :: S.Set T.Text
         nullableCols =
             S.fromList
                 [ T.pack (last colPath)
                 | meta <- metas
-                , rg <- rowGroups meta
-                , cc <- rowGroupColumns rg
-                , let cm = columnMetaData cc
-                      colPath = columnPathInSchema cm
+                , rg <- unField (row_groups meta)
+                , cc <- unField (rg_columns rg)
+                , Just cm <- [unField (cc_meta_data cc)]
+                , let colPath = map T.unpack (unField (cmd_path_in_schema cm))
                 , Prelude.not (null colPath)
-                , columnNullCount (columnStatistics cm) > 0
+                , let nc :: Int64
+                      nc = case unField (cmd_statistics cm) of
+                        Nothing -> 0
+                        Just stats -> Maybe.fromMaybe 0 (unField $ stats_null_count stats)
+                , nc > 0
                 ]
     let df =
             foldl
-                (\acc meta -> acc <> schemaToEmptyDataFrame nullableCols (schema meta))
+                (\acc meta -> acc <> schemaToEmptyDataFrame nullableCols (unField (schema meta)))
                 DataFrame.Internal.DataFrame.empty
                 metas
     declareColumns df
 
 schemaToEmptyDataFrame :: S.Set T.Text -> [SchemaElement] -> DataFrame
 schemaToEmptyDataFrame nullableCols elems =
-    let leafElems = filter (\e -> numChildren e == 0) elems
+    let leafElems = filter (\e -> Maybe.fromMaybe 0 (unField e.num_children) == 0) elems
      in fromNamedColumns (map (schemaElemToColumn nullableCols) leafElems)
 
 schemaElemToColumn :: S.Set T.Text -> SchemaElement -> (T.Text, Column)
 schemaElemToColumn nullableCols element =
-    let colName = elementName element
+    let colName = unField element.name
         isNull = colName `S.member` nullableCols
         column =
             if isNull
-                then emptyNullableColumnForType (elementType element)
-                else emptyColumnForType (elementType element)
+                then emptyNullableColumnForType (unField element.schematype)
+                else emptyColumnForType (unField element.schematype)
      in (colName, column)
 
-emptyColumnForType :: TType -> Column
+emptyColumnForType :: Maybe ThriftType -> Column
 emptyColumnForType = \case
-    BOOL -> fromList @Bool []
-    BYTE -> fromList @Word8 []
-    I16 -> fromList @Int16 []
-    I32 -> fromList @Int32 []
-    I64 -> fromList @Int64 []
-    I96 -> fromList @Int64 []
-    FLOAT -> fromList @Float []
-    DOUBLE -> fromList @Double []
-    STRING -> fromList @T.Text []
+    Just (BOOLEAN _) -> fromList @Bool []
+    Just (INT32 _) -> fromList @Int32 []
+    Just (INT64 _) -> fromList @Int64 []
+    Just (INT96 _) -> fromList @Int64 []
+    Just (FLOAT _) -> fromList @Float []
+    Just (DOUBLE _) -> fromList @Double []
+    Just (BYTE_ARRAY _) -> fromList @T.Text []
+    Just (FIXED_LEN_BYTE_ARRAY _) -> fromList @T.Text []
     other -> error $ "Unsupported parquet type for column: " <> show other
 
-emptyNullableColumnForType :: TType -> Column
+emptyNullableColumnForType :: Maybe ThriftType -> Column
 emptyNullableColumnForType = \case
-    BOOL -> fromList @(Maybe Bool) []
-    BYTE -> fromList @(Maybe Word8) []
-    I16 -> fromList @(Maybe Int16) []
-    I32 -> fromList @(Maybe Int32) []
-    I64 -> fromList @(Maybe Int64) []
-    I96 -> fromList @(Maybe Int64) []
-    FLOAT -> fromList @(Maybe Float) []
-    DOUBLE -> fromList @(Maybe Double) []
-    STRING -> fromList @(Maybe T.Text) []
+    Just (BOOLEAN _) -> fromList @(Maybe Bool) []
+    Just (INT32 _) -> fromList @(Maybe Int32) []
+    Just (INT64 _) -> fromList @(Maybe Int64) []
+    Just (INT96 _) -> fromList @(Maybe Int64) []
+    Just (FLOAT _) -> fromList @(Maybe Float) []
+    Just (DOUBLE _) -> fromList @(Maybe Double) []
+    Just (BYTE_ARRAY _) -> fromList @(Maybe T.Text) []
+    Just (FIXED_LEN_BYTE_ARRAY _) -> fromList @(Maybe T.Text) []
     other -> error $ "Unsupported parquet type for column: " <> show other
 
 declareColumnsFromCsvWithOpts :: CSV.ReadOptions -> String -> DecsQ
@@ -803,8 +832,6 @@ declareColumnsWithPrefix' prefix df =
      in
         fmap concat $ forM specs $ \(raw, nm, tyStr) -> do
             ty <- typeFromString (words tyStr)
-            let tyDisplay = if ' ' `elem` tyStr then "(" <> T.pack tyStr <> ")" else T.pack tyStr
-            trace (T.unpack (nm <> " :: Expr " <> tyDisplay)) pure ()
             let n = mkName (T.unpack nm)
             sig <- sigD n [t|Expr $(pure ty)|]
             val <- valD (varP n) (normalB [|col $(TH.lift raw)|]) []

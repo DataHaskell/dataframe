@@ -1,53 +1,58 @@
 {-# LANGUAGE BangPatterns #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE MonoLocalBinds #-}
-{-# LANGUAGE OverloadedStrings #-}
 
-module DataFrame.IO.Parquet.Dictionary where
+module DataFrame.IO.Parquet.Dictionary (DictVals (..), readDictVals, decodeRLEBitPackedHybrid) where
 
-import Control.Monad
 import Data.Bits
 import qualified Data.ByteString as BS
-import Data.IORef
-import Data.Int
-import Data.Maybe
+import qualified Data.ByteString.Unsafe as BSU
+import Data.Int (Int32, Int64)
 import qualified Data.Text as T
 import Data.Text.Encoding
-import Data.Time
+import Data.Time (UTCTime)
 import qualified Data.Vector as V
-import qualified Data.Vector.Mutable as VM
-import qualified Data.Vector.Unboxed as VU
-import DataFrame.IO.Parquet.Encoding
-import DataFrame.IO.Parquet.Levels
-import DataFrame.IO.Parquet.Time
-import DataFrame.IO.Parquet.Types
+import Data.Word
+import DataFrame.IO.Parquet.Binary (readUVarInt)
+import DataFrame.IO.Parquet.Thrift (ThriftType (..))
+import DataFrame.IO.Parquet.Time (int96ToUTCTime)
 import DataFrame.Internal.Binary (
     littleEndianInt32,
     littleEndianWord32,
     littleEndianWord64,
  )
-import qualified DataFrame.Internal.Column as DI
 import GHC.Float
 
-dictCardinality :: DictVals -> Int
-dictCardinality (DBool ds) = V.length ds
-dictCardinality (DInt32 ds) = V.length ds
-dictCardinality (DInt64 ds) = V.length ds
-dictCardinality (DInt96 ds) = V.length ds
-dictCardinality (DFloat ds) = V.length ds
-dictCardinality (DDouble ds) = V.length ds
-dictCardinality (DText ds) = V.length ds
+data DictVals
+    = DBool (V.Vector Bool)
+    | DInt32 (V.Vector Int32)
+    | DInt64 (V.Vector Int64)
+    | DInt96 (V.Vector UTCTime)
+    | DFloat (V.Vector Float)
+    | DDouble (V.Vector Double)
+    | DText (V.Vector T.Text)
+    deriving (Show, Eq)
 
-readDictVals :: ParquetType -> BS.ByteString -> Maybe Int32 -> DictVals
-readDictVals PBOOLEAN bs (Just count) = DBool (V.fromList (take (fromIntegral count) $ readPageBool bs))
-readDictVals PINT32 bs _ = DInt32 (V.fromList (readPageInt32 bs))
-readDictVals PINT64 bs _ = DInt64 (V.fromList (readPageInt64 bs))
-readDictVals PINT96 bs _ = DInt96 (V.fromList (readPageInt96Times bs))
-readDictVals PFLOAT bs _ = DFloat (V.fromList (readPageFloat bs))
-readDictVals PDOUBLE bs _ = DDouble (V.fromList (readPageWord64 bs))
-readDictVals PBYTE_ARRAY bs _ = DText (V.fromList (readPageBytes bs))
-readDictVals PFIXED_LEN_BYTE_ARRAY bs (Just len) = DText (V.fromList (readPageFixedBytes bs (fromIntegral len)))
-readDictVals t _ _ = error $ "Unsupported dictionary type: " ++ show t
+{- | Decode the values from a dictionary page.
+
+The @numVals@ argument is the entry count declared in the dictionary page
+header.  It is used to limit BOOLEAN decoding (1-bit-per-value encoding has
+no natural delimiter).
+
+The @typeLength@ argument is only meaningful for FIXED_LEN_BYTE_ARRAY: it is
+the byte-width of each individual dictionary entry, NOT the total number of
+entries.  Passing @numVals@ here (the old behaviour) would cause it to be
+misread as an element size, yielding a dictionary that is far too small.
+-}
+readDictVals :: ThriftType -> BS.ByteString -> Int32 -> Maybe Int32 -> DictVals
+readDictVals (BOOLEAN _) bs count _ = DBool (V.fromList (take (fromIntegral count) $ readPageBool bs))
+readDictVals (INT32 _) bs _ _ = DInt32 (V.fromList (readPageInt32 bs))
+readDictVals (INT64 _) bs _ _ = DInt64 (V.fromList (readPageInt64 bs))
+readDictVals (INT96 _) bs _ _ = DInt96 (V.fromList (readPageInt96Times bs))
+readDictVals (FLOAT _) bs _ _ = DFloat (V.fromList (readPageFloat bs))
+readDictVals (DOUBLE _) bs _ _ = DDouble (V.fromList (readPageWord64 bs))
+readDictVals (BYTE_ARRAY _) bs _ _ = DText (V.fromList (readPageBytes bs))
+readDictVals (FIXED_LEN_BYTE_ARRAY _) bs _ (Just len) =
+    DText (V.fromList (readPageFixedBytes bs (fromIntegral len)))
+readDictVals t _ _ _ = error $ "Unsupported dictionary type: " ++ show t
 
 readPageInt32 :: BS.ByteString -> [Int32]
 readPageInt32 xs
@@ -109,199 +114,51 @@ readPageFixedBytes xs len
     | otherwise =
         decodeUtf8Lenient (BS.take len xs) : readPageFixedBytes (BS.drop len xs) len
 
-{- | Dispatch to the right multi-level list stitching function.
-For maxRep=1 uses stitchList; for 2/3 uses stitchList2/3 with computed thresholds.
-Threshold formula: defT_r = maxDef - 2*(maxRep - r).
--}
-stitchForRepBool :: Int -> Int -> [Int] -> [Int] -> [Bool] -> DI.Column
-stitchForRepBool maxRep maxDef rep def vals = case maxRep of
-    2 -> DI.fromList (stitchList2 (maxDef - 2) maxDef rep def vals)
-    3 -> DI.fromList (stitchList3 (maxDef - 4) (maxDef - 2) maxDef rep def vals)
-    _ -> DI.fromList (stitchList maxDef rep def vals)
+unpackBitPacked :: Int -> Int -> BS.ByteString -> ([Word32], BS.ByteString)
+unpackBitPacked bw count bs
+    | count <= 0 = ([], bs)
+    | BS.null bs = ([], bs)
+    | otherwise =
+        let totalBytes = (bw * count + 7) `div` 8
+            chunk = BS.take totalBytes bs
+            rest = BS.drop totalBytes bs
+         in (extractBits bw count chunk, rest)
 
-stitchForRepInt32 :: Int -> Int -> [Int] -> [Int] -> [Int32] -> DI.Column
-stitchForRepInt32 maxRep maxDef rep def vals = case maxRep of
-    2 -> DI.fromList (stitchList2 (maxDef - 2) maxDef rep def vals)
-    3 -> DI.fromList (stitchList3 (maxDef - 4) (maxDef - 2) maxDef rep def vals)
-    _ -> DI.fromList (stitchList maxDef rep def vals)
+-- | LSB-first bit accumulator: reads each byte once with no intermediate ByteString allocation.
+extractBits :: Int -> Int -> BS.ByteString -> [Word32]
+extractBits bw count bs = go 0 (0 :: Word64) 0 count
+  where
+    !mask = if bw == 32 then maxBound else (1 `shiftL` bw) - 1 :: Word64
+    !len = BS.length bs
+    go !byteIdx !acc !accBits !remaining
+        | remaining <= 0 = []
+        | accBits >= bw =
+            fromIntegral (acc .&. mask)
+                : go byteIdx (acc `shiftR` bw) (accBits - bw) (remaining - 1)
+        | byteIdx >= len = []
+        | otherwise =
+            let b = fromIntegral (BSU.unsafeIndex bs byteIdx) :: Word64
+             in go (byteIdx + 1) (acc .|. (b `shiftL` accBits)) (accBits + 8) remaining
 
-stitchForRepInt64 :: Int -> Int -> [Int] -> [Int] -> [Int64] -> DI.Column
-stitchForRepInt64 maxRep maxDef rep def vals = case maxRep of
-    2 -> DI.fromList (stitchList2 (maxDef - 2) maxDef rep def vals)
-    3 -> DI.fromList (stitchList3 (maxDef - 4) (maxDef - 2) maxDef rep def vals)
-    _ -> DI.fromList (stitchList maxDef rep def vals)
-
-stitchForRepUTCTime :: Int -> Int -> [Int] -> [Int] -> [UTCTime] -> DI.Column
-stitchForRepUTCTime maxRep maxDef rep def vals = case maxRep of
-    2 -> DI.fromList (stitchList2 (maxDef - 2) maxDef rep def vals)
-    3 -> DI.fromList (stitchList3 (maxDef - 4) (maxDef - 2) maxDef rep def vals)
-    _ -> DI.fromList (stitchList maxDef rep def vals)
-
-stitchForRepFloat :: Int -> Int -> [Int] -> [Int] -> [Float] -> DI.Column
-stitchForRepFloat maxRep maxDef rep def vals = case maxRep of
-    2 -> DI.fromList (stitchList2 (maxDef - 2) maxDef rep def vals)
-    3 -> DI.fromList (stitchList3 (maxDef - 4) (maxDef - 2) maxDef rep def vals)
-    _ -> DI.fromList (stitchList maxDef rep def vals)
-
-stitchForRepDouble :: Int -> Int -> [Int] -> [Int] -> [Double] -> DI.Column
-stitchForRepDouble maxRep maxDef rep def vals = case maxRep of
-    2 -> DI.fromList (stitchList2 (maxDef - 2) maxDef rep def vals)
-    3 -> DI.fromList (stitchList3 (maxDef - 4) (maxDef - 2) maxDef rep def vals)
-    _ -> DI.fromList (stitchList maxDef rep def vals)
-
-stitchForRepText :: Int -> Int -> [Int] -> [Int] -> [T.Text] -> DI.Column
-stitchForRepText maxRep maxDef rep def vals = case maxRep of
-    2 -> DI.fromList (stitchList2 (maxDef - 2) maxDef rep def vals)
-    3 -> DI.fromList (stitchList3 (maxDef - 4) (maxDef - 2) maxDef rep def vals)
-    _ -> DI.fromList (stitchList maxDef rep def vals)
-
-{- | Build a Column from a dictionary + index vector + def levels in a single
-mutable-vector pass, avoiding the intermediate [a] and [Maybe a] lists.
-For maxRep > 0 (list columns) the caller must use the rep-stitching path instead.
--}
-applyDictToColumn ::
-    (DI.Columnable a, DI.Columnable (Maybe a)) =>
-    V.Vector a ->
-    VU.Vector Int ->
-    Int -> -- maxDef
-    [Int] -> -- defLvls
-    IO DI.Column
-applyDictToColumn dict idxs maxDef defLvls
-    | maxDef == 0 = do
-        -- All rows are required; no nullability to check.
-        let n = VU.length idxs
-        pure $ DI.fromVector (V.generate n (\i -> dict V.! (idxs VU.! i)))
-    | otherwise = do
-        let n = length defLvls
-        mv <- VM.new n
-        hasNullRef <- newIORef False
-        let go _ _ [] = pure ()
-            go !i !j (d : ds)
-                | d == maxDef = do
-                    VM.write mv i (Just (dict V.! (idxs VU.! j)))
-                    go (i + 1) (j + 1) ds
-                | otherwise = do
-                    writeIORef hasNullRef True
-                    VM.write mv i Nothing
-                    go (i + 1) j ds
-        go 0 0 defLvls
-        vec <- V.freeze mv
-        hasNull <- readIORef hasNullRef
-        pure $
-            if hasNull
-                then DI.fromVector vec -- VB.Vector (Maybe a) → OptionalColumn
-                else DI.fromVector (V.map fromJust vec) -- VB.Vector a → BoxedColumn/UnboxedColumn
-
-decodeDictV1 ::
-    Maybe DictVals ->
-    Int ->
-    Int ->
-    [Int] ->
-    [Int] ->
-    Int ->
-    BS.ByteString ->
-    IO DI.Column
-decodeDictV1 dictValsM maxDef maxRep repLvls defLvls nPresent bytes =
-    case dictValsM of
-        Nothing -> error "Dictionary-encoded page but dictionary is missing"
-        Just dictVals ->
-            let (idxs, _rest) = decodeDictIndicesV1 nPresent (dictCardinality dictVals) bytes
-             in do
-                    when (VU.length idxs /= nPresent) $
-                        error $
-                            "dict index count mismatch: got "
-                                ++ show (VU.length idxs)
-                                ++ ", expected "
-                                ++ show nPresent
-                    if maxRep > 0
-                        then do
-                            case dictVals of
-                                DBool ds ->
-                                    pure $
-                                        stitchForRepBool maxRep maxDef repLvls defLvls (map (ds V.!) (VU.toList idxs))
-                                DInt32 ds ->
-                                    pure $
-                                        stitchForRepInt32 maxRep maxDef repLvls defLvls (map (ds V.!) (VU.toList idxs))
-                                DInt64 ds ->
-                                    pure $
-                                        stitchForRepInt64 maxRep maxDef repLvls defLvls (map (ds V.!) (VU.toList idxs))
-                                DInt96 ds ->
-                                    pure $
-                                        stitchForRepUTCTime
-                                            maxRep
-                                            maxDef
-                                            repLvls
-                                            defLvls
-                                            (map (ds V.!) (VU.toList idxs))
-                                DFloat ds ->
-                                    pure $
-                                        stitchForRepFloat maxRep maxDef repLvls defLvls (map (ds V.!) (VU.toList idxs))
-                                DDouble ds ->
-                                    pure $
-                                        stitchForRepDouble maxRep maxDef repLvls defLvls (map (ds V.!) (VU.toList idxs))
-                                DText ds ->
-                                    pure $
-                                        stitchForRepText maxRep maxDef repLvls defLvls (map (ds V.!) (VU.toList idxs))
-                        else case dictVals of
-                            -- Fast path: unboxable types, no nulls — one allocation via VU.map
-                            DInt32 ds | maxDef == 0 -> pure $ DI.fromUnboxedVector (VU.map (ds V.!) idxs)
-                            DInt64 ds | maxDef == 0 -> pure $ DI.fromUnboxedVector (VU.map (ds V.!) idxs)
-                            DFloat ds | maxDef == 0 -> pure $ DI.fromUnboxedVector (VU.map (ds V.!) idxs)
-                            DDouble ds | maxDef == 0 -> pure $ DI.fromUnboxedVector (VU.map (ds V.!) idxs)
-                            DBool ds -> applyDictToColumn ds idxs maxDef defLvls
-                            DInt32 ds -> applyDictToColumn ds idxs maxDef defLvls
-                            DInt64 ds -> applyDictToColumn ds idxs maxDef defLvls
-                            DInt96 ds -> applyDictToColumn ds idxs maxDef defLvls
-                            DFloat ds -> applyDictToColumn ds idxs maxDef defLvls
-                            DDouble ds -> applyDictToColumn ds idxs maxDef defLvls
-                            DText ds -> applyDictToColumn ds idxs maxDef defLvls
-
-toMaybeInt32 :: Int -> [Int] -> [Int32] -> DI.Column
-toMaybeInt32 maxDef def xs =
-    let filled = stitchNullable maxDef def xs
-     in if all isJust filled
-            then DI.fromList (map (fromMaybe 0) filled)
-            else DI.fromList filled
-
-toMaybeDouble :: Int -> [Int] -> [Double] -> DI.Column
-toMaybeDouble maxDef def xs =
-    let filled = stitchNullable maxDef def xs
-     in if all isJust filled
-            then DI.fromList (map (fromMaybe 0) filled)
-            else DI.fromList filled
-
-toMaybeText :: Int -> [Int] -> [T.Text] -> DI.Column
-toMaybeText maxDef def xs =
-    let filled = stitchNullable maxDef def xs
-     in if all isJust filled
-            then DI.fromList (map (fromMaybe "") filled)
-            else DI.fromList filled
-
-toMaybeBool :: Int -> [Int] -> [Bool] -> DI.Column
-toMaybeBool maxDef def xs =
-    let filled = stitchNullable maxDef def xs
-     in if all isJust filled
-            then DI.fromList (map (fromMaybe False) filled)
-            else DI.fromList filled
-
-toMaybeInt64 :: Int -> [Int] -> [Int64] -> DI.Column
-toMaybeInt64 maxDef def xs =
-    let filled = stitchNullable maxDef def xs
-     in if all isJust filled
-            then DI.fromList (map (fromMaybe 0) filled)
-            else DI.fromList filled
-
-toMaybeFloat :: Int -> [Int] -> [Float] -> DI.Column
-toMaybeFloat maxDef def xs =
-    let filled = stitchNullable maxDef def xs
-     in if all isJust filled
-            then DI.fromList (map (fromMaybe 0.0) filled)
-            else DI.fromList filled
-
-toMaybeUTCTime :: Int -> [Int] -> [UTCTime] -> DI.Column
-toMaybeUTCTime maxDef def times =
-    let filled = stitchNullable maxDef def times
-        defaultTime = UTCTime (fromGregorian 1970 1 1) (secondsToDiffTime 0)
-     in if all isJust filled
-            then DI.fromList (map (fromMaybe defaultTime) filled)
-            else DI.fromList filled
+decodeRLEBitPackedHybrid :: Int -> BS.ByteString -> ([Word32], BS.ByteString)
+decodeRLEBitPackedHybrid bitWidth bs
+    | bitWidth == 0 = ([0], bs)
+    | BS.null bs = ([], bs)
+    | otherwise =
+        -- readUVarInt is evaluated here, inside the guard that has already
+        -- confirmed bs is non-empty.  Keeping it in a where clause would cause
+        -- it to be forced before the BS.null guard under {-# LANGUAGE Strict #-}.
+        let (hdr64, afterHdr) = readUVarInt bs
+            isPacked = (hdr64 .&. 1) == 1
+         in if isPacked
+                then
+                    let groups = fromIntegral (hdr64 `shiftR` 1) :: Int
+                        totalVals = groups * 8
+                     in unpackBitPacked bitWidth totalVals afterHdr
+                else
+                    let mask = if bitWidth == 32 then maxBound else (1 `shiftL` bitWidth) - 1
+                        runLen = fromIntegral (hdr64 `shiftR` 1) :: Int
+                        nBytes = (bitWidth + 7) `div` 8 :: Int
+                        word32 = littleEndianWord32 (BS.take 4 afterHdr)
+                        value = word32 .&. mask
+                     in (replicate runLen value, BS.drop nBytes afterHdr)
