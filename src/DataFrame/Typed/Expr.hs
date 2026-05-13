@@ -119,9 +119,6 @@ module DataFrame.Typed.Expr (
     unsafeCastExpr,
     toDouble,
 
-    -- * Named expression helper
-    as,
-
     -- * Sort helpers
     asc,
     desc,
@@ -138,8 +135,6 @@ import DataFrame.Internal.Column (Columnable)
 import DataFrame.Internal.Expression (
     BinaryOp (..),
     Expr (..),
-    NamedExpr,
-    UExpr (..),
     UnaryOp (..),
  )
 import DataFrame.Internal.Nullable (
@@ -639,14 +634,6 @@ unsafeCastExpr (TExpr e) =
 
 toDouble :: (Columnable a, Real a) => TExpr cols a -> TExpr cols Double
 toDouble (TExpr e) = TExpr (F.toDouble e)
-
--------------------------------------------------------------------------------
--- Named expression helper
--------------------------------------------------------------------------------
-
--- | Create a 'NamedExpr' for use with 'aggregateUntyped'.
-as :: (Columnable a) => TExpr cols a -> T.Text -> NamedExpr
-as (TExpr e) name = (name, UExpr e)
 
 -- | Create an ascending sort order from a typed expression.
 asc :: (Columnable a, Ord a) => TExpr cols a -> TSortOrder cols

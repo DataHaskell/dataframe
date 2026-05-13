@@ -1019,10 +1019,10 @@ type BirthdateSchema = '[ T.Column "name"      T.Text
 example :: T.TypedDataFrame BirthdateSchema -> IO ()
 example tdf = do
     let result = T.aggregate
-                    ( T.agg @"avg_weight" (T.mean (T.col @"weight"))
-                    $ T.agg @"avg_height" (T.mean (T.col @"height"))
-                    $ T.agg @"names"      (T.collect (T.col @"name"))
-                    $ T.aggNil )
+                    ( T.as @"avg_weight" (T.mean    (T.col @"weight"))
+                    . T.as @"avg_height" (T.mean    (T.col @"height"))
+                    . T.as @"names"      (T.collect (T.col @"name"))
+                    )
                     (T.groupBy @'["decade"] tdf')
         tdf' = tdf
             |> T.derive @"name"   (T.lift firstName (T.col @"name"))
@@ -1034,7 +1034,7 @@ example tdf = do
     firstName = head . T.split (== ' ')
 ```
 
-**Why it's better**: `T.agg @"avg_weight" (T.mean (T.col @"weight"))` is checked in two ways at
+**Why it's better**: `T.as @"avg_weight" (T.mean (T.col @"weight"))` is checked in two ways at
 compile time — `"weight"` must exist in the schema with type `Double`, and the result column
 `"avg_weight"` will have type `Double` in the output schema.  A wrong output-type annotation causes
 a type error before the program runs.
@@ -1753,7 +1753,7 @@ main = do
         Nothing  -> putStrLn "Schema mismatch!"
         Just tdf -> do
             let result = T.aggregate
-                    (T.agg @"total" (T.sum (T.col @"amount")) $ T.aggNil)
+                    (T.as @"total" (T.sum (T.col @"amount")))
                     (T.groupBy @'["country"] tdf)
             print (T.thaw result)
 ```
@@ -1853,9 +1853,9 @@ execFrameM df $ do
 **Typed**
 ```haskell
 T.aggregate
-    ( T.agg @"avg_salary" (T.mean  (T.col @"salary"))
-    $ T.agg @"n"          (T.count (T.col @"salary"))
-    $ T.aggNil )
+    ( T.as @"avg_salary" (T.mean  (T.col @"salary"))
+    . T.as @"n"          (T.count (T.col @"salary"))
+    )
     (T.groupBy @'["dept"] tdf)
 ```
 

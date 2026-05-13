@@ -46,13 +46,13 @@ df :: TypedDataFrame '[Column \"x\" (Maybe Double), Column \"y\" Int]
 T.filterAllJust df :: TypedDataFrame '[Column \"x\" Double, Column \"y\" Int]
 @
 
-== Typed aggregation (Option B)
+== Typed aggregation
 
 @
 result = T.aggregate
-    (T.agg \@\"total\" (T.tsum (T.col \@\"salary\"))
-   $ T.agg \@\"count\" (T.tcount (T.col \@\"salary\"))
-   $ T.aggNil)
+    ( T.as \@\"total\" (T.sum   (T.col \@\"salary\"))
+    . T.as \@\"count\" (T.count (T.col \@\"salary\"))
+    )
     (T.groupBy \@'[\"dept\"] employees)
 @
 -}
@@ -122,9 +122,6 @@ module DataFrame.Typed (
     asc,
     desc,
 
-    -- * Named expression helper
-    DataFrame.Typed.Expr.as,
-
     -- * Freeze / thaw boundary
     freeze,
     freezeWithError,
@@ -182,10 +179,9 @@ module DataFrame.Typed (
     rightJoin,
     fullOuterJoin,
 
-    -- * GroupBy and Aggregation (Option B)
+    -- * GroupBy and Aggregation
     groupBy,
-    agg,
-    aggNil,
+    as,
     aggregate,
     aggregateUntyped,
 
@@ -226,10 +222,9 @@ import Prelude hiding (drop, filter, take)
 
 import DataFrame.Typed.Access (columnAsList, columnAsVector)
 import DataFrame.Typed.Aggregate (
-    agg,
-    aggNil,
     aggregate,
     aggregateUntyped,
+    as,
     groupBy,
  )
 import DataFrame.Typed.Expr

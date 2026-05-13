@@ -537,18 +537,16 @@ main = do
             submissions'
                 |> DT.groupBy @'["challenge_id"]
                 |> DT.aggregate
-                    ( DT.aggNil
-                        |> DT.agg @"total_submissions" (DT.sum (DT.col @"total_submissions"))
-                        |> DT.agg @"total_accepted_submissions"
-                            (DT.sum (DT.col @"total_accepted_submissions"))
+                    ( (DT.sum (DT.col @"total_submissions") |> DT.as @"total_submissions")
+                        . (DT.sum (DT.col @"total_accepted_submissions")
+                              |> DT.as @"total_accepted_submissions")
                     )
     let viewTotals =
             views'
                 |> DT.groupBy @'["challenge_id"]
                 |> DT.aggregate
-                    ( DT.aggNil
-                        |> DT.agg @"total_views" (DT.sum (DT.col @"total_views"))
-                        |> DT.agg @"total_unique_views" (DT.sum (DT.col @"total_unique_views"))
+                    ( (DT.sum (DT.col @"total_views") |> DT.as @"total_views")
+                        . (DT.sum (DT.col @"total_unique_views") |> DT.as @"total_unique_views")
                     )
     print $
         contestsWithColleges

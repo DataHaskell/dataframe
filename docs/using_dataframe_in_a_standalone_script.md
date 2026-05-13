@@ -369,7 +369,7 @@ main = do
     print $ tdf
           |> DT.groupBy @'["ocean_proximity"]
           |> DT.aggregate
-                (DT.agg @"total" (DT.count (DT.col @"median_house_value")) DT.aggNil)
+                (DT.as @"total" (DT.count (DT.col @"median_house_value")))
 ```
 
 ## The Trade Off

@@ -1586,13 +1586,13 @@ TIO.putStrLn $ D.toMarkdown (DT.thaw typedResult)
 ```haskell
 typedGrouped = thousing
     |> DT.groupBy @'["ocean_proximity"]
-    |> DT.aggregate (DT.agg @"count" (DT.count (DT.col @"median_house_value")) DT.aggNil)
+    |> DT.aggregate (DT.as @"count" (DT.count (DT.col @"median_house_value")))
 
 TIO.putStrLn $ D.toMarkdown (DT.thaw typedGrouped)
 ```
 
 
-`DT.groupBy @'["col1","col2"]` takes a type-level list of column names (note the leading `'` for a promoted list). The aggregation spec is built with `DT.agg @"resultCol" aggregationExpr rest` and terminated with `DT.aggNil`.
+`DT.groupBy @'["col1","col2"]` takes a type-level list of column names (note the leading `'` for a promoted list). Each output column is named with `DT.as @"resultCol" aggregationExpr`; chain multiple aggregations with `(.)` from Prelude (no terminator needed).
 
 ### When to use each layer
 

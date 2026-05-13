@@ -80,18 +80,15 @@ data TSortOrder (cols :: [Type]) where
 newtype TypedGrouped (keys :: [Symbol]) (cols :: [Type])
     = TGD {unTGD :: D.GroupedDataFrame}
 
-{- | A typed aggregation builder (Option B).
-
-Accumulates 'NamedExpr' values at the term level while building
-the result schema at the type level. Each @agg@ call prepends a
-'Column' to the @aggs@ phantom list.
-
-Usage:
+{- | Internal aggregation chain. Each cons prepends a 'Column' to the
+@aggs@ phantom list. End users never construct this directly — they
+compose 'DataFrame.Typed.Aggregate.as' entries with @(.)@ and let
+'DataFrame.Typed.Aggregate.aggregate' apply the composition to
+'TAggNil'.
 
 @
-agg \@\"total\" (F.sum salary)
-  $ agg \@\"avg_age\" (F.mean age)
-  $ aggNil
+as \@\"total\"   (F.sum  salary)
+  . as \@\"avg_age\" (F.mean age)
 @
 -}
 data TAgg (keys :: [Symbol]) (cols :: [Type]) (aggs :: [Type]) where

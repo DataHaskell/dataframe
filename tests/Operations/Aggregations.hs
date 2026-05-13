@@ -82,7 +82,7 @@ countAllAggregationTyped =
                          , DT.Column "test6" Integer
                          ]
                 & DT.groupBy @'["test1"]
-                & DT.aggregate (DT.agg @"n" DT.countAll DT.aggNil)
+                & DT.aggregate (DT.as @"n" DT.countAll)
                 & DT.sortBy [DT.asc (DT.col @"test1")]
                 & DT.thaw
             )
@@ -109,7 +109,7 @@ foldAggregationTyped =
                          , DT.Column "test6" Integer
                          ]
                 & DT.groupBy @'["test1"]
-                & DT.aggregate (DT.agg @"test2_count" (DT.count (DT.col @"test2")) DT.aggNil)
+                & DT.aggregate (DT.as @"test2_count" (DT.count (DT.col @"test2")))
                 & DT.sortBy [DT.asc (DT.col @"test1")]
                 & DT.thaw
             )
@@ -153,7 +153,7 @@ numericAggregationTyped =
                          , DT.Column "test6" Integer
                          ]
                 & DT.groupBy @'["test1"]
-                & DT.aggregate (DT.agg @"test2_mean" (DT.mean (DT.col @"test2")) DT.aggNil)
+                & DT.aggregate (DT.as @"test2_mean" (DT.mean (DT.col @"test2")))
                 & DT.sortBy [DT.asc (DT.col @"test1")]
                 & DT.thaw
             )

@@ -43,8 +43,7 @@ module DataFrame.Fusion.Typed (
     module DataFrame.Fusion.Plan,
 
     -- ** Aggregation builders (re-exported from DataFrame.Typed.Aggregate)
-    AGG.agg,
-    AGG.aggNil,
+    AGG.as,
 ) where
 
 import qualified Data.Aeson as Aeson
@@ -168,18 +167,19 @@ groupBy ::
     Grouped keys cols
 groupBy (DF plan) = GD (symbolVals @keys) plan
 
-{- | Aggregate a grouped query. Each entry in the 'TAgg' chain becomes one
-output column. The wire format mirrors the JSON shape decoded by
+{- | Aggregate a grouped query. The first argument is a chain of 'AGG.as'
+entries composed with @(.)@; the empty composition (@id@) yields just
+the group keys. The wire format mirrors the JSON shape decoded by
 @df_plan_groupby_aggregate@ on the Rust side.
 -}
 aggregate ::
     forall keys cols aggs.
-    TAgg keys cols aggs ->
+    (TAgg keys cols '[] -> TAgg keys cols aggs) ->
     Grouped keys cols ->
     IO (DataFrame (Append (GroupKeyColumns keys cols) (Reverse aggs)))
-aggregate tagg (GD keys plan) = do
+aggregate build (GD keys plan) = do
     let keysJson = BL.toStrict (Aeson.encode keys)
-    aggEntries <- traverse encodeAggEntry (taggToNamedExprs tagg)
+    aggEntries <- traverse encodeAggEntry (taggToNamedExprs (build TAggNil))
     let aggsJson = BL.toStrict (Aeson.encode aggEntries)
     withPlan plan $ \pp ->
         withCStringBS keysJson $ \cKeys ->

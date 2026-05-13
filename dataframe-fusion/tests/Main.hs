@@ -127,11 +127,11 @@ main = do
                     assertEqual "row count after sort" 4 (Core.nRows df)
                 , TestLabel "groupBy + aggregate produces one row per key" $ TestCase $ do
                     fdf <- scan
-                    let
-                        -- group by name, sum scores (each name unique here, so 4 groups)
-                        aggs =
-                            Fusion.agg @"total" (Fusion.sum (Fusion.col @"score")) Fusion.aggNil
-                    fdf' <- Fusion.aggregate aggs (Fusion.groupBy @'["name"] fdf)
+                    -- group by name, sum scores (each name unique here, so 4 groups)
+                    fdf' <-
+                        Fusion.aggregate
+                            (Fusion.as @"total" (Fusion.sum (Fusion.col @"score")))
+                            (Fusion.groupBy @'["name"] fdf)
                     df <- thaw <$> Fusion.run fdf'
                     assertEqual "row count after groupBy" 4 (Core.nRows df)
                     assertEqual "column count after groupBy" 2 (Core.nColumns df)

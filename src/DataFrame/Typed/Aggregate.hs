@@ -11,9 +11,8 @@ module DataFrame.Typed.Aggregate (
     -- * Typed groupBy
     groupBy,
 
-    -- * Typed aggregation builder (Option B)
-    agg,
-    aggNil,
+    -- * Naming an aggregation
+    as,
 
     -- * Running aggregations
     aggregate,
@@ -47,50 +46,72 @@ groupBy ::
     TypedDataFrame cols -> TypedGrouped keys cols
 groupBy (TDF df) = TGD (DA.groupBy (symbolVals @keys) df)
 
--- | The empty aggregation — no output columns beyond the group keys.
-aggNil :: TAgg keys cols '[]
-aggNil = TAggNil
+{- | Build a named aggregation entry. The result column name is supplied via
+@TypeApplications@; the underlying expression is validated against the
+source schema at compile time.
 
-{- | Add one aggregation to the builder.
+@as@ produces a /transformer/ on the aggregation chain — entries compose
+with plain @(.)@ from Prelude (or via @(|>)@ for SQL-like postfix
+reading). 'aggregate' applies the composed transformer to the empty chain
+internally, so no terminator is needed.
 
-Each call prepends a @Column name a@ to the result schema and records
-the runtime 'NamedExpr'. The expression is validated against the
-source schema @cols@ at compile time.
+==== __Prefix form__
 
 @
-agg \@\"total_sales\" (tsum (col \@\"salary\"))
-  $ agg \@\"avg_price\" (tmean (col \@\"price\"))
-  $ aggNil
+result = grouped |> aggregate
+    ( as \@\"total\"  (sum   (col \@\"amount\"))
+    . as \@\"orders\" (count (col \@\"order_id\"))
+    . as \@\"avg\"    (mean  (col \@\"amount\"))
+    )
 @
+
+==== __Postfix form (SQL-like)__
+
+@
+result = grouped |> aggregate
+    ( (sum   (col \@\"amount\")   |> as \@\"total\")
+    . (count (col \@\"order_id\") |> as \@\"orders\")
+    . (mean  (col \@\"amount\")   |> as \@\"avg\")
+    )
+@
+
+Per-entry parentheses are required in the postfix form because
+@(.)@ binds tighter than @(|>)@.
 -}
-agg ::
+as ::
     forall name a keys cols aggs.
-    ( KnownSymbol name
-    , Columnable a
-    ) =>
-    TExpr cols a -> TAgg keys cols aggs -> TAgg keys cols (Column name a ': aggs)
-agg = TAggCons colName
-  where
-    colName = T.pack (symbolVal (Proxy @name))
+    (KnownSymbol name, Columnable a) =>
+    TExpr cols a ->
+    TAgg keys cols aggs ->
+    TAgg keys cols (Column name a ': aggs)
+as = TAggCons (T.pack (symbolVal (Proxy @name)))
 
-{- | Run a typed aggregation.
+{- | Run a typed aggregation against a grouped DataFrame.
 
-Result schema = grouping key columns ++ aggregated columns (in declaration order).
+The first argument is a chain of 'as' entries composed with @(.)@. The
+empty composition (@id@) yields just the group keys. The result schema is
+the group-key columns followed by the aggregation columns in declaration
+order.
 
 @
-result = aggregate
-    (agg \@\"total\" (tsum (col @"salary")) $ agg \@\"count\" (tcount (col @"salary") $ aggNil)
-    (groupBy \@'[\"dept\"] employees)
--- result :: TDF '[Column \"dept\" Text, Column \"total\" Double, Column \"count\" Int]
+result = grouped |> aggregate
+    ( as \@\"total\"  (sum (col \@\"amount\"))
+    . as \@\"orders\" (count (col \@\"order_id\"))
+    )
+-- result :: TypedDataFrame
+--     '[ Column \"region\" Text
+--      , Column \"total\"  Double
+--      , Column \"orders\" Int
+--      ]
 @
 -}
 aggregate ::
     forall keys cols aggs.
-    TAgg keys cols aggs ->
+    (TAgg keys cols '[] -> TAgg keys cols aggs) ->
     TypedGrouped keys cols ->
     TypedDataFrame (Append (GroupKeyColumns keys cols) (Reverse aggs))
-aggregate tagg (TGD gdf) =
-    unsafeFreeze (DA.aggregate (taggToNamedExprs tagg) gdf)
+aggregate build (TGD gdf) =
+    unsafeFreeze (DA.aggregate (taggToNamedExprs (build TAggNil)) gdf)
 
 -- | Escape hatch: run an untyped aggregation and return a raw 'DataFrame'.
 aggregateUntyped :: [NamedExpr] -> TypedGrouped keys cols -> D.DataFrame
