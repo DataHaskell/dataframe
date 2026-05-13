@@ -260,6 +260,7 @@ import DataFrame.IO.CSV as CSV (
     fromCsvBytes,
     readCsv,
     readCsvWithOpts,
+    readCsvWithSchema,
     readSeparated,
     readTsv,
     writeCsv,
@@ -309,6 +310,7 @@ import DataFrame.Internal.Row as Row (
     toRowVector,
  )
 import DataFrame.Internal.Schema as Schema (
+    deriveSchema,
     makeSchema,
     schemaType,
  )

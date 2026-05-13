@@ -4,6 +4,7 @@
 ### New features
 * New `DataFrame.Typed.TH.deriveSchemaFromType` Template Haskell splice generates a typed schema synonym and a `HasSchema` instance from a Haskell record ADT. Pair with `DataFrame.fromRecords` / `DataFrame.toRecords` (or `DataFrame.Typed.fromRecordsTyped` / `toRecordsTyped`) to convert between `[Order]` and `DataFrame`/`TypedDataFrame OrderSchema`. Field names are translated `camelCase → snake_case` by default; the transform is configurable via `SchemaOptions`.
 * New `DataFrame.Typed.Generic` exposes `SchemaOf`/`SchemaOfRaw` plus `genericToColumns` / `genericFromColumns`, so users who prefer `GHC.Generics` over a TH splice can derive the same schema and row bridge.
+* New `DataFrame.Internal.Schema.deriveSchema` Template Haskell splice generates, from a record ADT, both a runtime `Schema` value (`orderSchema :: Schema`, suitable for `readCsvWithSchema` / `readCsvWithOpts`) and one `Expr` accessor per field (`orderCustomerId :: Expr Int`, etc.), so expression-DSL code can refer to columns by typed name without writing `col @T "snake_case_name"` at each call site. Re-exported from `DataFrame`.
 
 ### Refactor
 * The untyped Template Haskell splices (`declareColumns`, `declareColumnsFromCsvFile`, `declareColumnsFromCsvWithOpts`, `declareColumnsFromParquetFile`, `declareColumnsWithPrefix`, `declareColumnsWithPrefix'`) have moved from `DataFrame.Functions` to a new `DataFrame.TH` module (re-exported from `DataFrame`). Update imports accordingly; the bundled `dataframe.ghci` already points to the new module.

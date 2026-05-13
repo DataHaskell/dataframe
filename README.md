@@ -305,6 +305,33 @@ Field names are translated `camelCase → snake_case` by default; override
 the translation with `deriveSchemaFromTypeWith
 defaultSchemaOptions{nameTransform = id}` (or any `String -> String`).
 
+If all you need is a runtime `Schema` to drive `readCsvWithSchema` (no
+typed-dataframe machinery), there's a companion splice in
+`DataFrame.Internal.Schema` (re-exported from `DataFrame`):
+
+```haskell
+$(D.deriveSchema ''Order)
+-- emits:
+--   orderSchema     :: Schema
+--   orderSchema     = makeSchema [("order_id", schemaType @Int64), ...]
+--   orderOrderId    :: Expr Int64
+--   orderOrderId    = col "order_id"
+--   orderRegion     :: Expr Text
+--   orderRegion     = col "region"
+--   orderAmount     :: Expr Double
+--   orderAmount     = col "amount"
+
+orders :: IO D.DataFrame
+orders = do
+    df <- D.readCsvWithSchema orderSchema "orders.csv"
+    pure (D.filter orderAmount (> 100) df)
+```
+
+Each record field gets a typed accessor named `<lower-first TyConName><UpperFirst FieldName>`,
+so `data Order { customerId :: Int }` yields `orderCustomerId :: Expr Int = col "customer_id"`.
+That's the same shape as `$(D.declareColumns df)` produces from a runtime
+`DataFrame`, but driven off the ADT instead of an existing frame.
+
 If you'd rather not depend on Template Haskell, the same schema is
 available via `GHC.Generics`:
 

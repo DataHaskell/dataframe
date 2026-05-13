@@ -15,13 +15,15 @@ module Operations.Record where
 
 import Data.Int (Int64)
 import qualified Data.Map.Strict as M
-import Data.Proxy (Proxy (..))
 import qualified Data.Text as T
+import qualified Data.Text.IO as TIO
 import GHC.Generics (Generic)
 
 import qualified DataFrame as D
+import qualified DataFrame.Functions as F
 import qualified DataFrame.Internal.Column as DI
 import qualified DataFrame.Internal.Schema as IS
+import DataFrame.Operators
 import DataFrame.Typed (Schema)
 import qualified DataFrame.Typed as DT
 
@@ -36,6 +38,7 @@ data Order = Order
     deriving (Show, Eq)
 
 $(DT.deriveSchemaFromType ''Order)
+$(D.deriveSchema ''Order)
 
 -- Nullable fields (Maybe Text -> RNullableBoxed; Maybe Int -> RNullableUnboxed).
 data User = User
@@ -46,6 +49,7 @@ data User = User
     deriving (Show, Eq)
 
 $(DT.deriveSchemaFromType ''User)
+$(D.deriveSchema ''User)
 
 -- Identity-cased: keep the record selector names verbatim.
 data Account = Account
@@ -85,6 +89,7 @@ data Wide = Wide
     deriving (Show, Eq)
 
 $(DT.deriveSchemaFromType ''Wide)
+$(D.deriveSchema ''Wide)
 
 -- Generics opt-in: derive the schema via Generic, not TH.
 data Foo = Foo
@@ -220,6 +225,117 @@ genericColumnNames = TestCase $ do
         ["foo_id", "foo_name", "foo_value"]
         (D.columnNames df)
 
+deriveSchemaSplice :: Test
+deriveSchemaSplice = TestCase $ do
+    assertEqual
+        "orderSchema column names"
+        ["amount", "order_id", "region"]
+        (M.keys (IS.elements orderSchema))
+    assertEqual
+        "order_id is Int64"
+        (Just (IS.schemaType @Int64))
+        (M.lookup "order_id" (IS.elements orderSchema))
+    assertEqual
+        "region is Text"
+        (Just (IS.schemaType @T.Text))
+        (M.lookup "region" (IS.elements orderSchema))
+    assertEqual
+        "amount is Double"
+        (Just (IS.schemaType @Double))
+        (M.lookup "amount" (IS.elements orderSchema))
+
+deriveSchemaNullable :: Test
+deriveSchemaNullable = TestCase $ do
+    assertEqual
+        "userSchema column names"
+        ["user_age", "user_id", "user_name"]
+        (M.keys (IS.elements userSchema))
+    assertEqual
+        "user_id is Int64"
+        (Just (IS.schemaType @Int64))
+        (M.lookup "user_id" (IS.elements userSchema))
+    assertEqual
+        "user_name is Maybe Text"
+        (Just (IS.schemaType @(Maybe T.Text)))
+        (M.lookup "user_name" (IS.elements userSchema))
+    assertEqual
+        "user_age is Maybe Int"
+        (Just (IS.schemaType @(Maybe Int)))
+        (M.lookup "user_age" (IS.elements userSchema))
+
+deriveSchemaWide :: Test
+deriveSchemaWide = TestCase $ do
+    assertEqual
+        "wideSchema has 8 keys"
+        8
+        (M.size (IS.elements wideSchema))
+    assertEqual
+        "f1 is Int"
+        (Just (IS.schemaType @Int))
+        (M.lookup "f1" (IS.elements wideSchema))
+    assertEqual
+        "f8 is Int"
+        (Just (IS.schemaType @Int))
+        (M.lookup "f8" (IS.elements wideSchema))
+
+deriveSchemaReadsCsv :: Test
+deriveSchemaReadsCsv = TestCase $ do
+    let csv =
+            T.unlines
+                [ "order_id,region,amount"
+                , "1,us,10.0"
+                , "2,eu,20.5"
+                , "3,ap,30.0"
+                ]
+        tmp = "/tmp/dataframe_test_deriveSchema.csv"
+    TIO.writeFile tmp csv
+    df <- D.readCsvWithSchema orderSchema tmp
+    assertEqual
+        "deriveSchema-driven readCsvWithSchema column names"
+        ["order_id", "region", "amount"]
+        (D.columnNames df)
+    case D.toRecords df :: Either T.Text [Order] of
+        Left e -> assertFailure (T.unpack e)
+        Right xs ->
+            assertEqual
+                "deriveSchema-driven CSV parses back to records"
+                [Order 1 "us" 10.0, Order 2 "eu" 20.5, Order 3 "ap" 30.0]
+                xs
+
+deriveSchemaAccessorFilter :: Test
+deriveSchemaAccessorFilter = TestCase $ do
+    let df =
+            D.fromRecords
+                [ Order 1 "us" 20.0
+                , Order 2 "eu" 20.5
+                , Order 3 "ap" 30.0
+                , Order 4 "us" 25.0
+                ]
+        big =
+            D.filterWhere
+                (orderAmount .>. F.lit @Double 15.0 .&&. orderRegion .==. F.lit @T.Text "us")
+                df
+    case D.toRecords big :: Either T.Text [Order] of
+        Left e -> assertFailure (T.unpack e)
+        Right xs ->
+            assertEqual
+                "accessor drives D.filter (amount > 15.0 && region == \"us\")"
+                [Order 1 "us" 20.0, Order 4 "us" 25.0]
+                xs
+
+deriveSchemaAccessorDerive :: Test
+deriveSchemaAccessorDerive = TestCase $ do
+    let df =
+            D.fromRecords
+                [ Order 1 "us" 10.0
+                , Order 2 "eu" 20.0
+                ]
+        df' = D.derive "double_amount" (orderAmount + orderAmount) df
+    assertEqual
+        "accessor composes in derive expression"
+        [20.0, 40.0]
+        (D.columnAsList (D.col @Double "double_amount") df')
+
 tests :: [Test]
 tests =
     [ TestLabel "basicTypedRoundTrip" basicTypedRoundTrip
@@ -233,4 +349,10 @@ tests =
     , TestLabel "wideRoundTrip" wideRoundTrip
     , TestLabel "genericRoundTrip" genericRoundTrip
     , TestLabel "genericColumnNames" genericColumnNames
+    , TestLabel "deriveSchemaSplice" deriveSchemaSplice
+    , TestLabel "deriveSchemaNullable" deriveSchemaNullable
+    , TestLabel "deriveSchemaWide" deriveSchemaWide
+    , TestLabel "deriveSchemaReadsCsv" deriveSchemaReadsCsv
+    , TestLabel "deriveSchemaAccessorFilter" deriveSchemaAccessorFilter
+    , TestLabel "deriveSchemaAccessorDerive" deriveSchemaAccessorDerive
     ]
