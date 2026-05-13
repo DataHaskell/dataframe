@@ -115,7 +115,7 @@ In the housing dataset it'll tell how "typical" our typical home price is.
 ```haskell
 import DataFrame ((|>))
 
-$(F.declareColumns df)
+$(D.declareColumns df)
 
 TIO.putStrLn $ D.toMarkdown $ 
    df |> D.derive "deviation" (abs (median_house_value - (F.mean median_house_value)))
@@ -172,7 +172,7 @@ withDeviation = df |> D.derive "deviation" (abs (median_house_value - (F.mean me
                    |> D.select ["median_house_value", "deviation"]
                    |> D.take 10
 
-$(F.declareColumns withDeviation)
+$(D.declareColumns withDeviation)
 
 import Data.Maybe
 

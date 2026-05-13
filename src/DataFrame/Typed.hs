@@ -189,6 +189,22 @@ module DataFrame.Typed (
     deriveSchema,
     deriveSchemaFromCsvFile,
     deriveSchemaFromCsvFileWith,
+    deriveSchemaFromType,
+    deriveSchemaFromTypeWith,
+    SchemaOptions (..),
+    defaultSchemaOptions,
+
+    -- * Record bridge (ADT <-> TypedDataFrame)
+    HasSchema (..),
+    fromRecordsTyped,
+    toRecordsTyped,
+
+    -- * Generics opt-in for schema derivation
+    SchemaOf,
+    SchemaOfRaw,
+    NameCase (..),
+    genericToColumns,
+    genericFromColumns,
 
     -- * Schema type families (for advanced use)
     Lookup,
@@ -229,13 +245,29 @@ import DataFrame.Typed.Aggregate (
  )
 import DataFrame.Typed.Expr
 import DataFrame.Typed.Freeze (freeze, freezeWithError, thaw, unsafeFreeze)
+import DataFrame.Typed.Generic (
+    NameCase (..),
+    SchemaOf,
+    SchemaOfRaw,
+    genericFromColumns,
+    genericToColumns,
+ )
 import DataFrame.Typed.Join (fullOuterJoin, innerJoin, leftJoin, rightJoin)
 import DataFrame.Typed.Operations
+import DataFrame.Typed.Record (
+    HasSchema (..),
+    fromRecordsTyped,
+    toRecordsTyped,
+ )
 import DataFrame.Typed.Schema
 import DataFrame.Typed.TH (
+    SchemaOptions (..),
+    defaultSchemaOptions,
     deriveSchema,
     deriveSchemaFromCsvFile,
     deriveSchemaFromCsvFileWith,
+    deriveSchemaFromType,
+    deriveSchemaFromTypeWith,
  )
 import DataFrame.Typed.Types (
     Column,

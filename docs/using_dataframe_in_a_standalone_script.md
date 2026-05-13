@@ -99,7 +99,7 @@ module Main where
 import qualified DataFrame as D
 import qualified DataFrame.Functions as F
 
-$(F.declareColumnsFromCsvFile "./housing.csv")
+$(D.declareColumnsFromCsvFile "./housing.csv")
 
 main :: IO ()
 main = do
@@ -137,7 +137,7 @@ import qualified DataFrame.Functions as F
 
 import DataFrame.Operators
 
-$(F.declareColumnsFromCsvFile "./housing.csv")
+$(D.declareColumnsFromCsvFile "./housing.csv")
 
 main :: IO ()
 main = do
@@ -165,7 +165,7 @@ import DataFrame.Operators
 
 import DataFrame.Monad
 
-$(F.declareColumnsFromCsvFile "./housing.csv")
+$(D.declareColumnsFromCsvFile "./housing.csv")
 
 main :: IO ()
 main = do
@@ -327,7 +327,7 @@ main :: IO ()
 main = do
     df <- D.readCsv "./data/housing.csv"
     let tdf = either (error . show) id (DT.freezeWithError @Housing df)
-    -- We could generate this with `F.declareColumnsFromCsvFile` as before
+    -- We could generate this with `D.declareColumnsFromCsvFile` as before
     let total_bedrooms = F.col @(Maybe Double) "total_bedrooms"
     print $ tdf
           |> DT.derive @"rooms_per_household" (DT.col @"total_rooms" / DT.col @"households")
@@ -357,7 +357,7 @@ $(DT.deriveSchemaFromCsvFile "Housing" "./data/housing.csv")
 main :: IO ()
 main = do
     df <- D.readCsv "./data/housing.csv"
-    -- We could generate this with `F.declareColumnsFromCsvFile` as before
+    -- We could generate this with `D.declareColumnsFromCsvFile` as before
     let total_bedrooms = F.col @(Maybe Double) "total_bedrooms"
     let tdf = either (error . show) id (DT.freezeWithError @Housing df)
     print $ tdf

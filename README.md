@@ -197,7 +197,8 @@ For scripts and projects, Template Haskell can generate column bindings at compi
 
 ### Generate column references from a CSV
 
-`declareColumnsFromCsvFile` reads your CSV at compile time and generates typed `Expr` bindings for every column:
+`declareColumnsFromCsvFile` (in `DataFrame.TH`, also re-exported from `DataFrame`)
+reads your CSV at compile time and generates typed `Expr` bindings for every column:
 
 ```haskell
 {-# LANGUAGE TemplateHaskell #-}
@@ -212,7 +213,7 @@ import DataFrame.Operators
 --   total_rooms :: Expr Double
 --   ocean_proximity :: Expr Text
 --   ... one binding per column
-$(F.declareColumnsFromCsvFile "./data/housing.csv")
+$(D.declareColumnsFromCsvFile "./data/housing.csv")
 
 main :: IO ()
 main = do
@@ -250,6 +251,80 @@ import qualified DataFrame.Typed as T
 --                        , ...
 --                        ]
 $(T.deriveSchemaFromCsvFile "HousingSchema" "./data/housing.csv")
+```
+
+### Generate a schema (and a row bridge) from a record ADT
+
+When the canonical row shape lives in your code as a Haskell record,
+`deriveSchemaFromType` produces both the typed schema and a `HasSchema`
+instance that converts between `[Order]` and a `DataFrame` (or
+`TypedDataFrame OrderSchema`) at runtime:
+
+```haskell
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE TypeFamilies #-}
+
+import Data.Int (Int64)
+import qualified Data.Text as T
+import qualified DataFrame as D
+import qualified DataFrame.Typed as DT
+
+data Order = Order
+    { orderId :: Int64
+    , region  :: T.Text
+    , amount  :: Double
+    } deriving (Show, Eq)
+
+$(DT.deriveSchemaFromType ''Order)
+-- expands to:
+--   type OrderSchema =
+--     '[DT.Column "order_id" Int64, DT.Column "region" T.Text, DT.Column "amount" Double]
+--   instance DT.HasSchema Order where
+--     type Schema Order = OrderSchema
+--     toColumns   = ...
+--     fromColumns = ...
+
+xs :: [Order]
+xs = [Order 1 "us" 10.0, Order 2 "eu" 20.5]
+
+-- Untyped: [Order] <-> DataFrame
+df :: D.DataFrame
+df = D.fromRecords xs
+
+xs' :: Either T.Text [Order]
+xs' = D.toRecords df          -- runtime-checked
+
+-- Typed: [Order] <-> TypedDataFrame OrderSchema
+tdf :: DT.TypedDataFrame OrderSchema
+tdf = DT.fromRecordsTyped xs
+```
+
+Field names are translated `camelCase → snake_case` by default; override
+the translation with `deriveSchemaFromTypeWith
+defaultSchemaOptions{nameTransform = id}` (or any `String -> String`).
+
+If you'd rather not depend on Template Haskell, the same schema is
+available via `GHC.Generics`:
+
+```haskell
+{-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE UndecidableInstances #-}
+
+import GHC.Generics (Generic)
+import DataFrame.Typed (Schema)
+import qualified DataFrame.Typed as DT
+
+data Order = Order { … } deriving (Generic)
+
+type OrderSchema = DT.SchemaOf Order
+
+instance DT.HasSchema Order where
+    type Schema Order = OrderSchema
+    toColumns   = DT.genericToColumns
+    fromColumns = DT.genericFromColumns
 ```
 
 ## Typed API

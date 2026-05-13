@@ -27,6 +27,7 @@ import qualified Operations.Merge
 import qualified Operations.Nullable
 import qualified Operations.Provenance
 import qualified Operations.ReadCsv
+import qualified Operations.Record
 import qualified Operations.Shuffle
 import qualified Operations.Sort
 import qualified Operations.Statistics
@@ -55,6 +56,7 @@ tests =
             ++ Operations.Nullable.tests
             ++ Operations.Provenance.tests
             ++ Operations.ReadCsv.tests
+            ++ Operations.Record.tests
             ++ Operations.WriteCsv.tests
             ++ Operations.Shuffle.tests
             ++ Operations.Sort.tests

@@ -1257,7 +1257,7 @@ let cleaned = starwars
   -- Remove the maybes.
   |> D.filterAllJust
 
-F.declareColumns cleaned
+D.declareColumns cleaned
 
 cleaned
   |> D.derive "bmi" (mass / F.pow height 2 / 100)

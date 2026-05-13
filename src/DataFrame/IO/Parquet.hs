@@ -396,8 +396,8 @@ getNonNullableColumn totalRows description chunks =
         m Column
     go decoder =
         foldNonNullable totalRows $
-            fmap (\(vs, _, _) -> vs) $
-                Stream.unfoldEach (readPages description decoder) (Stream.fromList chunks)
+            (\(vs, _, _) -> vs)
+                <$> Stream.unfoldEach (readPages description decoder) (Stream.fromList chunks)
 
     unboxedGo ::
         forall a.
@@ -406,8 +406,8 @@ getNonNullableColumn totalRows description chunks =
         m Column
     unboxedGo decoder =
         foldNonNullableUnboxed totalRows $
-            fmap (\(vs, _, _) -> vs) $
-                Stream.unfoldEach
+            (\(vs, _, _) -> vs)
+                <$> Stream.unfoldEach
                     (readPages description decoder)
                     (Stream.fromList chunks)
 
@@ -443,8 +443,8 @@ getNullableColumn totalRows description chunks =
         m Column
     go decoder =
         foldNullable maxDef totalRows $
-            fmap (\(vs, ds, _) -> (vs, ds)) $
-                Stream.unfoldEach (readPages description decoder) (Stream.fromList chunks)
+            (\(vs, ds, _) -> (vs, ds))
+                <$> Stream.unfoldEach (readPages description decoder) (Stream.fromList chunks)
     unboxedGo ::
         forall a.
         (Columnable a, VU.Unbox a) =>
@@ -452,8 +452,8 @@ getNullableColumn totalRows description chunks =
         m Column
     unboxedGo decoder =
         foldNullableUnboxed maxDef totalRows $
-            fmap (\(vs, ds, _) -> (vs, ds)) $
-                Stream.unfoldEach
+            (\(vs, ds, _) -> (vs, ds))
+                <$> Stream.unfoldEach
                     (readPages description decoder)
                     (Stream.fromList chunks)
 

@@ -424,7 +424,7 @@ instance Pinchable KeyValue
 
 -- https://github.com/apache/parquet-format/blob/master/src/main/thrift/parquet.thrift#L990
 -- union ColumnOrder
-data ColumnOrder
+newtype ColumnOrder
     = TYPE_ORDER (Field 1 TypeDefinedOrder)
     deriving (Eq, Show, Generic)
 

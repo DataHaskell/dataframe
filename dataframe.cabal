@@ -92,6 +92,7 @@ library
                     DataFrame.IO.Parquet.Time,
                     DataFrame.Lazy.IO.CSV,
                     DataFrame.Lazy.IO.Binary,
+                    DataFrame.IO.Parquet.Schema,
                     DataFrame.Lazy.Internal.DataFrame,
                     DataFrame.Lazy.Internal.LogicalPlan,
                     DataFrame.Lazy.Internal.PhysicalPlan,
@@ -109,7 +110,10 @@ library
                     DataFrame.Typed.TH,
                     DataFrame.Typed.Expr,
                     DataFrame.Typed.Lazy,
-                    DataFrame.Typed
+                    DataFrame.Typed.Record,
+                    DataFrame.Typed.Generic,
+                    DataFrame.Typed,
+                    DataFrame.TH
     build-depends:    base >= 4 && <5,
                       async >= 2.2 && < 3,
                       deepseq >= 1 && < 2,
@@ -266,6 +270,7 @@ test-suite tests
                    Operations.Statistics,
                    Operations.Take,
                    Operations.Typing,
+                   Operations.Record,
                    LazyParquet,
                    Parquet,
                    ParquetTestData,

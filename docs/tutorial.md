@@ -141,8 +141,13 @@ Once we run `declareColumns` (which requires `TemplateHaskell` to be enabled) we
 
 ```haskell
 :set -XTemplateHaskell
-F.declareColumns df
+import qualified DataFrame.TH as TH
+TH.declareColumns df
 ```
+
+(Inside a Haskell module you can also splice it as `$(TH.declareColumns df)`. The
+function used to live in `DataFrame.Functions`; it now lives in `DataFrame.TH`
+and is re-exported from `DataFrame` for convenience.)
 
 ![Screenshot of filtering with autocomplete](./_static/filter_autocomplete.png)
 

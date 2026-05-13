@@ -9,10 +9,12 @@ import Control.Monad (forM_)
 import qualified DataFrame as D
 import qualified DataFrame.Functions as F
 import qualified DataFrame.IO.Parquet as DP
+import qualified DataFrame.IO.Parquet.Schema as PS
 import ParquetTestData (allTypes, mtCarsDataset, tinyPagesLast10, transactions)
 
 import qualified Data.ByteString as BS
-import Data.Int
+import Data.Int (Int32, Int64)
+import Data.Maybe (fromMaybe)
 import qualified Data.Set as S
 import qualified Data.Text as T
 import Data.Word
@@ -1264,14 +1266,12 @@ shardedNullableSchema =
                     , let nc :: Int64
                           nc = case unField cm.cmd_statistics of
                             Nothing -> 0
-                            Just stats -> case unField stats.stats_null_count of
-                                Nothing -> 0
-                                Just n -> n
+                            Just stats -> fromMaybe 0 (unField stats.stats_null_count)
                     , nc > 0
                     ]
             df =
                 foldl
-                    (\acc meta -> acc <> F.schemaToEmptyDataFrame nullableCols (unField meta.schema))
+                    (\acc meta -> acc <> PS.schemaToEmptyDataFrame nullableCols (unField meta.schema))
                     D.empty
                     metas
         assertBool "id should be nullable" (hasMissing (unsafeGetColumn "id" df))
@@ -1293,12 +1293,10 @@ singleShardNoNulls =
                     , let nc :: Int64
                           nc = case unField cm.cmd_statistics of
                             Nothing -> 0
-                            Just stats -> case unField stats.stats_null_count of
-                                Nothing -> 0
-                                Just n -> n
+                            Just stats -> fromMaybe 0 (unField stats.stats_null_count)
                     , nc > 0
                     ]
-            df = F.schemaToEmptyDataFrame nullableCols (unField meta.schema)
+            df = PS.schemaToEmptyDataFrame nullableCols (unField meta.schema)
         assertBool
             "id should NOT be nullable"
             (not (hasMissing (unsafeGetColumn "id" df)))

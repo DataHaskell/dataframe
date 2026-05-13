@@ -40,7 +40,7 @@ import DataFrame.Operators
 
 -- Creates the column references used below (namely total_rooms and households)
 -- This gives us type-safe column access.
-$(F.declareColumnsFromCsvFile "./data/housing.csv")
+$(D.declareColumnsFromCsvFile "./data/housing.csv")
 
 main :: IO ()
 main = do
@@ -68,7 +68,7 @@ import DataFrame.Monad
 import Data.Text (Text)
 import DataFrame.Functions ((.&&.), (.>=.))
 
-$(F.declareColumnsFromCsvFile "./data/housing.csv")
+$(D.declareColumnsFromCsvFile "./data/housing.csv")
 
 main :: IO ()
 main = do

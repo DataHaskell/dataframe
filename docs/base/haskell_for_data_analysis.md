@@ -105,12 +105,12 @@ The type of `D.take` is `Int -> DataFrame -> DataFrame` — an integer in, a dat
 -- Runtime-checked (flexible):
 D.mean (F.col @Double "High Temperature (C)") weather
 
--- Compile-time-checked — $(F.declareColumns …) generates typed bindings:
-$(F.declareColumns weather)
+-- Compile-time-checked — $(D.declareColumns …) generates typed bindings:
+$(D.declareColumns weather)
 D.mean high_temperature_c weather
 ```
 
-The `$(F.declareColumns df)` splice inspects the dataframe at compile time and generates one typed binding per column (column names are sanitised into valid Haskell identifiers). If you try to use a column that does not exist, the program will not compile.
+The `$(D.declareColumns df)` splice inspects the dataframe at compile time and generates one typed binding per column (column names are sanitised into valid Haskell identifiers). If you try to use a column that does not exist, the program will not compile.
 
 ---
 
@@ -248,10 +248,10 @@ TIO.putStrLn $ D.toMarkdown (D.distinct dupData)
 
 ### Opting into stronger type safety
 
-After `$(F.declareColumns df)` any imputation or filter expression is checked at compile time. A typo in a column name becomes a compile error, not a runtime surprise.
+After `$(D.declareColumns df)` any imputation or filter expression is checked at compile time. A typo in a column name becomes a compile error, not a runtime surprise.
 
 ```haskell
-$(F.declareColumns housing)
+$(D.declareColumns housing)
 
 -- Compile-time checked — 'total_bedrooms' must exist and be Maybe Double:
 TIO.putStrLn $ D.toMarkdown $ D.take 10
@@ -337,10 +337,10 @@ TIO.putStrLn $ D.toMarkdown
 
 ### Opting into stronger type safety
 
-After `$(F.declareColumns meat)`, column references are checked at compile time:
+After `$(D.declareColumns meat)`, column references are checked at compile time:
 
 ```haskell
-$(F.declareColumns meat)
+$(D.declareColumns meat)
 
 -- Using declared column bindings — compiler catches typos and type mismatches:
 TIO.putStrLn $ D.toMarkdown
@@ -361,7 +361,7 @@ Every transformation so far has required threading the dataframe through manuall
 ```haskell
 import DataFrame.Monad
 
-$(F.declareColumnsFromCsvWithOpts (D.defaultReadOptions{D.typeSpec = D.InferFromSample 300}) "../data/housing.csv")
+$(D.declareColumnsFromCsvWithOpts (D.defaultReadOptions{D.typeSpec = D.InferFromSample 300}) "../data/housing.csv")
 
 housing <- D.readCsv "../data/housing.csv"
 
@@ -375,7 +375,7 @@ pipelined = execFrameM housing $ do
 TIO.putStrLn $ D.toMarkdown $ D.take 5 pipelined
 ```
 
-`$(F.declareColumnsFromCsvFile path)` generates compile-time column bindings by reading the CSV header at splice time — no live dataframe needs to be in scope, unlike `$(F.declareColumns df)` which requires a bound frame.
+`$(D.declareColumnsFromCsvFile path)` generates compile-time column bindings by reading the CSV header at splice time — no live dataframe needs to be in scope, unlike `$(D.declareColumns df)` which requires a bound frame.
 
 Inside the `do`-block, `<-` binds the typed `Expr` returned by each step; those expressions can be reused in later steps (e.g. `isExpensive` in the final `filterWhereM`) without any extra plumbing.
 
@@ -669,7 +669,7 @@ TIO.putStrLn $ D.toMarkdown withDates
 `F.castEither` returns `Either Text a` — Haskell's type system ensures you address the `Left` (failure) case before proceeding. The alternative coercion functions (`cast`, `castWithDefault`) have types that make the tradeoff explicit in the signature.
 
 ```haskell
-$(F.declareColumns withAudit)
+$(D.declareColumns withAudit)
 
 -- 'audit' is Expr (Either Text Double) — you must handle Left before using it as a number
 TIO.putStrLn $ D.toMarkdown (D.take 5 withAudit)
@@ -819,10 +819,10 @@ TIO.putStrLn $ D.toMarkdown (D.range (10, 15) housing)
 
 ### Opting into stronger type safety
 
-After a join the combined schema is known. Use `$(F.declareColumns …)` to get compile-time bindings for all columns of the joined result:
+After a join the combined schema is known. Use `$(D.declareColumns …)` to get compile-time bindings for all columns of the joined result:
 
 ```haskell
-$(F.declareColumns innerResult)
+$(D.declareColumns innerResult)
 
 -- All columns of innerResult are now bound with their exact types.
 -- Typos or type mismatches become compile errors, not runtime surprises.
@@ -994,7 +994,7 @@ TIO.putStrLn $ D.toMarkdown summary
 Group by multiple columns by passing a longer key list:
 
 ```haskell
-$(F.declareColumns meat)
+$(D.declareColumns meat)
 
 meatGrouped = D.groupBy ["food"] meat
 
@@ -1052,10 +1052,10 @@ TIO.putStrLn $ D.toMarkdown incomeByProx
 
 ### Opting into stronger type safety
 
-After aggregation the result has a new schema. A new `$(F.declareColumns …)` gives you compile-time bindings for that schema:
+After aggregation the result has a new schema. A new `$(D.declareColumns …)` gives you compile-time bindings for that schema:
 
 ```haskell
-$(F.declareColumns summary)
+$(D.declareColumns summary)
 
 -- All aggregated columns are now typed. mean_value :: Expr Double etc.
 ranked = D.sortBy D.Descending [F.name mean_value] summary

@@ -1,16 +1,11 @@
-{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE IncoherentInstances #-}
-{-# LANGUAGE InstanceSigs #-}
-{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE UndecidableInstances #-}
@@ -18,34 +13,21 @@
 module DataFrame.Functions (module DataFrame.Functions, module DataFrame.Operators) where
 
 import DataFrame.Internal.Column
-import DataFrame.Internal.DataFrame (
-    DataFrame (..),
-    empty,
-    unsafeGetColumn,
- )
-import DataFrame.Internal.Expression hiding (normalize)
+import DataFrame.Internal.Expression
 import DataFrame.Internal.Statistics
-import DataFrame.Operations.Core
 
 import Control.Applicative
-import Control.Monad
-import Control.Monad.IO.Class
 import qualified Data.Char as Char
 import Data.Either
-import Data.Function
-import Data.Functor
+import Data.Function (on)
 import Data.Int
 import qualified Data.List as L
 import qualified Data.Map as M
 import qualified Data.Maybe as Maybe
-import qualified Data.Set as S
 import qualified Data.Text as T
 import Data.Time
 import qualified Data.Vector as V
 import qualified Data.Vector.Unboxed as VU
-import qualified DataFrame.IO.CSV as CSV
-import qualified DataFrame.IO.Parquet as Parquet
-import DataFrame.IO.Parquet.Thrift
 
 import DataFrame.Internal.Nullable (
     BaseType,
@@ -55,11 +37,6 @@ import DataFrame.Internal.Nullable (
     NullLift2Result,
  )
 import DataFrame.Operators
-import Language.Haskell.TH
-import qualified Language.Haskell.TH.Syntax as TH
-import System.Directory (doesDirectoryExist)
-import System.FilePath ((</>))
-import System.FilePath.Glob (glob)
 import Text.Regex.TDFA
 import Prelude hiding (maximum, minimum)
 import Prelude as P
@@ -697,142 +674,3 @@ sanitize t
         '[' -> True
         ']' -> True
         _ -> False
-
-typeFromString :: [String] -> Q Type
-typeFromString [] = fail "No type specified"
-typeFromString [t0] = do
-    let t = normalize t0
-    case stripBrackets t of
-        Just inner -> typeFromString [inner] <&> AppT ListT
-        Nothing
-            | t == "Text" || t == "Data.Text.Text" || t == "T.Text" ->
-                pure (ConT ''T.Text)
-            | otherwise -> do
-                m <- lookupTypeName t
-                case m of
-                    Just tyName -> pure (ConT tyName)
-                    Nothing -> fail $ "Unsupported type: " ++ t0
-typeFromString [tycon, t1] = AppT <$> typeFromString [tycon] <*> typeFromString [t1]
-typeFromString [tycon, t1, t2] =
-    (\outer a b -> AppT (AppT outer a) b)
-        <$> typeFromString [tycon]
-        <*> typeFromString [t1]
-        <*> typeFromString [t2]
-typeFromString s = fail $ "Unsupported types: " ++ unwords s
-
-normalize :: String -> String
-normalize = dropWhile (== ' ') . reverse . dropWhile (== ' ') . reverse
-
-stripBrackets :: String -> Maybe String
-stripBrackets s =
-    case s of
-        ('[' : rest)
-            | P.not (null rest) && last rest == ']' ->
-                Just (init rest)
-        _ -> Nothing
-
-declareColumnsFromCsvFile :: String -> DecsQ
-declareColumnsFromCsvFile path = do
-    df <-
-        liftIO
-            (CSV.readSeparated (CSV.defaultReadOptions{CSV.numColumns = Just 100}) path)
-    declareColumns df
-
-declareColumnsFromParquetFile :: String -> DecsQ
-declareColumnsFromParquetFile path = do
-    isDir <- liftIO $ doesDirectoryExist path
-    let pat = if isDir then path </> "*.parquet" else path
-    matches <- liftIO $ glob pat
-    files <- liftIO $ filterM (fmap Prelude.not . doesDirectoryExist) matches
-    metas <- liftIO $ mapM Parquet.readMetadataFromPath files
-    let nullableCols :: S.Set T.Text
-        nullableCols =
-            S.fromList
-                [ T.pack (last colPath)
-                | meta <- metas
-                , rg <- unField (row_groups meta)
-                , cc <- unField (rg_columns rg)
-                , Just cm <- [unField (cc_meta_data cc)]
-                , let colPath = map T.unpack (unField (cmd_path_in_schema cm))
-                , Prelude.not (null colPath)
-                , let nc :: Int64
-                      nc = case unField (cmd_statistics cm) of
-                        Nothing -> 0
-                        Just stats -> Maybe.fromMaybe 0 (unField $ stats_null_count stats)
-                , nc > 0
-                ]
-    let df =
-            foldl
-                (\acc meta -> acc <> schemaToEmptyDataFrame nullableCols (unField (schema meta)))
-                DataFrame.Internal.DataFrame.empty
-                metas
-    declareColumns df
-
-schemaToEmptyDataFrame :: S.Set T.Text -> [SchemaElement] -> DataFrame
-schemaToEmptyDataFrame nullableCols elems =
-    let leafElems = filter (\e -> Maybe.fromMaybe 0 (unField e.num_children) == 0) elems
-     in fromNamedColumns (map (schemaElemToColumn nullableCols) leafElems)
-
-schemaElemToColumn :: S.Set T.Text -> SchemaElement -> (T.Text, Column)
-schemaElemToColumn nullableCols element =
-    let colName = unField element.name
-        isNull = colName `S.member` nullableCols
-        column =
-            if isNull
-                then emptyNullableColumnForType (unField element.schematype)
-                else emptyColumnForType (unField element.schematype)
-     in (colName, column)
-
-emptyColumnForType :: Maybe ThriftType -> Column
-emptyColumnForType = \case
-    Just (BOOLEAN _) -> fromList @Bool []
-    Just (INT32 _) -> fromList @Int32 []
-    Just (INT64 _) -> fromList @Int64 []
-    Just (INT96 _) -> fromList @Int64 []
-    Just (FLOAT _) -> fromList @Float []
-    Just (DOUBLE _) -> fromList @Double []
-    Just (BYTE_ARRAY _) -> fromList @T.Text []
-    Just (FIXED_LEN_BYTE_ARRAY _) -> fromList @T.Text []
-    other -> error $ "Unsupported parquet type for column: " <> show other
-
-emptyNullableColumnForType :: Maybe ThriftType -> Column
-emptyNullableColumnForType = \case
-    Just (BOOLEAN _) -> fromList @(Maybe Bool) []
-    Just (INT32 _) -> fromList @(Maybe Int32) []
-    Just (INT64 _) -> fromList @(Maybe Int64) []
-    Just (INT96 _) -> fromList @(Maybe Int64) []
-    Just (FLOAT _) -> fromList @(Maybe Float) []
-    Just (DOUBLE _) -> fromList @(Maybe Double) []
-    Just (BYTE_ARRAY _) -> fromList @(Maybe T.Text) []
-    Just (FIXED_LEN_BYTE_ARRAY _) -> fromList @(Maybe T.Text) []
-    other -> error $ "Unsupported parquet type for column: " <> show other
-
-declareColumnsFromCsvWithOpts :: CSV.ReadOptions -> String -> DecsQ
-declareColumnsFromCsvWithOpts opts path = do
-    df <- liftIO (CSV.readSeparated opts path)
-    declareColumns df
-
-declareColumns :: DataFrame -> DecsQ
-declareColumns = declareColumnsWithPrefix' Nothing
-
-declareColumnsWithPrefix :: T.Text -> DataFrame -> DecsQ
-declareColumnsWithPrefix prefix = declareColumnsWithPrefix' (Just prefix)
-
-declareColumnsWithPrefix' :: Maybe T.Text -> DataFrame -> DecsQ
-declareColumnsWithPrefix' prefix df =
-    let
-        names = (map fst . L.sortBy (compare `on` snd) . M.toList . columnIndices) df
-        types = map (columnTypeString . (`unsafeGetColumn` df)) names
-        specs =
-            zipWith
-                ( \colName type_ -> (colName, maybe "" (sanitize . (<> "_")) prefix <> sanitize colName, type_)
-                )
-                names
-                types
-     in
-        fmap concat $ forM specs $ \(raw, nm, tyStr) -> do
-            ty <- typeFromString (words tyStr)
-            let n = mkName (T.unpack nm)
-            sig <- sigD n [t|Expr $(pure ty)|]
-            val <- valD (varP n) (normalB [|col $(TH.lift raw)|]) []
-            pure [sig, val]

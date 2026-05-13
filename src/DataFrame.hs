@@ -233,6 +233,12 @@ module DataFrame (
     -- * Errors
     module Errors,
 
+    -- * Record bridge
+    module Record,
+
+    -- * Template Haskell column-binding splices
+    module TH,
+
     -- * Plotting
     module Plot,
 )
@@ -397,3 +403,16 @@ import DataFrame.Operations.Typing as Typing (
     parseDefaults,
  )
 import DataFrame.Operators as Operators
+import DataFrame.TH as TH (
+    declareColumns,
+    declareColumnsFromCsvFile,
+    declareColumnsFromCsvWithOpts,
+    declareColumnsFromParquetFile,
+    declareColumnsWithPrefix,
+    declareColumnsWithPrefix',
+ )
+import DataFrame.Typed.Record as Record (
+    HasSchema (..),
+    fromRecords,
+    toRecords,
+ )
