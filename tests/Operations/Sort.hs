@@ -89,6 +89,72 @@ sortByColumnDoesNotExist =
             (print $ D.sortBy [D.Asc (F.col @Int "test0")] testData)
         )
 
+compoundTestData :: D.DataFrame
+compoundTestData =
+    D.fromNamedColumns
+        [ ("a", DI.fromList ([3, 1, 4, 1, 5] :: [Int]))
+        , ("b", DI.fromList ([10, 40, 20, 30, 50] :: [Int]))
+        ]
+
+sortByCompoundExpression :: Test
+sortByCompoundExpression =
+    TestCase
+        ( assertEqual
+            "Sorting by Asc (a + b) orders rows by the sum without leaking a synthetic column"
+            ( D.fromNamedColumns
+                [ ("a", DI.fromList ([3, 4, 1, 1, 5] :: [Int]))
+                , ("b", DI.fromList ([10, 20, 30, 40, 50] :: [Int]))
+                ]
+            )
+            (D.sortBy [D.Asc (F.col @Int "a" + F.col @Int "b")] compoundTestData)
+        )
+
+sortByCompoundExpressionDescending :: Test
+sortByCompoundExpressionDescending =
+    TestCase
+        ( assertEqual
+            "Sorting by Desc (b - a) orders rows by descending difference"
+            ( D.fromNamedColumns
+                [ ("a", DI.fromList ([5, 1, 1, 4, 3] :: [Int]))
+                , ("b", DI.fromList ([50, 40, 30, 20, 10] :: [Int]))
+                ]
+            )
+            (D.sortBy [D.Desc (F.col @Int "b" - F.col @Int "a")] compoundTestData)
+        )
+
+sortByCompoundMixedWithBareColumn :: Test
+sortByCompoundMixedWithBareColumn =
+    TestCase
+        ( assertEqual
+            "Mixing a compound Asc key with a bare Desc tie-breaker works"
+            ( D.fromNamedColumns
+                [ ("a", DI.fromList ([1, 1, 3, 4, 5] :: [Int]))
+                , ("b", DI.fromList ([40, 30, 10, 20, 50] :: [Int]))
+                ]
+            )
+            ( D.sortBy
+                [D.Asc (F.col @Int "a" * 2), D.Desc (F.col @Int "b")]
+                compoundTestData
+            )
+        )
+
+sortByCompoundMissingColumn :: Test
+sortByCompoundMissingColumn =
+    TestCase
+        ( assertExpectException
+            "[Error Case]"
+            ( D.columnsNotFound
+                ["nope"]
+                "sortBy"
+                (D.columnNames compoundTestData)
+            )
+            ( print $
+                D.sortBy
+                    [D.Asc (F.col @Int "nope" + F.col @Int "a")]
+                    compoundTestData
+            )
+        )
+
 tests :: [Test]
 tests =
     [ TestLabel "sortByAscendingWAI" sortByAscendingWAI
@@ -96,4 +162,10 @@ tests =
     , TestLabel "sortByColumnDoesNotExist" sortByColumnDoesNotExist
     , TestLabel "sortByTwoColumns" sortByTwoColumns
     , TestLabel "sortByOneColumnAscOneColumnDesc" sortByOneColumnAscOneColumnDesc
+    , TestLabel "sortByCompoundExpression" sortByCompoundExpression
+    , TestLabel
+        "sortByCompoundExpressionDescending"
+        sortByCompoundExpressionDescending
+    , TestLabel "sortByCompoundMixedWithBareColumn" sortByCompoundMixedWithBareColumn
+    , TestLabel "sortByCompoundMissingColumn" sortByCompoundMissingColumn
     ]

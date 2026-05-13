@@ -22,8 +22,9 @@ import Data.Vector.Internal.Check (HasCallStack)
 import DataFrame.Errors (DataFrameException (..))
 import DataFrame.Internal.Column (Column (..), Columnable, atIndicesStable)
 import DataFrame.Internal.DataFrame (DataFrame (..), unsafeGetColumn)
-import DataFrame.Internal.Expression (Expr (Col))
+import DataFrame.Internal.Expression (Expr (Col), getColumns)
 import DataFrame.Operations.Core (columnNames, dimensions)
+import DataFrame.Operations.Transformations (derive)
 import System.Random (Random (randomR), RandomGen)
 import Type.Reflection (typeRep)
 
@@ -38,14 +39,39 @@ instance Eq SortOrder where
     (==) (Desc _) (Desc _) = True
     (==) _ _ = False
 
-getSortColumnName :: SortOrder -> T.Text
-getSortColumnName (Asc (Col n)) = n
-getSortColumnName (Desc (Col n)) = n
-getSortColumnName _ = error "Sorting on compound column"
+sortOrderColumns :: SortOrder -> [T.Text]
+sortOrderColumns (Asc e) = getColumns e
+sortOrderColumns (Desc e) = getColumns e
 
 mustFlipCompare :: SortOrder -> Bool
 mustFlipCompare (Asc _) = True
 mustFlipCompare (Desc _) = False
+
+{- | Materialize any compound sort expressions into synthetic columns on
+a working dataframe, returning rewritten 'SortOrder's that reference
+those columns by name.
+-}
+prepareSortColumns :: [SortOrder] -> DataFrame -> ([SortOrder], DataFrame)
+prepareSortColumns = go 0
+  where
+    go _ [] acc = ([], acc)
+    go i (ord : rest) acc =
+        let (ord', acc') = materializeSortOrder i ord acc
+            (rest', acc'') = go (i + 1) rest acc'
+         in (ord' : rest', acc'')
+
+materializeSortOrder :: Int -> SortOrder -> DataFrame -> (SortOrder, DataFrame)
+materializeSortOrder _ ord@(Asc (Col _)) df = (ord, df)
+materializeSortOrder _ ord@(Desc (Col _)) df = (ord, df)
+materializeSortOrder i (Asc (e :: Expr a)) df =
+    let name = syntheticName i
+     in (Asc (Col name :: Expr a), derive name e df)
+materializeSortOrder i (Desc (e :: Expr a)) df =
+    let name = syntheticName i
+     in (Desc (Col name :: Expr a), derive name e df)
+
+syntheticName :: Int -> T.Text
+syntheticName i = "__sortBy_synthetic_" <> T.pack (show i) <> "__"
 
 {- | O(k log n) Sorts the dataframe by a given row.
 
@@ -56,22 +82,24 @@ sortBy ::
     DataFrame ->
     DataFrame
 sortBy sortOrds df
-    | any (`notElem` columnNames df) names =
+    | not (null missing) =
         throw $
             ColumnsNotFoundException
-                (names L.\\ columnNames df)
+                missing
                 "sortBy"
                 (columnNames df)
     | otherwise =
         let
-            comparators = map (`sortOrderComparator` df) sortOrds
+            (sortOrds', df') = prepareSortColumns sortOrds df
+            comparators = map (`sortOrderComparator` df') sortOrds'
             compositeCompare i j = mconcat [c i j | c <- comparators]
-            nRows = fst (dataframeDimensions df)
+            nRows = fst (dataframeDimensions df')
             indexes = sortIndices compositeCompare nRows
          in
             df{columns = V.map (atIndicesStable indexes) (columns df)}
   where
-    names = map getSortColumnName sortOrds
+    referenced = L.nub (concatMap sortOrderColumns sortOrds)
+    missing = referenced L.\\ columnNames df
 
 {- | Build a row-index comparator from a SortOrder and a DataFrame.
 The Ord dictionary is recovered from the SortOrder GADT.
