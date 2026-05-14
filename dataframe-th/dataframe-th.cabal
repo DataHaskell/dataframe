@@ -1,6 +1,6 @@
 cabal-version:      2.4
 name:               dataframe-th
-version:            1.0.0.0
+version:            1.0.1.0
 
 synopsis:           Record-based Template Haskell splices for the dataframe ecosystem.
 description:
@@ -23,6 +23,7 @@ common warnings
         -Wincomplete-uni-patterns
         -Wunused-imports
         -Wunused-local-binds
+        -Wunused-packages
 
 library
     import:             warnings
