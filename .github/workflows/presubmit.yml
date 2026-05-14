@@ -42,28 +42,16 @@ jobs:
       - name: Run HLint over every satellite
         uses: haskell-actions/hlint-run@v2
         with:
-          path: |
-            src/
-            app/
-            benchmark/
-            examples/
-            ffi/
-            tests/
-            dataframe-arrow/
-            dataframe-core/
-            dataframe-csv/
-            dataframe-csv-th/
-            dataframe-fastcsv/
-            dataframe-fusion/
-            dataframe-hasktorch/
-            dataframe-json/
-            dataframe-lazy/
-            dataframe-learn/
-            dataframe-operations/
-            dataframe-parquet/
-            dataframe-parquet-th/
-            dataframe-parsing/
-            dataframe-persistent/
-            dataframe-th/
-            dataframe-viz/
+          # hlint-run@v2 parses this as a JSON array iff it matches
+          # /^\s*\[.*\]\s*$/ on a single line (no `s` flag); otherwise the
+          # entire value is treated as one path. Keep every body line at the
+          # same indent so `>-` folds it all into one line.
+          path: >-
+            ["src/", "app/", "benchmark/", "examples/", "ffi/", "tests/",
+            "dataframe-arrow/", "dataframe-core/", "dataframe-csv/",
+            "dataframe-csv-th/", "dataframe-fastcsv/", "dataframe-fusion/",
+            "dataframe-hasktorch/", "dataframe-json/", "dataframe-lazy/",
+            "dataframe-learn/", "dataframe-operations/", "dataframe-parquet/",
+            "dataframe-parquet-th/", "dataframe-parsing/",
+            "dataframe-persistent/", "dataframe-th/", "dataframe-viz/"]
           fail-on: warning
