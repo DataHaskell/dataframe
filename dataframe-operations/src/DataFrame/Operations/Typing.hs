@@ -38,7 +38,7 @@ import DataFrame.Internal.DataFrame (
  )
 import DataFrame.Internal.Parsing
 import DataFrame.Internal.Schema
-import DataFrame.Operations.Core
+import DataFrame.Operations.Core ()
 import Text.Read
 import Type.Reflection
 

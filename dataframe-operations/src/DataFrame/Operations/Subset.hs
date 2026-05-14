@@ -45,7 +45,7 @@ import DataFrame.Internal.DataFrame (
  )
 import DataFrame.Internal.Expression
 import DataFrame.Internal.Interpreter
-import DataFrame.Operations.Core
+import DataFrame.Operations.Core ()
 import DataFrame.Operations.Merge ()
 import DataFrame.Operations.Transformations (apply)
 import DataFrame.Operators

@@ -20,10 +20,13 @@ module DataFrame.Internal.Hash (
 import Data.Bits (xor)
 import Data.Char (ord)
 import qualified Data.Text as T
+import Data.Word (Word64)
 
 -- | FNV-1a 64-bit offset basis (used as the initial accumulator).
+-- The literal is unsigned and exceeds 'Int' range, so we round-trip through
+-- 'Word64' to get the well-defined two's-complement bit pattern.
 fnvOffset :: Int
-fnvOffset = 0xcbf29ce484222325
+fnvOffset = fromIntegral (0xcbf29ce484222325 :: Word64)
 
 -- | FNV-1a 64-bit prime.
 fnvPrime :: Int

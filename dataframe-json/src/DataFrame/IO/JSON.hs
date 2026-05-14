@@ -18,7 +18,6 @@ import qualified Data.Vector as V
 
 import qualified DataFrame.Internal.Column as D
 import qualified DataFrame.Internal.DataFrame as D
-import qualified DataFrame.Operations.Core as D
 
 readJSONEither :: LBS.ByteString -> Either String D.DataFrame
 readJSONEither bs = do

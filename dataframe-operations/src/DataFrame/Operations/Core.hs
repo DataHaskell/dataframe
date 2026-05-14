@@ -30,7 +30,6 @@ import DataFrame.Internal.Column (
     TypedColumn (..),
     columnLength,
     columnTypeString,
-    expandColumn,
     fromList,
     fromVector,
     toDoubleVector,
