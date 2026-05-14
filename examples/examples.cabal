@@ -100,7 +100,13 @@ executable examples
                    DataFrame.TH,
                    DataFrame.Typed,
                    DataFrame.Internal.Hash,
-                   DataFrame.IO.Internal.MutableColumn
+                   DataFrame.IO.Internal.MutableColumn,
+                   DataFrame.Internal.Schema.TH,
+                   DataFrame.TH.CSV,
+                   DataFrame.TH.Parquet,
+                   DataFrame.TH.Records,
+                   DataFrame.Typed.TH.CSV,
+                   DataFrame.Typed.TH.Records
     hs-source-dirs:   .,
                       ../src,
                       ../dataframe-core/src,

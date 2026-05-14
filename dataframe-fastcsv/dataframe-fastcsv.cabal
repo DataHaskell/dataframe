@@ -16,6 +16,7 @@ maintainer:         mschavinda@gmail.com
 
 copyright: (c) 2024-2025 Michael Chavinda
 category: Data
+tested-with:        GHC ==9.4.8 || ==9.6.7 || ==9.8.4 || ==9.10.3 || ==9.12.2
 extra-source-files: cbits/process_csv.h
                     tests/data/unstable_csv/*.csv
                     tests/data/unstable_csv/*.tsv

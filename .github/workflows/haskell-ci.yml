@@ -171,6 +171,18 @@ jobs:
         run: |
           touch cabal.project
           echo "packages: $GITHUB_WORKSPACE/source/." >> cabal.project
+          echo "packages: $GITHUB_WORKSPACE/source/dataframe-core" >> cabal.project
+          echo "packages: $GITHUB_WORKSPACE/source/dataframe-parsing" >> cabal.project
+          echo "packages: $GITHUB_WORKSPACE/source/dataframe-operations" >> cabal.project
+          echo "packages: $GITHUB_WORKSPACE/source/dataframe-csv" >> cabal.project
+          echo "packages: $GITHUB_WORKSPACE/source/dataframe-csv-th" >> cabal.project
+          echo "packages: $GITHUB_WORKSPACE/source/dataframe-json" >> cabal.project
+          echo "packages: $GITHUB_WORKSPACE/source/dataframe-parquet" >> cabal.project
+          echo "packages: $GITHUB_WORKSPACE/source/dataframe-parquet-th" >> cabal.project
+          echo "packages: $GITHUB_WORKSPACE/source/dataframe-th" >> cabal.project
+          echo "packages: $GITHUB_WORKSPACE/source/dataframe-viz" >> cabal.project
+          echo "packages: $GITHUB_WORKSPACE/source/dataframe-learn" >> cabal.project
+          echo "packages: $GITHUB_WORKSPACE/source/dataframe-lazy" >> cabal.project
           echo "packages: $GITHUB_WORKSPACE/source/dataframe-fastcsv" >> cabal.project
           cat cabal.project
       - name: sdist
@@ -185,12 +197,48 @@ jobs:
         run: |
           PKGDIR_dataframe="$(find "$GITHUB_WORKSPACE/unpacked" -maxdepth 1 -type d -regex '.*/dataframe-[0-9.]*')"
           echo "PKGDIR_dataframe=${PKGDIR_dataframe}" >> "$GITHUB_ENV"
+          PKGDIR_core="$(find "$GITHUB_WORKSPACE/unpacked" -maxdepth 1 -type d -regex '.*/dataframe-core-[0-9.]*')"
+          echo "PKGDIR_core=${PKGDIR_core}" >> "$GITHUB_ENV"
+          PKGDIR_parsing="$(find "$GITHUB_WORKSPACE/unpacked" -maxdepth 1 -type d -regex '.*/dataframe-parsing-[0-9.]*')"
+          echo "PKGDIR_parsing=${PKGDIR_parsing}" >> "$GITHUB_ENV"
+          PKGDIR_operations="$(find "$GITHUB_WORKSPACE/unpacked" -maxdepth 1 -type d -regex '.*/dataframe-operations-[0-9.]*')"
+          echo "PKGDIR_operations=${PKGDIR_operations}" >> "$GITHUB_ENV"
+          PKGDIR_csv="$(find "$GITHUB_WORKSPACE/unpacked" -maxdepth 1 -type d -regex '.*/dataframe-csv-[0-9.]*')"
+          echo "PKGDIR_csv=${PKGDIR_csv}" >> "$GITHUB_ENV"
+          PKGDIR_csv_th="$(find "$GITHUB_WORKSPACE/unpacked" -maxdepth 1 -type d -regex '.*/dataframe-csv-th-[0-9.]*')"
+          echo "PKGDIR_csv_th=${PKGDIR_csv_th}" >> "$GITHUB_ENV"
+          PKGDIR_json="$(find "$GITHUB_WORKSPACE/unpacked" -maxdepth 1 -type d -regex '.*/dataframe-json-[0-9.]*')"
+          echo "PKGDIR_json=${PKGDIR_json}" >> "$GITHUB_ENV"
+          PKGDIR_parquet="$(find "$GITHUB_WORKSPACE/unpacked" -maxdepth 1 -type d -regex '.*/dataframe-parquet-[0-9.]*')"
+          echo "PKGDIR_parquet=${PKGDIR_parquet}" >> "$GITHUB_ENV"
+          PKGDIR_parquet_th="$(find "$GITHUB_WORKSPACE/unpacked" -maxdepth 1 -type d -regex '.*/dataframe-parquet-th-[0-9.]*')"
+          echo "PKGDIR_parquet_th=${PKGDIR_parquet_th}" >> "$GITHUB_ENV"
+          PKGDIR_th="$(find "$GITHUB_WORKSPACE/unpacked" -maxdepth 1 -type d -regex '.*/dataframe-th-[0-9.]*')"
+          echo "PKGDIR_th=${PKGDIR_th}" >> "$GITHUB_ENV"
+          PKGDIR_viz="$(find "$GITHUB_WORKSPACE/unpacked" -maxdepth 1 -type d -regex '.*/dataframe-viz-[0-9.]*')"
+          echo "PKGDIR_viz=${PKGDIR_viz}" >> "$GITHUB_ENV"
+          PKGDIR_learn="$(find "$GITHUB_WORKSPACE/unpacked" -maxdepth 1 -type d -regex '.*/dataframe-learn-[0-9.]*')"
+          echo "PKGDIR_learn=${PKGDIR_learn}" >> "$GITHUB_ENV"
+          PKGDIR_lazy="$(find "$GITHUB_WORKSPACE/unpacked" -maxdepth 1 -type d -regex '.*/dataframe-lazy-[0-9.]*')"
+          echo "PKGDIR_lazy=${PKGDIR_lazy}" >> "$GITHUB_ENV"
           PKGDIR_fastcsv="$(find "$GITHUB_WORKSPACE/unpacked" -maxdepth 1 -type d -regex '.*/dataframe-fastcsv-[0-9.]*')"
           echo "PKGDIR_fastcsv=${PKGDIR_fastcsv}" >> "$GITHUB_ENV"
           rm -f cabal.project cabal.project.local
           touch cabal.project
           touch cabal.project.local
           echo "packages: ${PKGDIR_dataframe}" >> cabal.project
+          echo "packages: ${PKGDIR_core}" >> cabal.project
+          echo "packages: ${PKGDIR_parsing}" >> cabal.project
+          echo "packages: ${PKGDIR_operations}" >> cabal.project
+          echo "packages: ${PKGDIR_csv}" >> cabal.project
+          echo "packages: ${PKGDIR_csv_th}" >> cabal.project
+          echo "packages: ${PKGDIR_json}" >> cabal.project
+          echo "packages: ${PKGDIR_parquet}" >> cabal.project
+          echo "packages: ${PKGDIR_parquet_th}" >> cabal.project
+          echo "packages: ${PKGDIR_th}" >> cabal.project
+          echo "packages: ${PKGDIR_viz}" >> cabal.project
+          echo "packages: ${PKGDIR_learn}" >> cabal.project
+          echo "packages: ${PKGDIR_lazy}" >> cabal.project
           echo "packages: ${PKGDIR_fastcsv}" >> cabal.project
           echo "package dataframe" >> cabal.project
           echo "    ghc-options: -Werror=missing-methods -Werror=missing-fields" >> cabal.project
@@ -200,7 +248,7 @@ jobs:
           echo "    ghc-options: -Werror=incomplete-patterns -Werror=incomplete-uni-patterns" >> cabal.project
           cat >> cabal.project <<EOF
           EOF
-          $HCPKG list --simple-output --names-only | perl -ne 'for (split /\s+/) { print "constraints: any.$_ installed\n" unless /^(dataframe|dataframe-fastcsv)$/; }' >> cabal.project.local
+          $HCPKG list --simple-output --names-only | perl -ne 'for (split /\s+/) { print "constraints: any.$_ installed\n" unless /^(dataframe|dataframe-(core|parsing|operations|csv|csv-th|json|parquet|parquet-th|th|viz|learn|lazy|fastcsv))$/; }' >> cabal.project.local
           cat cabal.project
           cat cabal.project.local
       - name: dump install plan
