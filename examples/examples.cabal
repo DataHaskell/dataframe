@@ -7,8 +7,7 @@ synopsis: Examples for dataframe library.
 description: Examples for dataframe library.
 
 bug-reports: https://github.com/mchav/dataframe/issues
-license:            GPL-3.0-or-later
-license-file:       LICENSE
+license:            MIT
 author:             Michael Chavinda
 maintainer:         mschavinda@gmail.com
 
@@ -68,6 +67,7 @@ executable examples
                    DataFrame.IO.Parquet.Levels,
                    DataFrame.IO.Parquet.Page,
                    DataFrame.IO.Parquet.Seeking,
+                   DataFrame.IO.Parquet.Schema,
                    DataFrame.IO.Parquet.Thrift,
                    DataFrame.IO.Parquet.Time,
                    DataFrame.IO.Parquet.Utils,
@@ -94,6 +94,9 @@ executable examples
                    DataFrame.Typed.Aggregate,
                    DataFrame.Typed.TH,
                    DataFrame.Typed.Expr,
+                   DataFrame.Typed.Generic,
+                   DataFrame.Typed.Record,
+                   DataFrame.TH,
                    DataFrame.Typed
     hs-source-dirs:   .,
                       ../src,

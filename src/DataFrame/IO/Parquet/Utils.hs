@@ -47,7 +47,6 @@ import DataFrame.Internal.Column (
     buildBitmapFromValid,
     fromList,
  )
-import DataFrame.Internal.Types (SBool (..), sUnbox)
 import qualified Streamly.Data.Fold as Fold
 import Streamly.Data.Stream (Stream)
 import qualified Streamly.Data.Stream as Stream

@@ -24,7 +24,7 @@ import Torch
 import Data.Text (Text)
 import DataFrame.Operators
 
-$( F.declareColumnsFromCsvWithOpts
+$( D.declareColumnsFromCsvWithOpts
     (D.defaultReadOptions{D.typeSpec = D.InferFromSample 300})
     "../data/housing.csv"
  )

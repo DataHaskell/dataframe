@@ -16,9 +16,6 @@ import Control.Monad.ST (ST, runST)
 import Data.Bits
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Unsafe as BSU
-#if !MIN_VERSION_base(4,20,0)
-import Data.List (foldl')
-#endif
 import qualified Data.Vector.Unboxed as VU
 import qualified Data.Vector.Unboxed.Mutable as VUM
 import Data.Word

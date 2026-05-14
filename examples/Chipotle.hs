@@ -14,7 +14,7 @@ import Data.Text (Text)
 import DataFrame.Monad
 import DataFrame.Operators
 
-$( F.declareColumnsFromCsvWithOpts
+$( D.declareColumnsFromCsvWithOpts
     (D.defaultReadOptions{D.columnSeparator = '\t'})
     "../data/chipotle.tsv"
  )

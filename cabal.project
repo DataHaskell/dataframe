@@ -1,5 +1,6 @@
 packages:
     .
+    examples
     dataframe-fastcsv
     dataframe-hasktorch
     dataframe-persistent

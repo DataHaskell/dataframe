@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE MonoLocalBinds #-}
 {-# LANGUAGE NumericUnderscores #-}
@@ -17,7 +18,11 @@ import qualified Data.ByteString as BS
 import Data.Either (fromRight)
 import Data.Functor ((<&>))
 import Data.Int (Int32, Int64)
+#if !MIN_VERSION_base(4,20,0)
 import Data.List (foldl', transpose)
+#else
+import Data.List (transpose)
+#endif
 import qualified Data.List as L
 import qualified Data.Map as Map
 import qualified Data.Text as T
