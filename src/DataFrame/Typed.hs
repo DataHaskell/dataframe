@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE DataKinds #-}
 
 {- |
@@ -185,14 +186,18 @@ module DataFrame.Typed (
     aggregate,
     aggregateUntyped,
 
+#ifdef WITH_TH
     -- * Template Haskell
     deriveSchema,
+#ifdef WITH_CSV_TH
     deriveSchemaFromCsvFile,
     deriveSchemaFromCsvFileWith,
+#endif
     deriveSchemaFromType,
     deriveSchemaFromTypeWith,
     SchemaOptions (..),
     defaultSchemaOptions,
+#endif
 
     -- * Record bridge (ADT <-> TypedDataFrame)
     HasSchema (..),
@@ -260,15 +265,19 @@ import DataFrame.Typed.Record (
     toRecordsTyped,
  )
 import DataFrame.Typed.Schema
+#ifdef WITH_TH
 import DataFrame.Typed.TH (
     SchemaOptions (..),
     defaultSchemaOptions,
     deriveSchema,
+#ifdef WITH_CSV_TH
     deriveSchemaFromCsvFile,
     deriveSchemaFromCsvFileWith,
+#endif
     deriveSchemaFromType,
     deriveSchemaFromTypeWith,
  )
+#endif
 import DataFrame.Typed.Types (
     Column,
     TSortOrder (..),

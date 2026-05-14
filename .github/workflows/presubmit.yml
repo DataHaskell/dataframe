@@ -1,0 +1,56 @@
+name: Presubmit
+
+# Mirror the local scripts/presubmit.sh pipeline (format, lint, build, test)
+# so PRs get the same checks contributors run with ./scripts/presubmit.sh.
+# Format and lint each run as their own job for fast, parallel feedback; the
+# heavy build+test job lives in ci.yml.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  format:
+    name: Format (fourmolu)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: haskell-actions/run-fourmolu@v11
+        with:
+          version: "0.17.0.0"
+
+  lint:
+    name: Lint (hlint)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up HLint
+        uses: haskell-actions/hlint-setup@v2
+        with:
+          version: "3.8"
+      - name: Run HLint over every satellite
+        uses: haskell-actions/hlint-run@v2
+        with:
+          path: >-
+            [
+              "src/", "app/", "benchmark/", "examples/", "ffi/", "tests/",
+              "dataframe-arrow/",
+              "dataframe-core/",
+              "dataframe-csv/",
+              "dataframe-csv-th/",
+              "dataframe-fastcsv/",
+              "dataframe-fusion/",
+              "dataframe-hasktorch/",
+              "dataframe-json/",
+              "dataframe-lazy/",
+              "dataframe-learn/",
+              "dataframe-operations/",
+              "dataframe-parquet/",
+              "dataframe-parquet-th/",
+              "dataframe-parsing/",
+              "dataframe-persistent/",
+              "dataframe-th/",
+              "dataframe-viz/"
+            ]
+          fail-on: warning

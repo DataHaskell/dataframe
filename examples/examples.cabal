@@ -93,14 +93,32 @@ executable examples
                    DataFrame.Typed.Join,
                    DataFrame.Typed.Aggregate,
                    DataFrame.Typed.TH,
+                   DataFrame.Typed.Util,
                    DataFrame.Typed.Expr,
                    DataFrame.Typed.Generic,
                    DataFrame.Typed.Record,
                    DataFrame.TH,
-                   DataFrame.Typed
+                   DataFrame.Typed,
+                   DataFrame.Internal.Hash,
+                   DataFrame.IO.Internal.MutableColumn
     hs-source-dirs:   .,
                       ../src,
+                      ../dataframe-core/src,
+                      ../dataframe-csv/src,
+                      ../dataframe-csv-th/src,
+                      ../dataframe-json/src,
+                      ../dataframe-operations/src,
+                      ../dataframe-parquet/src,
+                      ../dataframe-parquet-th/src,
+                      ../dataframe-th/src,
+                      ../dataframe-lazy/src,
+                      ../dataframe-learn/src,
+                      ../dataframe-viz/src,
+                      ../dataframe-parsing/src,
                       ../dataframe-hasktorch/src
+    -- examples inlines the meta `dataframe` source, so it needs the same
+    -- cabal-flag-driven CPP defines that the library uses.
+    cpp-options:      -DWITH_CSV -DWITH_PARQUET -DWITH_TH -DWITH_LAZY -DWITH_CSV_TH -DWITH_PARQUET_TH
     build-depends:    base >= 4 && <5,
                       binary >= 0.8 && < 1,
                       aeson >= 0.11.0.0 && < 3,

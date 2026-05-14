@@ -1,0 +1,44 @@
+cabal-version:      2.4
+name:               dataframe-parsing
+version:            1.0.0.0
+
+synopsis:           Shared text/binary parsing helpers for the dataframe ecosystem.
+description:
+    Parsing primitives used by the @dataframe@ family: CSV-friendly text
+    parsing (@DataFrame.Internal.Parsing@), low-level binary decoding
+    helpers (@DataFrame.Internal.Binary@), and the runtime schema tag
+    (@DataFrame.Internal.Schema@). Kept in a small dedicated package so
+    @dataframe-csv@, @dataframe-parquet@, and @dataframe-operations@ can
+    share these without depending on each other.
+
+bug-reports:        https://github.com/mchav/dataframe/issues
+license:            MIT
+license-file:       LICENSE
+author:             Michael Chavinda
+maintainer:         mschavinda@gmail.com
+copyright:          (c) 2024-2025 Michael Chavinda
+category:           Data
+
+common warnings
+    ghc-options:
+        -Wincomplete-patterns
+        -Wincomplete-uni-patterns
+        -Wunused-imports
+        -Wunused-local-binds
+
+library
+    import:             warnings
+    exposed-modules:
+                        DataFrame.Internal.Binary
+                        DataFrame.Internal.Parsing
+                        DataFrame.Internal.Schema
+    build-depends:      base >= 4 && < 5,
+                        attoparsec >= 0.12 && < 0.15,
+                        bytestring >= 0.11 && < 0.13,
+                        bytestring-lexing >= 0.5 && < 0.6,
+                        containers >= 0.6.7 && < 0.9,
+                        dataframe-core ^>= 1.0,
+                        text >= 2.0 && < 3,
+                        time >= 1.12 && < 2
+    hs-source-dirs:     src
+    default-language:   Haskell2010

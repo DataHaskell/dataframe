@@ -1,3 +1,5 @@
+{-# LANGUAGE CPP #-}
+
 {- |
 Module      : DataFrame
 Copyright   : (c) 2025
@@ -213,10 +215,17 @@ module DataFrame (
 
     -- * Types
     module Schema,
+#ifdef WITH_TH
+    module SchemaTH,
+#endif
 
     -- * I/O
+#ifdef WITH_CSV
     module CSV,
+#endif
+#ifdef WITH_PARQUET
     module Parquet,
+#endif
 
     -- * Type conversion
     module Typing,
@@ -237,7 +246,9 @@ module DataFrame (
     module Record,
 
     -- * Template Haskell column-binding splices
+#ifdef WITH_TH
     module TH,
+#endif
 
     -- * Plotting
     module Plot,
@@ -251,6 +262,7 @@ import DataFrame.Display as Display (
  )
 import DataFrame.Display.Terminal.Plot as Plot
 import DataFrame.Errors as Errors
+#ifdef WITH_CSV
 import DataFrame.IO.CSV as CSV (
     HeaderSpec (..),
     ReadOptions (..),
@@ -266,6 +278,8 @@ import DataFrame.IO.CSV as CSV (
     writeCsv,
     writeSeparated,
  )
+#endif
+#ifdef WITH_PARQUET
 import DataFrame.IO.Parquet as Parquet (
     ParquetReadOptions (..),
     defaultParquetReadOptions,
@@ -274,6 +288,7 @@ import DataFrame.IO.Parquet as Parquet (
     readParquetFilesWithOpts,
     readParquetWithOpts,
  )
+#endif
 import DataFrame.Internal.Column as Column (
     Column,
     fromList,
@@ -290,8 +305,11 @@ import DataFrame.Internal.DataFrame as Dataframe (
     DataFrame,
     GroupedDataFrame,
     TruncateConfig (..),
+    columnNames,
     defaultTruncateConfig,
     empty,
+    fromNamedColumns,
+    insertColumn,
     null,
     toCsv,
     toCsv',
@@ -310,10 +328,12 @@ import DataFrame.Internal.Row as Row (
     toRowVector,
  )
 import DataFrame.Internal.Schema as Schema (
-    deriveSchema,
     makeSchema,
     schemaType,
  )
+#ifdef WITH_TH
+import DataFrame.Internal.Schema.TH as SchemaTH (deriveSchema)
+#endif
 import DataFrame.Operations.Aggregation as Aggregation (
     aggregate,
     distinct,
@@ -405,14 +425,20 @@ import DataFrame.Operations.Typing as Typing (
     parseDefaults,
  )
 import DataFrame.Operators as Operators
+#ifdef WITH_TH
 import DataFrame.TH as TH (
     declareColumns,
+#ifdef WITH_CSV_TH
     declareColumnsFromCsvFile,
     declareColumnsFromCsvWithOpts,
+#endif
+#ifdef WITH_PARQUET_TH
     declareColumnsFromParquetFile,
+#endif
     declareColumnsWithPrefix,
     declareColumnsWithPrefix',
  )
+#endif
 import DataFrame.Typed.Record as Record (
     HasSchema (..),
     fromRecords,

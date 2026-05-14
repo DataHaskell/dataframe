@@ -1,0 +1,41 @@
+cabal-version:      2.4
+name:               dataframe-csv
+version:            1.0.0.0
+
+synopsis:           CSV reader and writer for the dataframe ecosystem.
+description:
+    @DataFrame.IO.CSV@ — streaming CSV read/write built on top of
+    @cassava@. Plus @DataFrame.IO.Internal.MutableColumn@, the
+    mutable-column ingest helpers shared by the lazy CSV reader.
+
+bug-reports:        https://github.com/mchav/dataframe/issues
+license:            MIT
+license-file:       LICENSE
+author:             Michael Chavinda
+maintainer:         mschavinda@gmail.com
+copyright:          (c) 2024-2025 Michael Chavinda
+category:           Data
+
+common warnings
+    ghc-options:
+        -Wincomplete-patterns
+        -Wincomplete-uni-patterns
+        -Wunused-imports
+        -Wunused-local-binds
+
+library
+    import:             warnings
+    exposed-modules:
+                        DataFrame.IO.CSV
+                        DataFrame.IO.Internal.MutableColumn
+    build-depends:      base >= 4 && < 5,
+                        bytestring >= 0.11 && < 0.13,
+                        cassava >= 0.1 && < 1,
+                        containers >= 0.6.7 && < 0.9,
+                        dataframe-core ^>= 1.0,
+                        dataframe-operations ^>= 1.0,
+                        dataframe-parsing ^>= 1.0,
+                        text >= 2.0 && < 3,
+                        vector ^>= 0.13
+    hs-source-dirs:     src
+    default-language:   Haskell2010

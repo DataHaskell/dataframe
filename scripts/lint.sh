@@ -11,7 +11,31 @@ if [[ "${1:-}" == "--fix" ]]; then
   FIX_MODE=true
 fi
 
-DIRS=("src" "app" "tests" "benchmark" "examples" "dataframe-arrow" "dataframe-hasktorch" "dataframe-persistent" "dataframe-fastcsv" "dataframe-fusion" "ffi")
+DIRS=(
+  "src"
+  "app"
+  "tests"
+  "benchmark"
+  "examples"
+  "ffi"
+  "dataframe-arrow"
+  "dataframe-core"
+  "dataframe-csv"
+  "dataframe-csv-th"
+  "dataframe-fastcsv"
+  "dataframe-fusion"
+  "dataframe-hasktorch"
+  "dataframe-json"
+  "dataframe-lazy"
+  "dataframe-learn"
+  "dataframe-operations"
+  "dataframe-parquet"
+  "dataframe-parquet-th"
+  "dataframe-parsing"
+  "dataframe-persistent"
+  "dataframe-th"
+  "dataframe-viz"
+)
 
 echo "Running HLint on dataframe project..."
 echo "Dirs: ${DIRS[*]}"

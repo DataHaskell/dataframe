@@ -1,6 +1,6 @@
 cabal-version:      3.0
 name:               dataframe
-version:            1.3.0.0
+version:            2.0.0.0
 
 synopsis: A fast, safe, and intuitive DataFrame library.
 
@@ -41,114 +41,70 @@ common warnings
     ghc-options:
         -Wall
 
+flag no-csv
+    default:     False
+    manual:      True
+    description: Exclude the CSV reader/writer (@dataframe-csv@). Enable
+                 with @-f +no-csv@ (or @flags: no-csv@ in cabal.project)
+                 to trim the dep set of the meta package when CSV is not
+                 needed.
+
+flag no-parquet
+    default:     False
+    manual:      True
+    description: Exclude the Parquet reader/writer (@dataframe-parquet@
+                 plus pinch, zstd, snappy, streamly, http-conduit).
+                 Enable with @-f +no-parquet@.
+
+flag no-th
+    default:     False
+    manual:      True
+    description: Exclude the Template Haskell splices (@dataframe-th@,
+                 @dataframe-csv-th@, @dataframe-parquet-th@). Enable
+                 with @-f +no-th@ to drop the @template-haskell@ dep for
+                 downstream packages that don't use compile-time schema
+                 derivation.
+
 library
     import: warnings
     default-extensions: Strict
     exposed-modules: DataFrame,
-                    DataFrame.Lazy,
-                    DataFrame.Functions,
-                    DataFrame.Synthesis,
-                    DataFrame.Display.Web.Plot,
-                    DataFrame.Internal.Types,
-                    DataFrame.Internal.Expression,
-                    DataFrame.Internal.Grouping,
-                    DataFrame.Internal.Interpreter,
-                    DataFrame.Internal.Nullable,
-                    DataFrame.Internal.Parsing,
-                    DataFrame.Internal.Column,
-                    DataFrame.Internal.Binary,
-                    DataFrame.Internal.Statistics,
-                    DataFrame.Display.Terminal.PrettyPrint,
-                    DataFrame.Display.Terminal.Colours,
-                    DataFrame.Internal.DataFrame,
-                    DataFrame.Internal.Row,
-                    DataFrame.Internal.Schema,
-                    DataFrame.Errors,
-                    DataFrame.Operations.Core,
-                    DataFrame.Operations.Join,
-                    DataFrame.Operations.Merge,
-                    DataFrame.Operators,
-                    DataFrame.Operations.Permutation,
-                    DataFrame.Operations.Subset,
-                    DataFrame.Operations.Statistics,
-                    DataFrame.Operations.Transformations,
-                    DataFrame.Operations.Typing,
-                    DataFrame.Operations.Aggregation,
-                    DataFrame.Display,
-                    DataFrame.Display.Terminal.Plot,
-                    DataFrame.IO.CSV,
-                    DataFrame.IO.JSON,
-                    DataFrame.IO.Utils.RandomAccess,
-                    DataFrame.IO.Parquet,
-                    DataFrame.IO.Parquet.Binary,
-                    DataFrame.IO.Parquet.Dictionary,
-                    DataFrame.IO.Parquet.Levels,
-                    DataFrame.IO.Parquet.Thrift,
-                    DataFrame.IO.Parquet.Decompress,
-                    DataFrame.IO.Parquet.Encoding,
-                    DataFrame.IO.Parquet.Page,
-                    DataFrame.IO.Parquet.Utils,
-                    DataFrame.IO.Parquet.Seeking,
-                    DataFrame.IO.Parquet.Time,
-                    DataFrame.Lazy.IO.CSV,
-                    DataFrame.Lazy.IO.Binary,
-                    DataFrame.IO.Parquet.Schema,
-                    DataFrame.Lazy.Internal.DataFrame,
-                    DataFrame.Lazy.Internal.LogicalPlan,
-                    DataFrame.Lazy.Internal.PhysicalPlan,
-                    DataFrame.Lazy.Internal.Optimizer,
-                    DataFrame.Lazy.Internal.Executor,
-                    DataFrame.Monad,
-                    DataFrame.DecisionTree,
-                    DataFrame.Typed.Types,
-                    DataFrame.Typed.Schema,
-                    DataFrame.Typed.Freeze,
-                    DataFrame.Typed.Access,
-                    DataFrame.Typed.Operations,
-                    DataFrame.Typed.Join,
-                    DataFrame.Typed.Aggregate,
-                    DataFrame.Typed.TH,
-                    DataFrame.Typed.Expr,
-                    DataFrame.Typed.Lazy,
-                    DataFrame.Typed.Record,
-                    DataFrame.Typed.Generic,
-                    DataFrame.Typed,
-                    DataFrame.TH
+                    DataFrame.Typed
     build-depends:    base >= 4 && <5,
-                      async >= 2.2 && < 3,
-                      deepseq >= 1 && < 2,
-                      aeson >= 0.11.0.0 && < 3,
-                      array >= 0.5.4.0 && < 0.6,
-                      temporary >= 1.3 && < 2,
-                      attoparsec >= 0.12 && < 0.15,
-                      bytestring >= 0.11 && < 0.13,
-                      bytestring-lexing >= 0.5 && < 0.6,
-                      cassava >= 0.1 && < 1,
-                      containers >= 0.6.7 && < 0.9,
-                      directory >= 1.3.0.0 && < 2,
-                      granite ^>= 0.4,
-                      hashable >= 1.2 && < 2,
-                      process ^>= 1.6,
-                      snappy-hs ^>= 0.1,
-                      random >= 1.2 && < 2,
-                      regex-tdfa >= 1.3.0 && < 2,
-                      scientific >=0.3.1 && <0.4,
-                      template-haskell >= 2.0 && < 3,
-                      text >= 2.0 && < 3,
-                      these >= 1.1 && < 2,
-                      time >= 1.12 && < 2,
-                      unordered-containers >= 0.1 && < 1,
-                      vector ^>= 0.13,
-                      vector-algorithms ^>= 0.9,
-                      zlib >= 0.5 && < 1,
-                      zstd >= 0.1.2.0 && < 0.2,
-                      stm >= 2.5 && < 3,
-                      filepath >= 1.4 && < 2,
-                      Glob >= 0.10 && < 1,
-                      http-conduit    >= 2.3 && < 3,
-                      pinch >= 0.5 && < 1,
-                      streamly-core >= 0.2.3 && < 0.4,
-                      streamly-bytestring >= 0.2.0 && < 0.4
+                      dataframe-core ^>= 1.0,
+                      dataframe-json ^>= 1.0,
+                      dataframe-operations ^>= 1.0,
+                      dataframe-parsing ^>= 1.0,
+                      dataframe-viz ^>= 1.0,
+                      dataframe-learn ^>= 1.0
+
+    if !flag(no-csv)
+        build-depends:   dataframe-csv ^>= 1.0
+        cpp-options:     -DWITH_CSV
+
+    if !flag(no-parquet)
+        build-depends:   dataframe-parquet ^>= 1.0
+        cpp-options:     -DWITH_PARQUET
+
+    -- The lazy executor calls both CSV and Parquet readers directly, so
+    -- it can only be pulled in when both backends are present.
+    if !flag(no-csv) && !flag(no-parquet)
+        build-depends:   dataframe-lazy ^>= 1.0
+        cpp-options:     -DWITH_LAZY
+
+    if !flag(no-th)
+        build-depends:   dataframe-th ^>= 1.0
+        cpp-options:     -DWITH_TH
+        exposed-modules: DataFrame.TH,
+                         DataFrame.Typed.TH
+
+    if !flag(no-th) && !flag(no-csv)
+        build-depends:   dataframe-csv-th ^>= 1.0
+        cpp-options:     -DWITH_CSV_TH
+
+    if !flag(no-th) && !flag(no-parquet)
+        build-depends:   dataframe-parquet-th ^>= 1.0
+        cpp-options:     -DWITH_PARQUET_TH
 
     hs-source-dirs:   src
     default-language: Haskell2010
@@ -160,9 +116,20 @@ library arrow-bridge
     exposed-modules:  DataFrame.IO.Arrow
                       DataFrame.IR
                       DataFrame.IR.ExprJson
+    -- The Arrow bridge IR loads CSV + Parquet readers, so it requires
+    -- both backends. If either flag is off, skip building it.
+    if flag(no-csv) || flag(no-parquet)
+        buildable: False
     build-depends:
         base        >= 4   && < 5,
         dataframe,
+        dataframe-core ^>= 1.0,
+        dataframe-csv ^>= 1.0,
+        dataframe-json ^>= 1.0,
+        dataframe-lazy ^>= 1.0,
+        dataframe-operations ^>= 1.0,
+        dataframe-parquet ^>= 1.0,
+        dataframe-parsing ^>= 1.0,
         text        >= 2.0 && < 3,
         aeson       >= 0.11 && < 3,
         bytestring  >= 0.11 && < 0.13,
@@ -175,7 +142,8 @@ executable dataframe-benchmark-example
     import: warnings
     main-is: Benchmark.hs
     build-depends:    base >= 4 && < 5,
-                      dataframe >= 1 && < 2,
+                      dataframe >= 1 && < 3,
+                      dataframe-operations ^>= 1.0,
                       random >= 1 && < 2,
                       time >= 1.12 && < 2,
                       vector ^>= 0.13,
@@ -187,7 +155,10 @@ executable synthesis
     import: warnings
     main-is: Synthesis.hs
     build-depends:    base >= 4 && < 5,
-                      dataframe >= 1 && < 2,
+                      dataframe >= 1 && < 3,
+                      dataframe-core ^>= 1.0,
+                      dataframe-learn ^>= 1.0,
+                      dataframe-operations ^>= 1.0,
                       random >= 1 && < 2,
                       text >= 2.0 && < 3
     hs-source-dirs:   app
@@ -211,10 +182,18 @@ executable dataframe
 executable lazy-bench
     import: warnings
     main-is: LazyBenchmark.hs
+    -- lazy-bench drives the lazy executor against CSV/Parquet sources, so
+    -- it can only build when both backends are present.
+    if flag(no-csv) || flag(no-parquet)
+        buildable: False
     build-depends:    base >= 4 && < 5,
                       bytestring >= 0.11 && < 0.13,
                       containers >= 0.6.7 && < 0.9,
-                      dataframe >= 1 && < 2,
+                      dataframe >= 1 && < 3,
+                      dataframe-core ^>= 1.0,
+                      dataframe-lazy ^>= 1.0,
+                      dataframe-operations ^>= 1.0,
+                      dataframe-parsing ^>= 1.0,
                       directory >= 1.3.0.0 && < 2,
                       random >= 1 && < 2,
                       text >= 2.0 && < 3,
@@ -231,7 +210,7 @@ benchmark dataframe-benchmark
     build-depends: base >= 4 && < 5,
                    criterion >= 1 && < 2,
                    process >= 1.6 && < 2,
-                   dataframe >= 1 && < 2,
+                   dataframe >= 1 && < 3,
                    random >= 1 && < 2,
     default-language: Haskell2010
     ghc-options:
@@ -243,6 +222,10 @@ test-suite tests
     import: warnings
     type: exitcode-stdio-1.0
     main-is: Main.hs
+    -- The test runner imports CSV, JSON, Parquet, Lazy, and TH-derived
+    -- schema modules. All features must be enabled for it to compile.
+    if flag(no-csv) || flag(no-parquet) || flag(no-th)
+        buildable: False
     other-modules: Assertions,
                    DecisionTree,
                    Functions,
@@ -278,13 +261,21 @@ test-suite tests
                    Monad
     build-depends:  base >= 4 && < 5,
                     bytestring >= 0.11 && < 0.13,
-                    dataframe >= 1 && < 2,
+                    dataframe >= 1 && < 3,
+                    dataframe-core ^>= 1.0,
+                    dataframe-csv ^>= 1.0,
+                    dataframe-json ^>= 1.0,
+                    dataframe-lazy ^>= 1.0,
+                    dataframe-learn ^>= 1.0,
+                    dataframe-operations ^>= 1.0,
+                    dataframe-parquet ^>= 1.0,
+                    dataframe-parsing ^>= 1.0,
+                    dataframe-th ^>= 1.0,
                     HUnit ^>= 1.6,
                     QuickCheck >= 2 && < 3,
                     random-shuffle >= 0.0.4 && < 1,
                     random >= 1 && < 2,
                     text >= 2.0 && < 3,
-                    these >= 1.1 && < 2,
                     time >= 1.12 && < 2,
                     vector ^>= 0.13,
                     containers >= 0.6.7 && < 0.9

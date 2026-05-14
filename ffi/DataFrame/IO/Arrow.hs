@@ -30,8 +30,7 @@ import Foreign.C.String (CString, newCString, peekCString)
 import Type.Reflection (typeRep)
 
 import DataFrame.Internal.Column (Column (..))
-import DataFrame.Internal.DataFrame (DataFrame (..))
-import DataFrame.Operations.Core (fromNamedColumns)
+import DataFrame.Internal.DataFrame (DataFrame (..), fromNamedColumns)
 
 -- ---------------------------------------------------------------------------
 -- Opaque phantom types for the Arrow structs

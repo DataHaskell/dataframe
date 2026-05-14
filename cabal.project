@@ -1,5 +1,17 @@
 packages:
     .
+    dataframe-core
+    dataframe-parsing
+    dataframe-operations
+    dataframe-csv
+    dataframe-json
+    dataframe-parquet
+    dataframe-th
+    dataframe-csv-th
+    dataframe-parquet-th
+    dataframe-viz
+    dataframe-learn
+    dataframe-lazy
     examples
     dataframe-fastcsv
     dataframe-hasktorch

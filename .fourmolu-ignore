@@ -1,0 +1,7 @@
+# Files containing CPP directives that fourmolu's ghc-lib-parser can't
+# parse (Haddock mode). These are the meta-package re-export hubs whose
+# imports + module exports are gated on cabal flags.
+src/DataFrame.hs
+src/DataFrame/TH.hs
+src/DataFrame/Typed.hs
+src/DataFrame/Typed/TH.hs

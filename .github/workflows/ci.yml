@@ -26,16 +26,12 @@ jobs:
       - name: Set LIBTORCH_HOME
         run: echo "LIBTORCH_HOME=$HOME/.cache/libtorch" >> $GITHUB_ENV
 
-      - name: Configure
-        run: |
-          cat > cabal.project <<EOF
-          packages:
-            .
-            examples/
-            dataframe-persistent/
-            dataframe-hasktorch/
-            dataframe-fastcsv/
-          EOF
+      # The repo's cabal.project already lists every satellite
+      # (dataframe-core, dataframe-parsing, dataframe-operations,
+      # dataframe-csv, dataframe-json, dataframe-parquet, dataframe-th,
+      # dataframe-csv-th, dataframe-parquet-th, dataframe-viz,
+      # dataframe-learn, dataframe-lazy) plus the meta package, examples,
+      # and the pre-existing satellites. No regeneration needed.
 
       - name: Freeze
         run: cabal freeze

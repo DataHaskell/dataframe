@@ -1,0 +1,60 @@
+cabal-version:      2.4
+name:               dataframe-core
+version:            1.0.0.0
+
+synopsis:           Core data structures for the dataframe library.
+description:
+    Minimal interchange-format types for the @dataframe@ ecosystem:
+    'Column', 'DataFrame', 'Bitmap', the untyped expression/interpreter,
+    and the typed-schema phantom layer. Contains no Template Haskell and
+    no file I/O. Lightweight dependency footprint (base, vector,
+    containers, time, random, bytestring, text) so other packages can
+    exchange dataframes by-value without pulling in the full
+    @dataframe@ package.
+
+bug-reports:        https://github.com/mchav/dataframe/issues
+license:            MIT
+license-file:       LICENSE
+author:             Michael Chavinda
+maintainer:         mschavinda@gmail.com
+copyright:          (c) 2024-2025 Michael Chavinda
+category:           Data
+
+common warnings
+    ghc-options:
+        -Wincomplete-patterns
+        -Wincomplete-uni-patterns
+        -Wunused-imports
+        -Wunused-local-binds
+
+library
+    import:             warnings
+    exposed-modules:
+                        DataFrame.Errors
+                        DataFrame.Operators
+                        DataFrame.Display.Terminal.Colours
+                        DataFrame.Display.Terminal.PrettyPrint
+                        DataFrame.Internal.Column
+                        DataFrame.Internal.DataFrame
+                        DataFrame.Internal.Expression
+                        DataFrame.Internal.Grouping
+                        DataFrame.Internal.Hash
+                        DataFrame.Internal.Interpreter
+                        DataFrame.Internal.Nullable
+                        DataFrame.Internal.Row
+                        DataFrame.Internal.Types
+                        DataFrame.Typed.Freeze
+                        DataFrame.Typed.Generic
+                        DataFrame.Typed.Record
+                        DataFrame.Typed.Schema
+                        DataFrame.Typed.Types
+                        DataFrame.Typed.Util
+    build-depends:      base >= 4 && < 5,
+                        bytestring >= 0.11 && < 0.13,
+                        containers >= 0.6.7 && < 0.9,
+                        random >= 1 && < 2,
+                        text >= 2.0 && < 3,
+                        time >= 1.12 && < 2,
+                        vector ^>= 0.13
+    hs-source-dirs:     src
+    default-language:   Haskell2010

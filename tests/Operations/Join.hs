@@ -7,9 +7,9 @@ module Operations.Join where
 import Assertions (assertExpectException)
 import Control.Exception (evaluate)
 import Data.Text (Text, unpack)
-import Data.These
 import qualified DataFrame as D
 import qualified DataFrame.Functions as F
+import DataFrame.Internal.Types (These (..))
 import DataFrame.Operations.Join
 import qualified DataFrame.Typed as DT
 import Test.HUnit
