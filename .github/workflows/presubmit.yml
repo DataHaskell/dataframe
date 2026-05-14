@@ -19,6 +19,16 @@ jobs:
       - uses: haskell-actions/run-fourmolu@v11
         with:
           version: "0.17.0.0"
+          # Keep this list in sync with .fourmolu-ignore. These meta-package
+          # wrappers use CPP to gate re-exports on cabal flags, which
+          # fourmolu's ghc-lib-parser can't parse (Haddock mode).
+          pattern: |
+            **/*.hs
+            **/*.hs-boot
+            !src/DataFrame.hs
+            !src/DataFrame/TH.hs
+            !src/DataFrame/Typed.hs
+            !src/DataFrame/Typed/TH.hs
 
   lint:
     name: Lint (hlint)
@@ -32,25 +42,28 @@ jobs:
       - name: Run HLint over every satellite
         uses: haskell-actions/hlint-run@v2
         with:
-          path: >-
-            [
-              "src/", "app/", "benchmark/", "examples/", "ffi/", "tests/",
-              "dataframe-arrow/",
-              "dataframe-core/",
-              "dataframe-csv/",
-              "dataframe-csv-th/",
-              "dataframe-fastcsv/",
-              "dataframe-fusion/",
-              "dataframe-hasktorch/",
-              "dataframe-json/",
-              "dataframe-lazy/",
-              "dataframe-learn/",
-              "dataframe-operations/",
-              "dataframe-parquet/",
-              "dataframe-parquet-th/",
-              "dataframe-parsing/",
-              "dataframe-persistent/",
-              "dataframe-th/",
-              "dataframe-viz/"
-            ]
+          path: |
+            src/
+            app/
+            benchmark/
+            examples/
+            ffi/
+            tests/
+            dataframe-arrow/
+            dataframe-core/
+            dataframe-csv/
+            dataframe-csv-th/
+            dataframe-fastcsv/
+            dataframe-fusion/
+            dataframe-hasktorch/
+            dataframe-json/
+            dataframe-lazy/
+            dataframe-learn/
+            dataframe-operations/
+            dataframe-parquet/
+            dataframe-parquet-th/
+            dataframe-parsing/
+            dataframe-persistent/
+            dataframe-th/
+            dataframe-viz/
           fail-on: warning
