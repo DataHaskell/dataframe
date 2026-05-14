@@ -25,6 +25,15 @@ jobs:
       - uses: haskell-actions/run-fourmolu@v11
         with:
           version: "0.17.0.0"
+          # Keep in sync with .fourmolu-ignore and presubmit.yml. These four
+          # CPP-gated meta-package wrappers crash fourmolu's ghc-lib-parser.
+          pattern: |
+            **/*.hs
+            **/*.hs-boot
+            !src/DataFrame.hs
+            !src/DataFrame/TH.hs
+            !src/DataFrame/Typed.hs
+            !src/DataFrame/Typed/TH.hs
   hlint:
     runs-on: ubuntu-latest
     steps:
