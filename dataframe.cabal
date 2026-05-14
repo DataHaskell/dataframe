@@ -68,6 +68,10 @@ flag no-th
 library
     import: warnings
     default-extensions: Strict
+    -- Lock the unused-packages gate locally; haskell-ci already runs the
+    -- same Werror against this stanza. Catches the case where a satellite
+    -- gets added to build-depends but never re-exported.
+    ghc-options: -Werror=unused-packages
     exposed-modules: DataFrame,
                     DataFrame.Typed
     build-depends:    base >= 4 && <5,

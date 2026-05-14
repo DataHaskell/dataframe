@@ -19,6 +19,12 @@ cd "$(dirname "$0")/.."
 cabal build all
 cabal test all
 
+# Build the meta-package library on its own with -Werror=unused-packages
+# (set in dataframe.cabal). Catches the case where a satellite is added to
+# build-depends but never re-exported, which haskell-ci would otherwise be
+# the first to flag.
+cabal build dataframe:lib:dataframe
+
 # Exercise the meta-package's cabal flags so the CPP gates in DataFrame.hs,
 # DataFrame.Typed.hs, DataFrame.TH.hs and DataFrame.Typed.TH.hs don't silently
 # rot. Use cabal.project.bare (only the dataframe-* packages) so the solver

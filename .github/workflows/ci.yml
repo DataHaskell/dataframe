@@ -23,6 +23,14 @@ jobs:
           ghc-version: ${{ matrix.ghc }}
           cabal-version: latest
 
+      # dataframe-fusion's DataFusion crate links against bzip2, xz and zlib;
+      # the default ubuntu-latest image doesn't ship the -dev packages.
+      - name: Install system C libraries for dataframe-fusion
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libbz2-dev liblzma-dev zlib1g-dev
+
       - name: Set LIBTORCH_HOME
         run: echo "LIBTORCH_HOME=$HOME/.cache/libtorch" >> $GITHUB_ENV
 

@@ -226,6 +226,16 @@ module DataFrame (
 #ifdef WITH_PARQUET
     module Parquet,
 #endif
+    module JSON,
+
+    -- * Lazy query engine
+#ifdef WITH_LAZY
+    module Lazy,
+#endif
+
+    -- * Feature synthesis & decision trees
+    module Synthesis,
+    module DecisionTree,
 
     -- * Type conversion
     module Typing,
@@ -255,6 +265,11 @@ module DataFrame (
 )
 where
 
+-- DecisionTree defines its own `percentile`/`percentiles` helpers; the
+-- public versions surfaced through the meta module are the ones from
+-- Operations.Statistics / DataFrame.Synthesis. Hide the duplicates to
+-- avoid ambiguous-export errors.
+import DataFrame.DecisionTree as DecisionTree hiding (percentile, percentiles)
 import DataFrame.Display as Display (
     DisplayOptions (..),
     defaultDisplayOptions,
@@ -279,6 +294,10 @@ import DataFrame.IO.CSV as CSV (
     writeSeparated,
  )
 #endif
+import DataFrame.IO.JSON as JSON (
+    readJSON,
+    readJSONEither,
+ )
 #ifdef WITH_PARQUET
 import DataFrame.IO.Parquet as Parquet (
     ParquetReadOptions (..),
@@ -334,6 +353,22 @@ import DataFrame.Internal.Schema as Schema (
 #ifdef WITH_TH
 import DataFrame.Internal.Schema.TH as SchemaTH (deriveSchema)
 #endif
+#ifdef WITH_LAZY
+-- Re-export the lazy query engine's entry points. Only types and source
+-- constructors are surfaced; the operator surface (filter/select/derive/...)
+-- collides with the eager API already re-exported above, so users wanting
+-- full lazy access should `import qualified DataFrame.Lazy as L`.
+import DataFrame.Lazy as Lazy (
+    LazyDataFrame,
+    fromDataFrame,
+    runDataFrame,
+    scanCsv,
+    scanCsvWith,
+    scanParquet,
+    scanSeparated,
+    scanSeparatedWith,
+ )
+#endif
 import DataFrame.Operations.Aggregation as Aggregation (
     aggregate,
     distinct,
@@ -375,6 +410,7 @@ import DataFrame.Operations.Statistics as Statistics (
     summarize,
     variance,
  )
+import DataFrame.Synthesis as Synthesis
 import DataFrame.Operations.Subset as Subset (
     SelectionCriteria,
     byIndexRange,

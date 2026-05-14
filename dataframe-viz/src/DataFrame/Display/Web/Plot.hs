@@ -1,45 +1,75 @@
-{-# LANGUAGE AllowAmbiguousTypes #-}
-{-# LANGUAGE ExplicitNamespaces #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE GADTs #-}
+{-# LANGUAGE DuplicateRecordFields #-}
+{-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE RankNTypes #-}
-{-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE NoFieldSelectors #-}
 
-module DataFrame.Display.Web.Plot where
+{- |
+A plotly-express-style one-shot plotting API for HTML output. Mirrors
+'DataFrame.Display.Terminal.Plot' but emits embeddable Chart.js HTML.
+-}
+module DataFrame.Display.Web.Plot (
+    -- * Aggregation
+    Agg (..),
 
-import Control.Monad
-import qualified Data.Bifunctor
-import Data.Char
+    -- * Output
+    HtmlPlot (..),
+    showInDefaultBrowser,
+
+    -- * Layout
+    Size (..),
+    defaultSize,
+
+    -- * Bar charts
+    Bar (..),
+    mkBar,
+    bar,
+
+    -- * Histograms
+    Histogram (..),
+    mkHistogram,
+    histogram,
+
+    -- * Scatter plots
+    Scatter (..),
+    mkScatter,
+    scatter,
+
+    -- * Line charts
+    Line (..),
+    mkLine,
+    line,
+
+    -- * Pie charts
+    Pie (..),
+    mkPie,
+    pie,
+
+    -- * Box plots
+    Box (..),
+    mkBox,
+    box,
+
+    -- * Whole-frame plots
+    allHistograms,
+
+    -- * Deprecated legacy entry points
+    plotHistogram,
+    plotScatter,
+    plotBars,
+    plotLines,
+    plotPie,
+    plotBoxPlots,
+) where
+
+import Control.Monad (forM, void)
+import Data.Char (chr)
 import qualified Data.List as L
-import qualified Data.Map as M
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
-import Data.Type.Equality (TestEquality (testEquality), type (:~:) (Refl))
-import qualified Data.Vector as V
-import qualified Data.Vector.Generic as VG
-import qualified Data.Vector.Unboxed as VU
-import Data.Word (Word8)
 import GHC.Stack (HasCallStack)
-import System.Random (newStdGen, randomRs)
-import Type.Reflection (TypeRep, typeRep)
-
-import DataFrame.Internal.Column (Column (..), Columnable, isNumeric)
-import qualified DataFrame.Internal.Column as D
-import DataFrame.Internal.DataFrame (
-    DataFrame (..),
-    columnNames,
-    getColumn,
-    insertColumn,
- )
-import DataFrame.Internal.Expression
-import DataFrame.Internal.Types
-import DataFrame.Operations.Core
-import qualified DataFrame.Operations.Subset as D
 import Numeric (showFFloat)
-import System.Directory
-import System.Info
+import System.Directory (getHomeDirectory)
+import System.Info (os)
 import System.Process (
     StdStream (NoStream),
     createProcess,
@@ -49,37 +79,32 @@ import System.Process (
     std_out,
     waitForProcess,
  )
+import System.Random (newStdGen, randomRs)
 
+import DataFrame.Display.Internal.Common (
+    Agg (..),
+    aggLabel,
+    aggregateByGroup,
+    extractNumericColumn,
+    extractStringColumn,
+    groupWithOther,
+    groupWithOtherForPie,
+    isNumericColumn,
+ )
+import DataFrame.Internal.DataFrame (DataFrame, columnNames)
+
+-- ---------------------------------------------------------------------------
+-- Output container + layout
+-- ---------------------------------------------------------------------------
+
+-- | A snippet of HTML containing a Chart.js plot.
 newtype HtmlPlot = HtmlPlot T.Text deriving (Show)
 
-data PlotConfig = PlotConfig
-    { plotType :: PlotType
-    , plotTitle :: T.Text
-    , plotWidth :: Int
-    , plotHeight :: Int
-    , plotFile :: Maybe FilePath
-    }
+-- | Display dimensions for the HTML canvas, in pixels.
+data Size = Size {width :: Int, height :: Int}
 
-data PlotType
-    = Histogram
-    | Scatter
-    | Line
-    | Bar
-    | BoxPlot
-    | Pie
-    | StackedBar
-    | Heatmap
-    deriving (Eq, Show)
-
-defaultPlotConfig :: PlotType -> PlotConfig
-defaultPlotConfig ptype =
-    PlotConfig
-        { plotType = ptype
-        , plotTitle = ""
-        , plotWidth = 600
-        , plotHeight = 400
-        , plotFile = Nothing
-        }
+defaultSize :: Size
+defaultSize = Size 600 400
 
 generateChartId :: IO T.Text
 generateChartId = do
@@ -90,15 +115,15 @@ generateChartId = do
                 (take 64 (randomRs (49, 126) gen :: [Int]))
     return $ "chart_" <> T.pack (map chr randomWords)
 
-wrapInHTML :: T.Text -> T.Text -> Int -> Int -> T.Text
-wrapInHTML chartId content width height =
+wrapInHTML :: T.Text -> T.Text -> Size -> T.Text
+wrapInHTML chartId content sz =
     T.concat
         [ "<canvas id=\""
         , chartId
         , "\" style=\"width:100%;max-width:"
-        , T.pack (show width)
+        , T.pack (show sz.width)
         , "px;height:"
-        , T.pack (show height)
+        , T.pack (show sz.height)
         , "px\"></canvas>\n"
         , "<script src=\"https://cdnjs.cloudflare.com/ajax/libs/Chart.js/2.9.4/Chart.min.js\"></script>\n"
         , "<script>\n"
@@ -106,486 +131,8 @@ wrapInHTML chartId content width height =
         , "\n</script>\n"
         ]
 
-plotHistogram :: (HasCallStack) => T.Text -> DataFrame -> IO HtmlPlot
-plotHistogram colName = plotHistogramWith colName 30 (defaultPlotConfig Histogram)
-
-plotHistogramWith ::
-    (HasCallStack) => T.Text -> Int -> PlotConfig -> DataFrame -> IO HtmlPlot
-plotHistogramWith colName numBins config df = do
-    chartId <- generateChartId
-    let values = extractNumericColumn colName df
-        (minVal, maxVal) = if null values then (0, 1) else (minimum values, maximum values)
-        binWidth = (maxVal - minVal) / fromIntegral numBins
-        bins = [minVal + fromIntegral i * binWidth | i <- [0 .. numBins - 1]]
-        counts = calculateHistogram values bins binWidth
-        precision = max 0 $ ceiling (negate $ logBase 10 binWidth)
-
-        labels =
-            T.intercalate
-                ","
-                [ "\"" <> T.pack (showFFloat (Just precision) b "") <> "\""
-                | b <- bins
-                ]
-        dataPoints = T.intercalate "," [T.pack (show c) | c <- counts]
-
-        chartTitle =
-            if T.null (plotTitle config)
-                then "Histogram of " <> colName
-                else plotTitle config
-
-        jsCode =
-            T.concat
-                [ "setTimeout(function() { new Chart(\""
-                , chartId
-                , "\", {\n"
-                , "  type: \"bar\",\n"
-                , "  data: {\n"
-                , "    labels: ["
-                , labels
-                , "],\n"
-                , "    datasets: [{\n"
-                , "      label: \""
-                , colName
-                , "\",\n"
-                , "      data: ["
-                , dataPoints
-                , "],\n"
-                , "      backgroundColor: \"rgba(75, 192, 192, 0.6)\",\n"
-                , "      borderColor: \"rgba(75, 192, 192, 1)\",\n"
-                , "      borderWidth: 1\n"
-                , "    }]\n"
-                , "  },\n"
-                , "  options: {\n"
-                , "    title: { display: true, text: \""
-                , chartTitle
-                , "\" },\n"
-                , "    scales: {\n"
-                , "      yAxes: [{ ticks: { beginAtZero: true } }]\n"
-                , "    }\n"
-                , "  }\n"
-                , "})}, 100);"
-                ]
-
-    return $
-        HtmlPlot $
-            wrapInHTML chartId jsCode (plotWidth config) (plotHeight config)
-
-calculateHistogram :: [Double] -> [Double] -> Double -> [Int]
-calculateHistogram values bins binWidth =
-    let countBin b = length [v | v <- values, v >= b && v < b + binWidth]
-     in map countBin bins
-
-plotScatter :: (HasCallStack) => T.Text -> T.Text -> DataFrame -> IO HtmlPlot
-plotScatter xCol yCol = plotScatterWith xCol yCol (defaultPlotConfig Scatter)
-
-plotScatterWith ::
-    (HasCallStack) => T.Text -> T.Text -> PlotConfig -> DataFrame -> IO HtmlPlot
-plotScatterWith xCol yCol config df = do
-    chartId <- generateChartId
-    let xVals = extractNumericColumn xCol df
-        yVals = extractNumericColumn yCol df
-        points = zip xVals yVals
-
-        dataPoints =
-            T.intercalate
-                ","
-                [ "{x:" <> T.pack (show x) <> ", y:" <> T.pack (show y) <> "}" | (x, y) <- points
-                ]
-        chartTitle =
-            if T.null (plotTitle config) then xCol <> " vs " <> yCol else plotTitle config
-
-        jsCode =
-            T.concat
-                [ "setTimeout(function() { new Chart(\""
-                , chartId
-                , "\", {\n"
-                , "  type: \"scatter\",\n"
-                , "  data: {\n"
-                , "    datasets: [{\n"
-                , "      label: \""
-                , chartTitle
-                , "\",\n"
-                , "      data: ["
-                , dataPoints
-                , "],\n"
-                , "      pointRadius: 4,\n"
-                , "      pointBackgroundColor: \"rgb(75, 192, 192)\"\n"
-                , "    }]\n"
-                , "  },\n"
-                , "  options: {\n"
-                , "    title: { display: true, text: \""
-                , chartTitle
-                , "\" },\n"
-                , "    scales: {\n"
-                , "      xAxes: [{ scaleLabel: { display: true, labelString: \""
-                , xCol
-                , "\" } }],\n"
-                , "      yAxes: [{ scaleLabel: { display: true, labelString: \""
-                , yCol
-                , "\" } }]\n"
-                , "    }\n"
-                , "  }\n"
-                , "})}, 100);"
-                ]
-
-    return $
-        HtmlPlot $
-            wrapInHTML chartId jsCode (plotWidth config) (plotHeight config)
-
-plotScatterBy ::
-    (HasCallStack) => T.Text -> T.Text -> T.Text -> DataFrame -> IO HtmlPlot
-plotScatterBy xCol yCol grouping = plotScatterByWith xCol yCol grouping (defaultPlotConfig Scatter)
-
-plotScatterByWith ::
-    (HasCallStack) =>
-    T.Text -> T.Text -> T.Text -> PlotConfig -> DataFrame -> IO HtmlPlot
-plotScatterByWith xCol yCol grouping config df = do
-    chartId <- generateChartId
-    let vals = extractStringColumn grouping df
-        df' = insertColumn grouping (D.fromList vals) df
-        uniqueVals = L.nub vals
-
-        colors =
-            cycle
-                [ "rgb(255, 99, 132)"
-                , "rgb(54, 162, 235)"
-                , "rgb(255, 206, 86)"
-                , "rgb(75, 192, 192)"
-                , "rgb(153, 102, 255)"
-                , "rgb(255, 159, 64)"
-                ]
-
-    datasets <- forM (zip uniqueVals colors) $ \(val, color) -> do
-        let filtered = D.filter (Col grouping) (== val) df'
-            xVals = extractNumericColumn xCol filtered
-            yVals = extractNumericColumn yCol filtered
-            points = zip xVals yVals
-            dataPoints =
-                T.intercalate
-                    ","
-                    [ "{x:" <> T.pack (show x) <> ", y:" <> T.pack (show y) <> "}" | (x, y) <- points
-                    ]
-        return $
-            T.concat
-                [ "    {\n"
-                , "      label: \""
-                , val
-                , "\",\n"
-                , "      data: ["
-                , dataPoints
-                , "],\n"
-                , "      pointRadius: 4,\n"
-                , "      pointBackgroundColor: \""
-                , color
-                , "\"\n"
-                , "    }"
-                ]
-
-    let datasetsStr = T.intercalate ",\n" datasets
-        chartTitle =
-            if T.null (plotTitle config)
-                then xCol <> " vs " <> yCol <> " by " <> grouping
-                else plotTitle config
-
-        jsCode =
-            T.concat
-                [ "setTimeout(function() { new Chart(\""
-                , chartId
-                , "\", {\n"
-                , "  type: \"scatter\",\n"
-                , "  data: {\n"
-                , "    datasets: [\n"
-                , datasetsStr
-                , "\n    ]\n"
-                , "  },\n"
-                , "  options: {\n"
-                , "    title: { display: true, text: \""
-                , chartTitle
-                , "\" },\n"
-                , "    scales: {\n"
-                , "      xAxes: [{ scaleLabel: { display: true, labelString: \""
-                , xCol
-                , "\" } }],\n"
-                , "      yAxes: [{ scaleLabel: { display: true, labelString: \""
-                , yCol
-                , "\" } }]\n"
-                , "    }\n"
-                , "  }\n"
-                , "})}, 100);"
-                ]
-
-    return $
-        HtmlPlot $
-            wrapInHTML chartId jsCode (plotWidth config) (plotHeight config)
-
-plotLines :: (HasCallStack) => T.Text -> [T.Text] -> DataFrame -> IO HtmlPlot
-plotLines xAxis colNames = plotLinesWith xAxis colNames (defaultPlotConfig Line)
-
-plotLinesWith ::
-    (HasCallStack) => T.Text -> [T.Text] -> PlotConfig -> DataFrame -> IO HtmlPlot
-plotLinesWith xAxis colNames config df = do
-    chartId <- generateChartId
-    let xValues = extractNumericColumn xAxis df
-        labels = T.intercalate "," [T.pack (show x) | x <- xValues]
-
-        colors =
-            cycle
-                [ "rgb(255, 99, 132)"
-                , "rgb(54, 162, 235)"
-                , "rgb(255, 206, 86)"
-                , "rgb(75, 192, 192)"
-                , "rgb(153, 102, 255)"
-                , "rgb(255, 159, 64)"
-                ]
-
-    datasets <- forM (zip colNames colors) $ \(col, color) -> do
-        let values = extractNumericColumn col df
-            dataPoints = T.intercalate "," [T.pack (show v) | v <- values]
-        return $
-            T.concat
-                [ "    {\n"
-                , "      label: \""
-                , col
-                , "\",\n"
-                , "      data: ["
-                , dataPoints
-                , "],\n"
-                , "      fill: false,\n"
-                , "      borderColor: \""
-                , color
-                , "\",\n"
-                , "      tension: 0.1\n"
-                , "    }"
-                ]
-
-    let datasetsStr = T.intercalate ",\n" datasets
-        chartTitle = if T.null (plotTitle config) then "Line Chart" else plotTitle config
-
-        jsCode =
-            T.concat
-                [ "setTimeout(function() { new Chart(\""
-                , chartId
-                , "\", {\n"
-                , "  type: \"line\",\n"
-                , "  data: {\n"
-                , "    labels: ["
-                , labels
-                , "],\n"
-                , "    datasets: [\n"
-                , datasetsStr
-                , "\n    ]\n"
-                , "  },\n"
-                , "  options: {\n"
-                , "    title: { display: true, text: \""
-                , chartTitle
-                , "\" },\n"
-                , "    scales: {\n"
-                , "      xAxes: [{ scaleLabel: { display: true, labelString: \""
-                , xAxis
-                , "\" } }]\n"
-                , "    }\n"
-                , "  }\n"
-                , "})}, 100);"
-                ]
-
-    return $
-        HtmlPlot $
-            wrapInHTML chartId jsCode (plotWidth config) (plotHeight config)
-
-plotBars :: (HasCallStack) => T.Text -> DataFrame -> IO HtmlPlot
-plotBars colName = plotBarsWith colName Nothing (defaultPlotConfig Bar)
-
-plotBarsWith ::
-    (HasCallStack) =>
-    T.Text -> Maybe T.Text -> PlotConfig -> DataFrame -> IO HtmlPlot
-plotBarsWith colName groupByCol config df =
-    case groupByCol of
-        Nothing -> plotSingleBars colName config df
-        Just grpCol -> plotGroupedBarsWith grpCol colName config df
-
-plotSingleBars ::
-    (HasCallStack) => T.Text -> PlotConfig -> DataFrame -> IO HtmlPlot
-plotSingleBars colName config df = do
-    chartId <- generateChartId
-    let barData = getCategoricalCounts colName df
-    case barData of
-        Just counts -> do
-            let grouped = groupWithOther 10 counts
-                labels = T.intercalate "," ["\"" <> label <> "\"" | (label, _) <- grouped]
-                dataPoints = T.intercalate "," [T.pack (show val) | (_, val) <- grouped]
-                chartTitle = if T.null (plotTitle config) then colName else plotTitle config
-
-                jsCode =
-                    T.concat
-                        [ "setTimeout(function() { new Chart(\""
-                        , chartId
-                        , "\", {\n"
-                        , "  type: \"bar\",\n"
-                        , "  data: {\n"
-                        , "    labels: ["
-                        , labels
-                        , "],\n"
-                        , "    datasets: [{\n"
-                        , "      label: \"Count\",\n"
-                        , "      data: ["
-                        , dataPoints
-                        , "],\n"
-                        , "      backgroundColor: \"rgba(54, 162, 235, 0.6)\",\n"
-                        , "      borderColor: \"rgba(54, 162, 235, 1)\",\n"
-                        , "      borderWidth: 1\n"
-                        , "    }]\n"
-                        , "  },\n"
-                        , "  options: {\n"
-                        , "    title: { display: true, text: \""
-                        , chartTitle
-                        , "\" },\n"
-                        , "    scales: {\n"
-                        , "      yAxes: [{ ticks: { beginAtZero: true } }]\n"
-                        , "    }\n"
-                        , "  }\n"
-                        , "})}, 100);"
-                        ]
-            return $
-                HtmlPlot $
-                    wrapInHTML chartId jsCode (plotWidth config) (plotHeight config)
-        Nothing -> do
-            let values = extractNumericColumn colName df
-                labels' =
-                    if length values > 20
-                        then take 20 ["Item " <> T.pack (show i) | i <- [(1 :: Int) ..]]
-                        else ["Item " <> T.pack (show i) | i <- [1 .. length values]]
-                vals = if length values > 20 then take 20 values else values
-                labels = T.intercalate "," ["\"" <> label <> "\"" | label <- labels']
-                dataPoints = T.intercalate "," [T.pack (show val) | val <- vals]
-                chartTitle = if T.null (plotTitle config) then colName else plotTitle config
-
-                jsCode =
-                    T.concat
-                        [ "setTimeout(function() { new Chart(\""
-                        , chartId
-                        , "\", {\n"
-                        , "  type: \"bar\",\n"
-                        , "  data: {\n"
-                        , "    labels: ["
-                        , labels
-                        , "],\n"
-                        , "    datasets: [{\n"
-                        , "      label: \"Value\",\n"
-                        , "      data: ["
-                        , dataPoints
-                        , "],\n"
-                        , "      backgroundColor: \"rgba(54, 162, 235, 0.6)\",\n"
-                        , "      borderColor: \"rgba(54, 162, 235, 1)\",\n"
-                        , "      borderWidth: 1\n"
-                        , "    }]\n"
-                        , "  },\n"
-                        , "  options: {\n"
-                        , "    title: { display: true, text: \""
-                        , chartTitle
-                        , "\" },\n"
-                        , "    scales: {\n"
-                        , "      yAxes: [{ ticks: { beginAtZero: true } }]\n"
-                        , "    }\n"
-                        , "  }\n"
-                        , "})}, 100);"
-                        ]
-            return $
-                HtmlPlot $
-                    wrapInHTML chartId jsCode (plotWidth config) (plotHeight config)
-
-plotPie :: (HasCallStack) => T.Text -> Maybe T.Text -> DataFrame -> IO HtmlPlot
-plotPie valCol labelCol = plotPieWith valCol labelCol (defaultPlotConfig Pie)
-
-plotPieWith ::
-    (HasCallStack) =>
-    T.Text -> Maybe T.Text -> PlotConfig -> DataFrame -> IO HtmlPlot
-plotPieWith valCol labelCol config df = do
-    chartId <- generateChartId
-    let categoricalData = getCategoricalCounts valCol df
-    case categoricalData of
-        Just counts -> do
-            let grouped = groupWithOtherForPie 8 counts
-                labels = T.intercalate "," ["\"" <> label <> "\"" | (label, _) <- grouped]
-                dataPoints = T.intercalate "," [T.pack (show val) | (_, val) <- grouped]
-                colors = T.intercalate "," ["\"" <> c <> "\"" | c <- take (length grouped) pieColors]
-                chartTitle = if T.null (plotTitle config) then valCol else plotTitle config
-
-                jsCode =
-                    T.concat
-                        [ "setTimeout(function() { new Chart(\""
-                        , chartId
-                        , "\", {\n"
-                        , "  type: \"pie\",\n"
-                        , "  data: {\n"
-                        , "    labels: ["
-                        , labels
-                        , "],\n"
-                        , "    datasets: [{\n"
-                        , "      data: ["
-                        , dataPoints
-                        , "],\n"
-                        , "      backgroundColor: ["
-                        , colors
-                        , "]\n"
-                        , "    }]\n"
-                        , "  },\n"
-                        , "  options: {\n"
-                        , "    title: { display: true, text: \""
-                        , chartTitle
-                        , "\" }\n"
-                        , "  }\n"
-                        , "})}, 100);"
-                        ]
-            return $
-                HtmlPlot $
-                    wrapInHTML chartId jsCode (plotWidth config) (plotHeight config)
-        Nothing -> do
-            let values = extractNumericColumn valCol df
-                labels' = case labelCol of
-                    Nothing -> map (\i -> "Item " <> T.pack (show i)) [1 .. length values]
-                    Just lCol -> extractStringColumn lCol df
-                pieData = zip labels' values
-                grouped =
-                    if length pieData > 10
-                        then groupWithOtherForPie 8 pieData
-                        else pieData
-                labels = T.intercalate "," ["\"" <> label <> "\"" | (label, _) <- grouped]
-                dataPoints = T.intercalate "," [T.pack (show val) | (_, val) <- grouped]
-                colors = T.intercalate "," ["\"" <> c <> "\"" | c <- take (length grouped) pieColors]
-                chartTitle = if T.null (plotTitle config) then valCol else plotTitle config
-
-                jsCode =
-                    T.concat
-                        [ "setTimeout(function() { new Chart(\""
-                        , chartId
-                        , "\", {\n"
-                        , "  type: \"pie\",\n"
-                        , "  data: {\n"
-                        , "    labels: ["
-                        , labels
-                        , "],\n"
-                        , "    datasets: [{\n"
-                        , "      data: ["
-                        , dataPoints
-                        , "],\n"
-                        , "      backgroundColor: ["
-                        , colors
-                        , "]\n"
-                        , "    }]\n"
-                        , "  },\n"
-                        , "  options: {\n"
-                        , "    title: { display: true, text: \""
-                        , chartTitle
-                        , "\" }\n"
-                        , "  }\n"
-                        , "})}, 100);"
-                        ]
-            return $
-                HtmlPlot $
-                    wrapInHTML chartId jsCode (plotWidth config) (plotHeight config)
-
-pieColors :: [T.Text]
-pieColors =
+palette :: [T.Text]
+palette =
     [ "rgb(255, 99, 132)"
     , "rgb(54, 162, 235)"
     , "rgb(255, 206, 86)"
@@ -598,480 +145,406 @@ pieColors =
     , "rgb(238, 130, 238)"
     ]
 
-plotStackedBars ::
-    (HasCallStack) => T.Text -> [T.Text] -> DataFrame -> IO HtmlPlot
-plotStackedBars categoryCol valueColumns = plotStackedBarsWith categoryCol valueColumns (defaultPlotConfig StackedBar)
+-- ---------------------------------------------------------------------------
+-- Bar
+-- ---------------------------------------------------------------------------
 
-plotStackedBarsWith ::
-    (HasCallStack) => T.Text -> [T.Text] -> PlotConfig -> DataFrame -> IO HtmlPlot
-plotStackedBarsWith categoryCol valueColumns config df = do
+data Bar = Bar
+    { x :: T.Text
+    , y :: Maybe T.Text
+    , agg :: Agg
+    , topN :: Maybe Int
+    , title :: Maybe T.Text
+    , size :: Size
+    }
+
+mkBar :: T.Text -> Bar
+mkBar c = Bar c Nothing Sum Nothing Nothing defaultSize
+
+bar :: (HasCallStack) => Bar -> DataFrame -> IO HtmlPlot
+bar spec df = do
     chartId <- generateChartId
-    let categories = extractStringColumn categoryCol df
-        uniqueCategories = L.nub categories
-
-        colors =
-            cycle
-                [ "rgb(255, 99, 132)"
-                , "rgb(54, 162, 235)"
-                , "rgb(255, 206, 86)"
-                , "rgb(75, 192, 192)"
-                , "rgb(153, 102, 255)"
-                , "rgb(255, 159, 64)"
-                ]
-
-    datasets <- forM (zip valueColumns colors) $ \(col, color) -> do
-        dataVals <- forM uniqueCategories $ \cat -> do
-            let indices = [i | (i, c) <- zip [0 ..] categories, c == cat]
-                allValues = extractNumericColumn col df
-                values = [allValues !! i | i <- indices, i < length allValues]
-            return $ sum values
-        let dataPoints = T.intercalate "," [T.pack (show v) | v <- dataVals]
-        return $
-            T.concat
-                [ "    {\n"
-                , "      label: \""
-                , col
-                , "\",\n"
-                , "      data: ["
-                , dataPoints
-                , "],\n"
-                , "      backgroundColor: \""
-                , color
-                , "\"\n"
-                , "    }"
-                ]
-
-    let datasetsStr = T.intercalate ",\n" datasets
-        labels = T.intercalate "," ["\"" <> cat <> "\"" | cat <- uniqueCategories]
-        chartTitle = if T.null (plotTitle config) then "Stacked Bar Chart" else plotTitle config
-
+    let effectiveAgg = case spec.y of
+            Nothing -> Count
+            Just _ -> spec.agg
+        rows = aggregateByGroup effectiveAgg spec.x spec.y df
+        rows' = maybe rows (`groupWithOther` rows) spec.topN
+        chartTitle = case spec.title of
+            Just s -> s
+            Nothing -> autoTitle effectiveAgg spec.y spec.x
+        labels = T.intercalate "," ["\"" <> label <> "\"" | (label, _) <- rows']
+        dataPoints = T.intercalate "," [T.pack (show v) | (_, v) <- rows']
+        legendLabel = case spec.y of
+            Nothing -> "count"
+            Just yCol -> aggLabel effectiveAgg <> "(" <> yCol <> ")"
         jsCode =
             T.concat
                 [ "setTimeout(function() { new Chart(\""
                 , chartId
-                , "\", {\n"
-                , "  type: \"bar\",\n"
-                , "  data: {\n"
-                , "    labels: ["
+                , "\", {\n  type: \"bar\",\n  data: {\n    labels: ["
                 , labels
-                , "],\n"
-                , "    datasets: [\n"
-                , datasetsStr
-                , "\n    ]\n"
-                , "  },\n"
-                , "  options: {\n"
+                , "],\n    datasets: [{\n      label: \""
+                , legendLabel
+                , "\",\n      data: ["
+                , dataPoints
+                , "],\n      backgroundColor: \"rgba(54, 162, 235, 0.6)\",\n      borderColor: \"rgba(54, 162, 235, 1)\",\n      borderWidth: 1\n    }]\n  },\n"
+                , "  options: {\n    title: { display: true, text: \""
+                , chartTitle
+                , "\" },\n    scales: { yAxes: [{ ticks: { beginAtZero: true } }] }\n  }\n})}, 100);"
+                ]
+    return $ HtmlPlot $ wrapInHTML chartId jsCode spec.size
+
+-- ---------------------------------------------------------------------------
+-- Histogram
+-- ---------------------------------------------------------------------------
+
+data Histogram = Histogram
+    { x :: T.Text
+    , bins :: Int
+    , title :: Maybe T.Text
+    , size :: Size
+    }
+
+mkHistogram :: T.Text -> Histogram
+mkHistogram c = Histogram c 30 Nothing defaultSize
+
+histogram :: (HasCallStack) => Histogram -> DataFrame -> IO HtmlPlot
+histogram spec df = do
+    chartId <- generateChartId
+    let values = extractNumericColumn spec.x df
+        (lo, hi) = if null values then (0, 1) else (minimum values, maximum values)
+        binWidth = (hi - lo) / fromIntegral spec.bins
+        binStarts = [lo + fromIntegral i * binWidth | i <- [0 .. spec.bins - 1]]
+        countBin b = length [v | v <- values, v >= b && v < b + binWidth]
+        counts = map countBin binStarts
+        precision = max 0 $ ceiling (negate $ logBase 10 (max 1e-12 binWidth))
+        labels =
+            T.intercalate
+                ","
+                [ "\"" <> T.pack (showFFloat (Just precision) b "") <> "\""
+                | b <- binStarts
+                ]
+        dataPoints = T.intercalate "," [T.pack (show c) | c <- counts]
+        chartTitle = case spec.title of
+            Just s -> s
+            Nothing -> "histogram of " <> spec.x
+        jsCode =
+            T.concat
+                [ "setTimeout(function() { new Chart(\""
+                , chartId
+                , "\", {\n  type: \"bar\",\n  data: {\n    labels: ["
+                , labels
+                , "],\n    datasets: [{\n      label: \""
+                , spec.x
+                , "\",\n      data: ["
+                , dataPoints
+                , "],\n      backgroundColor: \"rgba(75, 192, 192, 0.6)\",\n      borderColor: \"rgba(75, 192, 192, 1)\",\n      borderWidth: 1\n    }]\n  },\n"
+                , "  options: {\n    title: { display: true, text: \""
+                , chartTitle
+                , "\" },\n    scales: { yAxes: [{ ticks: { beginAtZero: true } }] }\n  }\n})}, 100);"
+                ]
+    return $ HtmlPlot $ wrapInHTML chartId jsCode spec.size
+
+-- ---------------------------------------------------------------------------
+-- Scatter
+-- ---------------------------------------------------------------------------
+
+data Scatter = Scatter
+    { x :: T.Text
+    , y :: T.Text
+    , color :: Maybe T.Text
+    , title :: Maybe T.Text
+    , size :: Size
+    }
+
+mkScatter :: T.Text -> T.Text -> Scatter
+mkScatter xc yc = Scatter xc yc Nothing Nothing defaultSize
+
+scatter :: (HasCallStack) => Scatter -> DataFrame -> IO HtmlPlot
+scatter spec df = do
+    chartId <- generateChartId
+    let chartTitle = case spec.title of
+            Just s -> s
+            Nothing -> spec.x <> " vs " <> spec.y
+        xVals = extractNumericColumn spec.x df
+        yVals = extractNumericColumn spec.y df
+    datasets <- case spec.color of
+        Nothing ->
+            return $
+                T.singleton '\n'
+                    <> renderSeries chartTitle (head palette) (zip xVals yVals)
+        Just grp -> do
+            let groupVals = extractStringColumn grp df
+                triples = zip3 groupVals xVals yVals
+                uniq = L.nub groupVals
+                ds =
+                    [ renderSeries g col [(xv, yv) | (gv, xv, yv) <- triples, gv == g]
+                    | (g, col) <- zip uniq (cycle palette)
+                    ]
+            return $ T.intercalate ",\n" ds
+    let jsCode =
+            T.concat
+                [ "setTimeout(function() { new Chart(\""
+                , chartId
+                , "\", {\n  type: \"scatter\",\n  data: {\n    datasets: ["
+                , datasets
+                , "\n    ]\n  },\n  options: {\n"
                 , "    title: { display: true, text: \""
                 , chartTitle
                 , "\" },\n"
                 , "    scales: {\n"
-                , "      xAxes: [{ stacked: true }],\n"
-                , "      yAxes: [{ stacked: true, ticks: { beginAtZero: true } }]\n"
-                , "    }\n"
-                , "  }\n"
-                , "})}, 100);"
+                , "      xAxes: [{ scaleLabel: { display: true, labelString: \""
+                , spec.x
+                , "\" } }],\n      yAxes: [{ scaleLabel: { display: true, labelString: \""
+                , spec.y
+                , "\" } }]\n    }\n  }\n})}, 100);"
+                ]
+    return $ HtmlPlot $ wrapInHTML chartId jsCode spec.size
+  where
+    renderSeries label col pts =
+        let body =
+                T.intercalate
+                    ","
+                    [ "{x:" <> T.pack (show xv) <> ", y:" <> T.pack (show yv) <> "}" | (xv, yv) <- pts
+                    ]
+         in T.concat
+                [ "    {\n      label: \""
+                , label
+                , "\",\n      data: ["
+                , body
+                , "],\n      pointRadius: 4,\n      pointBackgroundColor: \""
+                , col
+                , "\"\n    }"
                 ]
 
-    return $
-        HtmlPlot $
-            wrapInHTML chartId jsCode (plotWidth config) (plotHeight config)
+-- ---------------------------------------------------------------------------
+-- Line
+-- ---------------------------------------------------------------------------
 
-plotBoxPlots :: (HasCallStack) => [T.Text] -> DataFrame -> IO HtmlPlot
-plotBoxPlots colNames = plotBoxPlotsWith colNames (defaultPlotConfig BoxPlot)
+data Line = Line
+    { x :: T.Text
+    , y :: [T.Text]
+    , title :: Maybe T.Text
+    , size :: Size
+    }
 
-plotBoxPlotsWith ::
-    (HasCallStack) => [T.Text] -> PlotConfig -> DataFrame -> IO HtmlPlot
-plotBoxPlotsWith colNames config df = do
+mkLine :: T.Text -> [T.Text] -> Line
+mkLine xc ys = Line xc ys Nothing defaultSize
+
+line :: (HasCallStack) => Line -> DataFrame -> IO HtmlPlot
+line spec df = do
     chartId <- generateChartId
-    boxData <- forM colNames $ \col -> do
+    let chartTitle = case spec.title of
+            Just s -> s
+            Nothing -> case spec.y of
+                [single] -> single <> " over " <> spec.x
+                _ -> T.intercalate ", " spec.y <> " over " <> spec.x
+        xValues = extractNumericColumn spec.x df
+        xLabels = T.intercalate "," [T.pack (show v) | v <- xValues]
+    datasets <- forM (zip spec.y (cycle palette)) $ \(col, c) -> do
         let values = extractNumericColumn col df
-            sorted = L.sort values
-            n = length values
-            q1 = sorted !! (n `div` 4)
-            median = sorted !! (n `div` 2)
-            q3 = sorted !! (3 * n `div` 4)
-            minVal = minimum values
-            maxVal = maximum values
-        return (col, minVal, q1, median, q3, maxVal)
-
-    let labels = T.intercalate "," ["\"" <> col <> "\"" | (col, _, _, _, _, _) <- boxData]
-        medians = T.intercalate "," [T.pack (show med) | (_, _, _, med, _, _) <- boxData]
-        chartTitle = if T.null (plotTitle config) then "Box Plot" else plotTitle config
-
+            body = T.intercalate "," [T.pack (show v) | v <- values]
+        return $
+            T.concat
+                [ "    {\n      label: \""
+                , col
+                , "\",\n      data: ["
+                , body
+                , "],\n      fill: false,\n      borderColor: \""
+                , c
+                , "\",\n      tension: 0.1\n    }"
+                ]
+    let datasetsStr = T.intercalate ",\n" datasets
         jsCode =
             T.concat
                 [ "setTimeout(function() { new Chart(\""
                 , chartId
-                , "\", {\n"
-                , "  type: \"bar\",\n"
-                , "  data: {\n"
-                , "    labels: ["
-                , labels
-                , "],\n"
-                , "    datasets: [{\n"
-                , "      label: \"Median\",\n"
-                , "      data: ["
-                , medians
-                , "],\n"
-                , "      backgroundColor: \"rgba(75, 192, 192, 0.6)\",\n"
-                , "      borderColor: \"rgba(75, 192, 192, 1)\",\n"
-                , "      borderWidth: 1\n"
-                , "    }]\n"
-                , "  },\n"
-                , "  options: {\n"
+                , "\", {\n  type: \"line\",\n  data: {\n    labels: ["
+                , xLabels
+                , "],\n    datasets: [\n"
+                , datasetsStr
+                , "\n    ]\n  },\n  options: {\n"
                 , "    title: { display: true, text: \""
                 , chartTitle
-                , " (showing medians)\" },\n"
-                , "    scales: {\n"
-                , "      yAxes: [{ ticks: { beginAtZero: true } }]\n"
-                , "    }\n"
-                , "  }\n"
-                , "})}, 100);"
+                , "\" },\n"
+                , "    scales: { xAxes: [{ scaleLabel: { display: true, labelString: \""
+                , spec.x
+                , "\" } }] }\n  }\n})}, 100);"
                 ]
+    return $ HtmlPlot $ wrapInHTML chartId jsCode spec.size
 
-    return $
-        HtmlPlot $
-            wrapInHTML chartId jsCode (plotWidth config) (plotHeight config)
+-- ---------------------------------------------------------------------------
+-- Pie
+-- ---------------------------------------------------------------------------
 
-plotGroupedBarsWith ::
-    (HasCallStack) => T.Text -> T.Text -> PlotConfig -> DataFrame -> IO HtmlPlot
-plotGroupedBarsWith = plotGroupedBarsWithN 10
+data Pie = Pie
+    { values :: T.Text
+    , names :: Maybe T.Text
+    , agg :: Agg
+    , topN :: Maybe Int
+    , title :: Maybe T.Text
+    , size :: Size
+    }
 
-plotGroupedBarsWithN ::
-    (HasCallStack) =>
-    Int -> T.Text -> T.Text -> PlotConfig -> DataFrame -> IO HtmlPlot
-plotGroupedBarsWithN n groupCol valCol config df = do
+mkPie :: T.Text -> Pie
+mkPie c = Pie c Nothing Count (Just 8) Nothing defaultSize
+
+pie :: (HasCallStack) => Pie -> DataFrame -> IO HtmlPlot
+pie spec df = do
     chartId <- generateChartId
-    let colIsNumeric = isNumericColumnCheck valCol df
+    let vCol = spec.values
+        mNames = spec.names
+        a = spec.agg
+        chartTitle = case spec.title of
+            Just s -> s
+            Nothing -> case mNames of
+                Just n -> aggLabel a <> "(" <> vCol <> ") by " <> n
+                Nothing -> aggLabel a <> " of " <> vCol
+        rows = case (a, mNames) of
+            (Count, Nothing) -> aggregateByGroup Count vCol Nothing df
+            (Count, Just n) -> aggregateByGroup Count n Nothing df
+            (_, Nothing) ->
+                let xs = extractNumericColumn vCol df
+                 in zip [T.pack ("Item " ++ show i) | i <- [1 .. length xs :: Int]] xs
+            (_, Just n) -> aggregateByGroup a n (Just vCol) df
+        rows' = maybe rows (`groupWithOtherForPie` rows) spec.topN
+        labels = T.intercalate "," ["\"" <> label <> "\"" | (label, _) <- rows']
+        dataPoints = T.intercalate "," [T.pack (show v) | (_, v) <- rows']
+        colors =
+            T.intercalate
+                ","
+                ["\"" <> c <> "\"" | c <- take (length rows') palette]
+        jsCode =
+            T.concat
+                [ "setTimeout(function() { new Chart(\""
+                , chartId
+                , "\", {\n  type: \"pie\",\n  data: {\n    labels: ["
+                , labels
+                , "],\n    datasets: [{\n      data: ["
+                , dataPoints
+                , "],\n      backgroundColor: ["
+                , colors
+                , "]\n    }]\n  },\n  options: { title: { display: true, text: \""
+                , chartTitle
+                , "\" } }\n})}, 100);"
+                ]
+    return $ HtmlPlot $ wrapInHTML chartId jsCode spec.size
 
-    if colIsNumeric
-        then do
-            let groups = extractStringColumn groupCol df
-                values = extractNumericColumn valCol df
-                m = M.fromListWith (+) (zip groups values)
-                grouped = map (\v -> (v, m M.! v)) groups
-                labels = T.intercalate "," ["\"" <> label <> "\"" | (label, _) <- grouped]
-                dataPoints = T.intercalate "," [T.pack (show val) | (_, val) <- grouped]
-                chartTitle =
-                    if T.null (plotTitle config)
-                        then groupCol <> " by " <> valCol
-                        else plotTitle config
+-- ---------------------------------------------------------------------------
+-- Box
+-- ---------------------------------------------------------------------------
 
-                jsCode =
-                    T.concat
-                        [ "setTimeout(function() { new Chart(\""
-                        , chartId
-                        , "\", {\n"
-                        , "  type: \"bar\",\n"
-                        , "  data: {\n"
-                        , "    labels: ["
-                        , labels
-                        , "],\n"
-                        , "    datasets: [{\n"
-                        , "      label: \""
-                        , valCol
-                        , "\",\n"
-                        , "      data: ["
-                        , dataPoints
-                        , "],\n"
-                        , "      backgroundColor: \"rgba(54, 162, 235, 0.6)\",\n"
-                        , "      borderColor: \"rgba(54, 162, 235, 1)\",\n"
-                        , "      borderWidth: 1\n"
-                        , "    }]\n"
-                        , "  },\n"
-                        , "  options: {\n"
-                        , "    title: { display: true, text: \""
-                        , chartTitle
-                        , "\" },\n"
-                        , "    scales: {\n"
-                        , "      yAxes: [{ ticks: { beginAtZero: true } }]\n"
-                        , "    }\n"
-                        , "  }\n"
-                        , "})}, 100);"
-                        ]
-            return $
-                HtmlPlot $
-                    wrapInHTML chartId jsCode (plotWidth config) (plotHeight config)
-        else do
-            let groups = extractStringColumn groupCol df
-                vals = extractStringColumn valCol df
-                pairs = zip groups vals
-                counts =
-                    M.toList $
-                        M.fromListWith
-                            (+)
-                            [(g <> " - " <> v, 1 :: Int) | (g, v) <- pairs]
-                finalCounts = groupWithOther n [(k, fromIntegral v) | (k, v) <- counts]
-                labels = T.intercalate "," ["\"" <> label <> "\"" | (label, _) <- finalCounts]
-                dataPoints = T.intercalate "," [T.pack (show val) | (_, val) <- finalCounts]
-                chartTitle =
-                    if T.null (plotTitle config)
-                        then groupCol <> " by " <> valCol
-                        else plotTitle config
+data Box = Box
+    { y :: [T.Text]
+    , title :: Maybe T.Text
+    , size :: Size
+    }
 
-                jsCode =
-                    T.concat
-                        [ "setTimeout(function() { new Chart(\""
-                        , chartId
-                        , "\", {\n"
-                        , "  type: \"bar\",\n"
-                        , "  data: {\n"
-                        , "    labels: ["
-                        , labels
-                        , "],\n"
-                        , "    datasets: [{\n"
-                        , "      label: \"Count\",\n"
-                        , "      data: ["
-                        , dataPoints
-                        , "],\n"
-                        , "      backgroundColor: \"rgba(54, 162, 235, 0.6)\",\n"
-                        , "      borderColor: \"rgba(54, 162, 235, 1)\",\n"
-                        , "      borderWidth: 1\n"
-                        , "    }]\n"
-                        , "  },\n"
-                        , "  options: {\n"
-                        , "    title: { display: true, text: \""
-                        , chartTitle
-                        , "\" },\n"
-                        , "    scales: {\n"
-                        , "      yAxes: [{ ticks: { beginAtZero: true } }]\n"
-                        , "    }\n"
-                        , "  }\n"
-                        , "})}, 100);"
-                        ]
-            return $
-                HtmlPlot $
-                    wrapInHTML chartId jsCode (plotWidth config) (plotHeight config)
+mkBox :: [T.Text] -> Box
+mkBox ys = Box ys Nothing defaultSize
 
--- TODO: Move these helpers to a common module.
+box :: (HasCallStack) => Box -> DataFrame -> IO HtmlPlot
+box spec df = do
+    chartId <- generateChartId
+    boxData <- forM spec.y $ \col -> do
+        let vs = extractNumericColumn col df
+            sorted = L.sort vs
+            n = max 1 (length vs)
+            median = sorted !! (n `div` 2)
+        return (col, median)
+    let labels = T.intercalate "," ["\"" <> col <> "\"" | (col, _) <- boxData]
+        medians = T.intercalate "," [T.pack (show med) | (_, med) <- boxData]
+        chartTitle = case spec.title of
+            Just s -> s
+            Nothing -> "box plot of " <> T.intercalate ", " spec.y
+        jsCode =
+            T.concat
+                [ "setTimeout(function() { new Chart(\""
+                , chartId
+                , "\", {\n  type: \"bar\",\n  data: {\n    labels: ["
+                , labels
+                , "],\n    datasets: [{\n      label: \"Median\",\n      data: ["
+                , medians
+                , "],\n      backgroundColor: \"rgba(75, 192, 192, 0.6)\",\n      borderColor: \"rgba(75, 192, 192, 1)\",\n      borderWidth: 1\n    }]\n  },\n"
+                , "  options: { title: { display: true, text: \""
+                , chartTitle
+                , " (showing medians)\" }, scales: { yAxes: [{ ticks: { beginAtZero: true } }] } }\n})}, 100);"
+                ]
+    return $ HtmlPlot $ wrapInHTML chartId jsCode spec.size
 
-isNumericColumn :: DataFrame -> T.Text -> Bool
-isNumericColumn df colName = maybe False isNumeric (getColumn colName df)
+-- ---------------------------------------------------------------------------
+-- Whole-frame helpers
+-- ---------------------------------------------------------------------------
 
-isNumericColumnCheck :: T.Text -> DataFrame -> Bool
-isNumericColumnCheck colName df = isNumericColumn df colName
-
-extractStringColumn :: (HasCallStack) => T.Text -> DataFrame -> [T.Text]
-extractStringColumn colName df =
-    case M.lookup colName (columnIndices df) of
-        Nothing -> error $ "Column " ++ T.unpack colName ++ " not found"
-        Just idx ->
-            let col = columns df V.! idx
-             in case col of
-                    BoxedColumn _ (vec :: V.Vector a) -> case testEquality (typeRep @a) (typeRep @T.Text) of
-                        Just Refl -> V.toList vec
-                        Nothing -> V.toList $ V.map (T.pack . show) vec
-                    UnboxedColumn _ vec -> V.toList $ VG.map (T.pack . show) (VG.convert vec)
-
-extractNumericColumn :: (HasCallStack) => T.Text -> DataFrame -> [Double]
-extractNumericColumn colName df =
-    case M.lookup colName (columnIndices df) of
-        Nothing -> error $ "Column " ++ T.unpack colName ++ " not found"
-        Just idx ->
-            let col = columns df V.! idx
-             in case col of
-                    BoxedColumn _ vec -> vectorToDoubles vec
-                    UnboxedColumn _ vec -> unboxedVectorToDoubles vec
-
-vectorToDoubles :: forall a. (Columnable a, Show a) => V.Vector a -> [Double]
-vectorToDoubles vec =
-    case testEquality (typeRep @a) (typeRep @Double) of
-        Just Refl -> V.toList vec
-        Nothing -> case sIntegral @a of
-            STrue -> V.toList $ V.map fromIntegral vec
-            SFalse -> case sFloating @a of
-                STrue -> V.toList $ V.map realToFrac vec
-                SFalse -> error $ "Column is not numeric (type: " ++ show (typeRep @a) ++ ")"
-
-unboxedVectorToDoubles ::
-    forall a. (Columnable a, VU.Unbox a, Show a) => VU.Vector a -> [Double]
-unboxedVectorToDoubles vec =
-    case testEquality (typeRep @a) (typeRep @Double) of
-        Just Refl -> VU.toList vec
-        Nothing -> case sIntegral @a of
-            STrue -> VU.toList $ VU.map fromIntegral vec
-            SFalse -> case sFloating @a of
-                STrue -> VU.toList $ VU.map realToFrac vec
-                SFalse -> error $ "Column is not numeric (type: " ++ show (typeRep @a) ++ ")"
-
-getCategoricalCounts ::
-    (HasCallStack) => T.Text -> DataFrame -> Maybe [(T.Text, Double)]
-getCategoricalCounts colName df =
-    case M.lookup colName (columnIndices df) of
-        Nothing -> error $ "Column " ++ T.unpack colName ++ " not found"
-        Just idx ->
-            let col = columns df V.! idx
-             in case col of
-                    BoxedColumn _ (vec :: V.Vector a) ->
-                        Just (countBoxed (typeRep @a) vec)
-                    UnboxedColumn _ (vec :: VU.Vector a) ->
-                        Just (countUnboxed (typeRep @a) vec)
-  where
-    countBoxed ::
-        forall a. (Show a) => TypeRep a -> V.Vector a -> [(T.Text, Double)]
-    countBoxed tr vec
-        | Just Refl <- testEquality tr (typeRep @T.Text) = toPairsText $ countValues vec
-        | Just Refl <- testEquality tr (typeRep @String) = toPairs $ countValues vec
-        | Just Refl <- testEquality tr (typeRep @Integer) = toPairs $ countValues vec
-        | Just Refl <- testEquality tr (typeRep @Int) = toPairs $ countValues vec
-        | Just Refl <- testEquality tr (typeRep @Double) = toPairs $ countValues vec
-        | Just Refl <- testEquality tr (typeRep @Float) = toPairs $ countValues vec
-        | Just Refl <- testEquality tr (typeRep @Bool) = toPairs $ countValues vec
-        | Just Refl <- testEquality tr (typeRep @Char) = toPairs $ countValues vec
-        | otherwise = countByShow $ V.toList vec
-
-    countUnboxed ::
-        forall a. (Show a, VU.Unbox a) => TypeRep a -> VU.Vector a -> [(T.Text, Double)]
-    countUnboxed tr vec
-        | Just Refl <- testEquality tr (typeRep @Int) = toPairs $ countValuesUnboxed vec
-        | Just Refl <- testEquality tr (typeRep @Double) =
-            toPairs $ countValuesUnboxed vec
-        | Just Refl <- testEquality tr (typeRep @Float) =
-            toPairs $ countValuesUnboxed vec
-        | Just Refl <- testEquality tr (typeRep @Bool) =
-            toPairs $ countValuesUnboxed vec
-        | Just Refl <- testEquality tr (typeRep @Char) =
-            toPairs $ countValuesUnboxed vec
-        | Just Refl <- testEquality tr (typeRep @Word8) =
-            toPairs $ countValuesUnboxed vec
-        | otherwise = countByShow $ VU.toList vec
-
-    toPairs :: (Show a) => [(a, Int)] -> [(T.Text, Double)]
-    toPairs = map (\(k, v) -> (T.pack (show k), fromIntegral v))
-
-    toPairsText :: [(T.Text, Int)] -> [(T.Text, Double)]
-    toPairsText = map (Data.Bifunctor.second fromIntegral)
-
-    countValues :: (Ord a) => V.Vector a -> [(a, Int)]
-    countValues vec = M.toList $ V.foldr' (\x acc -> M.insertWith (+) x 1 acc) M.empty vec
-
-    countValuesUnboxed :: (Ord a, VU.Unbox a) => VU.Vector a -> [(a, Int)]
-    countValuesUnboxed vec = M.toList $ VU.foldr' (\x acc -> M.insertWith (+) x 1 acc) M.empty vec
-
-    countByShow :: (Show a) => [a] -> [(T.Text, Double)]
-    countByShow xs =
-        map (Data.Bifunctor.bimap T.pack fromIntegral) $
-            M.toList $
-                L.foldl' (\acc x -> M.insertWith (+) (show x) (1 :: Int) acc) M.empty xs
-
-groupWithOther :: Int -> [(T.Text, Double)] -> [(T.Text, Double)]
-groupWithOther n items =
-    let sorted = L.sortOn (negate . snd) items
-        (topN, rest) = splitAt n sorted
-        otherSum = sum (map snd rest)
-        result =
-            if null rest || otherSum == 0
-                then topN
-                else topN ++ [("Other (" <> T.pack (show (length rest)) <> " items)", otherSum)]
-     in result
-
-groupWithOtherForPie :: Int -> [(T.Text, Double)] -> [(T.Text, Double)]
-groupWithOtherForPie n items =
-    let total = sum (map snd items)
-        sorted = L.sortOn (negate . snd) items
-        (topN, rest) = splitAt n sorted
-        otherSum = sum (map snd rest)
-        otherPct = round (100 * otherSum / total) :: Int
-        result =
-            if null rest || otherSum == 0
-                then topN
-                else
-                    topN
-                        ++ [
-                               ( "Other ("
-                                    <> T.pack (show (length rest))
-                                    <> " items, "
-                                    <> T.pack (show otherPct)
-                                    <> "%)"
-                               , otherSum
-                               )
-                           ]
-     in result
-
-plotBarsTopN :: (HasCallStack) => Int -> T.Text -> DataFrame -> IO HtmlPlot
-plotBarsTopN n colName = plotBarsTopNWith n colName (defaultPlotConfig Bar)
-
-plotBarsTopNWith ::
-    (HasCallStack) => Int -> T.Text -> PlotConfig -> DataFrame -> IO HtmlPlot
-plotBarsTopNWith n colName config df = do
-    let config' = config{plotTitle = plotTitle config <> " (Top " <> T.pack (show n) <> ")"}
-    plotBarsWith colName Nothing config' df
-
-plotValueCounts :: (HasCallStack) => T.Text -> DataFrame -> IO HtmlPlot
-plotValueCounts colName = plotValueCountsWith colName 10 (defaultPlotConfig Bar)
-
-plotValueCountsWith ::
-    (HasCallStack) => T.Text -> Int -> PlotConfig -> DataFrame -> IO HtmlPlot
-plotValueCountsWith colName maxBars config df = do
-    let config' = config{plotTitle = "Value counts for " <> colName}
-    plotBarsTopNWith maxBars colName config' df
-
-plotAllHistograms :: (HasCallStack) => DataFrame -> IO HtmlPlot
-plotAllHistograms df = do
-    let numericCols = filter (isNumericColumn df) (columnNames df)
-    xs <- forM numericCols $ \col -> do
-        plotHistogram col df
+{- | Concatenate a histogram for every numeric column in the frame. Useful
+as a one-shot exploratory summary.
+-}
+allHistograms :: (HasCallStack) => DataFrame -> IO HtmlPlot
+allHistograms df = do
+    let cols = filter (isNumericColumn df) (columnNames df)
+    xs <- forM cols $ \c -> histogram (mkHistogram c) df
     let allPlots = L.foldl' (\acc (HtmlPlot contents) -> acc <> "\n" <> contents) "" xs
     return (HtmlPlot allPlots)
 
-plotCategoricalSummary :: (HasCallStack) => DataFrame -> IO HtmlPlot
-plotCategoricalSummary df = do
-    let cols = columnNames df
-    xs <- forM cols $ \col -> do
-        let counts = getCategoricalCounts col df
-        case counts of
-            Just c -> do
-                if length c > 1
-                    then
-                        ( do
-                            let numUnique = length c
-                            putStrLn $
-                                "\n<!-- " ++ T.unpack col ++ " (" ++ show numUnique ++ " unique values) -->"
-                            if numUnique > 15 then plotBarsTopN 10 col df else plotBars col df
-                        )
-                    else return (HtmlPlot "")
-            Nothing -> return (HtmlPlot "")
-    let allPlots = L.foldl' (\acc (HtmlPlot contents) -> acc <> "\n" <> contents) "" xs
-    return (HtmlPlot allPlots)
+-- ---------------------------------------------------------------------------
+-- Title helper
+-- ---------------------------------------------------------------------------
 
-plotBarsWithPercentages :: (HasCallStack) => T.Text -> DataFrame -> IO HtmlPlot
-plotBarsWithPercentages colName df = do
-    let config = (defaultPlotConfig Bar){plotTitle = "Distribution of " <> colName}
-    plotBarsWith colName Nothing config df
+autoTitle :: Agg -> Maybe T.Text -> T.Text -> T.Text
+autoTitle Count _ groupCol = "count by " <> groupCol
+autoTitle a (Just yCol) groupCol = aggLabel a <> "(" <> yCol <> ") by " <> groupCol
+autoTitle a Nothing groupCol = aggLabel a <> " by " <> groupCol
 
-smartPlotBars :: (HasCallStack) => T.Text -> DataFrame -> IO HtmlPlot
-smartPlotBars colName df = do
-    let counts = getCategoricalCounts colName df
-    case counts of
-        Just c -> do
-            let numUnique = length c
-                config =
-                    (defaultPlotConfig Bar)
-                        { plotTitle = colName <> " (" <> T.pack (show numUnique) <> " unique values)"
-                        }
-            if numUnique <= 12
-                then plotBarsWith colName Nothing config df
-                else plotBarsTopNWith 10 colName config df
-        Nothing -> plotBars colName df
+-- ---------------------------------------------------------------------------
+-- Deprecated legacy entry points
+-- ---------------------------------------------------------------------------
+
+plotHistogram :: (HasCallStack) => T.Text -> DataFrame -> IO HtmlPlot
+plotHistogram c = histogram (mkHistogram c)
+{-# DEPRECATED plotHistogram "use 'histogram (mkHistogram col)' instead" #-}
+
+plotScatter :: (HasCallStack) => T.Text -> T.Text -> DataFrame -> IO HtmlPlot
+plotScatter xc yc = scatter (mkScatter xc yc)
+{-# DEPRECATED plotScatter "use 'scatter (mkScatter xCol yCol)' instead" #-}
+
+plotBars :: (HasCallStack) => T.Text -> DataFrame -> IO HtmlPlot
+plotBars c = bar (mkBar c)
+{-# DEPRECATED plotBars "use 'bar (mkBar col)' instead" #-}
+
+plotLines :: (HasCallStack) => T.Text -> [T.Text] -> DataFrame -> IO HtmlPlot
+plotLines xc ys = line (mkLine xc ys)
+{-# DEPRECATED plotLines "use 'line (mkLine xCol yCols)' instead" #-}
+
+plotPie :: (HasCallStack) => T.Text -> Maybe T.Text -> DataFrame -> IO HtmlPlot
+plotPie c mLabel =
+    let s = mkPie c
+     in pie s{names = mLabel}
+{-# DEPRECATED plotPie "use 'pie (mkPie col)' instead" #-}
+
+plotBoxPlots :: (HasCallStack) => [T.Text] -> DataFrame -> IO HtmlPlot
+plotBoxPlots ys = box (mkBox ys)
+{-# DEPRECATED plotBoxPlots "use 'box (mkBox cols)' instead" #-}
+
+-- ---------------------------------------------------------------------------
+-- Browser launcher
+-- ---------------------------------------------------------------------------
 
 showInDefaultBrowser :: HtmlPlot -> IO ()
 showInDefaultBrowser (HtmlPlot p) = do
     plotId <- generateChartId
     home <- getHomeDirectory
-    let operatingSystem = os
     let path = "plot-" <> T.unpack plotId <> ".html"
-
-    let fullPath =
-            if operatingSystem == "mingw32"
+        fullPath =
+            if os == "mingw32"
                 then home <> "\\" <> path
                 else home <> "/" <> path
     putStr "Saving plot to: "
     putStrLn fullPath
     T.writeFile fullPath p
-    case operatingSystem of
+    case os of
         "mingw32" -> openFileSilently "start" fullPath
         "darwin" -> openFileSilently "open" fullPath
         _ -> openFileSilently "xdg-open" fullPath
-    pure ()
 
 openFileSilently :: FilePath -> FilePath -> IO ()
 openFileSilently program path = do
