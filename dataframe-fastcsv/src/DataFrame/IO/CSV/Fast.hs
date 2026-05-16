@@ -277,21 +277,21 @@ readSeparatedFromMVec separator opts mutableFile len = do
                             parseTypes (columnNames Vector.! col) $
                                 Vector.generate numRow $ \i ->
                                     extractAt (dataRows VS.! i) col
-                        columns =
+                        cols =
                             Vector.fromListN
                                 numCol
                                 ( map generateColumn [0 .. numCol - 1]
                                     `using` parList rpar
                                 )
-                        columnIndices =
+                        colIndices =
                             M.fromList $
                                 zip (Vector.toList columnNames) [0 ..]
-                        dataframeDimensions = (numRow, numCol)
+                        dfDims = (numRow, numCol)
                     let rawDf =
                             DataFrame
-                                columns
-                                columnIndices
-                                dataframeDimensions
+                                cols
+                                colIndices
+                                dfDims
                                 M.empty
                         schemaMap = schemaTypeMap (typeSpec opts)
                         resolveMode =

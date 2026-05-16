@@ -1,0 +1,15 @@
+packages:
+    .
+    dataframe-core
+    dataframe-parsing
+    dataframe-operations
+    dataframe-csv
+    dataframe-csv-th
+    dataframe-json
+    dataframe-parquet
+    dataframe-parquet-th
+    dataframe-th
+    dataframe-viz
+    dataframe-learn
+    dataframe-lazy
+    dataframe-fastcsv
