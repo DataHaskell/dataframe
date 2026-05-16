@@ -338,7 +338,6 @@ test-suite tests
                     dataframe-operations ^>= 1.0,
                     dataframe-parquet ^>= 1.0,
                     dataframe-parsing ^>= 1.0,
-                    dataframe-th ^>= 1.0,
                     HUnit ^>= 1.6,
                     QuickCheck >= 2 && < 3,
                     random-shuffle >= 0.0.4 && < 1,
