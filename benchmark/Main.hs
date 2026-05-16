@@ -1,16 +1,27 @@
 {-# LANGUAGE NumericUnderscores #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeApplications #-}
+{-# OPTIONS_GHC -fno-warn-orphans #-}
 
 import qualified DataFrame as D
 import qualified DataFrame.Functions as F
 
+import Control.DeepSeq (NFData (..))
 import Control.Monad (void)
 import Criterion.Main
+import DataFrame.Internal.DataFrame (forceDataFrame)
 import DataFrame.Operations.Join
 import DataFrame.Operators
 import System.Process hiding (env)
 import System.Random.Stateful
+
+{- | Criterion's 'nf' and 'env' force benchmark inputs/results to normal form
+via 'NFData'. The core library intentionally dropped its @instance NFData
+DataFrame@ in favour of 'forceDataFrame', so we provide a thin orphan here
+(scoped to the benchmark) that reuses it.
+-}
+instance NFData D.DataFrame where
+    rnf df = forceDataFrame df `seq` ()
 
 haskell :: IO ()
 haskell = do
