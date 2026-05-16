@@ -40,8 +40,28 @@ common warnings
         -Wunused-local-binds
         -Wunused-packages
 
+-- Mirror the meta-package's opt-out flags. dataframe-fusion depends on
+-- `dataframe:arrow-bridge`, which sets `buildable: False` when either CSV
+-- or Parquet is disabled, so the library has to disappear in lockstep.
+-- Pass the matching flag (e.g. `--constraint="dataframe-fusion +no-csv"`)
+-- when building the meta package with `--flags="no-csv"` against the full
+-- cabal.project.
+flag no-csv
+    default:     False
+    manual:      True
+    description: Skip building dataframe-fusion when the meta package's
+                 CSV backend is disabled.
+
+flag no-parquet
+    default:     False
+    manual:      True
+    description: Skip building dataframe-fusion when the meta package's
+                 Parquet backend is disabled.
+
 library
     import: warnings
+    if flag(no-csv) || flag(no-parquet)
+        buildable: False
     exposed-modules:  DataFrame.Fusion.FFI
                       DataFrame.Fusion.Plan
                       DataFrame.Fusion.Typed
@@ -68,6 +88,8 @@ test-suite tests
     import: warnings
     type: exitcode-stdio-1.0
     main-is: Main.hs
+    if flag(no-csv) || flag(no-parquet)
+        buildable: False
     build-depends:    base       >= 4    && < 5,
                       dataframe  >= 1 && < 3,
                       dataframe-core ^>= 1.0,

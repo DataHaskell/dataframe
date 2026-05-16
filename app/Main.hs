@@ -108,7 +108,7 @@ ensureBoilerplate projectFile cabalFile mainFile = do
             , "  main-is:          Main.hs"
             , "  hs-source-dirs:   ."
             , "  default-language: Haskell2010"
-            , "  build-depends:    base, dataframe, text, time, random"
+            , "  build-depends:    base, dataframe, text, time, random, dataframe-core, dataframe-operations, dataframe-csv, dataframe-parquet, dataframe-json, dataframe-th, dataframe-csv-th, dataframe-parquet-th, dataframe-viz, dataframe-lazy, dataframe-parsing"
             ]
 
     writeIfMissing

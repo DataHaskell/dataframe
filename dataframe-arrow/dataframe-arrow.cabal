@@ -30,8 +30,28 @@ common warnings
         -Wunused-local-binds
         -Wunused-packages
 
+-- Mirror the meta-package's opt-out flags so the foreign library disappears
+-- in lockstep with `dataframe:arrow-bridge`, which sets `buildable: False`
+-- under the same conditions. Pass the matching flag to dataframe-arrow
+-- (e.g. `--constraint="dataframe-arrow +no-csv"`) when building the meta
+-- package with `--flags="no-csv"` against the full cabal.project.
+flag no-csv
+    default:     False
+    manual:      True
+    description: Skip building dataframe-arrow when the meta package's
+                 CSV backend is disabled (arrow-bridge becomes unbuildable).
+
+flag no-parquet
+    default:     False
+    manual:      True
+    description: Skip building dataframe-arrow when the meta package's
+                 Parquet backend is disabled (arrow-bridge becomes
+                 unbuildable).
+
 foreign-library dataframe-arrow
     import: warnings
+    if flag(no-csv) || flag(no-parquet)
+        buildable: False
     type:             native-shared
     hs-source-dirs:   ffi-export
     other-modules:    DataFrame.FFI

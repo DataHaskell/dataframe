@@ -1,6 +1,6 @@
 cabal-version:      3.0
 name:               dataframe
-version:            2.0.0.0
+version:            2.1.0.0
 
 synopsis: A fast, safe, and intuitive DataFrame library.
 
@@ -74,6 +74,49 @@ library
     ghc-options: -Werror=unused-packages
     exposed-modules: DataFrame,
                     DataFrame.Typed
+    reexported-modules: DataFrame.Functions,
+                        DataFrame.Synthesis,
+                        DataFrame.Display.Web.Plot,
+                        DataFrame.Internal.Types,
+                        DataFrame.Internal.Expression,
+                        DataFrame.Internal.Grouping,
+                        DataFrame.Internal.Interpreter,
+                        DataFrame.Internal.Nullable,
+                        DataFrame.Internal.Parsing,
+                        DataFrame.Internal.Column,
+                        DataFrame.Internal.Binary,
+                        DataFrame.Internal.Statistics,
+                        DataFrame.Display.Terminal.PrettyPrint,
+                        DataFrame.Display.Terminal.Colours,
+                        DataFrame.Internal.DataFrame,
+                        DataFrame.Internal.Row,
+                        DataFrame.Internal.Schema,
+                        DataFrame.Errors,
+                        DataFrame.Operations.Core,
+                        DataFrame.Operations.Join,
+                        DataFrame.Operations.Merge,
+                        DataFrame.Operators,
+                        DataFrame.Operations.Permutation,
+                        DataFrame.Operations.Subset,
+                        DataFrame.Operations.Statistics,
+                        DataFrame.Operations.Transformations,
+                        DataFrame.Operations.Typing,
+                        DataFrame.Operations.Aggregation,
+                        DataFrame.Display,
+                        DataFrame.Display.Terminal.Plot,
+                        DataFrame.Monad,
+                        DataFrame.DecisionTree,
+                        DataFrame.IO.JSON,
+                        DataFrame.Typed.Types,
+                        DataFrame.Typed.Schema,
+                        DataFrame.Typed.Freeze,
+                        DataFrame.Typed.Access,
+                        DataFrame.Typed.Operations,
+                        DataFrame.Typed.Join,
+                        DataFrame.Typed.Aggregate,
+                        DataFrame.Typed.Expr,
+                        DataFrame.Typed.Record,
+                        DataFrame.Typed.Generic
     build-depends:    base >= 4 && <5,
                       dataframe-core ^>= 1.0,
                       dataframe-json ^>= 1.0,
@@ -83,16 +126,39 @@ library
                       dataframe-learn ^>= 1.0
 
     if !flag(no-csv)
+        reexported-modules: DataFrame.IO.CSV
         build-depends:   dataframe-csv ^>= 1.0
         cpp-options:     -DWITH_CSV
 
     if !flag(no-parquet)
+        reexported-modules: DataFrame.IO.Parquet,
+                            DataFrame.IO.Parquet.Binary,
+                            DataFrame.IO.Parquet.Dictionary,
+                            DataFrame.IO.Parquet.Levels,
+                            DataFrame.IO.Parquet.Thrift,
+                            DataFrame.IO.Parquet.Decompress,
+                            DataFrame.IO.Parquet.Encoding,
+                            DataFrame.IO.Parquet.Page,
+                            DataFrame.IO.Parquet.Schema,
+                            DataFrame.IO.Parquet.Utils,
+                            DataFrame.IO.Parquet.Seeking,
+                            DataFrame.IO.Parquet.Time,
+                            DataFrame.IO.Utils.RandomAccess
         build-depends:   dataframe-parquet ^>= 1.0
         cpp-options:     -DWITH_PARQUET
 
     -- The lazy executor calls both CSV and Parquet readers directly, so
     -- it can only be pulled in when both backends are present.
     if !flag(no-csv) && !flag(no-parquet)
+        reexported-modules: DataFrame.Lazy,
+                            DataFrame.Lazy.IO.Binary,
+                            DataFrame.Lazy.IO.CSV,
+                            DataFrame.Lazy.Internal.DataFrame,
+                            DataFrame.Lazy.Internal.LogicalPlan,
+                            DataFrame.Lazy.Internal.PhysicalPlan,
+                            DataFrame.Lazy.Internal.Optimizer,
+                            DataFrame.Lazy.Internal.Executor,
+                            DataFrame.Typed.Lazy
         build-depends:   dataframe-lazy ^>= 1.0
         cpp-options:     -DWITH_LAZY
 
@@ -196,7 +262,6 @@ executable lazy-bench
                       dataframe >= 1 && < 3,
                       dataframe-core ^>= 1.0,
                       dataframe-lazy ^>= 1.0,
-                      dataframe-operations ^>= 1.0,
                       dataframe-parsing ^>= 1.0,
                       directory >= 1.3.0.0 && < 2,
                       random >= 1 && < 2,
