@@ -8,10 +8,10 @@ module DataFrame.Hasktorch (
 import qualified Data.Vector as V
 import qualified Data.Vector.Unboxed as VU
 import qualified Data.Vector.Unboxed.Mutable as VUM
-import qualified DataFrame as D
+import qualified DataFrame.Operations.Core as D
 
 import Control.Exception (throw)
-import DataFrame (DataFrame)
+import DataFrame.Internal.DataFrame (DataFrame)
 import Torch
 
 {- | Converts a dataframe to a floating-point tensor.
