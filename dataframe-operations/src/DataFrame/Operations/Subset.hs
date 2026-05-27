@@ -370,6 +370,19 @@ selectBy xs df = select finalSelection df
       where
         ixs = V.ifoldl' (\acc' i c -> if f c then i : acc' else acc') [] (columns df)
 
+{- | O(k * n) select rows by index
+
+> selectRows [0, 2, 4] df
+-}
+selectRows :: [Int] -> DataFrame -> DataFrame
+selectRows ixs df =
+    df
+        { columns = V.map (atIndicesStable ixs') (columns df)
+        , dataframeDimensions = (VU.length ixs', snd (dataframeDimensions df))
+        }
+  where
+    ixs' = VU.fromList ixs
+
 {- | O(n) inverse of select
 
 > exclude ["Name"] df
