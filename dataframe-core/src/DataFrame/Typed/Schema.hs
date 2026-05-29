@@ -44,6 +44,7 @@ module DataFrame.Typed.Schema (
     LeftJoinSchema,
     RightJoinSchema,
     FullOuterJoinSchema,
+    ToMaybe,
     WrapMaybe,
     WrapMaybeColumns,
     CollidingColumns,
@@ -280,10 +281,14 @@ type family
     UniqueLeftHelper 'True n a rest rn = UniqueLeft rest rn
     UniqueLeftHelper 'False n a rest rn = Column n a ': UniqueLeft rest rn
 
--- | Wrap column types in Maybe.
+type family ToMaybe (a :: Type) :: Type where
+    ToMaybe (Maybe a) = Maybe a
+    ToMaybe a = Maybe a
+
+-- | Wrap column types in Maybe; idempotent on already-optional columns.
 type family WrapMaybe (cols :: [Type]) :: [Type] where
     WrapMaybe '[] = '[]
-    WrapMaybe (Column n a ': rest) = Column n (Maybe a) ': WrapMaybe rest
+    WrapMaybe (Column n a ': rest) = Column n (ToMaybe a) ': WrapMaybe rest
 
 -- | Wrap selected columns in Maybe by name list.
 type family WrapMaybeColumns (names :: [Symbol]) (cols :: [Type]) :: [Type] where
@@ -301,7 +306,7 @@ type family
         [Type]
     where
     WrapMaybeColumnsHelper 'True n a names rest =
-        Column n (Maybe a) ': WrapMaybeColumns names rest
+        Column n (ToMaybe a) ': WrapMaybeColumns names rest
     WrapMaybeColumnsHelper 'False n a names rest =
         Column n a ': WrapMaybeColumns names rest
 
