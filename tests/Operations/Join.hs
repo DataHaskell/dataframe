@@ -127,12 +127,14 @@ dfOptional =
         , ("C", D.fromList [Just 10 :: Maybe Int, Just 11])
         ]
 
-tdfOptional :: DT.TypedDataFrame [DT.Column "key" Text, DT.Column "C" (Maybe Int)]
+tdfOptional ::
+    DT.TypedDataFrame [DT.Column "key" Text, DT.Column "C" (Maybe Int)]
 tdfOptional = either (error . show) id (DT.freezeWithError dfOptional)
 
--- | A left join over an already-optional column must not nest the Maybe: the
--- explicit @Maybe Int@ result schema below only type-checks because 'WrapMaybe'
--- flattens @Maybe (Maybe Int)@ to @Maybe Int@, matching the runtime column.
+{- | A left join over an already-optional column must not nest the Maybe: the
+explicit @Maybe Int@ result schema below only type-checks because 'WrapMaybe'
+flattens @Maybe (Maybe Int)@ to @Maybe Int@, matching the runtime column.
+-}
 testLeftJoinTypedOptional :: Test
 testLeftJoinTypedOptional =
     TestCase
@@ -141,13 +143,19 @@ testLeftJoinTypedOptional =
             ( D.fromNamedColumns
                 [ ("key", D.fromList ["K0" :: Text, "K1", "K2", "K3", "K4", "K5"])
                 , ("A", D.fromList ["A0" :: Text, "A1", "A2", "A3", "A4", "A5"])
-                , ("C", D.fromList ([Just 10, Just 11, Nothing, Nothing, Nothing, Nothing] :: [Maybe Int]))
+                ,
+                    ( "C"
+                    , D.fromList
+                        ([Just 10, Just 11, Nothing, Nothing, Nothing, Nothing] :: [Maybe Int])
+                    )
                 ]
             )
             (DT.thaw $ DT.sortBy [DT.asc (DT.col @"key")] joined)
         )
   where
-    joined :: DT.TypedDataFrame [DT.Column "key" Text, DT.Column "A" Text, DT.Column "C" (Maybe Int)]
+    joined ::
+        DT.TypedDataFrame
+            [DT.Column "key" Text, DT.Column "A" Text, DT.Column "C" (Maybe Int)]
     joined = DT.leftJoin @'["key"] tdf1 tdfOptional
 
 testRightJoinTyped :: Test

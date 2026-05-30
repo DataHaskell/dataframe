@@ -128,6 +128,7 @@ import Data.Either (fromRight)
 import Data.Proxy (Proxy (..))
 import Data.String (IsString (..))
 import qualified Data.Text as T
+import GHC.OverloadedLabels (IsLabel (..))
 import GHC.TypeLits (KnownSymbol, Symbol, symbolVal)
 
 import qualified DataFrame.Functions as F
@@ -185,6 +186,23 @@ col ::
     ) =>
     TExpr cols a
 col = TExpr (Col (T.pack (symbolVal (Proxy @name))))
+
+{- | Use a column name as an @OverloadedLabels@ label: @#age@ is sugar for
+@col \@\"age\"@. Enable @OverloadedLabels@ at the use site.
+
+@
+adults = filterWhere (#age .>=. lit 18) people
+@
+-}
+instance
+    ( KnownSymbol name
+    , a ~ SafeLookup name cols
+    , Columnable a
+    , AssertPresent name cols
+    ) =>
+    IsLabel name (TExpr cols a)
+    where
+    fromLabel = col @name
 
 {- | Create a literal expression. Valid for any schema since it
 references no columns.

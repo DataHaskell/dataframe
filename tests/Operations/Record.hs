@@ -3,6 +3,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE OverloadedLabels #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TemplateHaskell #-}
@@ -336,9 +337,23 @@ deriveSchemaAccessorDerive = TestCase $ do
         [20.0, 40.0]
         (D.columnAsList (D.col @Double "double_amount") df')
 
+labelColumnFilter :: Test
+labelColumnFilter = TestCase $ do
+    let df :: DT.TypedDataFrame OrderSchema
+        df = DT.fromRecordsTyped orderSample
+        usOnly = DT.filterWhere (#region DT..==. "us") df
+    case DT.toRecordsTyped usOnly of
+        Left e -> assertFailure (T.unpack e)
+        Right xs ->
+            assertEqual
+                "#region OverloadedLabel resolves to col @\"region\""
+                [Order 1 "us" 10.0]
+                xs
+
 tests :: [Test]
 tests =
     [ TestLabel "basicTypedRoundTrip" basicTypedRoundTrip
+    , TestLabel "labelColumnFilter" labelColumnFilter
     , TestLabel "basicUntypedRoundTrip" basicUntypedRoundTrip
     , TestLabel "emptyRoundTrip" emptyRoundTrip
     , TestLabel "nullableRoundTrip" nullableRoundTrip
