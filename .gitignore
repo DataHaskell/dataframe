@@ -9,6 +9,7 @@ cabal-dev
 *.dyn_o
 *.dyn_hi
 .hpc
+*.tix
 .hsenv
 .cabal-sandbox/
 cabal.sandbox.config
@@ -39,3 +40,9 @@ Cargo.lock
 *.dylib
 *.so
 *.dll
+
+# SQLite sidecar files left by WAL/rollback-journal mode when a .db is opened
+# (transient; the committed *.db fixtures themselves stay tracked).
+*.db-wal
+*.db-shm
+*.db-journal

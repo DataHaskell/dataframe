@@ -43,16 +43,11 @@ import DataFrame.IO.Persistent.Read
 import Data.Function ((&))
 ```
 
-> <!-- scripths:mime text/plain -->
-
 What tables are in this database?
 
 ```haskell
 listTables "./data/chinook.db"
 ```
-
-> <!-- scripths:mime text/plain -->
-> ["albums","artists","customers","employees","genres","invoice_items","invoices","media_types","playlist_track","playlists","tracks"]
 
 `describeTable` shows a table's columns and their inferred types before you load it (it returns a
 `describeColumns`-style `DataFrame`):
@@ -61,26 +56,11 @@ listTables "./data/chinook.db"
 D.toMarkdown' <$> describeTable "./data/chinook.db" "artists"
 ```
 
-> <!-- scripths:mime text/plain -->
-> | Column Name<br>Text | Type<br>Text | SQLite Type<br>Text | Nullable<br>Bool | Primary Key<br>Bool |
-> | --------------------|--------------|---------------------|------------------|-------------------- |
-> | ArtistId            | Int          | INTEGER             | False            | True                |
-> | Name                | Maybe Text   | NVARCHAR(120)       | True             | False               |
-
 Load the whole table. The column types (and nullability) come from the schema:
 
 ```haskell
 D.toMarkdown' . D.take 5 <$> readTable "./data/chinook.db" "artists"
 ```
-
-> <!-- scripths:mime text/plain -->
-> | ArtistId<br>Int |    Name<br>Maybe Text    |
-> | ----------------|------------------------- |
-> | 1               | Just "AC/DC"             |
-> | 2               | Just "Accept"            |
-> | 3               | Just "Aerosmith"         |
-> | 4               | Just "Alanis Morissette" |
-> | 5               | Just "Alice In Chains"   |
 
 Tables larger than memory? Filter them in the database. Raw SQL works as you'd expect:
 
@@ -88,27 +68,11 @@ Tables larger than memory? Filter them in the database. Raw SQL works as you'd e
 D.toMarkdown' <$> readSql "./data/chinook.db" "SELECT * FROM artists WHERE Name LIKE 'A%' LIMIT 5"
 ```
 
-> <!-- scripths:mime text/plain -->
-> | ArtistId<br>Int |   Name<br>Text    |
-> | ----------------|------------------ |
-> | 1               | AC/DC             |
-> | 2               | Accept            |
-> | 3               | Aerosmith         |
-> | 4               | Alanis Morissette |
-> | 5               | Alice In Chains   |
-
 Or push a `WHERE` / `LIMIT` down to a named table with a `ReadQuery` value:
 
 ```haskell
 D.toMarkdown' <$> readTableWith "./data/chinook.db" "artists" (allRows & limit 3)
 ```
-
-> <!-- scripths:mime text/plain -->
-> | ArtistId<br>Int | Name<br>Maybe Text |
-> | ----------------|------------------- |
-> | 1               | Just "AC/DC"       |
-> | 2               | Just "Accept"      |
-> | 3               | Just "Aerosmith"   |
 
 ## Tier 1: typed schema
 
@@ -123,16 +87,12 @@ import DataFrame.Typed ((.==.))
 import DataFrame.IO.Persistent.Schema (declareTable)
 ```
 
-> <!-- scripths:mime text/plain -->
-
 The splice brings one thing into scope, the type
 `type ArtistsSchema = '[Column "ArtistId" Int, Column "Name" (Maybe Text)]`:
 
 ```haskell
 $(declareTable "./data/chinook.db" "artists")
 ```
-
-> <!-- scripths:mime text/plain -->
 
 `readTableTyped @ArtistsSchema` reads any database/table into a `TypedDataFrame ArtistsSchema` (it
 validates the schema as it reads). You can bind your own reader:
@@ -141,22 +101,11 @@ validates the schema as it reads). You can bind your own reader:
 artists = readTableTyped @ArtistsSchema "./data/chinook.db" "artists"
 ```
 
-> <!-- scripths:mime text/plain -->
-
 `thaw` drops a typed frame back to an untyped `DataFrame`:
 
 ```haskell
 D.toMarkdown' . D.take 5 . DT.thaw <$> artists
 ```
-
-> <!-- scripths:mime text/plain -->
-> | ArtistId<br>Int |    Name<br>Maybe Text    |
-> | ----------------|------------------------- |
-> | 1               | Just "AC/DC"             |
-> | 2               | Just "Accept"            |
-> | 3               | Just "Aerosmith"         |
-> | 4               | Just "Alanis Morissette" |
-> | 5               | Just "Alice In Chains"   |
 
 Column access is checked against the schema. `col @"Name"` only compiles because `"Name"` is a
 column of `ArtistsSchema` (its element type is `Maybe Text`):
@@ -165,20 +114,12 @@ column of `ArtistsSchema` (its element type is `Maybe Text`):
 DT.columnAsList @"Name" . DT.take 3 <$> artists
 ```
 
-> <!-- scripths:mime text/plain -->
-> [Just "AC/DC",Just "Accept",Just "Aerosmith"]
-
 A filter on a column that doesn't exist (or has the wrong type) is a compile error rather than a
 runtime surprise:
 
 ```haskell
 D.toMarkdown' . DT.thaw . DT.filterWhere (DT.col @"Name" .==. DT.lit (Just "Accept")) <$> artists
 ```
-
-> <!-- scripths:mime text/plain -->
-> | ArtistId<br>Int | Name<br>Maybe Text |
-> | ----------------|------------------- |
-> | 2               | Just "Accept"      |
 
 Because the database is a value, reading the same table from two sources to join them is just two
 calls with the same `@ArtistsSchema`:
@@ -210,16 +151,12 @@ import Database.Persist.Sqlite (runSqlite)
 import DataFrame.IO.Persistent.Schema (declareEntity)
 ```
 
-> <!-- scripths:mime text/plain -->
-
 This generates the `Albums` entity (`Id`, `title`, `artistId`), bound to the real
 `albums` / `AlbumId` / `Title` / `ArtistId` SQLite names, plus its `EntityField` constructors:
 
 ```haskell
 $(declareEntity "./data/chinook.db" "albums")
 ```
-
-> <!-- scripths:mime text/plain -->
 
 Now load it with `selectToDataFrame`. It's a generic loader: it works for any `persistent` entity,
 so the one `declareEntity` splice is all the boilerplate.
@@ -244,12 +181,6 @@ Find AC/DC's albums (`ArtistId` 1):
 D.toMarkdown' <$> runSqlite "./data/chinook.db" (selectToDataFrame [AlbumsArtistId ==. 1] [])
 ```
 
-> <!-- scripths:mime text/plain -->
-> | id<br>Int |             title<br>Text             | artistId<br>Int |
-> | ----------|---------------------------------------|---------------- |
-> | 1         | For Those About To Rock We Salute You | 1               |
-> | 4         | Let There Be Rock                     | 1               |
-
 You can use both arguments together: filter and order/page in one query. Here are the albums by
 AC/DC or Alanis Morissette (`ArtistId` 1 or 4), sorted by title, capped at 5. (`<-.` is persistent's
 "field in list"; an empty filter list loads everything.)
@@ -258,13 +189,6 @@ AC/DC or Alanis Morissette (`ArtistId` 1 or 4), sorted by title, capped at 5. (`
 D.toMarkdown' <$> runSqlite "./data/chinook.db"
     (selectToDataFrame [AlbumsArtistId <-. [1, 4]] [Asc AlbumsTitle, LimitTo 5])
 ```
-
-> <!-- scripths:mime text/plain -->
-> | id<br>Int |             title<br>Text             | artistId<br>Int |
-> | ----------|---------------------------------------|---------------- |
-> | 1         | For Those About To Rock We Salute You | 1               |
-> | 6         | Jagged Little Pill                    | 4               |
-> | 4         | Let There Be Rock                     | 1               |
 
 ## Hand-off between dataframe and persistent
 
@@ -278,9 +202,6 @@ runSqlite "./data/chinook.db" $ do
     albums  <- selectToDataFrame ([] :: [Filter Albums]) []  -- entity → DataFrame
     pure (D.dimensions artists, D.dimensions albums)
 ```
-
-> <!-- scripths:mime text/plain -->
-> ((275,2),(347,3))
 
 ## PostgreSQL (and other backends)
 
@@ -299,9 +220,6 @@ section.
 :! bash scripts/pg-setup.sh
 ```
 
-> <!-- scripths:mime text/plain -->
-> postgres ready on port 54329 (db chinook: artists + albums)
-
 Open a connection (you supply `persistent-postgresql`; `runPg` is the usual `runSqlConn` wrapper):
 
 ```haskell
@@ -317,39 +235,19 @@ runPg act =
     runNoLoggingT (runResourceT (withPostgresqlConn "host=localhost port=54329 dbname=chinook user=postgres" (runSqlConn act)))
 ```
 
-> <!-- scripths:mime text/plain -->
-
 Discovery and reads use the same functions as SQLite, just `...Conn` wrapped in `runPg`:
 
 ```haskell
 runPg listTablesConn
 ```
 
-> <!-- scripths:mime text/plain -->
-> ["albums","artists"]
-
 ```haskell
 D.toMarkdown' <$> runPg (describeTableConn "artists")
 ```
 
-> <!-- scripths:mime text/plain -->
-> | Column Name<br>Text | Type<br>Text | SQLite Type<br>Text | Nullable<br>Bool | Primary Key<br>Bool |
-> | --------------------|--------------|---------------------|------------------|-------------------- |
-> | ArtistId            | Int          | integer             | False            | True                |
-> | Name                | Maybe Text   | text                | True             | False               |
-
 ```haskell
 D.toMarkdown' . D.take 5 <$> runPg (readTableConn "artists")
 ```
-
-> <!-- scripths:mime text/plain -->
-> | ArtistId<br>Int |    Name<br>Maybe Text    |
-> | ----------------|------------------------- |
-> | 1               | Just "AC/DC"             |
-> | 2               | Just "Accept"            |
-> | 3               | Just "Aerosmith"         |
-> | 4               | Just "Alanis Morissette" |
-> | 5               | Just "Alice In Chains"   |
 
 The typed reader is backend-agnostic too. The same `ArtistsSchema` generated from the SQLite file in
 Tier 1 validates this PostgreSQL read, so it's one schema type across two databases:
@@ -358,13 +256,6 @@ Tier 1 validates this PostgreSQL read, so it's one schema type across two databa
 D.toMarkdown' . D.take 3 . DT.thaw <$> runPg (readTableTypedConn @ArtistsSchema "artists")
 ```
 
-> <!-- scripths:mime text/plain -->
-> | ArtistId<br>Int | Name<br>Maybe Text |
-> | ----------------|------------------- |
-> | 1               | Just "AC/DC"       |
-> | 2               | Just "Accept"      |
-> | 3               | Just "Aerosmith"   |
-
 The `Albums` entity generated from SQLite at compile time is a plain `persistent` entity, so the
 same `declareEntity` splice and `selectToDataFrame` run unchanged against PostgreSQL:
 
@@ -372,21 +263,11 @@ same `declareEntity` splice and `selectToDataFrame` run unchanged against Postgr
 D.toMarkdown' <$> runPg (selectToDataFrame [AlbumsArtistId <-. [1, 4]] [Asc AlbumsTitle, LimitTo 5])
 ```
 
-> <!-- scripths:mime text/plain -->
-> | id<br>Int |             title<br>Text             | artistId<br>Int |
-> | ----------|---------------------------------------|---------------- |
-> | 1         | For Those About To Rock We Salute You | 1               |
-> | 6         | Jagged Little Pill                    | 4               |
-> | 4         | Let There Be Rock                     | 1               |
-
 Tear the throwaway cluster back down (again via `:!`):
 
 ```haskell
 :! bash scripts/pg-teardown.sh
 ```
-
-> <!-- scripths:mime text/plain -->
-> postgres stopped and removed
 
 ## How types are inferred
 

@@ -675,7 +675,7 @@ TIO.putStrLn $ D.toMarkdown $ D.take 5 pipelined
 > | -122.22             | 37.82              | 42.0                         | 2991.0                | 335.0                    | 1018.0               | 335.0                | 13.499                  | 500001.0                     | NEAR BAY                | True                 | 8.928358208955224             |
 
 
-`$(D.declareColumnsFromCsvFile path)` generates compile-time column bindings by reading the CSV header at splice time — no live dataframe needs to be in scope, unlike `$(D.declareColumns df)` which requires a bound frame.
+`$(D.declareColumnsFromCsvFile path)` generates compile-time column bindings by reading the CSV header at splice time (you don't need a live dataframe in scope) unlike `$(D.declareColumns df)` which requires a bound frame.
 
 Inside the `do`-block, `<-` binds the typed `Expr` returned by each step; those expressions can be reused in later steps (e.g. `isExpensive` in the final `filterWhereM`) without any extra plumbing.
 
