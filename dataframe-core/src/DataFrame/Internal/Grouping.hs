@@ -23,10 +23,11 @@ import qualified Data.Vector.Unboxed.Mutable as VUM
 
 import Control.Exception (throw)
 import Control.Monad
-import Control.Monad.ST (runST)
+import Control.Monad.ST (ST, runST)
 import Data.Type.Equality (TestEquality (..), type (:~:) (Refl))
 import DataFrame.Errors
 import DataFrame.Internal.Column (
+    Bitmap,
     Column (..),
     bitmapTestBit,
  )
@@ -78,49 +79,22 @@ groupBy names df
         mh <- VUM.replicate n fnvOffset
         let selectedCols = map (columns df V.!) indicesToGroup
         forM_ selectedCols $ \case
-            UnboxedColumn _ (v :: VU.Vector a) ->
+            UnboxedColumn ubm (v :: VU.Vector a) ->
                 case testEquality (typeRep @a) (typeRep @Int) of
-                    Just Refl ->
-                        VU.imapM_
-                            ( \i x -> do
-                                !h <- VUM.unsafeRead mh i
-                                VUM.unsafeWrite mh i (mixInt h x)
-                            )
-                            v
+                    Just Refl -> hashUnboxed mh ubm mixInt v
                     Nothing ->
                         case testEquality (typeRep @a) (typeRep @Double) of
-                            Just Refl ->
-                                VU.imapM_
-                                    ( \i d -> do
-                                        !h <- VUM.unsafeRead mh i
-                                        VUM.unsafeWrite mh i (mixDouble h d)
-                                    )
-                                    v
+                            Just Refl -> hashUnboxed mh ubm mixDouble v
                             Nothing ->
                                 case sIntegral @a of
                                     STrue ->
-                                        VU.imapM_
-                                            ( \i d -> do
-                                                !h <- VUM.unsafeRead mh i
-                                                VUM.unsafeWrite mh i (mixInt h (fromIntegral @a @Int d))
-                                            )
-                                            v
+                                        hashUnboxed mh ubm (\h d -> mixInt h (fromIntegral @a @Int d)) v
                                     SFalse ->
                                         case sFloating @a of
                                             STrue ->
-                                                VU.imapM_
-                                                    ( \i d -> do
-                                                        !h <- VUM.unsafeRead mh i
-                                                        VUM.unsafeWrite mh i (mixDouble h (realToFrac d :: Double))
-                                                    )
-                                                    v
+                                                hashUnboxed mh ubm (\h d -> mixDouble h (realToFrac d :: Double)) v
                                             SFalse ->
-                                                VU.imapM_
-                                                    ( \i d -> do
-                                                        !h <- VUM.unsafeRead mh i
-                                                        VUM.unsafeWrite mh i (mixShow h d)
-                                                    )
-                                                    v
+                                                hashUnboxed mh ubm mixShow v
             BoxedColumn bm (v :: V.Vector a) ->
                 case testEquality (typeRep @a) (typeRep @T.Text) of
                     Just Refl ->
@@ -128,7 +102,7 @@ groupBy names df
                             ( \i t -> do
                                 !h <- VUM.unsafeRead mh i
                                 let h' = case bm of
-                                        Just bm' | not (bitmapTestBit bm' i) -> mixInt h 0 -- null sentinel
+                                        Just bm' | not (bitmapTestBit bm' i) -> mixInt h nullSalt
                                         _ -> mixText h t
                                 VUM.unsafeWrite mh i h'
                             )
@@ -138,7 +112,7 @@ groupBy names df
                             ( \i d -> do
                                 !h <- VUM.unsafeRead mh i
                                 let h' = case bm of
-                                        Just bm' | not (bitmapTestBit bm' i) -> mixInt h 0 -- null sentinel
+                                        Just bm' | not (bitmapTestBit bm' i) -> mixInt h nullSalt
                                         _ -> mixShow h d
                                 VUM.unsafeWrite mh i h'
                             )
@@ -159,6 +133,36 @@ groupBy names df
                 , i <- reverse is
                 ]
         return (VU.fromList ordered)
+
+{- | Fold a value-mix over an unboxed column into the running hash vector,
+respecting the null bitmap: a null slot mixes a fixed 'nullSalt' sentinel.
+-}
+hashUnboxed ::
+    (VU.Unbox a) =>
+    VUM.MVector s Int ->
+    Maybe Bitmap ->
+    (Int -> a -> Int) ->
+    VU.Vector a ->
+    ST s ()
+hashUnboxed mh ubm mix v = case ubm of
+    Nothing ->
+        VU.imapM_
+            ( \i x -> do
+                !h <- VUM.unsafeRead mh i
+                VUM.unsafeWrite mh i (mix h x)
+            )
+            v
+    Just bm ->
+        VU.imapM_
+            ( \i x -> do
+                !h <- VUM.unsafeRead mh i
+                VUM.unsafeWrite
+                    mh
+                    i
+                    (if bitmapTestBit bm i then mix h x else mixInt h nullSalt)
+            )
+            v
+{-# INLINE hashUnboxed #-}
 
 -- Inline accessors to avoid depending on Operations.Core
 

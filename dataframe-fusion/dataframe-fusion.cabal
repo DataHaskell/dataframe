@@ -1,6 +1,6 @@
 cabal-version:      3.0
 name:               dataframe-fusion
-version:            0.1.1.0
+version:            0.1.1.1
 
 synopsis: Apache DataFusion backend for the dataframe typed API.
 
@@ -70,7 +70,7 @@ library
                       aeson      >= 0.11 && < 3,
                       dataframe-core ^>= 1.0,
                       dataframe-lazy ^>= 1.0,
-                      dataframe-operations ^>= 1.0,
+                      dataframe-operations ^>= 1.1,
                       dataframe:arrow-bridge,
                       text       >= 2.0  && < 3
     hs-source-dirs:   src
@@ -94,7 +94,7 @@ test-suite tests
                       dataframe  >= 1 && < 3,
                       dataframe-core ^>= 1.0,
                       dataframe-fusion,
-                      dataframe-operations ^>= 1.0,
+                      dataframe-operations ^>= 1.1,
                       directory  >= 1.3  && < 2,
                       filepath   >= 1.4  && < 2,
                       HUnit      ^>= 1.6,

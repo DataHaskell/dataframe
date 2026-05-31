@@ -17,7 +17,7 @@ import qualified Data.Vector.Unboxed as VU
 
 import Control.Exception (throw)
 import Data.Function (on)
-import Data.Maybe (fromMaybe)
+import Data.Maybe (catMaybes, fromMaybe, isNothing, mapMaybe)
 import Data.Type.Equality (TestEquality (..))
 import Data.Typeable (type (:~:) (..))
 import DataFrame.Errors (DataFrameException (..))
@@ -28,16 +28,23 @@ import Type.Reflection (typeOf, typeRep)
 
 data Any where
     Value :: (Columnable a) => a -> Any
+    -- Saves us the extra indirection we get from making Value (Maybe a)
+    -- and having to unpack it again to check for nulls.
+    -- Instead, we just have Null as a separate constructor.
+    Null :: Any
 
 instance Eq Any where
     (==) :: Any -> Any -> Bool
     (Value a) == (Value b) = fromMaybe False $ do
         Refl <- testEquality (typeOf a) (typeOf b)
         return $ a == b
+    Null == Null = True
+    _ == _ = False
 
 instance Show Any where
     show :: Any -> String
     show (Value a) = T.unpack (showValue a)
+    show Null = "null"
 
 showValue :: forall a. (Columnable a) => a -> T.Text
 showValue v = case testEquality (typeRep @a) (typeRep @T.Text) of
@@ -50,11 +57,20 @@ showValue v = case testEquality (typeRep @a) (typeRep @T.Text) of
 toAny :: forall a. (Columnable a) => a -> Any
 toAny = Value
 
--- | Unwraps a value from an \Any\ type.
+-- | Unwraps a value from an \Any\ type. A 'Null' cell yields 'Nothing'.
 fromAny :: forall a. (Columnable a) => Any -> Maybe a
+fromAny Null = Nothing
 fromAny (Value (v :: b)) = do
     Refl <- testEquality (typeRep @a) (typeRep @b)
     pure v
+
+{- | Wrap a column cell into an 'Any', honouring the column's null bitmap: a slot
+marked invalid becomes 'Null', any other slot becomes a 'Value'. Only needs
+@Columnable a@ (the stored element type), not @Columnable (Maybe a)@.
+-}
+cellAny :: (Columnable a) => Maybe Bitmap -> Int -> a -> Any
+cellAny Nothing _ x = Value x
+cellAny (Just bm) i x = if bitmapTestBit bm i then Value x else Null
 
 type Row = V.Vector Any
 
@@ -63,18 +79,31 @@ type Row = V.Vector Any
 (!?) (x : _) 0 = Just x
 (!?) (_x : xs) n = (!?) xs (n - 1)
 
+{- | Reconstruct column @i@ from a list of rows. The element type is taken from
+the first non-'Null' cell; cells of a different type are skipped. If any cell is
+'Null' the result is a nullable column (built with 'fromMaybeVec', which needs
+only @Columnable a@), so a round-trip through 'toRowList'/'fromRows' preserves
+nulls.
+-}
 mkColumnFromRow :: Int -> [[Any]] -> Column
-mkColumnFromRow i rows = case rows of
-    [] -> fromList ([] :: [T.Text])
-    (row : _) -> case row !? i of
-        Nothing -> fromList ([] :: [T.Text])
-        Just (Value (v :: a)) -> fromList $ reverse $ L.foldl' addToList [v] (drop 1 rows)
-          where
-            addToList acc r = case r !? i of
-                Nothing -> acc
-                Just (Value (v' :: b)) -> case testEquality (typeRep @a) (typeRep @b) of
-                    Nothing -> acc
-                    Just Refl -> v' : acc
+mkColumnFromRow i rows =
+    let cells = mapMaybe (!? i) rows
+     in case L.find isValue cells of
+            Nothing -> fromList ([] :: [T.Text])
+            Just (Value (_ :: a)) ->
+                let collect Null = Just (Nothing :: Maybe a)
+                    collect (Value (v' :: b)) =
+                        case testEquality (typeRep @a) (typeRep @b) of
+                            Just Refl -> Just (Just v')
+                            Nothing -> Nothing
+                    maybes = mapMaybe collect cells
+                 in if any isNothing maybes
+                        then fromMaybeVec (V.fromList maybes)
+                        else fromList (catMaybes maybes)
+            Just Null -> fromList ([] :: [T.Text]) -- unreachable: find isValue
+  where
+    isValue (Value _) = True
+    isValue Null = False
 
 {- | Converts the entire dataframe to a list of rows.
 
@@ -146,8 +175,8 @@ mkRowFromArgs names df i = V.map get (V.fromList names)
                     [name]
                     "[INTERNAL] mkRowFromArgs"
                     (M.keys $ columnIndices df)
-        Just (BoxedColumn _ column) -> toAny (column V.! i)
-        Just (UnboxedColumn _ column) -> toAny (column VU.! i)
+        Just (BoxedColumn bm column) -> cellAny bm i (column V.! i)
+        Just (UnboxedColumn bm column) -> cellAny bm i (column VU.! i)
 
 -- This function will return the items in the order that is specified
 -- by the user. For example, if the dataframe consists of the columns
@@ -165,11 +194,11 @@ mkRowRep df names i = V.generate (L.length names) (\index -> get (names' V.! ind
                 ++ "the other columns at index "
                 ++ show i
     get name = case getColumn name df of
-        Just (BoxedColumn _ c) -> case c V.!? i of
-            Just e -> toAny e
+        Just (BoxedColumn bm c) -> case c V.!? i of
+            Just e -> cellAny bm i e
             Nothing -> throwError name
-        Just (UnboxedColumn _ c) -> case c VU.!? i of
-            Just e -> toAny e
+        Just (UnboxedColumn bm c) -> case c VU.!? i of
+            Just e -> cellAny bm i e
             Nothing -> throwError name
         Nothing ->
             throw $ ColumnsNotFoundException [name] "mkRowRep" (M.keys $ columnIndices df)

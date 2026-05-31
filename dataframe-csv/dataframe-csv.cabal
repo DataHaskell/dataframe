@@ -1,6 +1,6 @@
 cabal-version:      2.4
 name:               dataframe-csv
-version:            1.0.1.0
+version:            1.0.1.1
 
 synopsis:           CSV reader and writer for the dataframe ecosystem.
 description:
@@ -35,7 +35,7 @@ library
                         cassava >= 0.1 && < 1,
                         containers >= 0.6.7 && < 0.9,
                         dataframe-core ^>= 1.0,
-                        dataframe-operations ^>= 1.0,
+                        dataframe-operations ^>= 1.1,
                         dataframe-parsing ^>= 1.0,
                         text >= 2.0 && < 3,
                         vector ^>= 0.13

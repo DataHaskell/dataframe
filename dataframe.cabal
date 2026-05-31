@@ -1,6 +1,6 @@
 cabal-version:      3.0
 name:               dataframe
-version:            2.1.0.1
+version:            2.1.1.0
 
 synopsis: A fast, safe, and intuitive DataFrame library.
 
@@ -120,7 +120,7 @@ library
     build-depends:    base >= 4 && <5,
                       dataframe-core ^>= 1.0,
                       dataframe-json ^>= 1.0,
-                      dataframe-operations ^>= 1.0,
+                      dataframe-operations ^>= 1.1,
                       dataframe-parsing ^>= 1.0,
                       dataframe-viz ^>= 1.0,
                       dataframe-learn ^>= 1.0
@@ -196,7 +196,7 @@ library arrow-bridge
         dataframe-csv ^>= 1.0,
         dataframe-json ^>= 1.0,
         dataframe-lazy ^>= 1.0,
-        dataframe-operations ^>= 1.0,
+        dataframe-operations ^>= 1.1,
         dataframe-parquet ^>= 1.0,
         dataframe-parsing ^>= 1.0,
         text        >= 2.0 && < 3,
@@ -212,7 +212,7 @@ executable dataframe-benchmark-example
     main-is: Benchmark.hs
     build-depends:    base >= 4 && < 5,
                       dataframe >= 1 && < 3,
-                      dataframe-operations ^>= 1.0,
+                      dataframe-operations ^>= 1.1,
                       random >= 1 && < 2,
                       time >= 1.12 && < 2,
                       vector ^>= 0.13,
@@ -227,7 +227,7 @@ executable synthesis
                       dataframe >= 1 && < 3,
                       dataframe-core ^>= 1.0,
                       dataframe-learn ^>= 1.0,
-                      dataframe-operations ^>= 1.0,
+                      dataframe-operations ^>= 1.1,
                       random >= 1 && < 2,
                       text >= 2.0 && < 3
     hs-source-dirs:   app
@@ -312,12 +312,14 @@ test-suite tests
                    Operations.Join,
                    Operations.Merge,
                    Operations.Nullable,
+                   Operations.NullableHashing,
                    Operations.Provenance,
                    Operations.ReadCsv,
                    Operations.Window,
                    Operations.WriteCsv,
                    Operations.Shuffle,
                    Operations.Sort,
+                   Operations.SetOps,
                    Operations.Subset,
                    Operations.Statistics,
                    Operations.Take,
@@ -327,8 +329,10 @@ test-suite tests
                    Parquet,
                    ParquetTestData,
                    Properties,
+                   Properties.Categorical,
                    Monad
     build-depends:  base >= 4 && < 5,
+                    aeson >= 0.11.0.0 && < 3,
                     bytestring >= 0.11 && < 0.13,
                     dataframe >= 1 && < 3,
                     dataframe-core ^>= 1.0,
@@ -336,7 +340,7 @@ test-suite tests
                     dataframe-json ^>= 1.0,
                     dataframe-lazy ^>= 1.0,
                     dataframe-learn ^>= 1.0,
-                    dataframe-operations ^>= 1.0,
+                    dataframe-operations ^>= 1.1,
                     dataframe-parquet ^>= 1.0,
                     dataframe-parsing ^>= 1.0,
                     HUnit ^>= 1.6,

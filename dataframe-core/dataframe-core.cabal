@@ -1,6 +1,6 @@
 cabal-version:      2.4
 name:               dataframe-core
-version:            1.0.1.1
+version:            1.0.2.0
 
 synopsis:           Core data structures for the dataframe library.
 description:

@@ -174,6 +174,12 @@ module DataFrame.Typed (
     -- * Vertical merge
     append,
 
+    -- * Set algebra (topos operations)
+    union,
+    intersect,
+    difference,
+    symmetricDifference,
+
     -- * Joins
     innerJoin,
     leftJoin,

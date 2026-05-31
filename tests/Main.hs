@@ -25,9 +25,11 @@ import qualified Operations.InsertColumn
 import qualified Operations.Join
 import qualified Operations.Merge
 import qualified Operations.Nullable
+import qualified Operations.NullableHashing
 import qualified Operations.Provenance
 import qualified Operations.ReadCsv
 import qualified Operations.Record
+import qualified Operations.SetOps
 import qualified Operations.Shuffle
 import qualified Operations.Sort
 import qualified Operations.Statistics
@@ -38,6 +40,7 @@ import qualified Operations.Window
 import qualified Operations.WriteCsv
 import qualified Parquet
 import qualified Properties
+import qualified Properties.Categorical
 
 tests :: Test
 tests =
@@ -54,10 +57,12 @@ tests =
             ++ Operations.Join.tests
             ++ Operations.Merge.tests
             ++ Operations.Nullable.tests
+            ++ Operations.NullableHashing.tests
             ++ Operations.Provenance.tests
             ++ Operations.ReadCsv.tests
             ++ Operations.Record.tests
             ++ Operations.WriteCsv.tests
+            ++ Operations.SetOps.tests
             ++ Operations.Shuffle.tests
             ++ Operations.Sort.tests
             ++ Operations.Statistics.tests
@@ -88,8 +93,10 @@ main = do
                     Operations.Subset.tests
             monadRes <- mapM (quickCheckWithResult stdArgs) Monad.tests
             propsRes <- mapM (quickCheckWithResult stdArgs) Properties.tests
+            catRes <- mapM (quickCheckWithResult stdArgs) Properties.Categorical.tests
             if not (all isSuccessful propRes)
                 || not (all isSuccessful monadRes)
                 || not (all isSuccessful propsRes)
+                || not (all isSuccessful catRes)
                 then Exit.exitFailure
                 else Exit.exitSuccess

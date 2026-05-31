@@ -21,11 +21,11 @@ import qualified Data.Vector.Unboxed.Mutable as VUM
 
 import Control.Exception (throw)
 import Control.Monad
-import Control.Monad.ST (runST)
-import Data.Hashable
+import Control.Monad.ST (ST, runST)
 import Data.Type.Equality (TestEquality (..), type (:~:) (Refl))
 import DataFrame.Errors
 import DataFrame.Internal.Column (
+    Bitmap,
     Column (..),
     TypedColumn (..),
     atIndicesStable,
@@ -39,6 +39,14 @@ import DataFrame.Internal.DataFrame (
  )
 import DataFrame.Internal.Expression
 import DataFrame.Internal.Grouping (buildRowToGroup, changingPoints, groupBy)
+import DataFrame.Internal.Hash (
+    fnvOffset,
+    mixDouble,
+    mixInt,
+    mixShow,
+    mixText,
+    nullSalt,
+ )
 import DataFrame.Internal.Interpreter
 import DataFrame.Internal.Types
 import DataFrame.Operations.Core
@@ -48,59 +56,28 @@ import Type.Reflection (typeRep)
 computeRowHashes :: [Int] -> DataFrame -> VU.Vector Int
 computeRowHashes indices df = runST $ do
     let n = fst (dimensions df)
-    mv <- VUM.new n
+    mv <- VUM.replicate n fnvOffset
 
     let selectedCols = map (columns df V.!) indices
 
     forM_ selectedCols $ \case
-        UnboxedColumn _ (v :: VU.Vector a) ->
+        UnboxedColumn ubm (v :: VU.Vector a) ->
             case testEquality (typeRep @a) (typeRep @Int) of
-                Just Refl ->
-                    VU.imapM_
-                        ( \i (x :: Int) -> do
-                            h <- VUM.unsafeRead mv i
-                            VUM.unsafeWrite mv i (hashWithSalt h x)
-                        )
-                        v
+                Just Refl -> hashKeyUnboxed mv ubm mixInt v
                 Nothing ->
                     case testEquality (typeRep @a) (typeRep @Double) of
                         Just Refl ->
-                            VU.imapM_
-                                ( \i (d :: Double) -> do
-                                    h <- VUM.unsafeRead mv i
-                                    VUM.unsafeWrite mv i (hashWithSalt h (doubleToInt d))
-                                )
-                                v
+                            hashKeyUnboxed mv ubm mixDouble v
                         Nothing ->
                             case sIntegral @a of
                                 STrue ->
-                                    VU.imapM_
-                                        ( \i d -> do
-                                            let x :: Int
-                                                x = fromIntegral @a @Int d
-                                            h <- VUM.unsafeRead mv i
-                                            VUM.unsafeWrite mv i (hashWithSalt h x)
-                                        )
-                                        v
+                                    hashKeyUnboxed mv ubm (\h d -> mixInt h (fromIntegral @a @Int d)) v
                                 SFalse ->
                                     case sFloating @a of
                                         STrue ->
-                                            VU.imapM_
-                                                ( \i d -> do
-                                                    let x :: Int
-                                                        x = doubleToInt (realToFrac d :: Double)
-                                                    h <- VUM.unsafeRead mv i
-                                                    VUM.unsafeWrite mv i (hashWithSalt h x)
-                                                )
-                                                v
+                                            hashKeyUnboxed mv ubm (\h d -> mixDouble h (realToFrac d :: Double)) v
                                         SFalse ->
-                                            VU.imapM_
-                                                ( \i d -> do
-                                                    let x = hash (show d)
-                                                    h <- VUM.unsafeRead mv i
-                                                    VUM.unsafeWrite mv i (hashWithSalt h x)
-                                                )
-                                                v
+                                            hashKeyUnboxed mv ubm mixShow v
         BoxedColumn bm (v :: V.Vector a) ->
             case testEquality (typeRep @a) (typeRep @T.Text) of
                 Just Refl ->
@@ -108,26 +85,55 @@ computeRowHashes indices df = runST $ do
                         ( \i (t :: T.Text) -> do
                             h <- VUM.unsafeRead mv i
                             let h' = case bm of
-                                    Just bm' | not (bitmapTestBit bm' i) -> hashWithSalt h (0 :: Int)
-                                    _ -> hashWithSalt h t
+                                    Just bm' | not (bitmapTestBit bm' i) -> mixInt h nullSalt
+                                    _ -> mixText h t
                             VUM.unsafeWrite mv i h'
                         )
                         v
                 Nothing ->
                     V.imapM_
                         ( \i d -> do
-                            let x = case bm of
-                                    Just bm' | not (bitmapTestBit bm' i) -> 0 :: Int
-                                    _ -> hash (show d)
                             h <- VUM.unsafeRead mv i
-                            VUM.unsafeWrite mv i (hashWithSalt h x)
+                            let h' = case bm of
+                                    Just bm' | not (bitmapTestBit bm' i) -> mixInt h nullSalt
+                                    _ -> mixShow h d
+                            VUM.unsafeWrite mv i h'
                         )
                         v
 
     VU.unsafeFreeze mv
-  where
-    doubleToInt :: Double -> Int
-    doubleToInt = floor . (* 1000)
+
+{- | Fold a value-mix over an unboxed key column into the running hash vector,
+respecting the null bitmap (a null slot mixes 'nullSalt' instead of its
+uninitialised stored value, so @Nothing@ never matches a present @Just x@).
+The non-nullable case is the original tight loop. @INLINE@d to specialise per call.
+-}
+hashKeyUnboxed ::
+    (VU.Unbox a) =>
+    VUM.MVector s Int ->
+    Maybe Bitmap ->
+    (Int -> a -> Int) ->
+    VU.Vector a ->
+    ST s ()
+hashKeyUnboxed mv ubm mix v = case ubm of
+    Nothing ->
+        VU.imapM_
+            ( \i x -> do
+                h <- VUM.unsafeRead mv i
+                VUM.unsafeWrite mv i (mix h x)
+            )
+            v
+    Just bm ->
+        VU.imapM_
+            ( \i x -> do
+                h <- VUM.unsafeRead mv i
+                VUM.unsafeWrite
+                    mv
+                    i
+                    (if bitmapTestBit bm i then mix h x else mixInt h nullSalt)
+            )
+            v
+{-# INLINE hashKeyUnboxed #-}
 
 {- | Aggregate a grouped dataframe using the expressions given.
 All ungrouped columns will be dropped.

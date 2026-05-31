@@ -50,6 +50,12 @@ module DataFrame.Typed.Operations (
 
     -- * Vertical merge
     append,
+
+    -- * Set algebra (topos operations)
+    union,
+    intersect,
+    difference,
+    symmetricDifference,
 ) where
 
 import Data.Proxy (Proxy (..))
@@ -67,6 +73,7 @@ import qualified DataFrame.Operations.Aggregation as DA
 import qualified DataFrame.Operations.Core as D
 import DataFrame.Operations.Merge ()
 import qualified DataFrame.Operations.Permutation as D
+import qualified DataFrame.Operations.SetOps as DS
 import qualified DataFrame.Operations.Subset as D
 import qualified DataFrame.Operations.Transformations as D
 
@@ -340,6 +347,32 @@ replaceColumn (TExpr expr) (TDF df) = unsafeFreeze (D.derive colName expr df)
 -- | Vertically merge two DataFrames with the same schema.
 append :: TypedDataFrame cols -> TypedDataFrame cols -> TypedDataFrame cols
 append (TDF a) (TDF b) = TDF (a <> b)
+
+-------------------------------------------------------------------------------
+-- Set algebra (topos operations)
+--
+-- Each treats a DataFrame as a /set/ of rows and is schema-preserving:
+-- the output type equals the input type; only which rows are present changes.
+-------------------------------------------------------------------------------
+
+-- | Rows appearing in either DataFrame, deduplicated (set union).
+union :: TypedDataFrame cols -> TypedDataFrame cols -> TypedDataFrame cols
+union (TDF a) (TDF b) = TDF (DS.union a b)
+
+-- | Rows appearing in both DataFrames, deduplicated (set intersection).
+intersect :: TypedDataFrame cols -> TypedDataFrame cols -> TypedDataFrame cols
+intersect (TDF a) (TDF b) = TDF (DS.intersect a b)
+
+{- | Rows in the left DataFrame but not the right, deduplicated
+(relational @EXCEPT@; the subobject complement).
+-}
+difference :: TypedDataFrame cols -> TypedDataFrame cols -> TypedDataFrame cols
+difference (TDF a) (TDF b) = TDF (DS.difference a b)
+
+-- | Rows in exactly one of the two DataFrames, deduplicated.
+symmetricDifference ::
+    TypedDataFrame cols -> TypedDataFrame cols -> TypedDataFrame cols
+symmetricDifference (TDF a) (TDF b) = TDF (DS.symmetricDifference a b)
 
 -------------------------------------------------------------------------------
 -- Metadata (pass-through)

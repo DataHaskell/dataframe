@@ -246,6 +246,7 @@ module DataFrame (
     module Aggregation,
     module Permutation,
     module Merge,
+    module SetOps,
     module Join,
     module Statistics,
 
@@ -388,6 +389,12 @@ import DataFrame.Operations.Join as Join (
     rightJoin,
  )
 import DataFrame.Operations.Merge as Merge
+import DataFrame.Operations.SetOps as SetOps (
+    difference,
+    intersect,
+    symmetricDifference,
+    union,
+ )
 import DataFrame.Operations.Permutation as Permutation (
     SortOrder (..),
     shuffle,
