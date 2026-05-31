@@ -8,7 +8,7 @@
 
 {- |
 Module      : DataFrame.Typed.Lazy
-Copyright   : (c) 2025
+Copyright   : (c) 2024 - 2026 Michael Chavinda
 License     : MIT
 Stability   : experimental
 

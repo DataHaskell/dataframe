@@ -5,14 +5,18 @@
 
 {- |
 A plotly-express-style one-shot plotting API for HTML output. Mirrors
-'DataFrame.Display.Terminal.Plot' but emits embeddable Chart.js HTML.
+'DataFrame.Display.Terminal.Plot' but emits embeddable, interactive Vega-Lite
+charts (rendered in the browser via vega-embed loaded from a CDN).
+
+This module is the string-keyed convenience tier. For an expression-based,
+composable grammar of graphics see "DataFrame.Display.Web.Chart" (untyped
+'Expr') and "DataFrame.Display.Web.Chart.Typed" (typed 'TExpr').
 -}
 module DataFrame.Display.Web.Plot (
     -- * Aggregation
     Agg (..),
 
     -- * Output
-    HtmlPlot (..),
     showInDefaultBrowser,
 
     -- * Layout
@@ -64,6 +68,7 @@ module DataFrame.Display.Web.Plot (
 import Control.Monad (forM, void)
 import Data.Char (chr)
 import qualified Data.List as L
+import qualified Data.Maybe
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import GHC.Stack (HasCallStack)
@@ -91,16 +96,25 @@ import DataFrame.Display.Internal.Common (
     groupWithOtherForPie,
     isNumericColumn,
  )
+import DataFrame.Display.Internal.VegaLite (
+    Channel (Color, Theta, X, Y),
+    FieldType (..),
+    ResolvedField,
+    VLSpec (..),
+    chanEnc,
+    emptySpec,
+    numField,
+    specHtml,
+    textField,
+ )
+import qualified DataFrame.Display.Internal.VegaLite as VL
 import DataFrame.Internal.DataFrame (DataFrame, columnNames)
 
 -- ---------------------------------------------------------------------------
--- Output container + layout
+-- Layout
 -- ---------------------------------------------------------------------------
 
--- | A snippet of HTML containing a Chart.js plot.
-newtype HtmlPlot = HtmlPlot T.Text deriving (Show)
-
--- | Display dimensions for the HTML canvas, in pixels.
+-- | Display dimensions for the chart, in pixels.
 data Size = Size {width :: Int, height :: Int}
 
 defaultSize :: Size
@@ -115,35 +129,12 @@ generateChartId = do
                 (take 64 (randomRs (49, 126) gen :: [Int]))
     return $ "chart_" <> T.pack (map chr randomWords)
 
-wrapInHTML :: T.Text -> T.Text -> Size -> T.Text
-wrapInHTML chartId content sz =
-    T.concat
-        [ "<canvas id=\""
-        , chartId
-        , "\" style=\"width:100%;max-width:"
-        , T.pack (show sz.width)
-        , "px;height:"
-        , T.pack (show sz.height)
-        , "px\"></canvas>\n"
-        , "<script src=\"https://cdnjs.cloudflare.com/ajax/libs/Chart.js/2.9.4/Chart.min.js\"></script>\n"
-        , "<script>\n"
-        , content
-        , "\n</script>\n"
-        ]
-
-palette :: [T.Text]
-palette =
-    [ "rgb(255, 99, 132)"
-    , "rgb(54, 162, 235)"
-    , "rgb(255, 206, 86)"
-    , "rgb(75, 192, 192)"
-    , "rgb(153, 102, 255)"
-    , "rgb(255, 159, 64)"
-    , "rgb(201, 203, 207)"
-    , "rgb(255, 99, 71)"
-    , "rgb(60, 179, 113)"
-    , "rgb(238, 130, 238)"
-    ]
+-- | Assemble a chart HTML snippet from resolved data fields and a spec.
+renderSpec :: Size -> [ResolvedField] -> VLSpec -> IO String
+renderSpec sz fields spec = do
+    chartId <- generateChartId
+    let spec' = spec{vlWidth = sz.width, vlHeight = sz.height}
+    return $ T.unpack $ specHtml chartId fields spec'
 
 -- ---------------------------------------------------------------------------
 -- Bar
@@ -161,9 +152,8 @@ data Bar = Bar
 mkBar :: T.Text -> Bar
 mkBar c = Bar c Nothing Sum Nothing Nothing defaultSize
 
-bar :: (HasCallStack) => Bar -> DataFrame -> IO HtmlPlot
+bar :: (HasCallStack) => Bar -> DataFrame -> IO String
 bar spec df = do
-    chartId <- generateChartId
     let effectiveAgg = case spec.y of
             Nothing -> Count
             Just _ -> spec.agg
@@ -172,27 +162,23 @@ bar spec df = do
         chartTitle = case spec.title of
             Just s -> s
             Nothing -> autoTitle effectiveAgg spec.y spec.x
-        labels = T.intercalate "," ["\"" <> label <> "\"" | (label, _) <- rows']
-        dataPoints = T.intercalate "," [T.pack (show v) | (_, v) <- rows']
         legendLabel = case spec.y of
             Nothing -> "count"
             Just yCol -> aggLabel effectiveAgg <> "(" <> yCol <> ")"
-        jsCode =
-            T.concat
-                [ "setTimeout(function() { new Chart(\""
-                , chartId
-                , "\", {\n  type: \"bar\",\n  data: {\n    labels: ["
-                , labels
-                , "],\n    datasets: [{\n      label: \""
-                , legendLabel
-                , "\",\n      data: ["
-                , dataPoints
-                , "],\n      backgroundColor: \"rgba(54, 162, 235, 0.6)\",\n      borderColor: \"rgba(54, 162, 235, 1)\",\n      borderWidth: 1\n    }]\n  },\n"
-                , "  options: {\n    title: { display: true, text: \""
-                , chartTitle
-                , "\" },\n    scales: { yAxes: [{ ticks: { beginAtZero: true } }] }\n  }\n})}, 100);"
-                ]
-    return $ HtmlPlot $ wrapInHTML chartId jsCode spec.size
+        (labels, values) = unzip rows'
+        fields =
+            [ textField spec.x labels
+            , numField legendLabel values
+            ]
+        vlSpec =
+            (emptySpec VL.Bar)
+                { vlEncodings =
+                    [ chanEnc X spec.x Nominal
+                    , chanEnc Y legendLabel Quantitative
+                    ]
+                , vlTitle = Just chartTitle
+                }
+    renderSpec spec.size fields vlSpec
 
 -- ---------------------------------------------------------------------------
 -- Histogram
@@ -208,42 +194,33 @@ data Histogram = Histogram
 mkHistogram :: T.Text -> Histogram
 mkHistogram c = Histogram c 30 Nothing defaultSize
 
-histogram :: (HasCallStack) => Histogram -> DataFrame -> IO HtmlPlot
+histogram :: (HasCallStack) => Histogram -> DataFrame -> IO String
 histogram spec df = do
-    chartId <- generateChartId
     let values = extractNumericColumn spec.x df
         (lo, hi) = if null values then (0, 1) else (minimum values, maximum values)
         binWidth = (hi - lo) / fromIntegral spec.bins
         binStarts = [lo + fromIntegral i * binWidth | i <- [0 .. spec.bins - 1]]
         countBin b = length [v | v <- values, v >= b && v < b + binWidth]
-        counts = map countBin binStarts
+        counts = map (fromIntegral . countBin) binStarts
         precision = max 0 $ ceiling (negate $ logBase 10 (max 1e-12 binWidth))
-        labels =
-            T.intercalate
-                ","
-                [ "\"" <> T.pack (showFFloat (Just precision) b "") <> "\""
-                | b <- binStarts
-                ]
-        dataPoints = T.intercalate "," [T.pack (show c) | c <- counts]
+        binLabels =
+            [T.pack (showFFloat (Just precision) b "") | b <- binStarts]
         chartTitle = case spec.title of
             Just s -> s
             Nothing -> "histogram of " <> spec.x
-        jsCode =
-            T.concat
-                [ "setTimeout(function() { new Chart(\""
-                , chartId
-                , "\", {\n  type: \"bar\",\n  data: {\n    labels: ["
-                , labels
-                , "],\n    datasets: [{\n      label: \""
-                , spec.x
-                , "\",\n      data: ["
-                , dataPoints
-                , "],\n      backgroundColor: \"rgba(75, 192, 192, 0.6)\",\n      borderColor: \"rgba(75, 192, 192, 1)\",\n      borderWidth: 1\n    }]\n  },\n"
-                , "  options: {\n    title: { display: true, text: \""
-                , chartTitle
-                , "\" },\n    scales: { yAxes: [{ ticks: { beginAtZero: true } }] }\n  }\n})}, 100);"
-                ]
-    return $ HtmlPlot $ wrapInHTML chartId jsCode spec.size
+        fields =
+            [ textField spec.x binLabels
+            , numField "count" counts
+            ]
+        vlSpec =
+            (emptySpec VL.Bar)
+                { vlEncodings =
+                    [ chanEnc X spec.x Ordinal
+                    , chanEnc Y "count" Quantitative
+                    ]
+                , vlTitle = Just chartTitle
+                }
+    renderSpec spec.size fields vlSpec
 
 -- ---------------------------------------------------------------------------
 -- Scatter
@@ -260,62 +237,27 @@ data Scatter = Scatter
 mkScatter :: T.Text -> T.Text -> Scatter
 mkScatter xc yc = Scatter xc yc Nothing Nothing defaultSize
 
-scatter :: (HasCallStack) => Scatter -> DataFrame -> IO HtmlPlot
+scatter :: (HasCallStack) => Scatter -> DataFrame -> IO String
 scatter spec df = do
-    chartId <- generateChartId
     let chartTitle = case spec.title of
             Just s -> s
             Nothing -> spec.x <> " vs " <> spec.y
         xVals = extractNumericColumn spec.x df
         yVals = extractNumericColumn spec.y df
-    datasets <- case spec.color of
-        Nothing ->
-            return $
-                T.singleton '\n'
-                    <> renderSeries chartTitle (head palette) (zip xVals yVals)
-        Just grp -> do
-            let groupVals = extractStringColumn grp df
-                triples = zip3 groupVals xVals yVals
-                uniq = L.nub groupVals
-                ds =
-                    [ renderSeries g col [(xv, yv) | (gv, xv, yv) <- triples, gv == g]
-                    | (g, col) <- zip uniq (cycle palette)
-                    ]
-            return $ T.intercalate ",\n" ds
-    let jsCode =
-            T.concat
-                [ "setTimeout(function() { new Chart(\""
-                , chartId
-                , "\", {\n  type: \"scatter\",\n  data: {\n    datasets: ["
-                , datasets
-                , "\n    ]\n  },\n  options: {\n"
-                , "    title: { display: true, text: \""
-                , chartTitle
-                , "\" },\n"
-                , "    scales: {\n"
-                , "      xAxes: [{ scaleLabel: { display: true, labelString: \""
-                , spec.x
-                , "\" } }],\n      yAxes: [{ scaleLabel: { display: true, labelString: \""
-                , spec.y
-                , "\" } }]\n    }\n  }\n})}, 100);"
-                ]
-    return $ HtmlPlot $ wrapInHTML chartId jsCode spec.size
-  where
-    renderSeries label col pts =
-        let body =
-                T.intercalate
-                    ","
-                    [ "{x:" <> T.pack (show xv) <> ", y:" <> T.pack (show yv) <> "}" | (xv, yv) <- pts
-                    ]
-         in T.concat
-                [ "    {\n      label: \""
-                , label
-                , "\",\n      data: ["
-                , body
-                , "],\n      pointRadius: 4,\n      pointBackgroundColor: \""
-                , col
-                , "\"\n    }"
-                ]
+        baseFields = [numField spec.x xVals, numField spec.y yVals]
+        baseEncs = [chanEnc X spec.x Quantitative, chanEnc Y spec.y Quantitative]
+        (fields, encs) = case spec.color of
+            Nothing -> (baseFields, baseEncs)
+            Just grp ->
+                ( baseFields ++ [textField grp (extractStringColumn grp df)]
+                , baseEncs ++ [chanEnc Color grp Nominal]
+                )
+        vlSpec =
+            (emptySpec VL.Point)
+                { vlEncodings = encs
+                , vlTitle = Just chartTitle
+                }
+    renderSpec spec.size fields vlSpec
 
 -- ---------------------------------------------------------------------------
 -- Line
@@ -331,47 +273,37 @@ data Line = Line
 mkLine :: T.Text -> [T.Text] -> Line
 mkLine xc ys = Line xc ys Nothing defaultSize
 
-line :: (HasCallStack) => Line -> DataFrame -> IO HtmlPlot
+line :: (HasCallStack) => Line -> DataFrame -> IO String
 line spec df = do
-    chartId <- generateChartId
     let chartTitle = case spec.title of
             Just s -> s
             Nothing -> case spec.y of
                 [single] -> single <> " over " <> spec.x
                 _ -> T.intercalate ", " spec.y <> " over " <> spec.x
-        xValues = extractNumericColumn spec.x df
-        xLabels = T.intercalate "," [T.pack (show v) | v <- xValues]
-    datasets <- forM (zip spec.y (cycle palette)) $ \(col, c) -> do
-        let values = extractNumericColumn col df
-            body = T.intercalate "," [T.pack (show v) | v <- values]
-        return $
-            T.concat
-                [ "    {\n      label: \""
-                , col
-                , "\",\n      data: ["
-                , body
-                , "],\n      fill: false,\n      borderColor: \""
-                , c
-                , "\",\n      tension: 0.1\n    }"
-                ]
-    let datasetsStr = T.intercalate ",\n" datasets
-        jsCode =
-            T.concat
-                [ "setTimeout(function() { new Chart(\""
-                , chartId
-                , "\", {\n  type: \"line\",\n  data: {\n    labels: ["
-                , xLabels
-                , "],\n    datasets: [\n"
-                , datasetsStr
-                , "\n    ]\n  },\n  options: {\n"
-                , "    title: { display: true, text: \""
-                , chartTitle
-                , "\" },\n"
-                , "    scales: { xAxes: [{ scaleLabel: { display: true, labelString: \""
-                , spec.x
-                , "\" } }] }\n  }\n})}, 100);"
-                ]
-    return $ HtmlPlot $ wrapInHTML chartId jsCode spec.size
+        xVals = extractNumericColumn spec.x df
+        -- Long-form melt: (x, value, series) so each y column becomes a line.
+        perSeries =
+            [ (col, zip xVals (extractNumericColumn col df))
+            | col <- spec.y
+            ]
+        xsLong = concat [[xv | (xv, _) <- pts] | (_, pts) <- perSeries]
+        valsLong = concat [[v | (_, v) <- pts] | (_, pts) <- perSeries]
+        seriesLong = concat [replicate (length pts) col | (col, pts) <- perSeries]
+        fields =
+            [ numField spec.x xsLong
+            , numField "value" valsLong
+            , textField "series" seriesLong
+            ]
+        vlSpec =
+            (emptySpec VL.Line)
+                { vlEncodings =
+                    [ chanEnc X spec.x Quantitative
+                    , chanEnc Y "value" Quantitative
+                    , chanEnc Color "series" Nominal
+                    ]
+                , vlTitle = Just chartTitle
+                }
+    renderSpec spec.size fields vlSpec
 
 -- ---------------------------------------------------------------------------
 -- Pie
@@ -389,9 +321,8 @@ data Pie = Pie
 mkPie :: T.Text -> Pie
 mkPie c = Pie c Nothing Count (Just 8) Nothing defaultSize
 
-pie :: (HasCallStack) => Pie -> DataFrame -> IO HtmlPlot
+pie :: (HasCallStack) => Pie -> DataFrame -> IO String
 pie spec df = do
-    chartId <- generateChartId
     let vCol = spec.values
         mNames = spec.names
         a = spec.agg
@@ -408,27 +339,21 @@ pie spec df = do
                  in zip [T.pack ("Item " ++ show i) | i <- [1 .. length xs :: Int]] xs
             (_, Just n) -> aggregateByGroup a n (Just vCol) df
         rows' = maybe rows (`groupWithOtherForPie` rows) spec.topN
-        labels = T.intercalate "," ["\"" <> label <> "\"" | (label, _) <- rows']
-        dataPoints = T.intercalate "," [T.pack (show v) | (_, v) <- rows']
-        colors =
-            T.intercalate
-                ","
-                ["\"" <> c <> "\"" | c <- take (length rows') palette]
-        jsCode =
-            T.concat
-                [ "setTimeout(function() { new Chart(\""
-                , chartId
-                , "\", {\n  type: \"pie\",\n  data: {\n    labels: ["
-                , labels
-                , "],\n    datasets: [{\n      data: ["
-                , dataPoints
-                , "],\n      backgroundColor: ["
-                , colors
-                , "]\n    }]\n  },\n  options: { title: { display: true, text: \""
-                , chartTitle
-                , "\" } }\n})}, 100);"
-                ]
-    return $ HtmlPlot $ wrapInHTML chartId jsCode spec.size
+        (labels, values) = unzip rows'
+        catName = Data.Maybe.fromMaybe "category" mNames
+        fields =
+            [ textField catName labels
+            , numField "value" values
+            ]
+        vlSpec =
+            (emptySpec VL.Arc)
+                { vlEncodings =
+                    [ chanEnc Theta "value" Quantitative
+                    , chanEnc Color catName Nominal
+                    ]
+                , vlTitle = Just chartTitle
+                }
+    renderSpec spec.size fields vlSpec
 
 -- ---------------------------------------------------------------------------
 -- Box
@@ -443,34 +368,27 @@ data Box = Box
 mkBox :: [T.Text] -> Box
 mkBox ys = Box ys Nothing defaultSize
 
-box :: (HasCallStack) => Box -> DataFrame -> IO HtmlPlot
+box :: (HasCallStack) => Box -> DataFrame -> IO String
 box spec df = do
-    chartId <- generateChartId
-    boxData <- forM spec.y $ \col -> do
-        let vs = extractNumericColumn col df
-            sorted = L.sort vs
-            n = max 1 (length vs)
-            median = sorted !! (n `div` 2)
-        return (col, median)
-    let labels = T.intercalate "," ["\"" <> col <> "\"" | (col, _) <- boxData]
-        medians = T.intercalate "," [T.pack (show med) | (_, med) <- boxData]
+    let series = [(col, extractNumericColumn col df) | col <- spec.y]
+        variableVals = concat [replicate (length vs) col | (col, vs) <- series]
+        valueVals = concat [vs | (_, vs) <- series]
         chartTitle = case spec.title of
             Just s -> s
             Nothing -> "box plot of " <> T.intercalate ", " spec.y
-        jsCode =
-            T.concat
-                [ "setTimeout(function() { new Chart(\""
-                , chartId
-                , "\", {\n  type: \"bar\",\n  data: {\n    labels: ["
-                , labels
-                , "],\n    datasets: [{\n      label: \"Median\",\n      data: ["
-                , medians
-                , "],\n      backgroundColor: \"rgba(75, 192, 192, 0.6)\",\n      borderColor: \"rgba(75, 192, 192, 1)\",\n      borderWidth: 1\n    }]\n  },\n"
-                , "  options: { title: { display: true, text: \""
-                , chartTitle
-                , " (showing medians)\" }, scales: { yAxes: [{ ticks: { beginAtZero: true } }] } }\n})}, 100);"
-                ]
-    return $ HtmlPlot $ wrapInHTML chartId jsCode spec.size
+        fields =
+            [ textField "variable" variableVals
+            , numField "value" valueVals
+            ]
+        vlSpec =
+            (emptySpec VL.Boxplot)
+                { vlEncodings =
+                    [ chanEnc X "variable" Nominal
+                    , chanEnc Y "value" Quantitative
+                    ]
+                , vlTitle = Just chartTitle
+                }
+    renderSpec spec.size fields vlSpec
 
 -- ---------------------------------------------------------------------------
 -- Whole-frame helpers
@@ -479,12 +397,11 @@ box spec df = do
 {- | Concatenate a histogram for every numeric column in the frame. Useful
 as a one-shot exploratory summary.
 -}
-allHistograms :: (HasCallStack) => DataFrame -> IO HtmlPlot
+allHistograms :: (HasCallStack) => DataFrame -> IO String
 allHistograms df = do
     let cols = filter (isNumericColumn df) (columnNames df)
     xs <- forM cols $ \c -> histogram (mkHistogram c) df
-    let allPlots = L.foldl' (\acc (HtmlPlot contents) -> acc <> "\n" <> contents) "" xs
-    return (HtmlPlot allPlots)
+    return $ L.intercalate "\n" xs
 
 -- ---------------------------------------------------------------------------
 -- Title helper
@@ -499,29 +416,29 @@ autoTitle a Nothing groupCol = aggLabel a <> " by " <> groupCol
 -- Deprecated legacy entry points
 -- ---------------------------------------------------------------------------
 
-plotHistogram :: (HasCallStack) => T.Text -> DataFrame -> IO HtmlPlot
+plotHistogram :: (HasCallStack) => T.Text -> DataFrame -> IO String
 plotHistogram c = histogram (mkHistogram c)
 {-# DEPRECATED plotHistogram "use 'histogram (mkHistogram col)' instead" #-}
 
-plotScatter :: (HasCallStack) => T.Text -> T.Text -> DataFrame -> IO HtmlPlot
+plotScatter :: (HasCallStack) => T.Text -> T.Text -> DataFrame -> IO String
 plotScatter xc yc = scatter (mkScatter xc yc)
 {-# DEPRECATED plotScatter "use 'scatter (mkScatter xCol yCol)' instead" #-}
 
-plotBars :: (HasCallStack) => T.Text -> DataFrame -> IO HtmlPlot
+plotBars :: (HasCallStack) => T.Text -> DataFrame -> IO String
 plotBars c = bar (mkBar c)
 {-# DEPRECATED plotBars "use 'bar (mkBar col)' instead" #-}
 
-plotLines :: (HasCallStack) => T.Text -> [T.Text] -> DataFrame -> IO HtmlPlot
+plotLines :: (HasCallStack) => T.Text -> [T.Text] -> DataFrame -> IO String
 plotLines xc ys = line (mkLine xc ys)
 {-# DEPRECATED plotLines "use 'line (mkLine xCol yCols)' instead" #-}
 
-plotPie :: (HasCallStack) => T.Text -> Maybe T.Text -> DataFrame -> IO HtmlPlot
+plotPie :: (HasCallStack) => T.Text -> Maybe T.Text -> DataFrame -> IO String
 plotPie c mLabel =
     let s = mkPie c
      in pie s{names = mLabel}
 {-# DEPRECATED plotPie "use 'pie (mkPie col)' instead" #-}
 
-plotBoxPlots :: (HasCallStack) => [T.Text] -> DataFrame -> IO HtmlPlot
+plotBoxPlots :: (HasCallStack) => [T.Text] -> DataFrame -> IO String
 plotBoxPlots ys = box (mkBox ys)
 {-# DEPRECATED plotBoxPlots "use 'box (mkBox cols)' instead" #-}
 
@@ -529,8 +446,8 @@ plotBoxPlots ys = box (mkBox ys)
 -- Browser launcher
 -- ---------------------------------------------------------------------------
 
-showInDefaultBrowser :: HtmlPlot -> IO ()
-showInDefaultBrowser (HtmlPlot p) = do
+showInDefaultBrowser :: String -> IO ()
+showInDefaultBrowser p = do
     plotId <- generateChartId
     home <- getHomeDirectory
     let path = "plot-" <> T.unpack plotId <> ".html"
@@ -540,7 +457,7 @@ showInDefaultBrowser (HtmlPlot p) = do
                 else home <> "/" <> path
     putStr "Saving plot to: "
     putStrLn fullPath
-    T.writeFile fullPath p
+    T.writeFile fullPath (T.pack p)
     case os of
         "mingw32" -> openFileSilently "start" fullPath
         "darwin" -> openFileSilently "open" fullPath

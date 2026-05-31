@@ -2,7 +2,7 @@
 
 {- |
 Module      : DataFrame
-Copyright   : (c) 2025
+Copyright   : (c) 2024 - 2026 Michael Chavinda
 License     : GPL-3.0
 Maintainer  : mschavinda@gmail.com
 Stability   : experimental

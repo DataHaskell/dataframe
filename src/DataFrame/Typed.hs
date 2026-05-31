@@ -3,7 +3,7 @@
 
 {- |
 Module      : DataFrame.Typed
-Copyright   : (c) 2025
+Copyright   : (c) 2024 - 2026 Michael Chavinda
 License     : MIT
 Maintainer  : mschavinda@gmail.com
 Stability   : experimental

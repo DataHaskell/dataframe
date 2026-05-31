@@ -1,6 +1,6 @@
 cabal-version:      2.4
 name:               dataframe-learn
-version:            1.0.1.0
+version:            1.0.2.0
 
 synopsis:           Decision trees and feature synthesis for the dataframe ecosystem.
 description:
@@ -13,7 +13,7 @@ license:            MIT
 license-file:       LICENSE
 author:             Michael Chavinda
 maintainer:         mschavinda@gmail.com
-copyright:          (c) 2024-2025 Michael Chavinda
+copyright:          (c) 2024-2026 Michael Chavinda
 category:           Data
 tested-with:        GHC ==9.4.8 || ==9.6.7 || ==9.8.4 || ==9.10.3 || ==9.12.2
 
@@ -33,7 +33,7 @@ library
     build-depends:      base >= 4 && < 5,
                         containers >= 0.6.7 && < 0.9,
                         dataframe-core ^>= 1.0,
-                        dataframe-operations ^>= 1.0,
+                        dataframe-operations ^>= 1.1,
                         text >= 2.0 && < 3,
                         vector ^>= 0.13
     hs-source-dirs:     src

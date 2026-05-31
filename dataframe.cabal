@@ -1,6 +1,6 @@
 cabal-version:      3.0
 name:               dataframe
-version:            2.1.1.0
+version:            2.1.0.1
 
 synopsis: A fast, safe, and intuitive DataFrame library.
 
@@ -12,7 +12,7 @@ license-file:       LICENSE
 author:             Michael Chavinda
 maintainer:         mschavinda@gmail.com
 
-copyright: (c) 2024-2025 Michael Chavinda
+copyright: (c) 2024-2026 Michael Chavinda
 category: Data
 tested-with: GHC ==9.4.8 || ==9.6.7 || ==9.8.4 || ==9.10.3 || ==9.12.2
 extra-doc-files: CHANGELOG.md README.md
@@ -77,6 +77,8 @@ library
     reexported-modules: DataFrame.Functions,
                         DataFrame.Synthesis,
                         DataFrame.Display.Web.Plot,
+                        DataFrame.Display.Web.Chart,
+                        DataFrame.Display.Web.Chart.Typed,
                         DataFrame.Internal.Types,
                         DataFrame.Internal.Expression,
                         DataFrame.Internal.Grouping,
@@ -328,6 +330,7 @@ test-suite tests
                    LazyParquet,
                    Parquet,
                    ParquetTestData,
+                   Plotting,
                    Properties,
                    Properties.Categorical,
                    Monad

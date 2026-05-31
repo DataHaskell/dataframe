@@ -20,6 +20,8 @@ module DataFrame.Display.Internal.Common (
     -- * Column extraction
     extractStringColumn,
     extractNumericColumn,
+    columnToStrings,
+    columnToDoubles,
 
     -- * Type guards
     isNumericColumn,
@@ -145,25 +147,29 @@ extractStringColumn :: (HasCallStack) => T.Text -> DataFrame -> [T.Text]
 extractStringColumn colName df =
     case M.lookup colName (columnIndices df) of
         Nothing -> error $ "Column " ++ T.unpack colName ++ " not found"
-        Just idx ->
-            let col = columns df V.! idx
-             in case col of
-                    BoxedColumn _ (vec :: V.Vector a) ->
-                        case testEquality (typeRep @a) (typeRep @T.Text) of
-                            Just Refl -> V.toList vec
-                            Nothing -> V.toList $ V.map (T.pack . show) vec
-                    UnboxedColumn _ vec ->
-                        V.toList $ VG.map (T.pack . show) (VG.convert vec)
+        Just idx -> columnToStrings (columns df V.! idx)
 
 extractNumericColumn :: (HasCallStack) => T.Text -> DataFrame -> [Double]
 extractNumericColumn colName df =
     case M.lookup colName (columnIndices df) of
         Nothing -> error $ "Column " ++ T.unpack colName ++ " not found"
-        Just idx ->
-            let col = columns df V.! idx
-             in case col of
-                    BoxedColumn _ vec -> vectorToDoubles vec
-                    UnboxedColumn _ vec -> unboxedVectorToDoubles vec
+        Just idx -> columnToDoubles (columns df V.! idx)
+
+-- | Render a column's values as strings (identity for @Text@, @show@ otherwise).
+columnToStrings :: (HasCallStack) => Column -> [T.Text]
+columnToStrings col = case col of
+    BoxedColumn _ (vec :: V.Vector a) ->
+        case testEquality (typeRep @a) (typeRep @T.Text) of
+            Just Refl -> V.toList vec
+            Nothing -> V.toList $ V.map (T.pack . show) vec
+    UnboxedColumn _ vec ->
+        V.toList $ VG.map (T.pack . show) (VG.convert vec)
+
+-- | Coerce a numeric column to @[Double]@; errors if the element type is not numeric.
+columnToDoubles :: (HasCallStack) => Column -> [Double]
+columnToDoubles col = case col of
+    BoxedColumn _ vec -> vectorToDoubles vec
+    UnboxedColumn _ vec -> unboxedVectorToDoubles vec
 
 vectorToDoubles :: forall a. (Columnable a, Show a) => V.Vector a -> [Double]
 vectorToDoubles vec =

@@ -39,6 +39,7 @@ import qualified Operations.Typing
 import qualified Operations.Window
 import qualified Operations.WriteCsv
 import qualified Parquet
+import qualified Plotting
 import qualified Properties
 import qualified Properties.Categorical
 
@@ -75,6 +76,7 @@ tests =
             ++ IO.JSON.tests
             ++ Parquet.tests
             ++ LazyParquet.tests
+            ++ Plotting.tests
 
 isSuccessful :: Result -> Bool
 isSuccessful (Success{}) = True

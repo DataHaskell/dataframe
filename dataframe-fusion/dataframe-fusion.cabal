@@ -71,7 +71,7 @@ library
                       dataframe-core ^>= 1.0,
                       dataframe-lazy ^>= 1.0,
                       dataframe-operations ^>= 1.1,
-                      dataframe:arrow-bridge,
+                      dataframe:arrow-bridge >= 1 && < 3,
                       text       >= 2.0  && < 3
     hs-source-dirs:   src
     include-dirs:     cbits

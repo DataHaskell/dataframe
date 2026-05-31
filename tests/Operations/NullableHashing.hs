@@ -1,6 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-
 {- |
 Regression tests for null-aware row hashing and row extraction.
 
