@@ -14,6 +14,7 @@ import qualified IO.CSV
 import qualified IO.JSON
 import qualified Internal.Parsing
 import qualified LazyParquet
+import qualified LinearSolver
 import qualified Monad
 import qualified Operations.Aggregations
 import qualified Operations.Apply
@@ -77,6 +78,7 @@ tests =
             ++ Parquet.tests
             ++ LazyParquet.tests
             ++ Plotting.tests
+            ++ LinearSolver.tests
 
 isSuccessful :: Result -> Bool
 isSuccessful (Success{}) = True

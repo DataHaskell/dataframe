@@ -262,6 +262,37 @@ import Data.Int (Int16, Int32, Int64, Int8)
     Column ->
     Either DataFrameException Column
     #-}
+-- Bool-returning binary comparators (hot path for Expr Bool used in
+-- DecisionTree splits)
+{-# SPECIALIZE zipWithColumns ::
+    (Double -> Double -> Bool) ->
+    Column ->
+    Column ->
+    Either DataFrameException Column
+    #-}
+{-# SPECIALIZE zipWithColumns ::
+    (Float -> Float -> Bool) ->
+    Column ->
+    Column ->
+    Either DataFrameException Column
+    #-}
+{-# SPECIALIZE zipWithColumns ::
+    (Int -> Int -> Bool) ->
+    Column ->
+    Column ->
+    Either DataFrameException Column
+    #-}
+{-# SPECIALIZE zipWithColumns ::
+    (Bool -> Bool -> Bool) ->
+    Column ->
+    Column ->
+    Either DataFrameException Column
+    #-}
+
+-- Bool-mapping unary ops (e.g. 'not')
+{-# SPECIALIZE mapColumn ::
+    (Bool -> Bool) -> Column -> Either DataFrameException Column
+    #-}
 
 -------------------------------------------------------------------------------
 -- Value: the unified result type
@@ -273,15 +304,15 @@ broadcast allocations.
 -}
 data Value a where
     -- | A single value, not yet broadcast to any length.
-    Scalar :: (Columnable a) => a -> Value a
+    Scalar :: (Columnable a) => !a -> Value a
     {- | A flat column (one element per row in the flat case, or one
     element per group after aggregation).
     -}
-    Flat :: (Columnable a) => Column -> Value a
+    Flat :: (Columnable a) => !Column -> Value a
     {- | A grouped column: one 'Column' slice per group.  Only produced
     when interpreting inside a 'GroupCtx'.
     -}
-    Group :: (Columnable a) => V.Vector Column -> Value a
+    Group :: (Columnable a) => !(V.Vector Column) -> Value a
 
 instance (Show a) => Show (Value a) where
     show (Scalar v) = show v
@@ -325,6 +356,7 @@ liftValue ::
 liftValue f (Scalar v) = Right (Scalar (f v))
 liftValue f (Flat col) = Flat <$> mapColumn f col
 liftValue f (Group gs) = Group <$> V.mapM (mapColumn f) gs
+{-# INLINEABLE liftValue #-}
 
 {- | Apply a binary function to two 'Value's.  When one side is a
 'Scalar' the operation degenerates to a 'liftValue' — this is how the
@@ -351,6 +383,7 @@ liftValue2 _ (Group _) (Flat _) =
     Left $ AggregatedAndNonAggregatedException "non-aggregated" "aggregated"
 liftValue2 _ (Group _) (Group _) =
     Left $ InternalException "Group count mismatch in binary operation"
+{-# INLINEABLE liftValue2 #-}
 
 -- | Branch on a boolean 'Value', selecting from two same-typed 'Value's.
 branchValue ::
@@ -384,6 +417,7 @@ branchValue _ _ _ =
         AggregatedAndNonAggregatedException
             "if-then-else branches"
             "mismatched shapes"
+{-# INLINEABLE branchValue #-}
 
 {- | Low-level column branch: given a boolean column and two same-typed
 columns, produce the element-wise selection.

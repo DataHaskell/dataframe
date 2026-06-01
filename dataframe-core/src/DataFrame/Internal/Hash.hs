@@ -21,10 +21,10 @@ module DataFrame.Internal.Hash (
     mixShow,
 ) where
 
-import Data.Array.Byte (ByteArray (ByteArray))
 import Data.Bits (rotateL, unsafeShiftL, unsafeShiftR, xor)
 import Data.Char (ord)
 import qualified Data.Text as T
+import Data.Text.Array (Array (ByteArray))
 import Data.Text.Internal (Text (Text))
 import GHC.Exts (Int (I#), indexWord8Array#, indexWord8ArrayAsWord64#)
 import GHC.Word (Word64 (W64#), Word8 (W8#))

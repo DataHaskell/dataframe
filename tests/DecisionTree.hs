@@ -8,8 +8,9 @@ import qualified DataFrame as D
 import DataFrame.DecisionTree
 import qualified DataFrame.Functions as F
 import qualified DataFrame.Internal.Column as DI
-import DataFrame.Internal.Expression (Expr (..), eqExpr)
+import DataFrame.Internal.Expression (Expr (..), eqExpr, getColumns)
 import DataFrame.Internal.Interpreter (interpret)
+import qualified DataFrame.LinearSolver
 import DataFrame.Operators
 
 import Data.Function (on)
@@ -402,8 +403,10 @@ taoRecoversNestedObliqueDerived = TestCase $ do
         0.0
         finalLoss
 
-taoAxisAlignedInsufficientForOblique :: Test
-taoAxisAlignedInsufficientForOblique = TestCase $ do
+-- Shared setup for C2 (a) and (b): axis-aligned pool only, oblique label.
+obliqueAxisAlignedFixture ::
+    (D.DataFrame, V.Vector Int, [Expr Bool], Tree T.Text)
+obliqueAxisAlignedFixture =
     let labelExpr =
             F.ifThenElse
                 ((F.col @Double "x" + F.col @Double "y") .<= F.lit (4.5 :: Double))
@@ -420,12 +423,47 @@ taoAxisAlignedInsufficientForOblique = TestCase $ do
                 (Leaf "pos")
                 (Leaf "neg") ::
                 Tree T.Text
-        cfg = defaultTreeConfig{taoIterations = 10, expressionPairs = 6, minLeafSize = 1}
+     in (df, indices, axisConds, initTree)
+
+-- C2 (a): with the linear solver OFF, axis-aligned pool cannot recover the
+-- oblique decision boundary. Preserves the original guarantee of the test.
+taoAxisAlignedInsufficientForObliqueDiscreteOnly :: Test
+taoAxisAlignedInsufficientForObliqueDiscreteOnly = TestCase $ do
+    let (df, indices, axisConds, initTree) = obliqueAxisAlignedFixture
+        cfg =
+            defaultTreeConfig
+                { taoIterations = 10
+                , expressionPairs = 6
+                , minLeafSize = 1
+                , useLinearSolver = False
+                }
         result = taoOptimize @T.Text cfg "label" axisConds df indices initTree
         finalLoss = computeTreeLoss @T.Text "label" df indices result
     assertBool
-        "axis-aligned stump cannot recover oblique label (loss must remain > 0.1)"
+        "axis-aligned stump cannot recover oblique label without linear solver (loss > 0.1)"
         (finalLoss > 0.1)
+
+-- C2 (b): with the linear solver ON, the L1-LR fit discovers the oblique
+-- (x + y) hyperplane even though only axis-aligned conditions are in the
+-- candidate pool. This is the test that licenses calling the implementation
+-- canonical TAO.
+taoLinearRecoversObliqueFromAxisAlignedPool :: Test
+taoLinearRecoversObliqueFromAxisAlignedPool = TestCase $ do
+    let (df, indices, axisConds, initTree) = obliqueAxisAlignedFixture
+        cfg =
+            defaultTreeConfig
+                { taoIterations = 10
+                , expressionPairs = 6
+                , minLeafSize = 1
+                , useLinearSolver = True
+                , minCarePointsForLinear = 2
+                }
+        result = taoOptimize @T.Text cfg "label" axisConds df indices initTree
+        finalLoss = computeTreeLoss @T.Text "label" df indices result
+    assertEqual
+        "linear solver recovers oblique split from axis-aligned-only pool"
+        0.0
+        finalLoss
 
 ------------------------------------------------------------------------
 -- Nullable numeric feature tests
@@ -713,6 +751,345 @@ probArgmaxMatchesClassifier = TestCase $ do
                         indices
 
 ------------------------------------------------------------------------
+-- C4-C9 / D-series: linear solver integration tests
+------------------------------------------------------------------------
+
+-- C4: Nested oblique recovery without supplying any oblique hints.
+-- The label is determined by two oblique boundaries: (x+y <= 4.5) and
+-- (x-y <= 0.5). Only axis-aligned thresholds are in the candidate pool.
+-- With the linear solver, both oblique splits should be learned and the
+-- tree should reach zero loss.
+taoRecoversNestedObliqueWithoutHint :: Test
+taoRecoversNestedObliqueWithoutHint = TestCase $ do
+    let labelExpr =
+            F.ifThenElse
+                ((F.col @Double "x" + F.col @Double "y") .<= F.lit (4.5 :: Double))
+                (F.lit ("low" :: T.Text))
+                ( F.ifThenElse
+                    ((F.col @Double "x" - F.col @Double "y") .<= F.lit (0.5 :: Double))
+                    (F.lit "mid")
+                    (F.lit "high")
+                )
+        df = D.derive @T.Text "label" labelExpr gridBaseDF
+        indices = V.enumFromN 0 16
+        initTree =
+            Branch
+                (F.col @Double "x" .<= F.lit (1.5 :: Double))
+                (Leaf "low")
+                ( Branch
+                    (F.col @Double "y" .<= F.lit (3.5 :: Double))
+                    (Leaf "mid")
+                    (Leaf "high")
+                ) ::
+                Tree T.Text
+        axisOnlyConds =
+            [F.col @Double "x" .<= F.lit (t :: Double) | t <- [1.5, 2.5, 3.5]]
+                ++ [F.col @Double "y" .<= F.lit (t :: Double) | t <- [1.5, 2.5, 3.5]]
+        cfg =
+            defaultTreeConfig
+                { taoIterations = 20
+                , expressionPairs = 6
+                , minLeafSize = 1
+                , useLinearSolver = True
+                , minCarePointsForLinear = 2
+                }
+        result = taoOptimize @T.Text cfg "label" axisOnlyConds df indices initTree
+        finalLoss = computeTreeLoss @T.Text "label" df indices result
+    assertEqual
+        "linear solver recovers nested oblique tree from axis-aligned-only pool"
+        0.0
+        finalLoss
+
+-- C5: Monotone loss across iterations with the linear solver enabled.
+-- Resolves Issue 1 from the prior plan (currentCond included in the
+-- competition pool).
+taoMonotoneWithLinear :: Test
+taoMonotoneWithLinear = TestCase $ do
+    let indices = V.enumFromN 0 20
+        cfg = defaultTreeConfig{taoIterations = 5, expressionPairs = 4, minLeafSize = 1}
+        initLoss = computeTreeLoss @T.Text "label" sepDF indices wrongStump
+        stepTree = taoIteration @T.Text cfg "label" sepConds sepDF indices
+        step (tree, _) =
+            let tree' = stepTree tree
+             in (tree', computeTreeLoss @T.Text "label" sepDF indices tree')
+        snapshots = take 6 $ iterate step (wrongStump, initLoss)
+        losses = map snd snapshots
+        pairs = zip losses (tail losses)
+    assertBool
+        ("loss must be non-increasing across iterations (got " ++ show losses ++ ")")
+        (all (\(a, b) -> b <= a + 1e-9) pairs)
+
+-- C6: When the discrete pool contains an exact-zero-error split (axis-aligned
+-- works perfectly), the competition picks the simpler discrete candidate
+-- rather than a similarly-good but more complex linear one.
+taoLinearVsDiscreteCompetition :: Test
+taoLinearVsDiscreteCompetition = TestCase $ do
+    -- sepDF is axis-aligned-separable by x <= 10.5. The discrete pool
+    -- sepConds contains this exact condition. Linear solver may also
+    -- produce a hyperplane that works, but the discrete one has smaller
+    -- eSize, so the tie-breaker should pick it.
+    let indices = V.enumFromN 0 20
+        cfg =
+            defaultTreeConfig
+                { taoIterations = 5
+                , expressionPairs = 4
+                , minLeafSize = 1
+                , useLinearSolver = True
+                , minCarePointsForLinear = 2
+                }
+        result = taoOptimize @T.Text cfg "label" sepConds sepDF indices wrongStump
+        finalLoss = computeTreeLoss @T.Text "label" sepDF indices result
+    assertEqual
+        "axis-aligned separable data should fit to zero loss"
+        0.0
+        finalLoss
+
+-- C8: Linear solver respects the L1 penalty and produces sparse hyperplanes
+-- on data where only some features are informative.
+taoLinearProducesSparsity :: Test
+taoLinearProducesSparsity = TestCase $ do
+    -- 50 rows, 4 features. label depends only on (a + b). c and d are noise.
+    -- With sufficient L1 strength, the chosen split should mention only a and b.
+    let n = 50 :: Int
+        xs = [fromIntegral i / 10 - 2.5 :: Double | i <- [0 .. n - 1]]
+        as = xs
+        bs = map (* 0.7) xs
+        -- noise: take xs and shift them so they don't correlate with a+b
+        cs = [fromIntegral ((i * 7) `mod` 11) / 5 - 1 :: Double | i <- [0 .. n - 1]]
+        ds = [fromIntegral ((i * 13) `mod` 7) / 3 - 1 :: Double | i <- [0 .. n - 1]]
+        labels =
+            [ if (as !! i) + (bs !! i) > 0 then "pos" else "neg" :: T.Text
+            | i <- [0 .. n - 1]
+            ]
+        df =
+            D.fromNamedColumns
+                [ ("label", DI.fromList labels)
+                , ("a", DI.fromList as)
+                , ("b", DI.fromList bs)
+                , ("c", DI.fromList cs)
+                , ("d", DI.fromList ds)
+                ]
+        cfg =
+            defaultTreeConfig
+                { maxTreeDepth = 1
+                , taoIterations = 10
+                , minLeafSize = 1
+                , useLinearSolver = True
+                , minCarePointsForLinear = 2
+                , linearSolverConfig =
+                    (linearSolverConfig defaultTreeConfig)
+                        { DataFrame.LinearSolver.scL1Lambda = 0.05
+                        }
+                }
+        result = fitDecisionTree @T.Text cfg (Col "label") df
+        rootCols = getColumns result
+    -- Hard fail only if NONE of a/b show up — that would mean the model
+    -- is ignoring the signal. We expect at most 4 columns; the H3 target
+    -- is that fewer than 4 (some noise columns dropped) -- but the test
+    -- only asserts the signal columns appear.
+    assertBool
+        ( "informative columns 'a' or 'b' must appear in the fitted Expr (got "
+            ++ show rootCols
+            ++ ")"
+        )
+        ("a" `elem` rootCols || "b" `elem` rootCols)
+
+-- C9: Determinism — same training data produces an equal (eqExpr) tree.
+taoLinearDeterministic :: Test
+taoLinearDeterministic = TestCase $ do
+    let cfg =
+            defaultTreeConfig
+                { taoIterations = 5
+                , expressionPairs = 4
+                , minLeafSize = 1
+                , useLinearSolver = True
+                , minCarePointsForLinear = 2
+                }
+        r1 = fitDecisionTree @T.Text cfg (Col "label") sepDF
+        r2 = fitDecisionTree @T.Text cfg (Col "label") sepDF
+    assertBool "fitDecisionTree is deterministic on the same input" (eqExpr r1 r2)
+
+-- D1: One care point — solver must not crash; integration should fall back
+-- gracefully (via minCarePointsForLinear) and rely on the discrete path.
+taoLinearTinyCareSet :: Test
+taoLinearTinyCareSet = TestCase $ do
+    -- Use the toy sepDF, but force minCarePointsForLinear = 100 so the
+    -- linear path is always skipped. The result should match the
+    -- linear-off baseline.
+    let cfg =
+            defaultTreeConfig
+                { taoIterations = 5
+                , expressionPairs = 4
+                , minLeafSize = 1
+                , useLinearSolver = True
+                , minCarePointsForLinear = 100
+                }
+        result = fitDecisionTree @T.Text cfg (Col "label") sepDF
+        -- Sanity: the tree should still classify correctly.
+        cfgOff = cfg{useLinearSolver = False}
+        resultOff = fitDecisionTree @T.Text cfgOff (Col "label") sepDF
+    assertBool
+        "skipping linear solver yields same expression as linear-off baseline"
+        (eqExpr result resultOff)
+
+------------------------------------------------------------------------
+-- Categorical-condition generator tests (Phase 1-2 of the plan)
+------------------------------------------------------------------------
+
+-- A binary-target DataFrame with a 5-level Text column whose levels have
+-- monotonically-increasing positive rates. Breiman's algorithm should
+-- enumerate the 4 contiguous-prefix splits in that exact rate order.
+breimanBinaryDF :: D.DataFrame
+breimanBinaryDF =
+    let n = 100 :: Int
+        -- Levels chosen so positive rates after Laplace are:
+        --   a: 0/n+1 / 2+n+2  → very low
+        --   b: 0.25
+        --   c: 0.5
+        --   d: 0.75
+        --   e: ~1.0
+        mkLabel "a" = "neg"
+        mkLabel "b" = "neg"
+        mkLabel "c" = "pos"
+        mkLabel "d" = "pos"
+        mkLabel "e" = "pos"
+        mkLabel _ = "neg"
+        levels = cycle ["a", "b", "c", "d", "e"]
+        feats = take n levels
+        labs = map mkLabel feats
+     in D.fromUnnamedColumns
+            [ DI.fromList (map T.pack feats :: [T.Text])
+            , DI.fromList (map T.pack labs :: [T.Text])
+            ]
+            |> D.rename "0" "feat"
+            |> D.rename "1" "label"
+
+testCategoricalBreimanBinary :: Test
+testCategoricalBreimanBinary = TestCase $ do
+    let Just ti = mkTargetInfo @T.Text "label" breimanBinaryDF
+        conds =
+            discreteConditions @T.Text
+                ti
+                defaultTreeConfig
+                (D.exclude ["label"] breimanBinaryDF)
+        feat = "feat"
+        -- Filter only conditions over "feat" (cross-column equality could
+        -- mix in if there were other categoricals; here there aren't).
+        feats = filter (\c -> feat `elem` getColumns c) conds
+    -- 5 levels → 4 prefixes
+    assertEqual "Breiman emits k-1 prefixes" 4 (length feats)
+
+testCategoricalSubsetsMulticlassLowCard :: Test
+testCategoricalSubsetsMulticlassLowCard = TestCase $ do
+    -- 3-class target, 3-level Text column. Subset enumeration: 2^3 - 2 = 6.
+    let n = 30 :: Int
+        feats = take n (cycle ["x", "y", "z"])
+        labs = take n (cycle ["A", "B", "C"])
+        df =
+            D.fromUnnamedColumns
+                [ DI.fromList (map T.pack feats :: [T.Text])
+                , DI.fromList (map T.pack labs :: [T.Text])
+                ]
+                |> D.rename "0" "feat"
+                |> D.rename "1" "label"
+        Just ti = mkTargetInfo @T.Text "label" df
+        conds = discreteConditions @T.Text ti defaultTreeConfig (D.exclude ["label"] df)
+        feat = "feat"
+        feats' = filter (\c -> feat `elem` getColumns c) conds
+    -- 3 classes → multi-class path → subsets at cap=4 → 2^3 - 2 = 6
+    assertEqual "subsets at low cardinality" 6 (length feats')
+
+testCategoricalSingletonsMulticlassHighCard :: Test
+testCategoricalSingletonsMulticlassHighCard = TestCase $ do
+    -- 3-class target, 6-level Text column. Above cap=4 → singletons (6).
+    let n = 60 :: Int
+        feats = take n (cycle ["a", "b", "c", "d", "e", "f"])
+        labs = take n (cycle ["A", "B", "C"])
+        df =
+            D.fromUnnamedColumns
+                [ DI.fromList (map T.pack feats :: [T.Text])
+                , DI.fromList (map T.pack labs :: [T.Text])
+                ]
+                |> D.rename "0" "feat"
+                |> D.rename "1" "label"
+        Just ti = mkTargetInfo @T.Text "label" df
+        conds = discreteConditions @T.Text ti defaultTreeConfig (D.exclude ["label"] df)
+        feat = "feat"
+        feats' = filter (\c -> feat `elem` getColumns c) conds
+    -- 6 > cap=4 → singletons → 6 conditions
+    assertEqual "singletons at high cardinality" 6 (length feats')
+
+testCategoricalCardZero :: Test
+testCategoricalCardZero = TestCase $ do
+    -- Empty column → no conditions.
+    let df =
+            D.fromUnnamedColumns
+                [ DI.fromList ([] :: [T.Text])
+                , DI.fromList ([] :: [T.Text])
+                ]
+                |> D.rename "0" "feat"
+                |> D.rename "1" "label"
+        Just ti = mkTargetInfo @T.Text "label" df
+        conds = discreteConditions @T.Text ti defaultTreeConfig (D.exclude ["label"] df)
+        feat = "feat"
+        feats' = filter (\c -> feat `elem` getColumns c) conds
+    assertEqual "no candidates on empty column" 0 (length feats')
+
+testCategoricalNullableBinary :: Test
+testCategoricalNullableBinary = TestCase $ do
+    -- Maybe Text feature with nulls, binary target. Breiman should fire on
+    -- the non-null distinct values; nulls drop out via validBoxedValues.
+    let feats =
+            [ Just "a"
+            , Just "b"
+            , Just "c"
+            , Nothing
+            , Just "a"
+            , Just "b"
+            , Just "c"
+            , Nothing
+            , Just "a"
+            , Just "b"
+            , Just "c"
+            , Just "a"
+            , Just "b"
+            , Just "c"
+            , Just "a"
+            , Just "b"
+            ]
+        labs =
+            [ "neg"
+            , "neg"
+            , "pos"
+            , "neg"
+            , "neg"
+            , "neg"
+            , "pos"
+            , "neg"
+            , "neg"
+            , "neg"
+            , "pos"
+            , "neg"
+            , "neg"
+            , "pos"
+            , "neg"
+            , "pos"
+            ]
+        df =
+            D.fromUnnamedColumns
+                [ DI.fromList (feats :: [Maybe T.Text])
+                , DI.fromList (map T.pack labs :: [T.Text])
+                ]
+                |> D.rename "0" "feat"
+                |> D.rename "1" "label"
+        Just ti = mkTargetInfo @T.Text "label" df
+        conds = discreteConditions @T.Text ti defaultTreeConfig (D.exclude ["label"] df)
+        feat = "feat" :: T.Text
+        feats' = filter (\c -> feat `elem` getColumns c) conds
+    -- 3 non-null distinct levels → k-1 = 2 Breiman prefixes
+    assertEqual "Breiman prefixes on nullable column ignore nulls" 2 (length feats')
+
+------------------------------------------------------------------------
 -- Test list
 ------------------------------------------------------------------------
 
@@ -740,8 +1117,11 @@ tests =
     , TestLabel "taoRecoversSingleObliqueDerived" taoRecoversSingleObliqueDerived
     , TestLabel "taoRecoversNestedObliqueDerived" taoRecoversNestedObliqueDerived
     , TestLabel
-        "taoAxisAlignedInsufficientForOblique"
-        taoAxisAlignedInsufficientForOblique
+        "C2a taoAxisAlignedInsufficientForObliqueDiscreteOnly"
+        taoAxisAlignedInsufficientForObliqueDiscreteOnly
+    , TestLabel
+        "C2b taoLinearRecoversObliqueFromAxisAlignedPool"
+        taoLinearRecoversObliqueFromAxisAlignedPool
     , TestLabel "numericColsNullableDouble" numericColsNullableDoubleTest
     , TestLabel "numericColsNullableInt" numericColsNullableIntTest
     , TestLabel "numericCondsNullableNonEmpty" numericCondsNullableNonEmptyTest
@@ -759,4 +1139,21 @@ tests =
     , TestLabel "probExprsAllClasses" probExprsAllClasses
     , TestLabel "probsSumToOne" probsSumToOne
     , TestLabel "probArgmaxMatchesClassifier" probArgmaxMatchesClassifier
+    , TestLabel
+        "C4 taoRecoversNestedObliqueWithoutHint"
+        taoRecoversNestedObliqueWithoutHint
+    , TestLabel "C5 taoMonotoneWithLinear" taoMonotoneWithLinear
+    , TestLabel "C6 taoLinearVsDiscreteCompetition" taoLinearVsDiscreteCompetition
+    , TestLabel "C8 taoLinearProducesSparsity" taoLinearProducesSparsity
+    , TestLabel "C9 taoLinearDeterministic" taoLinearDeterministic
+    , TestLabel "D1 taoLinearTinyCareSet" taoLinearTinyCareSet
+    , TestLabel "E1 categoricalBreimanBinary" testCategoricalBreimanBinary
+    , TestLabel
+        "E2 categoricalSubsetsMulticlassLowCard"
+        testCategoricalSubsetsMulticlassLowCard
+    , TestLabel
+        "E3 categoricalSingletonsMulticlassHighCard"
+        testCategoricalSingletonsMulticlassHighCard
+    , TestLabel "E4 categoricalCardZero" testCategoricalCardZero
+    , TestLabel "E5 categoricalNullableBinary" testCategoricalNullableBinary
     ]

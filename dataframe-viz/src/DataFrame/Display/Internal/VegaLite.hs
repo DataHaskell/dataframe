@@ -41,6 +41,7 @@ module DataFrame.Display.Internal.VegaLite (
     rowCountWarning,
 ) where
 
+import qualified Control.Monad
 import Data.Aeson (ToJSON (toJSON), Value (Null), object, (.=))
 import qualified Data.Aeson.Key as K
 import Data.Aeson.Text (encodeToLazyText)
