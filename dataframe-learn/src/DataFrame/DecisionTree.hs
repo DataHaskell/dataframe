@@ -18,8 +18,8 @@ import DataFrame.Internal.DataFrame (
     unsafeGetColumn,
  )
 import DataFrame.Internal.Expression (
+    BinaryOp (binaryName),
     Expr (..),
-    binaryName,
     compareExpr,
     eSize,
     eqExpr,
@@ -1259,8 +1259,9 @@ pruneExpr e = e
 -- Faithful sklearn CART (for an aligned TAO baseline)
 -- ----------------------------------------------------------------------------
 
--- | A one-hot feature column: its per-row Double values plus the sklearn LEFT
--- predicate (@x <= threshold@) expressed over the ORIGINAL DataFrame.
+{- | A one-hot feature column: its per-row Double values plus the sklearn LEFT
+predicate (@x <= threshold@) expressed over the ORIGINAL DataFrame.
+-}
 data CartFeature = CartFeature
     { cfValues :: !(VU.Vector Double)
     , cfPred :: !(Double -> Expr Bool)
@@ -1281,7 +1282,8 @@ continuous features. @min_samples_split@ is fixed at 2; @max_depth@ /
 feature order (no RNG permutation), so it matches sklearn only where gains do
 not tie (i.e. not the seeded tie-break sklearn applies to one-hot columns).
 -}
-buildCartTree :: forall a. (Columnable a, Ord a) => TreeConfig -> T.Text -> DataFrame -> Tree a
+buildCartTree ::
+    forall a. (Columnable a, Ord a) => TreeConfig -> T.Text -> DataFrame -> Tree a
 buildCartTree cfg target df = cartToTree (buildCartNode 0 (VU.enumFromN 0 nAll))
   where
     feats = V.fromList (cartFeatures target df)
@@ -1301,12 +1303,16 @@ buildCartTree cfg target df = cartToTree (buildCartNode 0 (VU.enumFromN 0 nAll))
     minLeaf = max 1 (minLeafSize cfg)
 
     classCounts idxs =
-        VU.accumulate (+) (VU.replicate nClasses 0) (VU.map (\i -> (codes VU.! i, 1)) idxs)
+        VU.accumulate
+            (+)
+            (VU.replicate nClasses 0)
+            (VU.map (\i -> (codes VU.! i, 1)) idxs)
 
     -- Gini over a class-count list of total m: 1 - Σ (c/m)².
     giniL cs m
         | m == 0 = 0
-        | otherwise = 1 - sum [let p = fromIntegral c / fromIntegral m in p * p | c <- cs]
+        | otherwise =
+            1 - sum [let p = fromIntegral c / fromIntegral m in p * p | c <- cs]
 
     buildCartNode :: Int -> VU.Vector Int -> CartNode
     buildCartNode depth idxs
@@ -1317,7 +1323,11 @@ buildCartTree cfg target df = cartToTree (buildCartNode 0 (VU.enumFromN 0 nAll))
                 let !vals = cfValues (feats V.! fj)
                     leftIdx = VU.filter (\i -> vals VU.! i <= thr) idxs
                     rightIdx = VU.filter (\i -> vals VU.! i > thr) idxs
-                 in CSplit fj thr (buildCartNode (depth + 1) leftIdx) (buildCartNode (depth + 1) rightIdx)
+                 in CSplit
+                        fj
+                        thr
+                        (buildCartNode (depth + 1) leftIdx)
+                        (buildCartNode (depth + 1) rightIdx)
       where
         n = VU.length idxs
         counts = classCounts idxs
@@ -1345,7 +1355,9 @@ buildCartTree cfg target df = cartToTree (buildCartNode 0 (VU.enumFromN 0 nAll))
                 sweep best _ _ _ [] = best
                 sweep best leftAcc moved prevV ((v, c) : more) =
                     let best'
-                            | moved >= minLeaf, n - moved >= minLeaf, v > prevV + 1e-7 =
+                            | moved >= minLeaf
+                            , n - moved >= minLeaf
+                            , v > prevV + 1e-7 =
                                 let nl = moved
                                     nr = n - nl
                                     gl = giniL leftAcc nl
@@ -1373,7 +1385,9 @@ cartFeatures target df = concatMap featOf (filter (/= target) (columnNames df))
             case testEquality (typeRep @b) (typeRep @Double) of
                 Just Refl -> [CartFeature v (\t -> F.col @Double c .<=. F.lit t)]
                 Nothing -> case sIntegral @b of
-                    STrue -> [CartFeature (VU.map fromIntegral v) (\t -> F.toDouble (F.col @b c) .<=. F.lit t)]
+                    STrue ->
+                        [ CartFeature (VU.map fromIntegral v) (\t -> F.toDouble (F.col @b c) .<=. F.lit t)
+                        ]
                     SFalse -> []
         BoxedColumn _ (v :: V.Vector b) ->
             case testEquality (typeRep @b) (typeRep @T.Text) of

@@ -1,4 +1,5 @@
 {-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE MagicHash #-}
 
 {- |
@@ -24,7 +25,11 @@ module DataFrame.Internal.Hash (
 import Data.Bits (rotateL, unsafeShiftL, unsafeShiftR, xor)
 import Data.Char (ord)
 import qualified Data.Text as T
+#if MIN_VERSION_text(2,1,0)
+import Data.Array.Byte (ByteArray (ByteArray))
+#else
 import Data.Text.Array (Array (ByteArray))
+#endif
 import Data.Text.Internal (Text (Text))
 import GHC.Exts (Int (I#), indexWord8Array#, indexWord8ArrayAsWord64#)
 import GHC.Word (Word64 (W64#), Word8 (W8#))

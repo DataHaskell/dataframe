@@ -8,6 +8,7 @@ import GenDataFrame ()
 import Test.HUnit
 import Test.QuickCheck
 
+import qualified Cart
 import qualified DecisionTree
 import qualified Functions
 import qualified IO.CSV
@@ -44,7 +45,6 @@ import qualified Plotting
 import qualified Properties
 import qualified Properties.Categorical
 import qualified Properties.Simplify
-import qualified Cart
 import qualified Simplify
 import qualified TreePruning
 import qualified Worklist
