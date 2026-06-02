@@ -56,8 +56,8 @@ tests =
     ]
 
 readJson :: (FromJSON a) => FilePath -> IO (Either String a)
-readJson path = do
-    e <- try (BL.readFile path) :: IO (Either SomeException BL.ByteString)
+readJson fp = do
+    e <- try (BL.readFile fp) :: IO (Either SomeException BL.ByteString)
     pure $ case e of
         Left _ -> Left "missing"
         Right raw -> eitherDecode raw

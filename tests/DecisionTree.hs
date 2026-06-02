@@ -25,6 +25,14 @@ import Test.HUnit
 -- Shared fixtures
 ------------------------------------------------------------------------
 
+{- | Build a 'TargetInfo' or fail loudly; the test fixtures always satisfy
+'mkTargetInfo', so a 'Nothing' here is a broken test, not a runtime case.
+-}
+requireTargetInfo :: T.Text -> D.DataFrame -> TargetInfo T.Text
+requireTargetInfo target df = case mkTargetInfo @T.Text target df of
+    Just ti -> ti
+    Nothing -> error ("requireTargetInfo: no target info for " <> T.unpack target)
+
 -- 4 rows: label = ["A","B","A","C"], x = [1.0,2.0,3.0,4.0]
 fixtureDF :: D.DataFrame
 fixtureDF =
@@ -853,19 +861,19 @@ taoLinearProducesSparsity = TestCase $ do
     -- With sufficient L1 strength, the chosen split should mention only a and b.
     let n = 50 :: Int
         xs = [fromIntegral i / 10 - 2.5 :: Double | i <- [0 .. n - 1]]
-        as = xs
+        avals = xs
         bs = map (* 0.7) xs
         -- noise: take xs and shift them so they don't correlate with a+b
         cs = [fromIntegral ((i * 7) `mod` 11) / 5 - 1 :: Double | i <- [0 .. n - 1]]
         ds = [fromIntegral ((i * 13) `mod` 7) / 3 - 1 :: Double | i <- [0 .. n - 1]]
         labels =
-            [ if (as !! i) + (bs !! i) > 0 then "pos" else "neg" :: T.Text
+            [ if (avals !! i) + (bs !! i) > 0 then "pos" else "neg" :: T.Text
             | i <- [0 .. n - 1]
             ]
         df =
             D.fromNamedColumns
                 [ ("label", DI.fromList labels)
-                , ("a", DI.fromList as)
+                , ("a", DI.fromList avals)
                 , ("b", DI.fromList bs)
                 , ("c", DI.fromList cs)
                 , ("d", DI.fromList ds)
@@ -967,7 +975,7 @@ breimanBinaryDF =
 
 testCategoricalBreimanBinary :: Test
 testCategoricalBreimanBinary = TestCase $ do
-    let Just ti = mkTargetInfo @T.Text "label" breimanBinaryDF
+    let ti = requireTargetInfo "label" breimanBinaryDF
         conds =
             discreteConditions @T.Text
                 ti
@@ -993,7 +1001,7 @@ testCategoricalSubsetsMulticlassLowCard = TestCase $ do
                 ]
                 |> D.rename "0" "feat"
                 |> D.rename "1" "label"
-        Just ti = mkTargetInfo @T.Text "label" df
+        ti = requireTargetInfo "label" df
         conds = discreteConditions @T.Text ti defaultTreeConfig (D.exclude ["label"] df)
         feat = "feat"
         feats' = filter (\c -> feat `elem` getColumns c) conds
@@ -1013,7 +1021,7 @@ testCategoricalSingletonsMulticlassHighCard = TestCase $ do
                 ]
                 |> D.rename "0" "feat"
                 |> D.rename "1" "label"
-        Just ti = mkTargetInfo @T.Text "label" df
+        ti = requireTargetInfo "label" df
         conds = discreteConditions @T.Text ti defaultTreeConfig (D.exclude ["label"] df)
         feat = "feat"
         feats' = filter (\c -> feat `elem` getColumns c) conds
@@ -1030,7 +1038,7 @@ testCategoricalCardZero = TestCase $ do
                 ]
                 |> D.rename "0" "feat"
                 |> D.rename "1" "label"
-        Just ti = mkTargetInfo @T.Text "label" df
+        ti = requireTargetInfo "label" df
         conds = discreteConditions @T.Text ti defaultTreeConfig (D.exclude ["label"] df)
         feat = "feat"
         feats' = filter (\c -> feat `elem` getColumns c) conds
@@ -1083,7 +1091,7 @@ testCategoricalNullableBinary = TestCase $ do
                 ]
                 |> D.rename "0" "feat"
                 |> D.rename "1" "label"
-        Just ti = mkTargetInfo @T.Text "label" df
+        ti = requireTargetInfo "label" df
         conds = discreteConditions @T.Text ti defaultTreeConfig (D.exclude ["label"] df)
         feat = "feat" :: T.Text
         feats' = filter (\c -> feat `elem` getColumns c) conds

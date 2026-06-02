@@ -106,14 +106,14 @@ testA1RecoverHyperplane = TestCase $ do
                 , scTol = 1e-6
                 }
         model = fitL1Logistic cfg rows labels (V.fromList ["x", "y"])
-        cos = cosineSim (lmWeights model) groundTruth
+        cosSim = cosineSim (lmWeights model) groundTruth
         sameSignAll =
             all
                 (\i -> predict model (rows V.! i) == labels VU.! i)
                 [0 .. V.length rows - 1]
     assertBool
-        ("recovered weights should align with ground truth (cos = " ++ show cos ++ ")")
-        (cos > 0.99)
+        ("recovered weights should align with ground truth (cos = " ++ show cosSim ++ ")")
+        (cosSim > 0.99)
     assertBool "all training points predicted correctly" sameSignAll
 
 ------------------------------------------------------------------------
@@ -669,7 +669,9 @@ testA19ElasticNetRecoveryHigh = TestCase $ do
         men = fitL1Logistic cfgEN rows labels names
         wEN = VU.toList (lmWeights men)
         nzCount xs = length (filter (/= 0) xs)
-        [aEN, bEN] = take 2 wEN
+        (aEN, bEN) = case wEN of
+            (a : b : _) -> (a, b)
+            _ -> error "elastic-net test: expected at least two weights"
     assertBool
         ("ρ=0.97 EN keeps f0 non-zero; wEN[:2] = " ++ show (take 2 wEN))
         (aEN /= 0)
@@ -693,7 +695,9 @@ testA19ElasticNetRecoveryMid = TestCase $ do
         cfgEN = defaultSolverConfig{scL1Lambda = 0.05, scL2Lambda = 0.05, scMaxIter = 1000}
         men = fitL1Logistic cfgEN rows labels names
         wEN = VU.toList (lmWeights men)
-        [aEN, bEN] = take 2 wEN
+        (aEN, bEN) = case wEN of
+            (a : b : _) -> (a, b)
+            _ -> error "elastic-net test: expected at least two weights"
     assertBool
         ("ρ=0.7 EN keeps f0 non-zero; wEN[:2] = " ++ show (take 2 wEN))
         (aEN /= 0)

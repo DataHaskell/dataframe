@@ -131,12 +131,12 @@ genTree d
 
 evalBool :: D.DataFrame -> Expr Bool -> Maybe (VU.Vector Bool)
 evalBool df e = case interpret @Bool df e of
-    Right (TColumn col) -> either (const Nothing) Just (toVector @Bool @VU.Vector col)
+    Right (TColumn tcol) -> either (const Nothing) Just (toVector @Bool @VU.Vector tcol)
     Left _ -> Nothing
 
 evalMaybe :: D.DataFrame -> Expr (Maybe Bool) -> Maybe (V.Vector (Maybe Bool))
 evalMaybe df e = case interpret @(Maybe Bool) df e of
-    Right (TColumn col) -> either (const Nothing) Just (toVector @(Maybe Bool) @V.Vector col)
+    Right (TColumn tcol) -> either (const Nothing) Just (toVector @(Maybe Bool) @V.Vector tcol)
     Left _ -> Nothing
 
 -- ---- properties ----
