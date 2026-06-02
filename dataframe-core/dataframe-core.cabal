@@ -44,6 +44,7 @@ library
                         DataFrame.Internal.Interpreter
                         DataFrame.Internal.Nullable
                         DataFrame.Internal.Row
+                        DataFrame.Internal.Simplify
                         DataFrame.Internal.Types
                         DataFrame.Typed.Freeze
                         DataFrame.Typed.Generic

@@ -107,7 +107,11 @@ executable examples
                    DataFrame.TH.Parquet,
                    DataFrame.TH.Records,
                    DataFrame.Typed.TH.CSV,
-                   DataFrame.Typed.TH.Records
+                   DataFrame.Typed.TH.Records,
+                   DataFrame.Display.Internal.VegaLite,
+                   DataFrame.LinearSolver,
+                   DataFrame.Operations.SetOps,
+                   DataFrame.Internal.Simplify
     hs-source-dirs:   .,
                       ../src,
                       ../dataframe-core/src,

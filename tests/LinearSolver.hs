@@ -1,3 +1,4 @@
+{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeApplications #-}
 
@@ -97,7 +98,13 @@ testA1RecoverHyperplane = TestCase $ do
         groundBias = 0.3
         rows = syntheticPoints 1 200 2
         labels = labelsForHyperplane rows groundTruth groundBias
-        cfg = defaultSolverConfig{scL1Lambda = 0, scMaxIter = 500, scTol = 1e-6}
+        cfg =
+            defaultSolverConfig
+                { scL1Lambda = 0
+                , scL2Lambda = 0
+                , scMaxIter = 500
+                , scTol = 1e-6
+                }
         model = fitL1Logistic cfg rows labels (V.fromList ["x", "y"])
         cos = cosineSim (lmWeights model) groundTruth
         sameSignAll =
@@ -120,7 +127,13 @@ testA2L1Sparsity = TestCase $ do
         groundBias = 0
         rows = syntheticPoints 7 500 10
         labels = labelsForHyperplane rows groundTruth groundBias
-        cfg = defaultSolverConfig{scL1Lambda = 0.1, scMaxIter = 500, scTol = 1e-6}
+        cfg =
+            defaultSolverConfig
+                { scL1Lambda = 0.1
+                , scL2Lambda = 0
+                , scMaxIter = 500
+                , scTol = 1e-6
+                }
         names = V.fromList [T.pack ("f" ++ show i) | i <- [0 .. 9 :: Int]]
         model = fitL1Logistic cfg rows labels names
         ws = VU.toList (lmWeights model)
@@ -159,7 +172,13 @@ testA3Convergence = TestCase $ do
     let groundTruth = VU.fromList [1.0, -0.5, 0.7]
         rows = syntheticPoints 2 300 3
         labels = labelsForHyperplane rows groundTruth 0
-        cfg = defaultSolverConfig{scL1Lambda = 0.01, scMaxIter = 1000, scTol = 1e-5}
+        cfg =
+            defaultSolverConfig
+                { scL1Lambda = 0.01
+                , scL2Lambda = 0
+                , scMaxIter = 1000
+                , scTol = 1e-5
+                }
         model = fitL1Logistic cfg rows labels (V.fromList ["a", "b", "c"])
         -- Loss at the fitted model
         (rowsStd, _, _, _) = standardize rows
@@ -187,7 +206,7 @@ testA4LossNotIncreasing = TestCase $ do
     let groundTruth = VU.fromList [0.8, 0.4]
         rows = syntheticPoints 3 100 2
         labels = labelsForHyperplane rows groundTruth 0
-        cfg = defaultSolverConfig{scL1Lambda = 0.05, scMaxIter = 100}
+        cfg = defaultSolverConfig{scL1Lambda = 0.05, scL2Lambda = 0, scMaxIter = 100}
         model = fitL1Logistic cfg rows labels (V.fromList ["x", "y"])
         loss0 = logisticLoss rows labels (VU.replicate 2 0) 0
         lossFit = logisticLoss rows labels (lmWeights model) (lmIntercept model)
@@ -208,7 +227,7 @@ testA5AllSameDirection :: Test
 testA5AllSameDirection = TestCase $ do
     let rows = syntheticPoints 4 50 3
         labels = VU.replicate 50 1.0
-        cfg = defaultSolverConfig{scL1Lambda = 0.01, scMaxIter = 100}
+        cfg = defaultSolverConfig{scL1Lambda = 0.01, scL2Lambda = 0, scMaxIter = 100}
         model = fitL1Logistic cfg rows labels (V.fromList ["a", "b", "c"])
         ws = VU.toList (lmWeights model)
         b = lmIntercept model
@@ -252,7 +271,13 @@ testA7ConstantFeature = TestCase $ do
                 baseRows
         groundTruth = VU.fromList [0.0, 1.0] -- only feature 1 matters
         labels = labelsForHyperplane rows groundTruth 0
-        cfg = defaultSolverConfig{scL1Lambda = 0.01, scMaxIter = 300, scTol = 1e-6}
+        cfg =
+            defaultSolverConfig
+                { scL1Lambda = 0.01
+                , scL2Lambda = 0
+                , scMaxIter = 300
+                , scTol = 1e-6
+                }
         model = fitL1Logistic cfg rows labels (V.fromList ["constant", "signal"])
         ws = VU.toList (lmWeights model)
         anyBad = any (\x -> isNaN x || isInfinite x) ws
@@ -275,7 +300,7 @@ testA8LargeValues = TestCase $ do
         rows = V.map (VU.map (* scale)) baseRows
         groundTruth = VU.fromList [0.5, -0.7]
         labels = labelsForHyperplane rows groundTruth 0
-        cfg = defaultSolverConfig{scL1Lambda = 0.01, scMaxIter = 300}
+        cfg = defaultSolverConfig{scL1Lambda = 0.01, scL2Lambda = 0, scMaxIter = 300}
         model = fitL1Logistic cfg rows labels (V.fromList ["x", "y"])
         ws = VU.toList (lmWeights model)
         b = lmIntercept model
@@ -314,7 +339,13 @@ testA9StandardizationRoundTrip = TestCase $ do
                 [ if (c0 - 200) + 1000 * (c1 - 0.1) > 0 then 1.0 else -1.0
                 | (c0, c1) <- zip col0 col1
                 ]
-        cfg = defaultSolverConfig{scL1Lambda = 1.0e-4, scMaxIter = 2000, scTol = 1.0e-7}
+        cfg =
+            defaultSolverConfig
+                { scL1Lambda = 1.0e-4
+                , scL2Lambda = 0
+                , scMaxIter = 2000
+                , scTol = 1.0e-7
+                }
         model = fitL1Logistic cfg rows labels (V.fromList ["x", "y"])
         truthDir = VU.fromList [1.0, 1000.0]
         cs = cosineSim (lmWeights model) truthDir
@@ -344,7 +375,7 @@ testA10Determinism = TestCase $ do
     let groundTruth = VU.fromList [0.6, 0.4]
         rows = syntheticPoints 9 60 2
         labels = labelsForHyperplane rows groundTruth 0
-        cfg = defaultSolverConfig{scL1Lambda = 0.05, scMaxIter = 200}
+        cfg = defaultSolverConfig{scL1Lambda = 0.05, scL2Lambda = 0, scMaxIter = 200}
         m1 = fitL1Logistic cfg rows labels (V.fromList ["x", "y"])
         m2 = fitL1Logistic cfg rows labels (V.fromList ["x", "y"])
     assertEqual "same input -> same weights" (lmWeights m1) (lmWeights m2)
@@ -364,7 +395,13 @@ testA11GroundTruthRatio = TestCase $ do
         -- Scale up so x_i can range over [-3, 3] -- gives wider coverage of the boundary
         rows = V.map (VU.map (* 3)) baseRows
         labels = labelsForHyperplane rows groundTruth groundBias
-        cfg = defaultSolverConfig{scL1Lambda = 0.001, scMaxIter = 1000, scTol = 1e-7}
+        cfg =
+            defaultSolverConfig
+                { scL1Lambda = 0.001
+                , scL2Lambda = 0
+                , scMaxIter = 1000
+                , scTol = 1e-7
+                }
         model = fitL1Logistic cfg rows labels (V.fromList ["x", "y"])
         ws = lmWeights model
         b = lmIntercept model
@@ -440,7 +477,7 @@ testA14ConstantHugeValue = TestCase $ do
                 baseRows
         -- Label depends only on the informative (second) feature.
         labels = labelsForHyperplane rows (VU.fromList [0.0, 1.0]) 0
-        cfg = defaultSolverConfig{scL1Lambda = 0.01, scMaxIter = 300}
+        cfg = defaultSolverConfig{scL1Lambda = 0.01, scL2Lambda = 0, scMaxIter = 300}
         model = fitL1Logistic cfg rows labels (V.fromList ["constant", "signal"])
         ws = VU.toList (lmWeights model)
         b = lmIntercept model
@@ -467,7 +504,7 @@ testA15AllZeroFeature = TestCase $ do
                 (\row -> VU.fromList (0.0 : VU.toList row))
                 baseRows
         labels = labelsForHyperplane rows (VU.fromList [0.0, 1.0]) 0
-        cfg = defaultSolverConfig{scL1Lambda = 0.01, scMaxIter = 300}
+        cfg = defaultSolverConfig{scL1Lambda = 0.01, scL2Lambda = 0, scMaxIter = 300}
         model = fitL1Logistic cfg rows labels (V.fromList ["zero", "signal"])
         ws = VU.toList (lmWeights model)
     assertEqual "zero-variance column has weight zero" 0 (head ws)
@@ -487,7 +524,7 @@ testA16ImbalancedLabels = TestCase $ do
         labels =
             VU.fromList
                 (replicate nPos 1.0 ++ replicate nNeg (-1.0))
-        cfg = defaultSolverConfig{scL1Lambda = 0.01, scMaxIter = 500}
+        cfg = defaultSolverConfig{scL1Lambda = 0.01, scL2Lambda = 0, scMaxIter = 500}
         model = fitL1Logistic cfg rows labels (V.fromList ["x", "y"])
         ws = VU.toList (lmWeights model)
         b = lmIntercept model
@@ -516,7 +553,7 @@ testA17ImbalancedRawScales = TestCase $ do
                 )
                 baseRows
         labels = labelsForHyperplane baseRows (VU.fromList [1.0, -0.5, 0.7]) 0
-        cfg = defaultSolverConfig{scL1Lambda = 1.0e-4, scMaxIter = 500}
+        cfg = defaultSolverConfig{scL1Lambda = 1.0e-4, scL2Lambda = 0, scMaxIter = 500}
         model = fitL1Logistic cfg rows labels (V.fromList ["tiny", "unit", "huge"])
         ws = VU.toList (lmWeights model)
         b = lmIntercept model
@@ -559,7 +596,7 @@ testA13MaxIterOne :: Test
 testA13MaxIterOne = TestCase $ do
     let rows = syntheticPoints 21 80 2
         labels = labelsForHyperplane rows (VU.fromList [1.0, -0.5]) 0
-        cfg = defaultSolverConfig{scMaxIter = 1, scL1Lambda = 0.001}
+        cfg = defaultSolverConfig{scMaxIter = 1, scL1Lambda = 0.001, scL2Lambda = 0}
         cfg0 = cfg{scMaxIter = 0}
         m1 = fitL1Logistic cfg rows labels (V.fromList ["x", "y"])
         m0 = fitL1Logistic cfg0 rows labels (V.fromList ["x", "y"])
@@ -574,6 +611,186 @@ testA13MaxIterOne = TestCase $ do
     let badW = VU.any (\x -> isNaN x || isInfinite x) (lmWeights m1)
         badB = isNaN (lmIntercept m1) || isInfinite (lmIntercept m1)
     assertBool "no NaN/Inf after one iteration" (not (badW || badB))
+
+------------------------------------------------------------------------
+-- PR 3: Elastic Net recovery on correlated-feature pairs.
+-- Pure L1 picks ONE of two correlated informative features at random;
+-- Elastic Net keeps BOTH non-zero (Zou & Hastie 2005 "grouping effect",
+-- §2.3 Theorem 1).
+--
+-- Two cases per the ML reviewer: ρ ≈ 0.97 (strong) and ρ ≈ 0.7 (moderate).
+------------------------------------------------------------------------
+
+-- Generate two correlated features f0, f1 with correlation ρ, plus
+-- noise features f2..f7. Truth is sign(f0 + f1).
+correlatedPairData ::
+    Int -> Double -> (V.Vector (VU.Vector Double), VU.Vector Double)
+correlatedPairData seed rho =
+    let n = 400 :: Int
+        d = 8 :: Int
+        g0 = mkStdGen seed
+        drawUnit = randomR (-1.0 :: Double, 1.0)
+        drawRow !gIn =
+            let (z0, g1) = drawUnit gIn
+                (epsRaw, g2) = drawUnit g1
+                eps = epsRaw * sqrt (max 0 (1 - rho * rho))
+                f0 = z0
+                f1 = rho * z0 + eps -- corr(f0, f1) ≈ rho by construction
+                drawNoise k g
+                    | k >= d - 2 = ([], g)
+                    | otherwise =
+                        let (x, g') = drawUnit g
+                            (xs, g'') = drawNoise (k + 1) g'
+                         in (x : xs, g'')
+                (noise, g3) = drawNoise 0 g2
+                row = f0 : f1 : noise
+             in (VU.fromList row, g3)
+        go 0 _ acc = reverse acc
+        go k g acc =
+            let (r, g') = drawRow g
+             in go (k - 1) g' (r : acc)
+        rows = V.fromList (go n g0 [])
+        labels =
+            VU.generate n $ \i ->
+                let r = rows V.! i
+                    s = VU.unsafeIndex r 0 + VU.unsafeIndex r 1
+                 in if s > 0 then 1.0 else -1.0
+     in (rows, labels)
+
+testA19ElasticNetRecoveryHigh :: Test
+testA19ElasticNetRecoveryHigh = TestCase $ do
+    -- ρ ≈ 0.97: positive test for Elastic Net's "grouping effect" —
+    -- both correlated informative features kept non-zero and on the
+    -- same order of magnitude. (We don't assert pure L1 picks just one;
+    -- with strong-signal features L1 sometimes keeps both anyway.)
+    let (rows, labels) = correlatedPairData 31 0.97
+        names = V.fromList ["f0", "f1", "f2", "f3", "f4", "f5", "f6", "f7"]
+        cfgEN = defaultSolverConfig{scL1Lambda = 0.05, scL2Lambda = 0.05, scMaxIter = 1000}
+        men = fitL1Logistic cfgEN rows labels names
+        wEN = VU.toList (lmWeights men)
+        nzCount xs = length (filter (/= 0) xs)
+        [aEN, bEN] = take 2 wEN
+    assertBool
+        ("ρ=0.97 EN keeps f0 non-zero; wEN[:2] = " ++ show (take 2 wEN))
+        (aEN /= 0)
+    assertBool
+        ("ρ=0.97 EN keeps f1 non-zero; wEN[:2] = " ++ show (take 2 wEN))
+        (bEN /= 0)
+    let ratio = abs aEN / max (abs bEN) 1e-9
+    assertBool
+        ("ρ=0.97 EN grouping: |w0/w1| ∈ [0.33, 3.0]; got ratio=" ++ show ratio)
+        (ratio >= 0.33 && ratio <= 3.0)
+    -- Sanity: shouldn't have spuriously activated all noise features.
+    assertBool
+        ("ρ=0.97 EN sparsity: total non-zero ≤ 5; got " ++ show (nzCount wEN))
+        (nzCount wEN <= 5)
+
+testA19ElasticNetRecoveryMid :: Test
+testA19ElasticNetRecoveryMid = TestCase $ do
+    -- ρ ≈ 0.7: theoretically required regime for grouping (Zou-Hastie 2005 §5.1).
+    let (rows, labels) = correlatedPairData 37 0.7
+        names = V.fromList ["f0", "f1", "f2", "f3", "f4", "f5", "f6", "f7"]
+        cfgEN = defaultSolverConfig{scL1Lambda = 0.05, scL2Lambda = 0.05, scMaxIter = 1000}
+        men = fitL1Logistic cfgEN rows labels names
+        wEN = VU.toList (lmWeights men)
+        [aEN, bEN] = take 2 wEN
+    assertBool
+        ("ρ=0.7 EN keeps f0 non-zero; wEN[:2] = " ++ show (take 2 wEN))
+        (aEN /= 0)
+    assertBool
+        ("ρ=0.7 EN keeps f1 non-zero; wEN[:2] = " ++ show (take 2 wEN))
+        (bEN /= 0)
+    let ratio = abs aEN / max (abs bEN) 1e-9
+    assertBool
+        ("ρ=0.7 EN grouping: |w0/w1| ∈ [0.33, 3.0]; got ratio=" ++ show ratio)
+        (ratio >= 0.33 && ratio <= 3.0)
+
+------------------------------------------------------------------------
+-- PR 3: A20 — class-balanced fit on 95/5 imbalance.
+-- Without weights the intercept polarises toward logit(0.95) ≈ 2.94.
+-- With sample weights mean-1 sklearn-form, the intercept sits near 0 and
+-- predictions become roughly balanced on a symmetric test set.
+------------------------------------------------------------------------
+
+testA20ClassBalancedFit :: Test
+testA20ClassBalancedFit = TestCase $ do
+    -- Generate 200 rows: 190 positive, 10 negative. Class-conditional
+    -- means are at ±0.15 with σ ≈ 0.6 — only weakly informative on a
+    -- single feature, so the unweighted MLE intercept absorbs the
+    -- class prior @logit(0.95) ≈ 2.94@; class-balanced weighting must
+    -- pull it back toward zero. Highly-separable features (e.g. mu=±1)
+    -- would let the slope dominate and mask the intercept effect.
+    let n = 200 :: Int
+        nPos = 190 :: Int
+        g0 = mkStdGen 41
+        drawN = randomR (-1.0 :: Double, 1.0)
+        drawRowAt mu g =
+            let (z, g') = drawN g
+                x = mu + 0.6 * z
+             in (VU.singleton x, g')
+        rowsAndLabels =
+            let go _ 0 _ acc = reverse acc
+                go !pCnt k g acc =
+                    let !mu = if pCnt > 0 then 0.15 else -0.15
+                        (row, g') = drawRowAt mu g
+                        !y = if pCnt > 0 then 1.0 else -1.0
+                     in go (pCnt - 1) (k - 1) g' ((row, y) : acc)
+             in go nPos n g0 []
+        rows = V.fromList (map fst rowsAndLabels)
+        labels = VU.fromList (map snd rowsAndLabels)
+        names = V.fromList ["x"]
+        cfgUnbal =
+            defaultSolverConfig
+                { scL1Lambda = 0.001
+                , scL2Lambda = 0
+                , scMaxIter = 2000
+                , scTol = 1e-7
+                , scSampleWeights = Nothing
+                }
+        nNeg = n - nPos
+        balanced =
+            VU.generate n $ \i ->
+                let !y = VU.unsafeIndex labels i
+                 in if y > 0
+                        then fromIntegral n / (2 * fromIntegral nPos)
+                        else fromIntegral n / (2 * fromIntegral nNeg)
+        cfgBal = cfgUnbal{scSampleWeights = Just balanced}
+        mUnbal = fitL1Logistic cfgUnbal rows labels names
+        mBal = fitL1Logistic cfgBal rows labels names
+        bUnbal = lmIntercept mUnbal
+        bBal = lmIntercept mBal
+        -- Test set: 100 rows at each class-conditional mean. We measure
+        -- predictions on this BALANCED test set; the unweighted model
+        -- will predict mostly positive (intercept dominates), the
+        -- balanced model close to 50/50.
+        testRows =
+            V.fromList
+                ( replicate 100 (VU.singleton 0.15)
+                    ++ replicate 100 (VU.singleton (-0.15))
+                )
+        predFracPos m =
+            let preds = V.map (predict m) testRows
+                ps = V.length (V.filter (> 0) preds)
+             in fromIntegral ps / fromIntegral (V.length testRows) :: Double
+        fracUnbal = predFracPos mUnbal
+        fracBal = predFracPos mBal
+    -- Reviewer-tightened intercept bounds (logit(0.95) ≈ 2.94 is the
+    -- intercept-only solution; the weak slope shrinks this slightly).
+    assertBool
+        ("unbalanced |b| > 2.0; got " ++ show bUnbal)
+        (abs bUnbal > 2.0)
+    assertBool
+        ("balanced |b| < 0.3; got " ++ show bBal)
+        (abs bBal < 0.3)
+    -- Prediction-class-balance assertion:
+    assertBool
+        ("unbalanced fraction-positive on balanced test ≥ 0.90; got " ++ show fracUnbal)
+        (fracUnbal >= 0.90)
+    assertBool
+        ( "balanced fraction-positive on balanced test ∈ [0.40, 0.60]; got "
+            ++ show fracBal
+        )
+        (fracBal >= 0.40 && fracBal <= 0.60)
 
 ------------------------------------------------------------------------
 -- Test list
@@ -600,4 +817,8 @@ tests =
     , TestLabel "A17 imbalanced raw scales" testA17ImbalancedRawScales
     , TestLabel "B1 Expr well-typed" testB1ExprWellTyped
     , TestLabel "B2 zero weights pruned" testB2ZeroWeightsPruned
+    , -- PR 3: Elastic Net + class-balanced weights.
+      TestLabel "A19 Elastic Net grouping ρ=0.97" testA19ElasticNetRecoveryHigh
+    , TestLabel "A19 Elastic Net grouping ρ=0.7" testA19ElasticNetRecoveryMid
+    , TestLabel "A20 class-balanced fit on 95/5" testA20ClassBalancedFit
     ]

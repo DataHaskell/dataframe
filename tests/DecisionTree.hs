@@ -18,6 +18,7 @@ import Data.List (maximumBy, sort)
 import qualified Data.Map.Strict as M
 import qualified Data.Text as T
 import qualified Data.Vector as V
+import qualified Data.Vector.Unboxed as VU
 import Test.HUnit
 
 ------------------------------------------------------------------------
@@ -558,7 +559,7 @@ nullableFitZeroLossTest = TestCase $ do
     let cfg = defaultTreeConfig{taoIterations = 5, expressionPairs = 4, minLeafSize = 1}
         featureDf = D.exclude ["label"] nullableSepDF
         conds = generateNumericConds cfg featureDf
-        initTree = buildGreedyTree @T.Text cfg (maxTreeDepth cfg) "label" conds nullableSepDF
+        initTree = buildCartTree @T.Text cfg "label" nullableSepDF
         indices = V.enumFromN 0 12
         result = taoOptimize @T.Text cfg "label" conds nullableSepDF indices initTree
         loss = computeTreeLoss @T.Text "label" nullableSepDF indices result
@@ -570,7 +571,7 @@ nullableFitWithNullsNoCrashTest = TestCase $ do
     let cfg = defaultTreeConfig{taoIterations = 3, expressionPairs = 4, minLeafSize = 1}
         featureDf = D.exclude ["label"] nullsMixedDF
         conds = generateNumericConds cfg featureDf
-        initTree = buildGreedyTree @T.Text cfg (maxTreeDepth cfg) "label" conds nullsMixedDF
+        initTree = buildCartTree @T.Text cfg "label" nullsMixedDF
         indices = V.enumFromN 0 6
         result = taoOptimize @T.Text cfg "label" conds nullsMixedDF indices initTree
         loss = computeTreeLoss @T.Text "label" nullsMixedDF indices result
@@ -1090,6 +1091,205 @@ testCategoricalNullableBinary = TestCase $ do
     assertEqual "Breiman prefixes on nullable column ignore nulls" 2 (length feats')
 
 ------------------------------------------------------------------------
+-- PR 2 extended: threshold-consolidation rewrite in combineAndVec /
+-- combineOrVec. Eight positive cases (one per <, ≤, >, ≥ × AND / OR),
+-- six negative cases (rule must NOT fire), one semantic-preservation
+-- QuickCheck-style spot check.
+------------------------------------------------------------------------
+
+-- A small synthetic DataFrame to materialize CondVecs against.
+threshFixtureDF :: D.DataFrame
+threshFixtureDF =
+    D.fromNamedColumns
+        [ ("x", DI.fromList ([0.0, 1.0, 2.0, 3.0, 4.0, 5.0] :: [Double]))
+        , ("y", DI.fromList ([5.0, 4.0, 3.0, 2.0, 1.0, 0.0] :: [Double]))
+        ]
+
+materializeOrFail :: Expr Bool -> CondVec
+materializeOrFail e = case materializeCondVec threshFixtureDF e of
+    Just cv -> cv
+    Nothing -> error "materializeOrFail: condition could not be materialized"
+
+-- | Helper: assert that two `Expr Bool`s agree by 'eqExpr'.
+assertEqExpr :: String -> Expr Bool -> Expr Bool -> Assertion
+assertEqExpr msg expected actual =
+    assertBool
+        (msg ++ "\n  expected: " ++ show expected ++ "\n  actual:   " ++ show actual)
+        (eqExpr expected actual)
+
+-- Eight positive cases.
+
+threshAndLeq :: Test
+threshAndLeq = TestCase $ do
+    let a = materializeOrFail (F.col @Double "x" .<=. F.lit (3.0 :: Double))
+        b = materializeOrFail (F.col @Double "x" .<=. F.lit (1.0 :: Double))
+        r = combineAndVec a b
+    assertEqExpr
+        "AND of x≤3 and x≤1 collapses to x≤1"
+        (F.col @Double "x" .<=. F.lit (1.0 :: Double))
+        (cvExpr r)
+
+threshOrLeq :: Test
+threshOrLeq = TestCase $ do
+    let a = materializeOrFail (F.col @Double "x" .<=. F.lit (3.0 :: Double))
+        b = materializeOrFail (F.col @Double "x" .<=. F.lit (1.0 :: Double))
+        r = combineOrVec a b
+    assertEqExpr
+        "OR of x≤3 and x≤1 collapses to x≤3"
+        (F.col @Double "x" .<=. F.lit (3.0 :: Double))
+        (cvExpr r)
+
+threshAndLt :: Test
+threshAndLt = TestCase $ do
+    let a = materializeOrFail (F.col @Double "x" .<. F.lit (3.0 :: Double))
+        b = materializeOrFail (F.col @Double "x" .<. F.lit (1.0 :: Double))
+        r = combineAndVec a b
+    assertEqExpr
+        "AND of x<3 and x<1 collapses to x<1"
+        (F.col @Double "x" .<. F.lit (1.0 :: Double))
+        (cvExpr r)
+
+threshOrLt :: Test
+threshOrLt = TestCase $ do
+    let a = materializeOrFail (F.col @Double "x" .<. F.lit (3.0 :: Double))
+        b = materializeOrFail (F.col @Double "x" .<. F.lit (1.0 :: Double))
+        r = combineOrVec a b
+    assertEqExpr
+        "OR of x<3 and x<1 collapses to x<3"
+        (F.col @Double "x" .<. F.lit (3.0 :: Double))
+        (cvExpr r)
+
+threshAndGeq :: Test
+threshAndGeq = TestCase $ do
+    let a = materializeOrFail (F.col @Double "x" .>=. F.lit (1.0 :: Double))
+        b = materializeOrFail (F.col @Double "x" .>=. F.lit (3.0 :: Double))
+        r = combineAndVec a b
+    assertEqExpr
+        "AND of x≥1 and x≥3 collapses to x≥3"
+        (F.col @Double "x" .>=. F.lit (3.0 :: Double))
+        (cvExpr r)
+
+threshOrGeq :: Test
+threshOrGeq = TestCase $ do
+    let a = materializeOrFail (F.col @Double "x" .>=. F.lit (1.0 :: Double))
+        b = materializeOrFail (F.col @Double "x" .>=. F.lit (3.0 :: Double))
+        r = combineOrVec a b
+    assertEqExpr
+        "OR of x≥1 and x≥3 collapses to x≥1"
+        (F.col @Double "x" .>=. F.lit (1.0 :: Double))
+        (cvExpr r)
+
+threshAndGt :: Test
+threshAndGt = TestCase $ do
+    let a = materializeOrFail (F.col @Double "x" .>. F.lit (1.0 :: Double))
+        b = materializeOrFail (F.col @Double "x" .>. F.lit (3.0 :: Double))
+        r = combineAndVec a b
+    assertEqExpr
+        "AND of x>1 and x>3 collapses to x>3"
+        (F.col @Double "x" .>. F.lit (3.0 :: Double))
+        (cvExpr r)
+
+threshOrGt :: Test
+threshOrGt = TestCase $ do
+    let a = materializeOrFail (F.col @Double "x" .>. F.lit (1.0 :: Double))
+        b = materializeOrFail (F.col @Double "x" .>. F.lit (3.0 :: Double))
+        r = combineOrVec a b
+    assertEqExpr
+        "OR of x>1 and x>3 collapses to x>1"
+        (F.col @Double "x" .>. F.lit (1.0 :: Double))
+        (cvExpr r)
+
+-- Six negative cases: rewrite must NOT fire.
+
+threshNegMixedDirection :: Test
+threshNegMixedDirection = TestCase $ do
+    let a = materializeOrFail (F.col @Double "x" .<. F.lit (3.0 :: Double))
+        b = materializeOrFail (F.col @Double "x" .>=. F.lit (1.0 :: Double))
+        r = combineAndVec a b
+    -- Mixed directions (< vs ≥): consolidation deliberately out-of-scope.
+    -- Expect the generic F.and form.
+    assertEqExpr
+        "mixed-direction AND keeps generic F.and form"
+        (F.and (cvExpr a) (cvExpr b))
+        (cvExpr r)
+
+threshNegCrossColumn :: Test
+threshNegCrossColumn = TestCase $ do
+    let a = materializeOrFail (F.col @Double "x" .>. F.lit (1.0 :: Double))
+        b = materializeOrFail (F.col @Double "y" .>. F.lit (3.0 :: Double))
+        r = combineAndVec a b
+    -- Same op, different columns: no rewrite.
+    assertEqExpr
+        "cross-column AND keeps generic F.and form"
+        (F.and (cvExpr a) (cvExpr b))
+        (cvExpr r)
+
+threshNegMixedOpFamily :: Test
+threshNegMixedOpFamily = TestCase $ do
+    let a = materializeOrFail (F.col @Double "x" .>. F.lit (1.0 :: Double))
+        b = materializeOrFail (F.col @Double "x" .<. F.lit (4.0 :: Double))
+        r = combineAndVec a b
+    -- > and < are different op families: no rewrite.
+    assertEqExpr
+        "different-op-family AND keeps generic F.and form"
+        (F.and (cvExpr a) (cvExpr b))
+        (cvExpr r)
+
+threshNegEqualityOp :: Test
+threshNegEqualityOp = TestCase $ do
+    let a = materializeOrFail (F.col @Double "x" .==. F.lit (3.0 :: Double))
+        b = materializeOrFail (F.col @Double "x" .==. F.lit (1.0 :: Double))
+        r = combineOrVec a b
+    -- Equality is not in the threshold family; consolidate doesn't fire.
+    assertEqExpr
+        "equality OR keeps generic F.or form"
+        (F.or (cvExpr a) (cvExpr b))
+        (cvExpr r)
+
+threshNegLitOnLeft :: Test
+threshNegLitOnLeft = TestCase $ do
+    -- Lit on LEFT of the comparison: pattern requires (Col, Lit) ordering.
+    let a = materializeOrFail (F.lit (1.0 :: Double) .<. F.col @Double "x")
+        b = materializeOrFail (F.lit (3.0 :: Double) .<. F.col @Double "x")
+        r = combineAndVec a b
+    assertEqExpr
+        "Lit-on-left AND keeps generic F.and form"
+        (F.and (cvExpr a) (cvExpr b))
+        (cvExpr r)
+
+threshNegNonLiteralRhs :: Test
+threshNegNonLiteralRhs = TestCase $ do
+    -- RHS is a Col, not a Lit: pattern doesn't match.
+    let a = materializeOrFail (F.col @Double "x" .>. F.col @Double "y")
+        b = materializeOrFail (F.col @Double "x" .>. F.lit (3.0 :: Double))
+        r = combineAndVec a b
+    assertEqExpr
+        "non-literal RHS AND keeps generic F.and form"
+        (F.and (cvExpr a) (cvExpr b))
+        (cvExpr r)
+
+-- Semantic-preservation spot check (in lieu of a full QuickCheck property
+-- which would require generators for strict-op Expr Bool — followup work).
+-- Verifies that the consolidated cvVec matches the elementwise AND/OR of
+-- the inputs at every row of a synthetic DataFrame.
+threshSemanticPreservation :: Test
+threshSemanticPreservation = TestCase $ do
+    let a = materializeOrFail (F.col @Double "x" .>. F.lit (1.0 :: Double))
+        b = materializeOrFail (F.col @Double "x" .>. F.lit (3.0 :: Double))
+        rAnd = combineAndVec a b
+        rOr = combineOrVec a b
+        expectedAnd = VU.zipWith (&&) (cvVec a) (cvVec b)
+        expectedOr = VU.zipWith (||) (cvVec a) (cvVec b)
+    assertEqual
+        "consolidated AND vec matches elementwise &&"
+        expectedAnd
+        (cvVec rAnd)
+    assertEqual
+        "consolidated OR vec matches elementwise ||"
+        expectedOr
+        (cvVec rOr)
+
+------------------------------------------------------------------------
 -- Test list
 ------------------------------------------------------------------------
 
@@ -1156,4 +1356,21 @@ tests =
         testCategoricalSingletonsMulticlassHighCard
     , TestLabel "E4 categoricalCardZero" testCategoricalCardZero
     , TestLabel "E5 categoricalNullableBinary" testCategoricalNullableBinary
+    , -- PR 2 extended: threshold-consolidation rewrite (positive cases).
+      TestLabel "F1 threshAndLeq" threshAndLeq
+    , TestLabel "F2 threshOrLeq" threshOrLeq
+    , TestLabel "F3 threshAndLt" threshAndLt
+    , TestLabel "F4 threshOrLt" threshOrLt
+    , TestLabel "F5 threshAndGeq" threshAndGeq
+    , TestLabel "F6 threshOrGeq" threshOrGeq
+    , TestLabel "F7 threshAndGt" threshAndGt
+    , TestLabel "F8 threshOrGt" threshOrGt
+    , -- PR 2 extended: negative cases (rewrite must NOT fire).
+      TestLabel "F9 threshNegMixedDirection" threshNegMixedDirection
+    , TestLabel "F10 threshNegCrossColumn" threshNegCrossColumn
+    , TestLabel "F11 threshNegMixedOpFamily" threshNegMixedOpFamily
+    , TestLabel "F12 threshNegEqualityOp" threshNegEqualityOp
+    , TestLabel "F13 threshNegLitOnLeft" threshNegLitOnLeft
+    , TestLabel "F14 threshNegNonLiteralRhs" threshNegNonLiteralRhs
+    , TestLabel "F15 threshSemanticPreservation" threshSemanticPreservation
     ]

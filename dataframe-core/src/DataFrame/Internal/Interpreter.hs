@@ -841,13 +841,13 @@ eval ctx (CastExprWith _tag onResult (inner :: Expr src)) = do
             Group <$> V.mapM (promoteColumnWith onResult) gs
 -- Unary ------------------------------------------------------------------
 
-eval ctx expr@(Unary (op :: UnaryOp b a) inner) = addContext expr $ do
+eval ctx expr@(Unary op (inner :: Expr b)) = addContext expr $ do
     v <- eval @b ctx inner
     liftValue (unaryFn op) v
 
 -- Binary -----------------------------------------------------------------
 
-eval ctx expr@(Binary (op :: BinaryOp c b a) left right) =
+eval ctx expr@(Binary op (left :: Expr c) (right :: Expr b)) =
     addContext expr $ do
         l <- eval @c ctx left
         r <- eval @b ctx right

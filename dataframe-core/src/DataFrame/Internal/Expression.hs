@@ -1,4 +1,5 @@
 {-# LANGUAGE AllowAmbiguousTypes #-}
+{-# LANGUAGE DisambiguateRecordFields #-}
 {-# LANGUAGE ExplicitNamespaces #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
@@ -10,6 +11,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE NoFieldSelectors #-}
 
 module DataFrame.Internal.Expression where
 
@@ -20,19 +22,53 @@ import qualified Data.Vector.Generic as VG
 import DataFrame.Internal.Column
 import Type.Reflection (Typeable, typeOf, typeRep)
 
-data UnaryOp a b = MkUnaryOp
+{- | Operators are an open typeclass: built-ins get their own 'Typeable' type so
+the simplifier can match them by 'cast', and users can add @instance@s. The
+generic 'UnUDF'/'BinUDF' carriers cover UDFs, dynamic-named, and arithmetic ops.
+Method names match the carrier record fields ('NoFieldSelectors' frees them), so
+existing construction and read sites are unchanged.
+-}
+class (Typeable op) => UnaryOp op where
+    unaryFn :: op a b -> a -> b
+    unaryName :: op a b -> T.Text
+    unarySymbol :: op a b -> Maybe T.Text
+    unarySymbol _ = Nothing
+
+class (Typeable op) => BinaryOp op where
+    binaryFn :: op a b c -> a -> b -> c
+    binaryName :: op a b c -> T.Text
+    binarySymbol :: op a b c -> Maybe T.Text
+    binarySymbol _ = Nothing
+    binaryCommutative :: op a b c -> Bool
+    binaryCommutative _ = False
+    binaryPrecedence :: op a b c -> Int
+    binaryPrecedence _ = 9
+
+data UnUDF a b = MkUnaryOp
     { unaryFn :: a -> b
     , unaryName :: T.Text
     , unarySymbol :: Maybe T.Text
     }
 
-data BinaryOp a b c = MkBinaryOp
+data BinUDF a b c = MkBinaryOp
     { binaryFn :: a -> b -> c
     , binaryName :: T.Text
     , binarySymbol :: Maybe T.Text
     , binaryCommutative :: Bool
     , binaryPrecedence :: Int
     }
+
+instance UnaryOp UnUDF where
+    unaryFn (MkUnaryOp{unaryFn = f}) = f
+    unaryName (MkUnaryOp{unaryName = n}) = n
+    unarySymbol (MkUnaryOp{unarySymbol = s}) = s
+
+instance BinaryOp BinUDF where
+    binaryFn (MkBinaryOp{binaryFn = f}) = f
+    binaryName (MkBinaryOp{binaryName = n}) = n
+    binarySymbol (MkBinaryOp{binarySymbol = s}) = s
+    binaryCommutative (MkBinaryOp{binaryCommutative = c}) = c
+    binaryPrecedence (MkBinaryOp{binaryPrecedence = p}) = p
 
 data MeanAcc = MeanAcc {-# UNPACK #-} !Double {-# UNPACK #-} !Int
     deriving (Show, Eq, Ord, Read)
@@ -66,10 +102,10 @@ data Expr a where
         Expr b
     Lit :: (Columnable a) => a -> Expr a
     Unary ::
-        (Columnable a, Columnable b) => UnaryOp b a -> Expr b -> Expr a
+        (UnaryOp op, Columnable a, Columnable b) => op b a -> Expr b -> Expr a
     Binary ::
-        (Columnable c, Columnable b, Columnable a) =>
-        BinaryOp c b a -> Expr c -> Expr b -> Expr a
+        (BinaryOp op, Columnable c, Columnable b, Columnable a) =>
+        op c b a -> Expr c -> Expr b -> Expr a
     If :: (Columnable a) => Expr Bool -> Expr a -> Expr a -> Expr a
     Agg :: (Columnable a, Columnable b) => AggStrategy a b -> Expr b -> Expr a
     Over :: (Columnable a) => [T.Text] -> Expr a -> Expr a

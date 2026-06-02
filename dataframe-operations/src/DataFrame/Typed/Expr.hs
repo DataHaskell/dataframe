@@ -1,5 +1,6 @@
 {-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE DisambiguateRecordFields #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GADTs #-}
@@ -134,9 +135,9 @@ import GHC.TypeLits (KnownSymbol, Symbol, symbolVal)
 import qualified DataFrame.Functions as F
 import DataFrame.Internal.Column (Columnable)
 import DataFrame.Internal.Expression (
-    BinaryOp (..),
+    BinUDF (..),
     Expr (..),
-    UnaryOp (..),
+    UnUDF (..),
  )
 import DataFrame.Internal.Nullable (
     BaseType,

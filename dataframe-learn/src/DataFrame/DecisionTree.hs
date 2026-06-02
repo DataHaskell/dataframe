@@ -3,6 +3,7 @@
 {-# LANGUAGE CPP #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
@@ -16,8 +17,17 @@ import DataFrame.Internal.DataFrame (
     columnNames,
     unsafeGetColumn,
  )
-import DataFrame.Internal.Expression (Expr (..), eSize, eqExpr, getColumns)
+import DataFrame.Internal.Expression (
+    Expr (..),
+    binaryName,
+    compareExpr,
+    eSize,
+    eqExpr,
+    getColumns,
+    normalize,
+ )
 import DataFrame.Internal.Interpreter (interpret)
+import DataFrame.Internal.Simplify (PredFact, entails, factFalse, factTrue)
 import DataFrame.Internal.Statistics (percentileOrd')
 import DataFrame.Internal.Types
 import qualified DataFrame.LinearSolver as LS
@@ -72,22 +82,6 @@ ttrace msg x
     | taoTraceEnabled = Trace.trace ("[TAO] " ++ msg) x
     | otherwise = x
 
--- ----------------------------------------------------------------------------
--- Candidate-condition vector cache
--- ----------------------------------------------------------------------------
-
-{- | A candidate split condition paired with its pre-evaluated Bool vector
-over the full DataFrame. Built once at 'fitDecisionTree' time; downstream
-node-level scoring then partitions / counts care-point errors by indexing
-into the cached vector rather than re-interpreting the expression.
-
-The vector is kept UNBOXED ('VU.Vector Bool') deliberately: the
-interpreter produces an 'UnboxedColumn Bool' internally (via
-'mapColumn's @VU.generate@), and requesting 'toVector @Bool @VU.Vector'
-below makes @VG.convert@ a no-op — preserving the unboxed representation
-end-to-end and avoiding the boxed-Bool round-trip that the default
-@toVector @Bool@ would force.
--}
 data CondVec = CondVec
     { cvExpr :: !(Expr Bool)
     , cvVec :: !(VU.Vector Bool)
@@ -111,7 +105,7 @@ every entry in @indices@ is in range by construction.
 -}
 partitionByVec ::
     VU.Vector Bool -> V.Vector Int -> (V.Vector Int, V.Vector Int)
-partitionByVec boolVals = V.partition ((boolVals VU.!))
+partitionByVec boolVals = V.partition (boolVals VU.!)
 
 -- | Count misrouted care points for a condition whose Bool vector is cached.
 countErrorsByVec :: VU.Vector Bool -> [CarePoint] -> Int
@@ -119,33 +113,85 @@ countErrorsByVec boolVals =
     length . filter isMis
   where
     isMis cp =
-        let goesLeft = boolVals VU.! (cpIndex cp)
+        let goesLeft = boolVals VU.! cpIndex cp
             shouldGoLeft = cpCorrectDir cp == GoLeft
          in goesLeft /= shouldGoLeft
+
+consolidateThreshold ::
+    Bool -> -- True = AND, False = OR
+    Expr Bool ->
+    Expr Bool ->
+    Maybe (Expr Bool)
+consolidateThreshold isAnd ea eb = case (ea, eb) of
+    ( Binary op1 (Col c1 :: Expr c1) (Lit (t1 :: t1))
+        , Binary op2 (Col c2 :: Expr c2) (Lit (t2 :: t2))
+        ) ->
+            case ( testEquality (typeRep @c1) (typeRep @Double)
+                 , testEquality (typeRep @c2) (typeRep @Double)
+                 , testEquality (typeRep @t1) (typeRep @Double)
+                 , testEquality (typeRep @t2) (typeRep @Double)
+                 ) of
+                (Just Refl, Just Refl, Just Refl, Just Refl)
+                    | c1 == c2
+                    , binaryName op1 == binaryName op2
+                    , let name = binaryName op1
+                    , name `elem` (["lt", "leq", "gt", "geq"] :: [T.Text]) ->
+                        -- For same-direction same-column thresholds:
+                        --   '<' / '<=' (left-half-spaces):
+                        --     AND = tighter = min(t1, t2)
+                        --     OR  = looser  = max(t1, t2)
+                        --   '>' / '>=' (right-half-spaces):
+                        --     AND = tighter = max(t1, t2)
+                        --     OR  = looser  = min(t1, t2)
+                        let leftDir = name == "lt" || name == "leq"
+                            chosen
+                                | leftDir, isAnd = min (t1 :: Double) t2
+                                | leftDir = max t1 t2
+                                | isAnd = max t1 t2
+                                | otherwise = min t1 t2
+                         in Just (Binary op1 (Col c1) (Lit chosen))
+                _ -> Nothing
+    _ -> Nothing
 
 {- | AND-combine two cached conditions: the resulting Bool vector is the
 elementwise conjunction; the Expr is @F.and a b@.
 
-Applies idempotence at the construction site (PR 2 / Section 10): if both
-operands are 'eqExpr'-equal, return the left operand unchanged. This catches
-@(x > c) ∧ (x > c)@ tautologies that 'nubBy eqExpr' upstream would have
-missed (different syntactic paths producing the same condition). Avoids
-the K² blow-up in 'boolExprsVec' generating redundant conjunctions of
-correlated thresholds — the BCW-regression mechanism diagnosed in
-Pre-flight outcomes §B.
+Applies (in order):
+
+  1. Idempotence: if both operands are 'eqExpr'-equal, return the left
+     operand unchanged. Catches @(x > c) ∧ (x > c)@ tautologies that
+     'nubBy eqExpr' upstream missed.
+
+  2. Threshold consolidation (see 'consolidateThreshold'): same-column
+     same-direction strict-Double comparisons collapse to a single
+     comparison. The cached Bool vector is then the elementwise
+     conjunction of the two inputs — bit-exact because @(x>a) ∧ (x>b)@
+     is true iff both @x>a@ and @x>b@ are true regardless of how we
+     express the consolidated form.
+
+These rewrites cut the K² blow-up in 'boolExprsVec' driven by correlated
+thresholds (the BCW-regression mechanism diagnosed in Pre-flight §B). The
+generic @F.and@ fallback fires only when neither shortcut applies.
 -}
 combineAndVec :: CondVec -> CondVec -> CondVec
 combineAndVec a b
     | eqExpr (cvExpr a) (cvExpr b) = a
+    | Just consolidated <- consolidateThreshold True (cvExpr a) (cvExpr b) =
+        CondVec consolidated (VU.zipWith (&&) (cvVec a) (cvVec b))
     | otherwise =
         CondVec
             (F.and (cvExpr a) (cvExpr b))
             (VU.zipWith (&&) (cvVec a) (cvVec b))
 
--- | OR-combine two cached conditions. Idempotence applied as in 'combineAndVec'.
+{- | OR-combine two cached conditions. Idempotence + threshold consolidation
+applied as in 'combineAndVec' (the AND/OR direction differs; see
+'consolidateThreshold').
+-}
 combineOrVec :: CondVec -> CondVec -> CondVec
 combineOrVec a b
     | eqExpr (cvExpr a) (cvExpr b) = a
+    | Just consolidated <- consolidateThreshold False (cvExpr a) (cvExpr b) =
+        CondVec consolidated (VU.zipWith (||) (cvVec a) (cvVec b))
     | otherwise =
         CondVec
             (F.or (cvExpr a) (cvExpr b))
@@ -256,9 +302,8 @@ data SynthConfig = SynthConfig
     {- ^ Cap on how many top-K candidates may share the same primary column
     (first 'getColumns' entry). 'Nothing' = no cap (legacy behaviour, useful
     for A/B). 'Just q' = at most @q@ conditions per column survive the
-    gain-sort + take-K step in 'bestDiscreteCandidate' (DecisionTree.hs:609)
-    and 'findBestGreedySplit' (DecisionTree.hs:1053). Forces diversity in the
-    @sortedConditions@ pool fed to 'boolExprs(Vec)'; empirically guards
+    gain-sort + take-K step in 'bestDiscreteCandidate'. Forces diversity in the
+    @sortedConditions@ pool fed to 'boolExprsVec'/'saturateCandidates'; empirically guards
     small-n folds (BCW, Wine) from correlated-threshold tautologies.
     Equivalent in spirit to Random Forest @mtry@ column sampling
     (Breiman 2001, §3) and RuleFit rule-diversity (Friedman & Popescu 2008).
@@ -328,7 +373,7 @@ fitDecisionTree cfg (Col target) df =
             Just ti -> ti
         !oldConds = discreteConditions targetInfo cfg (exclude [target] df)
         !rawCount = length numConds + length oldConds
-        !conds = nubBy eqExpr (numConds ++ oldConds)
+        !conds = nubByExpr (numConds ++ oldConds)
         !nConds = length conds
         -- Pre-evaluate every candidate condition to a Bool vector ONCE over
         -- the full DataFrame.  All downstream node-level scoring uses these
@@ -350,16 +395,14 @@ fitDecisionTree cfg (Col target) df =
                     ++ " cached="
                     ++ show (length condVecs)
                 )
-                -- buildGreedyTree recurses on partitioned DataFrames so the
-                -- CondVec cache wouldn't apply across levels; pass the raw
-                -- [Expr Bool] list. This is a one-time cost per fit (~10% of
-                -- total interpret work) — the inner TAO loop is the hot path.
-                (buildGreedyTree @a cfg (maxTreeDepth cfg) target conds df)
+                -- Seed TAO from a faithful sklearn-style CART (axis-aligned, exact
+                -- Gini). One-time cost per fit; the inner TAO loop is the hot path.
+                (buildCartTree @a cfg target df)
 
         indices = V.enumFromN 0 (nRows df)
 
         optimizedTree =
-            ttrace "fitDecisionTree: built greedy tree, starting TAO" $
+            ttrace "fitDecisionTree: built CART init tree, starting TAO" $
                 -- Go straight to the internal CV worker — no need to re-marshal
                 -- through the public [Expr Bool] wrapper.
                 taoOptimizeCV @a cfg target condVecs df indices initialTree
@@ -696,7 +739,7 @@ bestDiscreteCandidate ::
     Maybe CondVec
 bestDiscreteCandidate _ _ [] = Nothing
 bestDiscreteCandidate cfg penaltyCV validCondVecs =
-    case boolExprsVec sortedCondVecs sortedCondVecs 0 (boolExpansion (synthConfig cfg)) of
+    case saturateCandidates Structural (boolExpansion (synthConfig cfg)) sortedCondVecs of
         [] -> Nothing
         xs -> Just (minimumBy (compare `on` penaltyCV) xs)
   where
@@ -725,6 +768,67 @@ boolExprsVec baseExprs prevExprs depth maxDepth
         guard (not (eqExpr (cvExpr e1) (cvExpr e2)))
         [combineAndVec e1 e2, combineOrVec e1 e2]
 
+data DedupMode = Structural | TruthVector
+    deriving (Eq, Show)
+
+saturateCandidates :: DedupMode -> Int -> [CondVec] -> [CondVec]
+saturateCandidates Structural maxDepth base =
+    base' ++ go 1 base' seen0
+  where
+    (base', seen0) = admitKeys Set.empty base
+    go !depth frontier seen
+        | depth >= maxDepth || null frontier = []
+        | otherwise =
+            let (admitted, seen') = admitKeys seen (roundProducts frontier base)
+             in admitted ++ go (depth + 1) admitted seen'
+saturateCandidates TruthVector maxDepth base =
+    M.elems (go 1 frontier0 reps0)
+  where
+    (reps0, frontier0) = admitVecs M.empty base
+    go !depth frontier reps
+        | depth >= maxDepth || null frontier = reps
+        | otherwise =
+            let (reps', admitted) = admitVecs reps (roundProducts frontier base)
+             in go (depth + 1) admitted reps'
+
+{- | One combination round: @frontier × base@ via AND then OR, skipping self-pairs.
+Mirrors 'boolExprsVec'\'s @combinedExprs@ so structural output is byte-identical.
+-}
+roundProducts :: [CondVec] -> [CondVec] -> [CondVec]
+roundProducts frontier base =
+    [ c
+    | e1 <- frontier
+    , e2 <- base
+    , not (eqExpr (cvExpr e1) (cvExpr e2))
+    , c <- [combineAndVec e1 e2, combineOrVec e1 e2]
+    ]
+
+admitKeys :: Set.Set String -> [CondVec] -> ([CondVec], Set.Set String)
+admitKeys = go []
+  where
+    go acc seen [] = (reverse acc, seen)
+    go acc !seen (c : cs)
+        | k `Set.member` seen = go acc seen cs
+        | otherwise = go (c : acc) (Set.insert k seen) cs
+      where
+        k = show (normalize (cvExpr c))
+
+admitVecs ::
+    M.Map (VU.Vector Bool) CondVec ->
+    [CondVec] ->
+    (M.Map (VU.Vector Bool) CondVec, [CondVec])
+admitVecs = go []
+  where
+    go acc reps [] = (reps, reverse acc)
+    go acc !reps (c : cs) =
+        case M.lookup (cvVec c) reps of
+            Nothing -> go (c : acc) (M.insert (cvVec c) c reps) cs
+            Just r -> go acc (M.insert (cvVec c) (smaller r c) reps) cs
+    smaller a b = case compare (eSize (cvExpr a)) (eSize (cvExpr b)) of
+        LT -> a
+        GT -> b
+        EQ -> if compareExpr (cvExpr a) (cvExpr b) /= GT then a else b
+
 {- | Best linear candidate, or 'Nothing' when the linear path is disabled or
 there are too few care points to fit on.
 -}
@@ -746,9 +850,17 @@ bestLinearCandidate cfg df carePoints
             ("P1/linear: called care=" ++ show (length carePoints))
             (fitLinearCandidate cfg df carePoints)
 
-{- | Fit an L1-LR to the care points and convert the hyperplane to an
-'Expr Bool'. 'Nothing' when there are no numeric columns or the solver
-returns an all-zero model.
+{- | Fit an L1-LR (Elastic-Net regularised) to the
+care points and convert the hyperplane to an 'Expr Bool'. Class-balanced
+sample weights are constructed from the care-point label distribution to
+prevent the FISTA intercept from polarising under tree-shape imbalance.
+
+Returns 'Nothing' when:
+  * there are no numeric columns,
+  * the solver returns an all-zero model, or
+  * the resulting hyperplane scores every care row on the same side of 0
+    (degenerate-hyperplane detector: PR 3 safety net; equivalent to
+    'isValidAtNode' rejection but caught upstream).
 -}
 fitLinearCandidate ::
     TreeConfig -> DataFrame -> [CarePoint] -> Maybe (Expr Bool)
@@ -756,11 +868,36 @@ fitLinearCandidate cfg df carePoints =
     case mapMaybe (materializeFeatureForCare df carePoints) (numericCols df) of
         [] -> ttrace "P1/fit: empty-numeric — no NumExpr cols materialized" Nothing
         mats ->
-            let model =
+            let nCare = length carePoints
+                rows = careRowsFromFeatures nCare mats
+                labels = careLabels carePoints
+                !nPos = VU.length (VU.filter (> 0) labels)
+                !nNeg = nCare - nPos
+                -- Class-balanced sklearn-form weights: w_i = N / (2 · N_class)
+                -- with N = nCare so weights have mean 1 (Σ w_i = N). This
+                -- preserves the existing @1/N@ gradient normalisation
+                -- exactly; the Lipschitz bound stays @(d+1)/4 + λ₂@.
+                !classWeights =
+                    if nPos > 0 && nNeg > 0
+                        then Just $ VU.generate nCare $ \i ->
+                            let !y = VU.unsafeIndex labels i
+                             in if y > 0
+                                    then
+                                        fromIntegral nCare
+                                            / (2 * fromIntegral nPos)
+                                    else
+                                        fromIntegral nCare
+                                            / (2 * fromIntegral nNeg)
+                        else Nothing -- degenerate one-class case; uniform OK
+                solverCfg =
+                    (linearSolverConfig cfg)
+                        { LS.scSampleWeights = classWeights
+                        }
+                model =
                     LS.fitL1Logistic
-                        (linearSolverConfig cfg)
-                        (careRowsFromFeatures (length carePoints) mats)
-                        (careLabels carePoints)
+                        solverCfg
+                        rows
+                        labels
                         (V.fromList (map fst mats))
                 weights = LS.lmWeights model
                 nnz = VU.length (VU.filter (/= 0) weights)
@@ -771,19 +908,55 @@ fitLinearCandidate cfg df carePoints =
                             ( "P1/fit: all-zero — d="
                                 ++ show (VU.length weights)
                                 ++ " care="
-                                ++ show (length carePoints)
+                                ++ show nCare
+                                ++ " imbalance="
+                                ++ show
+                                    ( fromIntegral (max nPos nNeg)
+                                        / fromIntegral (max 1 nCare) ::
+                                        Double
+                                    )
                             )
                             Nothing
                     else
-                        ttrace
-                            ( "P1/fit: ok nnz="
-                                ++ show nnz
-                                ++ "/"
-                                ++ show (VU.length weights)
-                                ++ " |w|1="
-                                ++ show l1
-                            )
-                            (Just (LS.modelToExpr model))
+                        let !bias = LS.lmIntercept model
+                            !nFull = V.length (V.fromList mats)
+                            -- Score each care row: w · x_i + b
+                            scoreAt i =
+                                let !row = V.unsafeIndex rows i
+                                 in VU.sum (VU.zipWith (*) weights row) + bias
+                            scores =
+                                VU.generate nCare scoreAt
+                            !sMin = VU.minimum scores
+                            !sMax = VU.maximum scores
+                            degenerate =
+                                nCare > 0 && (sMin > 0 || sMax < 0)
+                            _ = nFull -- silence unused
+                         in if degenerate
+                                then
+                                    ttrace
+                                        ( "P1/fit: degenerate — scores ["
+                                            ++ show sMin
+                                            ++ ","
+                                            ++ show sMax
+                                            ++ "] all same-side; rejecting"
+                                        )
+                                        Nothing
+                                else
+                                    ttrace
+                                        ( "P1/fit: ok nnz="
+                                            ++ show nnz
+                                            ++ "/"
+                                            ++ show (VU.length weights)
+                                            ++ " |w|1="
+                                            ++ show l1
+                                            ++ " imbalance="
+                                            ++ show
+                                                ( fromIntegral (max nPos nNeg)
+                                                    / fromIntegral (max 1 nCare) ::
+                                                    Double
+                                                )
+                                        )
+                                        (Just (LS.modelToExpr model))
 
 {- | Build per-care-point feature rows from materialized columns. Each column
 has length @nCare@ by construction, so the indexing is in range.
@@ -970,7 +1143,7 @@ countCarePointErrors cond df carePoints =
   where
     isMisclassified :: VU.Vector Bool -> CarePoint -> Bool
     isMisclassified boolVals cp =
-        let goesLeft = boolVals VU.! (cpIndex cp)
+        let goesLeft = boolVals VU.! cpIndex cp
             shouldGoLeft = cpCorrectDir cp == GoLeft
          in goesLeft /= shouldGoLeft
 
@@ -1039,14 +1212,34 @@ computeTreeLoss target df indices tree
                          in
                             fromIntegral errors / fromIntegral n
 
-pruneDead :: Tree a -> Tree a
-pruneDead (Leaf v) = Leaf v
-pruneDead (Branch cond left right) =
-    let
-        left' = pruneDead left
-        right' = pruneDead right
-     in
-        Branch cond left' right'
+{- | Semantics-preserving fitted-tree pruning, run once post-convergence:
+* path-condition entailment — if the conditions taken to reach a node force its
+  test true\/false, splice in the live child (true-edge facts always usable;
+  false-edge facts only for non-NaN integral columns);
+* same-branch collapse — @Branch c t t@ becomes @t@, cascading upward.
+Decidable only for same-column Double\/Int threshold tests; cross-column, oblique
+and nullable tests are left untouched.
+-}
+pruneDead :: forall a. (Columnable a) => Tree a -> Tree a
+pruneDead = go []
+  where
+    go :: [PredFact] -> Tree a -> Tree a
+    go _ (Leaf v) = Leaf v
+    go facts (Branch cond left right) =
+        case entails facts cond of
+            Just True -> go facts left
+            Just False -> go facts right
+            Nothing ->
+                let left' = go (addFact (factTrue cond) facts) left
+                    right' = go (addFact (factFalse cond) facts) right
+                 in if treeEq left' right' then left' else Branch cond left' right'
+    addFact (Just f) fs = f : fs
+    addFact Nothing fs = fs
+
+treeEq :: (Columnable a) => Tree a -> Tree a -> Bool
+treeEq (Leaf x) (Leaf y) = x == y
+treeEq (Branch c1 l1 r1) (Branch c2 l2 r2) = eqExpr c1 c2 && treeEq l1 l2 && treeEq r1 r2
+treeEq _ _ = False
 
 pruneExpr :: forall a. (Columnable a) => Expr a -> Expr a
 pruneExpr (If cond trueBranch falseBranch) =
@@ -1062,128 +1255,146 @@ pruneExpr (Unary op e) = Unary op (pruneExpr e)
 pruneExpr (Binary op l r) = Binary op (pruneExpr l) (pruneExpr r)
 pruneExpr e = e
 
-buildGreedyTree ::
-    forall a.
-    (Columnable a, Ord a) =>
-    TreeConfig ->
-    Int ->
-    T.Text ->
-    [Expr Bool] ->
-    DataFrame ->
-    Tree a
-buildGreedyTree cfg depth target conds df
-    | depth <= 0 || nRows df <= minSamplesSplit cfg =
-        Leaf (majorityValue @a target df)
-    | otherwise =
-        case findBestGreedySplit @a cfg target conds df of
-            Nothing -> Leaf (majorityValue @a target df)
-            Just bestCond ->
-                let (dfTrue, dfFalse) = partitionDataFrame bestCond df
-                 in if nRows dfTrue < minLeafSize cfg || nRows dfFalse < minLeafSize cfg
-                        then Leaf (majorityValue @a target df)
-                        else
-                            Branch
-                                bestCond
-                                (buildGreedyTree @a cfg (depth - 1) target conds dfTrue)
-                                (buildGreedyTree @a cfg (depth - 1) target conds dfFalse)
+-- ----------------------------------------------------------------------------
+-- Faithful sklearn CART (for an aligned TAO baseline)
+-- ----------------------------------------------------------------------------
 
-findBestGreedySplit ::
-    forall a.
-    (Columnable a, Ord a) =>
-    TreeConfig -> T.Text -> [Expr Bool] -> DataFrame -> Maybe (Expr Bool)
-findBestGreedySplit cfg target conds df =
-    case interpret @a df (Col target) of
-        Left _ -> Nothing
-        Right (TColumn col) -> case toVector @a col of
-            Left _ -> Nothing
-            Right targetVals -> goWithLabels targetVals
+-- | A one-hot feature column: its per-row Double values plus the sklearn LEFT
+-- predicate (@x <= threshold@) expressed over the ORIGINAL DataFrame.
+data CartFeature = CartFeature
+    { cfValues :: !(VU.Vector Double)
+    , cfPred :: !(Double -> Expr Bool)
+    }
+
+-- | Pre-`Tree` CART node: leaf class id, or split on feature @j@ at @threshold@.
+data CartNode = CLeaf !Int | CSplit !Int !Double !CartNode !CartNode
+
+{- | sklearn-faithful CART: one-hot-encodes categoricals like
+@pd.get_dummies(drop_first=False)@ (numeric columns pass through in CSV order,
+each categorical replaced in place by sorted @col_value@ dummies), then builds a
+tree with exact (unsmoothed) Gini, axis-aligned best splits over all midpoint
+thresholds (@<=@ ⇒ left), sklearn stop rules, and the smallest-class-index
+argmax leaf. Produces a @Tree T.Text@ (string class labels via @astype(str)@)
+that predicts identically to @DecisionTreeClassifier(criterion='gini')@ on
+continuous features. @min_samples_split@ is fixed at 2; @max_depth@ /
+@min_samples_leaf@ come from 'maxTreeDepth' / 'minLeafSize'. Tie-broken by
+feature order (no RNG permutation), so it matches sklearn only where gains do
+not tie (i.e. not the seeded tie-break sklearn applies to one-hot columns).
+-}
+buildCartTree :: forall a. (Columnable a, Ord a) => TreeConfig -> T.Text -> DataFrame -> Tree a
+buildCartTree cfg target df = cartToTree (buildCartNode 0 (VU.enumFromN 0 nAll))
   where
-    !nDf = nRows df
-    !nDfD = fromIntegral @Int @Double nDf
-    !minLeaf = minLeafSize cfg
-    calculateComplexity c = complexityPenalty (synthConfig cfg) * fromIntegral (eSize c)
-    -- Count value frequencies via Map.
-    countsOver = V.foldl' (\acc x -> M.insertWith (+) x 1 acc) M.empty
-    giniFromCounts :: Int -> M.Map a Int -> Double
-    giniFromCounts n counts
-        | n == 0 = 0
-        | otherwise =
-            let nC = fromIntegral n
-                k = fromIntegral (M.size counts)
-                ps = map (\c -> (fromIntegral c + 1) / (nC + k)) (M.elems counts)
-             in 1 - sum (map (^ (2 :: Int)) ps)
+    feats = V.fromList (cartFeatures target df)
+    nFeats = V.length feats
+    labels :: V.Vector a
+    labels = case interpret @a df (Col target) of
+        Right (TColumn column) -> case toVector @a column of
+            Right v -> v
+            Left _ -> error "buildCartTree: target column type mismatch"
+        _ -> error "buildCartTree: cannot interpret target column"
+    classes = V.fromList (Set.toList (Set.fromList (V.toList labels)))
+    nClasses = V.length classes
+    classIx = M.fromList (zip (V.toList classes) [0 ..])
+    codes = VU.generate nAll (\i -> M.findWithDefault 0 (labels V.! i) classIx)
+    nAll = nRows df
+    maxD = maxTreeDepth cfg
+    minLeaf = max 1 (minLeafSize cfg)
 
-    goWithLabels targetVals =
-        let
-            !allCounts = countsOver targetVals
-            !initialImpurity = giniFromCounts nDf allCounts
+    classCounts idxs =
+        VU.accumulate (+) (VU.replicate nClasses 0) (VU.map (\i -> (codes VU.! i, 1)) idxs)
 
-            evalCandidate :: Expr Bool -> Maybe (Expr Bool, Int, Int, Double)
-            evalCandidate c = case materializeCondVec df c of
-                Nothing -> Nothing
-                Just cv ->
-                    let bv = cvVec cv
-                        (!trueCnt, !trueCnts, !falseCnts) =
-                            V.ifoldl' step (0, M.empty, M.empty) targetVals
-                          where
-                            step (!tc, !mt, !mf) i v
-                                | bv VU.! i =
-                                    (tc + 1, M.insertWith (+) v 1 mt, mf)
-                                | otherwise =
-                                    (tc, mt, M.insertWith (+) v 1 mf)
-                        !falseCnt = nDf - trueCnt
-                     in if trueCnt < minLeaf || falseCnt < minLeaf
-                            then Nothing
-                            else
-                                let !wT = fromIntegral trueCnt / nDfD
-                                    !wF = fromIntegral falseCnt / nDfD
-                                    !gT = giniFromCounts trueCnt trueCnts
-                                    !gF = giniFromCounts falseCnt falseCnts
-                                    !newImp = wT * gT + wF * gF
-                                    !gain = (initialImpurity - newImp) - calculateComplexity c
-                                 in Just (c, trueCnt, falseCnt, gain)
+    -- Gini over a class-count list of total m: 1 - Σ (c/m)².
+    giniL cs m
+        | m == 0 = 0
+        | otherwise = 1 - sum [let p = fromIntegral c / fromIntegral m in p * p | c <- cs]
 
-            -- The evaluations of the original candidate pool.
-            !primaryEvals = mapMaybe evalCandidate conds
+    buildCartNode :: Int -> VU.Vector Int -> CartNode
+    buildCartNode depth idxs
+        | n < 2 || depth >= maxD || isPure = CLeaf (VU.maxIndex counts)
+        | otherwise = case bestSplit idxs counts n of
+            Nothing -> CLeaf (VU.maxIndex counts)
+            Just (fj, thr) ->
+                let !vals = cfValues (feats V.! fj)
+                    leftIdx = VU.filter (\i -> vals VU.! i <= thr) idxs
+                    rightIdx = VU.filter (\i -> vals VU.! i > thr) idxs
+                 in CSplit fj thr (buildCartNode (depth + 1) leftIdx) (buildCartNode (depth + 1) rightIdx)
+      where
+        n = VU.length idxs
+        counts = classCounts idxs
+        isPure = VU.length (VU.filter (> 0) counts) <= 1
 
-            -- Sort by gain desc (with eSize tiebreaker), filter by
-            -- complexity-aware threshold, take 'expressionPairs' with the
-            -- per-column quota guard (see 'takeDiverse').
-            sortedConditions =
-                takeDiverse
-                    (expressionPairs cfg)
-                    (perColumnQuota (synthConfig cfg))
-                    primaryColExpr
-                    ( map (\(c, _, _, _) -> c) $
-                        sortBy
-                            (flip compare `on` (\(c, _, _, g) -> (g, negate (eSize c))))
-                            ( filter
-                                (\(c, _, _, g) -> g > negate (calculateComplexity c))
-                                primaryEvals
-                            )
-                    )
+    -- Min weighted-child-Gini (feature, threshold); first feature wins ties; Nothing
+    -- if no feature has a min_samples_leaf-respecting threshold (⇒ leaf).
+    bestSplit :: VU.Vector Int -> VU.Vector Int -> Int -> Maybe (Int, Double)
+    bestSplit idxs counts n = pick Nothing 0
+      where
+        total = VU.toList counts
+        pick acc fj
+            | fj >= nFeats = fmap (\(_, j, t) -> (j, t)) acc
+            | otherwise = case featureBest (feats V.! fj) of
+                Nothing -> pick acc (fj + 1)
+                Just (g, thr) -> case acc of
+                    Just (gBest, _, _) | gBest <= g -> pick acc (fj + 1)
+                    _ -> pick (Just (g, fj, thr)) (fj + 1)
+          where
+            -- placeholder so the where binds to the right fj
+            featureBest feat = sweep Nothing (replicate nClasses 0) (0 :: Int) (0 / 0) sorted
+              where
+                vals = cfValues feat
+                sorted = sortBy (compare `on` fst) [(vals VU.! i, codes VU.! i) | i <- VU.toList idxs]
+                sweep best _ _ _ [] = best
+                sweep best leftAcc moved prevV ((v, c) : more) =
+                    let best'
+                            | moved >= minLeaf, n - moved >= minLeaf, v > prevV + 1e-7 =
+                                let nl = moved
+                                    nr = n - nl
+                                    gl = giniL leftAcc nl
+                                    gr = giniL (zipWith (-) total leftAcc) nr
+                                    wg = (fromIntegral nl * gl + fromIntegral nr * gr) / fromIntegral n
+                                    thr = (prevV + v) / 2
+                                 in case best of
+                                        Just (wb, _) | wb <= wg -> best
+                                        _ -> Just (wg, thr)
+                            | otherwise = best
+                        leftAcc' = zipWith (\j x -> if j == c then x + 1 else x) [0 ..] leftAcc
+                     in sweep best' leftAcc' (moved + 1) v more
 
-            -- Final selection: also consider boolExprs expansion. Use
-            -- evalCandidate so each cond is materialized at most twice
-            -- (once here, possibly once earlier).
-            evalGainTuple :: Expr Bool -> (Double, Int)
-            evalGainTuple c = case evalCandidate c of
-                Nothing -> (negate (1 / 0), negate (eSize c))
-                Just (_, _, _, g) -> (g, negate (eSize c))
-         in
-            if null sortedConditions
-                then Nothing
-                else
-                    Just $
-                        maximumBy
-                            (compare `on` evalGainTuple)
-                            ( boolExprs
-                                df
-                                sortedConditions
-                                sortedConditions
-                                0
-                                (boolExpansion (synthConfig cfg))
-                            )
+    cartToTree (CLeaf cid) = Leaf (classes V.! cid)
+    cartToTree (CSplit fj thr l r) = Branch (cfPred (feats V.! fj) thr) (cartToTree l) (cartToTree r)
+
+-- | One-hot features in @pd.get_dummies(drop_first=False)@ column order.
+cartFeatures :: T.Text -> DataFrame -> [CartFeature]
+cartFeatures target df = concatMap featOf (filter (/= target) (columnNames df))
+  where
+    nAll = nRows df
+    featOf :: T.Text -> [CartFeature]
+    featOf c = case unsafeGetColumn c df of
+        UnboxedColumn _ (v :: VU.Vector b) ->
+            case testEquality (typeRep @b) (typeRep @Double) of
+                Just Refl -> [CartFeature v (\t -> F.col @Double c .<=. F.lit t)]
+                Nothing -> case sIntegral @b of
+                    STrue -> [CartFeature (VU.map fromIntegral v) (\t -> F.toDouble (F.col @b c) .<=. F.lit t)]
+                    SFalse -> []
+        BoxedColumn _ (v :: V.Vector b) ->
+            case testEquality (typeRep @b) (typeRep @T.Text) of
+                Just Refl ->
+                    [ CartFeature
+                        (VU.generate nAll (\i -> if v V.! i == cat then 1 else 0))
+                        (\_ -> F.col @T.Text c ./=. F.lit cat)
+                    | cat <- Set.toList (Set.fromList (V.toList v))
+                    ]
+                Nothing -> []
+        _ -> []
+
+-- | Target column as string labels (matches pandas @y.astype(str)@).
+cartTargetLabels :: T.Text -> DataFrame -> V.Vector T.Text
+cartTargetLabels target df = case unsafeGetColumn target df of
+    BoxedColumn _ (v :: V.Vector b) ->
+        case testEquality (typeRep @b) (typeRep @T.Text) of
+            Just Refl -> v
+            Nothing -> V.map (T.pack . show) v
+    UnboxedColumn _ (v :: VU.Vector b) -> V.map (T.pack . show) (V.convert v)
+    _ -> error "cartTargetLabels: unsupported target column type"
 
 -- | Unifies non-nullable and nullable Double expressions for feature generation.
 data NumExpr
@@ -1277,9 +1488,58 @@ generateNumericConds cfg df = do
         , F.fromMaybe False (e .> F.lit t)
         ]
 
+{- | Dedup a candidate-expression list by normalized structural form, keeping the
+first occurrence. O(n log n) — the keyed replacement for @nubBy eqExpr@ on large
+candidate pools (`show . normalize` is faithful to 'eqExpr', see the worklist).
+-}
+nubByExpr :: [Expr Bool] -> [Expr Bool]
+nubByExpr = go Set.empty
+  where
+    go _ [] = []
+    go seen (e : es)
+        | k `Set.member` seen = go seen es
+        | otherwise = e : go (Set.insert k seen) es
+      where
+        k = show (normalize e)
+
+{- | Arithmetic candidate expansion, generated already-deduped: each round
+combines @frontier × base@ and admits only candidates whose normalized form is
+novel, so the frontier never carries duplicates (no generate-all + 'nubBy').
+This is the numeric analog of the bool 'saturateCandidates' worklist; without it,
+@maxExprDepth >= 3@ blows the candidate list up combinatorially and the old
+@nubBy eqExpr@ pass was O(n²). Produces base + @maxExprDepth-1@ combination
+rounds (matching the previous depth semantics, deduped).
+-}
 numericExprsWithTerms :: SynthConfig -> DataFrame -> [NumExpr]
-numericExprsWithTerms cfg df =
-    concatMap (numericExprs cfg df [] 0) [0 .. maxExprDepth cfg]
+numericExprsWithTerms cfg df
+    | not (enableArithOps cfg) = base
+    | otherwise = base ++ go (max 0 (maxExprDepth cfg - 1)) base seen0
+  where
+    base = numericCols df
+    keyNum (NDouble e) = show (normalize e)
+    keyNum (NMaybeDouble e) = show (normalize e)
+    seen0 = Set.fromList (map keyNum base)
+    disallowed e1 e2 =
+        let cols = numExprCols e1 <> numExprCols e2
+         in any (\(l, r) -> l `elem` cols && r `elem` cols) (disallowedCombinations cfg)
+    go 0 _ _ = []
+    go d frontier seen =
+        let products =
+                [ c
+                | e1 <- frontier
+                , e2 <- base
+                , not (numExprEq e1 e2)
+                , not (disallowed e1 e2)
+                , c <- combineNumExprs e1 e2
+                ]
+            (admitted, seen') = admit seen [] products
+         in if null admitted then [] else admitted ++ go (d - 1) admitted seen'
+    admit seen acc [] = (reverse acc, seen)
+    admit seen acc (c : cs)
+        | k `Set.member` seen = admit seen acc cs
+        | otherwise = admit (Set.insert k seen) (c : acc) cs
+      where
+        k = keyNum c
 
 numericCols :: DataFrame -> [NumExpr]
 numericCols df = concatMap extract (columnNames df)
@@ -1306,46 +1566,6 @@ numericCols df = concatMap extract (columnNames df)
                         [NMaybeDouble (F.whenPresent (realToFrac @b @Double) (Col @(Maybe b) colName))]
                     SFalse -> []
         _ -> []
-
-numericExprs ::
-    SynthConfig -> DataFrame -> [NumExpr] -> Int -> Int -> [NumExpr]
-numericExprs cfg df prevExprs depth maxDepth
-    | depth == 0 = baseExprs ++ numericExprs cfg df baseExprs (depth + 1) maxDepth
-    | depth >= maxDepth = []
-    | otherwise =
-        combinedExprs ++ numericExprs cfg df combinedExprs (depth + 1) maxDepth
-  where
-    baseExprs = numericCols df
-    combinedExprs
-        | not (enableArithOps cfg) = []
-        | otherwise = do
-            e1 <- prevExprs
-            e2 <- baseExprs
-            let cols = numExprCols e1 <> numExprCols e2
-            guard
-                ( not (numExprEq e1 e2)
-                    && not
-                        ( any
-                            (\(l, r) -> l `elem` cols && r `elem` cols)
-                            (disallowedCombinations cfg)
-                        )
-                )
-            combineNumExprs e1 e2
-
-boolExprs ::
-    DataFrame -> [Expr Bool] -> [Expr Bool] -> Int -> Int -> [Expr Bool]
-boolExprs df baseExprs prevExprs depth maxDepth
-    | depth == 0 =
-        baseExprs ++ boolExprs df baseExprs prevExprs (depth + 1) maxDepth
-    | depth >= maxDepth = []
-    | otherwise =
-        combinedExprs ++ boolExprs df baseExprs combinedExprs (depth + 1) maxDepth
-  where
-    combinedExprs = do
-        e1 <- prevExprs
-        e2 <- baseExprs
-        guard (Prelude.not (eqExpr e1 e2))
-        [F.and e1 e2, F.or e1 e2]
 
 {- | Valid-slot view of a nullable boxed column: null slots hold crash-thunks,
 so callers that force every element (e.g. percentile sorting) must filter
@@ -1648,17 +1868,11 @@ buildTree ::
     Expr a
 buildTree cfg depth target conds df =
     let
-        tree = buildGreedyTree @a cfg depth target conds df
+        tree = buildCartTree @a cfg{maxTreeDepth = depth} target df
         indices = V.enumFromN 0 (nRows df)
         optimized = taoOptimize @a cfg target conds df indices tree
      in
         pruneExpr (treeToExpr optimized)
-
-findBestSplit ::
-    forall a.
-    (Columnable a, Ord a) =>
-    TreeConfig -> T.Text -> [Expr Bool] -> DataFrame -> Maybe (Expr Bool)
-findBestSplit = findBestGreedySplit @a
 
 pruneTree :: forall a. (Columnable a) => Expr a -> Expr a
 pruneTree = pruneExpr
@@ -1736,10 +1950,10 @@ fitProbTree cfg (Col target) df =
             Nothing -> TargetInfo False Nothing V.empty
             Just ti -> ti
         conds =
-            nubBy eqExpr $
+            nubByExpr $
                 numericConditions cfg (exclude [target] df)
                     ++ discreteConditions targetInfo cfg (exclude [target] df)
-        initialTree = buildGreedyTree @a cfg (maxTreeDepth cfg) target conds df
+        initialTree = buildCartTree @a cfg target df
         indices = V.enumFromN 0 (nRows df)
         optimizedTree = taoOptimize @a cfg target conds df indices initialTree
         pruned = pruneDead optimizedTree

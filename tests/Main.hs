@@ -43,6 +43,11 @@ import qualified Parquet
 import qualified Plotting
 import qualified Properties
 import qualified Properties.Categorical
+import qualified Properties.Simplify
+import qualified Cart
+import qualified Simplify
+import qualified TreePruning
+import qualified Worklist
 
 tests :: Test
 tests =
@@ -79,6 +84,10 @@ tests =
             ++ LazyParquet.tests
             ++ Plotting.tests
             ++ LinearSolver.tests
+            ++ Simplify.tests
+            ++ TreePruning.tests
+            ++ Worklist.tests
+            ++ Cart.tests
 
 isSuccessful :: Result -> Bool
 isSuccessful (Success{}) = True
@@ -98,9 +107,13 @@ main = do
             monadRes <- mapM (quickCheckWithResult stdArgs) Monad.tests
             propsRes <- mapM (quickCheckWithResult stdArgs) Properties.tests
             catRes <- mapM (quickCheckWithResult stdArgs) Properties.Categorical.tests
+            simpRes <- mapM (quickCheckWithResult stdArgs) Properties.Simplify.tests
+            wlRes <- mapM (quickCheckWithResult stdArgs) Worklist.props
             if not (all isSuccessful propRes)
                 || not (all isSuccessful monadRes)
                 || not (all isSuccessful propsRes)
                 || not (all isSuccessful catRes)
+                || not (all isSuccessful simpRes)
+                || not (all isSuccessful wlRes)
                 then Exit.exitFailure
                 else Exit.exitSuccess

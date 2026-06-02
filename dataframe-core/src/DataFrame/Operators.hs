@@ -1,4 +1,5 @@
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE GADTs #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
@@ -9,8 +10,8 @@ import Data.Function ((&))
 import qualified Data.Text as T
 import DataFrame.Internal.Column (Columnable)
 import DataFrame.Internal.Expression (
+    BinUDF (MkBinaryOp),
     BinaryOp (
-        MkBinaryOp,
         binaryCommutative,
         binaryFn,
         binaryName,
@@ -20,7 +21,7 @@ import DataFrame.Internal.Expression (
     Expr (Binary, Col, If, Lit, Unary),
     NamedExpr,
     UExpr (UExpr),
-    UnaryOp (MkUnaryOp, unaryFn, unaryName, unarySymbol),
+    UnUDF (MkUnaryOp),
  )
 import DataFrame.Internal.Nullable (
     BaseType,
@@ -72,7 +73,7 @@ lit = Lit
 liftDecorated ::
     (Columnable a, Columnable b) =>
     (a -> b) -> T.Text -> Maybe T.Text -> Expr a -> Expr b
-liftDecorated f opName rep = Unary (MkUnaryOp{unaryFn = f, unaryName = opName, unarySymbol = rep})
+liftDecorated f opName rep = Unary (MkUnaryOp f opName rep)
 
 lift2Decorated ::
     (Columnable c, Columnable b, Columnable a) =>
@@ -85,15 +86,110 @@ lift2Decorated ::
     Expr b ->
     Expr a
 lift2Decorated f opName rep comm prec =
-    Binary
-        ( MkBinaryOp
-            { binaryFn = f
-            , binaryName = opName
-            , binarySymbol = rep
-            , binaryCommutative = comm
-            , binaryPrecedence = prec
-            }
-        )
+    Binary (MkBinaryOp f opName rep comm prec)
+
+data NullEq a b c where
+    NullEq ::
+        ( NumericWidenOp (BaseType a) (BaseType b)
+        , NullLift2Op a b Bool (NullCmpResult a b)
+        , Eq (Promote (BaseType a) (BaseType b))
+        ) =>
+        NullEq a b (NullCmpResult a b)
+
+data NullNeq a b c where
+    NullNeq ::
+        ( NumericWidenOp (BaseType a) (BaseType b)
+        , NullLift2Op a b Bool (NullCmpResult a b)
+        , Eq (Promote (BaseType a) (BaseType b))
+        ) =>
+        NullNeq a b (NullCmpResult a b)
+
+data NullLt a b c where
+    NullLt ::
+        ( NumericWidenOp (BaseType a) (BaseType b)
+        , NullLift2Op a b Bool (NullCmpResult a b)
+        , Ord (Promote (BaseType a) (BaseType b))
+        ) =>
+        NullLt a b (NullCmpResult a b)
+
+data NullGt a b c where
+    NullGt ::
+        ( NumericWidenOp (BaseType a) (BaseType b)
+        , NullLift2Op a b Bool (NullCmpResult a b)
+        , Ord (Promote (BaseType a) (BaseType b))
+        ) =>
+        NullGt a b (NullCmpResult a b)
+
+data NullLeq a b c where
+    NullLeq ::
+        ( NumericWidenOp (BaseType a) (BaseType b)
+        , NullLift2Op a b Bool (NullCmpResult a b)
+        , Ord (Promote (BaseType a) (BaseType b))
+        ) =>
+        NullLeq a b (NullCmpResult a b)
+
+data NullGeq a b c where
+    NullGeq ::
+        ( NumericWidenOp (BaseType a) (BaseType b)
+        , NullLift2Op a b Bool (NullCmpResult a b)
+        , Ord (Promote (BaseType a) (BaseType b))
+        ) =>
+        NullGeq a b (NullCmpResult a b)
+
+data NullAnd a b c where
+    NullAnd ::
+        (NullableCmpOp a b (NullCmpResult a b), BaseType a ~ Bool) =>
+        NullAnd a b (NullCmpResult a b)
+
+data NullOr a b c where
+    NullOr ::
+        (NullableCmpOp a b (NullCmpResult a b), BaseType a ~ Bool) =>
+        NullOr a b (NullCmpResult a b)
+
+instance BinaryOp NullEq where
+    binaryFn NullEq = applyNull2 (widenCmpOp (==))
+    binaryName NullEq = "eq"
+    binarySymbol NullEq = Just ".=="
+    binaryCommutative NullEq = True
+    binaryPrecedence NullEq = 4
+instance BinaryOp NullNeq where
+    binaryFn NullNeq = applyNull2 (widenCmpOp (/=))
+    binaryName NullNeq = "neq"
+    binarySymbol NullNeq = Just "./="
+    binaryCommutative NullNeq = True
+    binaryPrecedence NullNeq = 4
+instance BinaryOp NullLt where
+    binaryFn NullLt = applyNull2 (widenCmpOp (<))
+    binaryName NullLt = "lt"
+    binarySymbol NullLt = Just ".<"
+    binaryPrecedence NullLt = 4
+instance BinaryOp NullGt where
+    binaryFn NullGt = applyNull2 (widenCmpOp (>))
+    binaryName NullGt = "gt"
+    binarySymbol NullGt = Just ".>"
+    binaryPrecedence NullGt = 4
+instance BinaryOp NullLeq where
+    binaryFn NullLeq = applyNull2 (widenCmpOp (<=))
+    binaryName NullLeq = "leq"
+    binarySymbol NullLeq = Just ".<="
+    binaryPrecedence NullLeq = 4
+instance BinaryOp NullGeq where
+    binaryFn NullGeq = applyNull2 (widenCmpOp (>=))
+    binaryName NullGeq = "geq"
+    binarySymbol NullGeq = Just ".>="
+    binaryPrecedence NullGeq = 4
+instance BinaryOp NullAnd where
+    binaryFn NullAnd = nullCmpOp (&&)
+    binaryName NullAnd = "nulland"
+    binarySymbol NullAnd = Just ".&&"
+    binaryCommutative NullAnd = True
+    binaryPrecedence NullAnd = 3
+instance BinaryOp NullOr where
+    binaryFn NullOr = nullCmpOp (||)
+    binaryName NullOr = "nullor"
+    binarySymbol NullOr = Just ".||"
+    binaryCommutative NullOr = True
+    binaryPrecedence NullOr = 2
 
 (.==.) ::
     (Columnable a, Eq a) =>
@@ -211,7 +307,7 @@ operand is nullable.
     Expr a ->
     Expr b ->
     Expr (NullCmpResult a b)
-(.==) = lift2Decorated (applyNull2 (widenCmpOp (==))) "eq" (Just ".==") True 4
+(.==) = Binary NullEq
 
 -- | Nullable-aware inequality. Widens numeric operands to their common type.
 (./=) ::
@@ -222,7 +318,7 @@ operand is nullable.
     Expr a ->
     Expr b ->
     Expr (NullCmpResult a b)
-(./=) = lift2Decorated (applyNull2 (widenCmpOp (/=))) "neq" (Just "./=") True 4
+(./=) = Binary NullNeq
 
 -- | Nullable-aware less-than. Widens numeric operands to their common type.
 (.<) ::
@@ -233,7 +329,7 @@ operand is nullable.
     Expr a ->
     Expr b ->
     Expr (NullCmpResult a b)
-(.<) = lift2Decorated (applyNull2 (widenCmpOp (<))) "lt" (Just ".<") False 4
+(.<) = Binary NullLt
 
 -- | Nullable-aware greater-than. Widens numeric operands to their common type.
 (.>) ::
@@ -244,7 +340,7 @@ operand is nullable.
     Expr a ->
     Expr b ->
     Expr (NullCmpResult a b)
-(.>) = lift2Decorated (applyNull2 (widenCmpOp (>))) "gt" (Just ".>") False 4
+(.>) = Binary NullGt
 
 {- | Nullable-aware less-than-or-equal. Widens numeric operands to their
 common type, so @Expr Double .<= Expr Int@ typechecks.
@@ -257,7 +353,7 @@ common type, so @Expr Double .<= Expr Int@ typechecks.
     Expr a ->
     Expr b ->
     Expr (NullCmpResult a b)
-(.<=) = lift2Decorated (applyNull2 (widenCmpOp (<=))) "leq" (Just ".<=") False 4
+(.<=) = Binary NullLeq
 
 -- | Nullable-aware greater-than-or-equal. Widens numeric operands to their common type.
 (.>=) ::
@@ -268,7 +364,7 @@ common type, so @Expr Double .<= Expr Int@ typechecks.
     Expr a ->
     Expr b ->
     Expr (NullCmpResult a b)
-(.>=) = lift2Decorated (applyNull2 (widenCmpOp (>=))) "geq" (Just ".>=") False 4
+(.>=) = Binary NullGeq
 
 (.&&.) :: Expr Bool -> Expr Bool -> Expr Bool
 (.&&.) = lift2Decorated (&&) "and" (Just ".&&.") True 3
@@ -282,7 +378,7 @@ common type, so @Expr Double .<= Expr Int@ typechecks.
     Expr a ->
     Expr b ->
     Expr (NullCmpResult a b)
-(.&&) = lift2Decorated (nullCmpOp (&&)) "nulland" (Just ".&&") True 3
+(.&&) = Binary NullAnd
 
 -- | Nullable-aware logical OR. Returns @Maybe Bool@ when either operand is nullable.
 (.||) ::
@@ -290,7 +386,7 @@ common type, so @Expr Double .<= Expr Int@ typechecks.
     Expr a ->
     Expr b ->
     Expr (NullCmpResult a b)
-(.||) = lift2Decorated (nullCmpOp (||)) "nullor" (Just ".||") True 2
+(.||) = Binary NullOr
 
 (.^^) ::
     ( Columnable (BaseType a)

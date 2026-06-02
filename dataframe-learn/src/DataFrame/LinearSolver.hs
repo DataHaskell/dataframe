@@ -51,19 +51,37 @@ data LinearModel = LinearModel
 data SolverConfig = SolverConfig
     { scL1Lambda :: !Double
     -- ^ Strength of the L1 penalty on weights (intercept is not regularized).
+    , scL2Lambda :: !Double
+    {- ^ Strength of the L2 penalty @(λ₂/2)·|w|²@ (Elastic Net; Zou & Hastie
+    2005). Combined with @scL1Lambda@ this gives the standard elastic-net
+    objective @λ₁·|w|₁ + (λ₂/2)·|w|²@. At @scL2Lambda = 0@ the solver
+    reduces to pure L1 (the original behaviour). The Friedman/Hastie/
+    Tibshirani 2010 glmnet proximal step under step size @1/L@ is
+    @softThreshold(z, λ₁/L) / (1 + λ₂/L)@ with @L = (d+1)/4 + λ₂@.
+    -}
     , scMaxIter :: !Int
     -- ^ Maximum number of FISTA iterations.
     , scTol :: !Double
     -- ^ Convergence tolerance on the weight delta (L-inf norm).
+    , scSampleWeights :: !(Maybe (VU.Vector Double))
+    {- ^ Optional per-row sample weights, length @n@. @Nothing@ is uniform
+    weight 1 (legacy behaviour, A1-A18 path). The 1/N gradient
+    normalisation is preserved by convention: weights should have mean
+    1 (i.e. @Σ w_i = N@) so the existing Lipschitz bound stays valid.
+    See 'fitLinearCandidate' in 'DataFrame.DecisionTree' for the
+    class-balanced construction @w_i = N / (2 · N_class(label_i))@.
+    -}
     }
     deriving (Eq, Show)
 
 defaultSolverConfig :: SolverConfig
 defaultSolverConfig =
     SolverConfig
-        { scL1Lambda = 0.01
+        { scL1Lambda = 0.005
+        , scL2Lambda = 0.005
         , scMaxIter = 200
         , scTol = 1.0e-4
+        , scSampleWeights = Nothing
         }
 
 {- | Fit L1-regularized binary logistic regression by FISTA. Rows are feature
@@ -88,13 +106,20 @@ fitL1Logistic cfg rows labels featureNames
                     let !meansKept = gatherBy keep means
                         !stdsKept = gatherBy keep stds
                         !xKept = V.map (standardizeRowKept keep means stds) rows
-                        !lipschitz = fromIntegral (VU.length keep + 1) / 4
+                        -- Elastic-Net Lipschitz: standard logistic bound
+                        -- @(d+1)/4@ plus the L2 part's Hessian-norm
+                        -- contribution @λ₂·I@ (operator norm @λ₂@).
+                        !lipschitz =
+                            fromIntegral (VU.length keep + 1) / 4
+                                + scL2Lambda cfg
                         (!wStdKept, !bStd) =
                             fistaLoop
                                 (scL1Lambda cfg)
+                                (scL2Lambda cfg)
                                 lipschitz
                                 (scMaxIter cfg)
                                 (scTol cfg)
+                                (scSampleWeights cfg)
                                 xKept
                                 labels
                                 (VU.replicate (VU.length keep) 0)
@@ -165,7 +190,6 @@ modelToExpr m =
         ]
     term w n = F.lit w .*. (Col n :: Expr Double)
     score rest first = foldl (\acc (w, n) -> acc .+. term w n) first rest .+. F.lit b
-
 
 {- | Per-column @(means, stds, variances)@ of a feature matrix. Cheaper than
 'standardize' when only the statistics are needed. unsafeIndex within is
@@ -260,36 +284,50 @@ dotProduct u v = VU.sum (VU.zipWith (*) u v)
 
 {- | Gradient of the average binary logistic loss at @(w, b)@ for labels in
 @{\-1,+1}@. Returns @(gradW, gradB)@.
+
+Sample-weighted variant: when @sampleWeights@ is @Just ws@ the per-row
+contribution is multiplied by @ws[i]@. With weights of mean 1
+(i.e. @Σ w_i = N@; the class-balanced convention used by
+'fitLinearCandidate'), the @1/N@ normalisation is preserved exactly.
 -}
 logisticGradient ::
+    Maybe (VU.Vector Double) ->
     V.Vector (VU.Vector Double) ->
     VU.Vector Double ->
     VU.Vector Double ->
     Double ->
     (VU.Vector Double, Double)
-logisticGradient features labels w b = (gradW, gradB)
+logisticGradient sampleWeights features labels w b = (gradW, gradB)
   where
     !invN = 1 / fromIntegral (V.length features)
-    !coeffs = rowCoeffs features labels w b invN
+    !coeffs = rowCoeffs sampleWeights features labels w b invN
     !gradW = accumulateGradW (VU.length w) features coeffs
     !gradB = VU.sum coeffs
 
-{- | Per-row loss coefficient @c_i = -y_i * sigmoid(-y_i * margin_i) / N@.
-unsafeIndex is safe: @i@ ranges over @[0,n-1]@ and @labels@ has length n.
+{- | Per-row loss coefficient. Without sample weights:
+@c_i = -y_i * sigmoid(-y_i * margin_i) / N@. With @Just ws@, each row's
+contribution is additionally multiplied by @ws[i]@.
+
+unsafeIndex is safe: @i@ ranges over @[0,n-1]@ and @labels@ /
+@sampleWeights@ both have length @n@ by construction.
 -}
 rowCoeffs ::
+    Maybe (VU.Vector Double) ->
     V.Vector (VU.Vector Double) ->
     VU.Vector Double ->
     VU.Vector Double ->
     Double ->
     Double ->
     VU.Vector Double
-rowCoeffs features labels w b invN =
+rowCoeffs sampleWeights features labels w b invN =
     VU.generate (V.length features) $ \i ->
         let !yi = VU.unsafeIndex labels i
             !row = V.unsafeIndex features i
             !margin = yi * (dotProduct w row + b)
-         in -(yi * sigmoid (-margin) * invN)
+            !base = -(yi * sigmoid (-margin) * invN)
+         in case sampleWeights of
+                Nothing -> base
+                Just ws -> base * VU.unsafeIndex ws i
 
 {- | Accumulate the weight gradient in one pass over every (row, feature)
 pair, scattering into a length-@d@ mutable vector.
@@ -305,20 +343,31 @@ accumulateGradW d features coeffs = runST $ do
 
 {- | Inner FISTA loop over standardized features. Returns the final @(w, b)@;
 the caller is responsible for de-standardization.
+
+@lambda1@ and @lambda2@ are the L1 / L2 penalty strengths; @lp@ is the
+Lipschitz constant of the smooth part @(d+1)/4 + λ₂@. The Elastic-Net
+proximal step is applied per FHT 2010 glmnet §2.6:
+@prox(z) = softThreshold(z, λ₁/lp) / (1 + λ₂/lp)@.
 -}
 fistaLoop ::
     Double ->
     Double ->
+    Double ->
     Int ->
     Double ->
+    Maybe (VU.Vector Double) ->
     V.Vector (VU.Vector Double) ->
     VU.Vector Double ->
     VU.Vector Double ->
     Double ->
     (VU.Vector Double, Double)
-fistaLoop lambda lp maxIter tol features labels w0 b0 = go 0 w0 b0 w0 b0 1.0
+fistaLoop lambda1 lambda2 lp maxIter tol sampleWeights features labels w0 b0 =
+    go 0 w0 b0 w0 b0 1.0
   where
-    proxStep = fistaProxStep features labels (lambda / lp) (1 / lp)
+    !shrink = lambda1 / lp
+    !ridgeDenom = 1 + lambda2 / lp
+    !stepInv = 1 / lp
+    proxStep = fistaProxStep sampleWeights features labels shrink ridgeDenom stepInv
     go !iter !xWPrev !xBPrev !yW !yB !t
         | iter >= maxIter = (xWPrev, xBPrev)
         | iter > 0 && delta < tol = (xW, xB)
@@ -328,20 +377,31 @@ fistaLoop lambda lp maxIter tol features labels w0 b0 = go 0 w0 b0 w0 b0 1.0
         !delta = if VU.null xW then 0 else deltaInf xWPrev xW
         (!yWNew, !yBNew, !tNew) = fistaMomentum t xWPrev xBPrev xW xB
 
-{- | One fused FISTA prox step: gradient step plus soft-threshold, without
+{- | One fused FISTA prox step: gradient step plus the Elastic-Net
+proximal operator (soft-threshold then ridge shrinkage), without
 materializing the intermediate trial weights.
+
+The Elastic-Net prox of @g(w) = λ₁·|w|₁ + (λ₂/2)·|w|²@ at step @1/lp@ is
+@softThreshold(z, λ₁/lp) / (1 + λ₂/lp)@ (FHT 2010 glmnet §2.6; Beck &
+Teboulle 2009 §4). The intercept is unregularised (no L1 or L2 applied).
 -}
 fistaProxStep ::
+    Maybe (VU.Vector Double) ->
     V.Vector (VU.Vector Double) ->
     VU.Vector Double ->
+    Double ->
     Double ->
     Double ->
     VU.Vector Double ->
     Double ->
     (VU.Vector Double, Double)
-fistaProxStep features labels shrink stepInv yW yB =
-    let (gW, gB) = logisticGradient features labels yW yB
-        !wNew = VU.zipWith (\yi gi -> softThreshold shrink (yi - gi * stepInv)) yW gW
+fistaProxStep sampleWeights features labels shrink ridgeDenom stepInv yW yB =
+    let (gW, gB) = logisticGradient sampleWeights features labels yW yB
+        !wNew =
+            VU.zipWith
+                (\yi gi -> softThreshold shrink (yi - gi * stepInv) / ridgeDenom)
+                yW
+                gW
         !bNew = yB - gB * stepInv
      in (wNew, bNew)
 
