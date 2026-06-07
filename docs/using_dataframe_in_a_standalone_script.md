@@ -50,7 +50,7 @@ import qualified DataFrame.Functions as F
 main :: IO ()
 main = do
   df <- D.readCsv "./housing.csv"
-  print (D.derive "rooms_per_household" (F.col @Double "total_rooms" / F.col @Double "households") df)
+  print (D.derive "rooms_per_household" (F.col Double "total_rooms" / F.col Double "households") df)
 ```
 
 You'll notice the dataframe now has a new column called `rooms_per_household` at the end. This is great! But what if we had made a mistake? What if we had instead typed "totalrooms"? Or what if we had assumed both columns were ints and used integer division? These would have both resulted in runtime errors. This gets worse as we rewrite more transformations using the same columns (we're more likely to have a stray typo or get the type wrong).
@@ -73,8 +73,8 @@ module Main where
 import qualified DataFrame as D
 import qualified DataFrame.Functions as F
 
-total_rooms = F.col @Double "total_rooms"
-households = F.col @Double "households"
+total_rooms = F.col Double "total_rooms"
+households = F.col Double "households"
 
 main :: IO ()
 main = do
@@ -147,7 +147,7 @@ main = do
         meanBedrooms = D.meanMaybe total_bedrooms dfWithRoomsPerHousehold
         dfWithTotalBedroomsImputed = D.impute total_bedrooms meanBedrooms dfWithRoomsPerHousehold
 
-    print $ dfWithTotalBedroomsImputed |> D.filterWhere (isExpensive .&&. roomsPerHousehold .>=. 7 .&&. (F.col @Double "total_bedrooms") .>=. 200)
+    print $ dfWithTotalBedroomsImputed |> D.filterWhere (isExpensive .&&. roomsPerHousehold .>=. 7 .&&. (F.col Double "total_bedrooms") .>=. 200)
 ```
 
 Our code is now inundated with different dataframe variables and a bunch of pipeline management. Should we just revert back to using the old `derive` and keep track of names and types ourselves? Not at all. We can use a structure called a `FrameM` to remove this boilerplate while still keeping the guarantees we unlocked before.
@@ -308,7 +308,7 @@ main = do
 
 ### Statically Typed Transformations
 
-Once your dataframe is safely frozen, you can perform transformations with complete confidence. You will notice the use of the `@` symbol in functions like `DT.derive` and `DT.col`. This syntax is enabled by the `TypeApplications` extension in Haskell. Instead of passing standard string values, we are passing type level strings directly to the compiler. When you write `DT.col @"total_rooms"`, the compiler checks the schema of your dataframe immediately. It verifies that the column exists and knows exactly what type of data it holds. Every time you derive a new column, the compiler automatically updates the schema to include it for the very next step.
+Once your dataframe is safely frozen, you can perform transformations with complete confidence. You will notice the use of the `@` symbol in functions like `DT.derive` and `DT.col`. This syntax is enabled by the `TypeApplications` extension in Haskell. Instead of passing standard string values, we are passing type level strings directly to the compiler. When you write `DT.col "total_rooms"`, the compiler checks the schema of your dataframe immediately. It verifies that the column exists and knows exactly what type of data it holds. Every time you derive a new column, the compiler automatically updates the schema to include it for the very next step.
 
 ```haskell
 {-# LANGUAGE DataKinds #-}
@@ -328,12 +328,12 @@ main = do
     df <- D.readCsv "./data/housing.csv"
     let tdf = either (error . show) id (DT.freezeWithError @Housing df)
     -- We could generate this with `D.declareColumnsFromCsvFile` as before
-    let total_bedrooms = F.col @(Maybe Double) "total_bedrooms"
+    let total_bedrooms = F.col (Maybe Double) "total_bedrooms"
     print $ tdf
-          |> DT.derive @"rooms_per_household" (DT.col @"total_rooms" / DT.col @"households")
+          |> DT.derive "rooms_per_household" (DT.col "total_rooms" / DT.col "households")
           |> DT.impute @"total_bedrooms" (D.meanMaybe total_bedrooms df)
-          |> DT.derive @"bedrooms_per_household" (DT.col @"total_bedrooms" / DT.col @"households")
-          |> DT.derive @"population_per_household" (DT.col @"population" / DT.col @"households")
+          |> DT.derive "bedrooms_per_household" (DT.col "total_bedrooms" / DT.col "households")
+          |> DT.derive "population_per_household" (DT.col "population" / DT.col "households")
 ```
 
 ### Complex Operations
@@ -358,18 +358,18 @@ main :: IO ()
 main = do
     df <- D.readCsv "./data/housing.csv"
     -- We could generate this with `D.declareColumnsFromCsvFile` as before
-    let total_bedrooms = F.col @(Maybe Double) "total_bedrooms"
+    let total_bedrooms = F.col (Maybe Double) "total_bedrooms"
     let tdf = either (error . show) id (DT.freezeWithError @Housing df)
     print $ tdf
-          |> DT.derive @"rooms_per_household" (DT.col @"total_rooms" / DT.col @"households")
+          |> DT.derive "rooms_per_household" (DT.col "total_rooms" / DT.col "households")
           |> DT.impute @"total_bedrooms" (D.meanMaybe total_bedrooms df)
-          |> DT.derive @"bedrooms_per_household" (DT.col @"total_bedrooms" / DT.col @"households")
-          |> DT.derive @"population_per_household" (DT.col @"population" / DT.col @"households")
+          |> DT.derive "bedrooms_per_household" (DT.col "total_bedrooms" / DT.col "households")
+          |> DT.derive "population_per_household" (DT.col "population" / DT.col "households")
 
     print $ tdf
           |> DT.groupBy @'["ocean_proximity"]
           |> DT.aggregate
-                (DT.as @"total" (DT.count (DT.col @"median_house_value")))
+                (DT.as @"total" (DT.count (DT.col "median_house_value")))
 ```
 
 ## The Trade Off

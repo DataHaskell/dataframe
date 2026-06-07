@@ -1,4 +1,3 @@
-{-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
@@ -7,6 +6,7 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE RequiredTypeArguments #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
@@ -422,25 +422,25 @@ type family
 
 -- | Provides runtime evidence of a schema: a list of (name, TypeRep) pairs.
 class KnownSchema (cols :: [Type]) where
-    schemaEvidence :: [(T.Text, SomeTypeRep)]
+    schemaEvidence :: forall cols' -> (cols ~ cols') => [(T.Text, SomeTypeRep)]
 
 instance KnownSchema '[] where
-    schemaEvidence = []
+    schemaEvidence _ = []
 
 instance
     (KnownSymbol name, Typeable a, Columnable a, KnownSchema rest) =>
     KnownSchema (Column name a ': rest)
     where
-    schemaEvidence =
+    schemaEvidence _ =
         (T.pack (symbolVal (Proxy @name)), someTypeRep (Proxy @a))
-            : schemaEvidence @rest
+            : schemaEvidence rest
 
 -- | A class that provides a list of 'Text' values for a type-level list of Symbols.
 class AllKnownSymbol (names :: [Symbol]) where
-    symbolVals :: [T.Text]
+    symbolVals :: forall names' -> (names ~ names') => [T.Text]
 
 instance AllKnownSymbol '[] where
-    symbolVals = []
+    symbolVals _ = []
 
 instance (KnownSymbol n, AllKnownSymbol ns) => AllKnownSymbol (n ': ns) where
-    symbolVals = T.pack (symbolVal (Proxy @n)) : symbolVals @ns
+    symbolVals _ = T.pack (symbolVal (Proxy @n)) : symbolVals ns

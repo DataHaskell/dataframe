@@ -1,4 +1,3 @@
-{-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE DisambiguateRecordFields #-}
 {-# LANGUAGE ExplicitNamespaces #-}
 {-# LANGUAGE FlexibleContexts #-}
@@ -272,7 +271,7 @@ instance (Floating a, Columnable a) => Floating (Expr a) where
 
 instance (Show a) => Show (Expr a) where
     show :: Expr a -> String
-    show (Col name) = "(col @" ++ show (typeRep @a) ++ " " ++ show name ++ ")"
+    show (Col name) = "(col " ++ show (typeRep @a) ++ " " ++ show name ++ ")"
     show (CastWith name tag _) = "(castWith " ++ show tag ++ " " ++ show name ++ ")"
     show (CastExprWith tag _ inner) = "(castExprWith " ++ show tag ++ " " ++ show inner ++ ")"
     show (Lit value) = "(lit (" ++ show value ++ "))"

@@ -2,6 +2,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE InstanceSigs #-}
+{-# LANGUAGE RequiredTypeArguments #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
@@ -35,7 +36,7 @@ data SchemaType where
 
 ==== __Examples__
 >>> :set -XTypeApplications
->>> show (schemaType @Bool)
+>>> show (schemaType Bool)
 "Bool"
 -}
 instance Show SchemaType where
@@ -46,10 +47,10 @@ instance Show SchemaType where
 
 ==== __Examples__
 >>> :set -XTypeApplications
->>> schemaType @Int == schemaType @Int
+>>> schemaType Int == schemaType Int
 True
 
->>> schemaType @Int == schemaType @Integer
+>>> schemaType Int == schemaType Integer
 False
 -}
 instance Eq SchemaType where
@@ -61,14 +62,14 @@ instance Eq SchemaType where
 
 ==== __Examples__
 >>> :set -XTypeApplications
->>> schemaType @T.Text == schemaType @T.Text
+>>> schemaType T.Text == schemaType T.Text
 True
 
->>> show (schemaType @Double)
+>>> show (schemaType Double)
 "Double"
 -}
-schemaType :: forall a. (Columnable a, Read a) => SchemaType
-schemaType = SType (P.Proxy @a)
+schemaType :: forall a -> (Columnable a, Read a) => SchemaType
+schemaType a = SType (P.Proxy @a)
 
 {- | Logical schema of a 'DataFrame': a mapping from column names to their
 element types ('SchemaType').

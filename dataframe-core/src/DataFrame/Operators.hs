@@ -1,6 +1,8 @@
+{-# LANGUAGE ExplicitForAll #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RequiredTypeArguments #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
 
@@ -58,8 +60,11 @@ name other =
     error $
         "You must call `name` on a column reference. Not the expression: " ++ show other
 
-col :: (Columnable a) => T.Text -> Expr a
-col = Col
+col :: forall a -> (Columnable a) => T.Text -> Expr a
+col _ = Col
+
+col' :: forall a. (Columnable a) => T.Text -> Expr a
+col' = Col
 
 ifThenElse :: (Columnable a) => Expr Bool -> Expr a -> Expr a -> Expr a
 ifThenElse = If

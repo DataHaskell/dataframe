@@ -1,6 +1,6 @@
-{-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RequiredTypeArguments #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 -- 'buildNullableColumn' deliberately constrains @Columnable (Maybe a)@ (needed to
@@ -44,16 +44,16 @@ import DataFrame.Typed.Types (TypedDataFrame)
 type ColumnReader = [PersistValue] -> Column
 
 -- | Build a non-null column, decoding each value with 'fromPersistValue'.
-buildColumn :: forall a. (Columnable a, PersistField a) => ColumnReader
-buildColumn pvs = case traverse fromPersistValue pvs of
-    Left err -> error (decodeError (typeName @a) err)
+buildColumn :: forall a -> (Columnable a, PersistField a) => ColumnReader
+buildColumn a pvs = case traverse fromPersistValue pvs of
+    Left err -> error (decodeError (typeName a) err)
     Right (xs :: [a]) -> fromList xs
 
 -- | Build a nullable column (@PersistNull@ becomes @Nothing@).
 buildNullableColumn ::
-    forall a. (Columnable (Maybe a), PersistField a) => ColumnReader
-buildNullableColumn pvs = case traverse fromPersistValue pvs of
-    Left err -> error (decodeError (typeName @(Maybe a)) err)
+    forall a -> (Columnable (Maybe a), PersistField a) => ColumnReader
+buildNullableColumn a pvs = case traverse fromPersistValue pvs of
+    Left err -> error (decodeError (typeName (Maybe a)) err)
     Right (xs :: [Maybe a]) -> fromList xs
 
 {- | Infer a column's type by sniffing the first non-null value; nullable if any
@@ -67,24 +67,24 @@ columnReaderFor ht True = nullableReaderFor ht
 columnReaderFor ht False = readerFor ht
 
 readerFor :: HaskellType -> ColumnReader
-readerFor HTInt = buildColumn @Int
-readerFor HTDouble = buildColumn @Double
-readerFor HTText = buildColumn @Text
-readerFor HTBool = buildColumn @Bool
-readerFor HTByteString = buildColumn @ByteString
-readerFor HTDay = buildColumn @Day
-readerFor HTUTCTime = buildColumn @UTCTime
-readerFor HTTimeOfDay = buildColumn @TimeOfDay
+readerFor HTInt = buildColumn Int
+readerFor HTDouble = buildColumn Double
+readerFor HTText = buildColumn Text
+readerFor HTBool = buildColumn Bool
+readerFor HTByteString = buildColumn ByteString
+readerFor HTDay = buildColumn Day
+readerFor HTUTCTime = buildColumn UTCTime
+readerFor HTTimeOfDay = buildColumn TimeOfDay
 
 nullableReaderFor :: HaskellType -> ColumnReader
-nullableReaderFor HTInt = buildNullableColumn @Int
-nullableReaderFor HTDouble = buildNullableColumn @Double
-nullableReaderFor HTText = buildNullableColumn @Text
-nullableReaderFor HTBool = buildNullableColumn @Bool
-nullableReaderFor HTByteString = buildNullableColumn @ByteString
-nullableReaderFor HTDay = buildNullableColumn @Day
-nullableReaderFor HTUTCTime = buildNullableColumn @UTCTime
-nullableReaderFor HTTimeOfDay = buildNullableColumn @TimeOfDay
+nullableReaderFor HTInt = buildNullableColumn Int
+nullableReaderFor HTDouble = buildNullableColumn Double
+nullableReaderFor HTText = buildNullableColumn Text
+nullableReaderFor HTBool = buildNullableColumn Bool
+nullableReaderFor HTByteString = buildNullableColumn ByteString
+nullableReaderFor HTDay = buildNullableColumn Day
+nullableReaderFor HTUTCTime = buildNullableColumn UTCTime
+nullableReaderFor HTTimeOfDay = buildNullableColumn TimeOfDay
 
 inferHaskellType :: [PersistValue] -> HaskellType
 inferHaskellType = maybe HTText haskellTypeOf . find (not . isNull)
@@ -103,8 +103,8 @@ isNull :: PersistValue -> Bool
 isNull PersistNull = True
 isNull _ = False
 
-typeName :: forall a. (Columnable a) => String
-typeName = show (typeRep (Proxy @a))
+typeName :: forall a -> (Columnable a) => String
+typeName a = show (typeRep (Proxy @a))
 
 decodeError :: String -> Text -> String
 decodeError ty err = "buildColumn: failed to decode column as " <> ty <> ": " <> T.unpack err

@@ -88,7 +88,7 @@ testDeclareTableTyped = TestCase $ do
     tdf <- readTableTyped @ArtistsSchema "./data/chinook.db" "artists"
     assertEqual "typed row count" 275 (nRows (DT.thaw tdf))
     -- @col \@"Name"@ here is checked against the generated ArtistsSchema:
-    let names = DT.columnAsList @"Name" tdf
+    let names = DT.columnAsList "Name" tdf
     assertEqual "first artist" (Just (Just "AC/DC")) (listToMaybe names)
 
 -- Tier 2: persistent entity generation -------------------------------------

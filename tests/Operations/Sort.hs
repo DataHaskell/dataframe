@@ -42,7 +42,7 @@ sortByAscendingWAI =
                 , ("test2", DI.fromList ['a' .. 'z'])
                 ]
             )
-            (D.sortBy [D.Asc (F.col @Int "test1")] testData)
+            (D.sortBy [D.Asc (F.col Int "test1")] testData)
         )
 
 sortByDescendingWAI :: Test
@@ -55,7 +55,7 @@ sortByDescendingWAI =
                 , ("test2", DI.fromList $ reverse ['a' .. 'z'])
                 ]
             )
-            (D.sortBy [D.Desc (F.col @Int "test1")] testData)
+            (D.sortBy [D.Desc (F.col Int "test1")] testData)
         )
 
 sortByTwoColumns :: Test
@@ -64,7 +64,7 @@ sortByTwoColumns =
         ( assertEqual
             "Sorting moreTestData (which is already sorted) is idempotent."
             moreTestData
-            (D.sortBy [D.Asc (F.col @Int "test1"), D.Asc (F.col @Int "test2")] moreTestData)
+            (D.sortBy [D.Asc (F.col Int "test1"), D.Asc (F.col Int "test2")] moreTestData)
         )
 
 sortByOneColumnAscOneColumnDesc :: Test
@@ -77,7 +77,7 @@ sortByOneColumnAscOneColumnDesc =
                 , ("test2", DI.fromList $ [10 :: Int, 9 .. 1] ++ [10, 9 .. 1])
                 ]
             )
-            (D.sortBy [D.Asc (F.col @Int "test1"), D.Desc (F.col @Int "test2")] moreTestData)
+            (D.sortBy [D.Asc (F.col Int "test1"), D.Desc (F.col Int "test2")] moreTestData)
         )
 
 sortByColumnDoesNotExist :: Test
@@ -86,7 +86,7 @@ sortByColumnDoesNotExist =
         ( assertExpectException
             "[Error Case]"
             (D.columnsNotFound ["test0"] "sortBy" (D.columnNames testData))
-            (print $ D.sortBy [D.Asc (F.col @Int "test0")] testData)
+            (print $ D.sortBy [D.Asc (F.col Int "test0")] testData)
         )
 
 compoundTestData :: D.DataFrame
@@ -106,7 +106,7 @@ sortByCompoundExpression =
                 , ("b", DI.fromList ([10, 20, 30, 40, 50] :: [Int]))
                 ]
             )
-            (D.sortBy [D.Asc (F.col @Int "a" + F.col @Int "b")] compoundTestData)
+            (D.sortBy [D.Asc (F.col Int "a" + F.col Int "b")] compoundTestData)
         )
 
 sortByCompoundExpressionDescending :: Test
@@ -119,7 +119,7 @@ sortByCompoundExpressionDescending =
                 , ("b", DI.fromList ([50, 40, 30, 20, 10] :: [Int]))
                 ]
             )
-            (D.sortBy [D.Desc (F.col @Int "b" - F.col @Int "a")] compoundTestData)
+            (D.sortBy [D.Desc (F.col Int "b" - F.col Int "a")] compoundTestData)
         )
 
 sortByCompoundMixedWithBareColumn :: Test
@@ -133,7 +133,7 @@ sortByCompoundMixedWithBareColumn =
                 ]
             )
             ( D.sortBy
-                [D.Asc (F.col @Int "a" * 2), D.Desc (F.col @Int "b")]
+                [D.Asc (F.col Int "a" * 2), D.Desc (F.col Int "b")]
                 compoundTestData
             )
         )
@@ -150,7 +150,7 @@ sortByCompoundMissingColumn =
             )
             ( print $
                 D.sortBy
-                    [D.Asc (F.col @Int "nope" + F.col @Int "a")]
+                    [D.Asc (F.col Int "nope" + F.col Int "a")]
                     compoundTestData
             )
         )

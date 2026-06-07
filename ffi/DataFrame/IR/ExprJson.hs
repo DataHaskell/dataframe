@@ -1,9 +1,9 @@
-{-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE ExplicitNamespaces #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE RequiredTypeArguments #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 
@@ -85,8 +85,8 @@ data SomeExpr where
     SomeExpr :: (Columnable a) => TypeRep a -> Expr a -> SomeExpr
 
 -- | Map a Haskell type to its wire-format tag string.
-typeTagOf :: forall a. (Typeable a) => Maybe T.Text
-typeTagOf
+typeTagOf :: forall a -> (Typeable a) => Maybe T.Text
+typeTagOf a
     | Just _ <- testEquality (typeRep @a) (typeRep @Int) = Just "int"
     | Just _ <- testEquality (typeRep @a) (typeRep @Int8) = Just "int8"
     | Just _ <- testEquality (typeRep @a) (typeRep @Int16) = Just "int16"
@@ -234,7 +234,7 @@ names (binaryUdf, unaryUdf, …).
 encodeExpr :: forall a. (Columnable a) => Expr a -> Either String Aeson.Value
 encodeExpr expr = case expr of
     Col name -> do
-        outTag <- requireTypeTag @a
+        outTag <- requireTypeTag a
         Right $
             object
                 [ "node" .= ("col" :: T.Text)
@@ -242,7 +242,7 @@ encodeExpr expr = case expr of
                 , "name" .= name
                 ]
     Lit v -> do
-        outTag <- requireTypeTag @a
+        outTag <- requireTypeTag a
         litVal <- encodeLit @a v
         Right $
             object
@@ -251,8 +251,8 @@ encodeExpr expr = case expr of
                 , "value" .= litVal
                 ]
     Unary op (arg :: Expr b) -> do
-        outTag <- requireTypeTag @a
-        argTag <- requireTypeTag @b
+        outTag <- requireTypeTag a
+        argTag <- requireTypeTag b
         opTag <- recognizeUnary (unaryName op)
         argEnc <- encodeExpr arg
         Right $
@@ -264,8 +264,8 @@ encodeExpr expr = case expr of
                 , "arg" .= argEnc
                 ]
     Binary op (lhs :: Expr c) (rhs :: Expr b) -> do
-        outTag <- requireTypeTag @a
-        argTag <- requireTypeTag @c
+        outTag <- requireTypeTag a
+        argTag <- requireTypeTag c
         opTag <- recognizeBinary (binaryName op)
         lEnc <- encodeExpr lhs
         rEnc <- encodeExpr rhs
@@ -279,7 +279,7 @@ encodeExpr expr = case expr of
                 , "rhs" .= rEnc
                 ]
     If cond th el -> do
-        outTag <- requireTypeTag @a
+        outTag <- requireTypeTag a
         cEnc <- encodeExpr cond
         tEnc <- encodeExpr th
         eEnc <- encodeExpr el
@@ -298,8 +298,8 @@ encodeExpr expr = case expr of
         Left
             "DataFrame.IR.ExprJson.encodeExpr: CastExprWith is not supported in the wire format"
     Agg (strat :: F.AggStrategy a b) (inner :: F.Expr b) -> do
-        outTag <- requireTypeTag @a
-        argTag <- requireTypeTag @b
+        outTag <- requireTypeTag a
+        argTag <- requireTypeTag b
         innerEnc <- encodeExpr inner
         Right $
             object
@@ -310,7 +310,7 @@ encodeExpr expr = case expr of
                 , "arg" .= innerEnc
                 ]
     Over names inner -> do
-        outTag <- requireTypeTag @a
+        outTag <- requireTypeTag a
         innerEnc <- encodeExpr inner
         Right $
             object
@@ -320,8 +320,8 @@ encodeExpr expr = case expr of
                 , "arg" .= innerEnc
                 ]
   where
-    requireTypeTag :: forall x. (Typeable x) => Either String T.Text
-    requireTypeTag = case typeTagOf @x of
+    requireTypeTag :: forall x -> (Typeable x) => Either String T.Text
+    requireTypeTag x = case typeTagOf x of
         Just t -> Right t
         Nothing ->
             Left $

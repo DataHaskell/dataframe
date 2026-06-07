@@ -431,7 +431,7 @@ initializeColumns names _row opts = zipWithM initColumn names (map lookupType na
         BuilderBS <$> newPagedVector <*> pure validityRef
     initColumn _ mtype = do
         validityRef <- newPagedUnboxedVector
-        let t = fromMaybe (schemaType @T.Text) mtype
+        let t = fromMaybe (schemaType T.Text) mtype
         case t of
             SType (_ :: P.Proxy a) -> case testEquality (typeRep @a) (typeRep @Int) of
                 Just Refl -> BuilderInt <$> newPagedUnboxedVector <*> pure validityRef

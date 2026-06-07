@@ -59,9 +59,9 @@ groupByHaskell = do
         df
             |> D.groupBy ["ocean_proximity"]
             |> D.aggregate
-                [ F.minimum (F.col @Double "median_house_value")
+                [ F.minimum (F.col Double "median_house_value")
                     `as` "minimum_median_house_value"
-                , F.maximum (F.col @Double "median_house_value")
+                , F.maximum (F.col Double "median_house_value")
                     `as` "maximum_median_house_value"
                 ]
 

@@ -54,7 +54,7 @@ testInnerJoin =
                 , ("B", D.fromList ["B0" :: Text, "B1", "B2"])
                 ]
             )
-            (D.sortBy [D.Asc (F.col @Text "key")] (innerJoin ["key"] df1 df2))
+            (D.sortBy [D.Asc (F.col Text "key")] (innerJoin ["key"] df1 df2))
         )
 
 testLeftJoin :: Test
@@ -68,7 +68,7 @@ testLeftJoin =
                 , ("B", D.fromList [Just "B0", Just "B1" :: Maybe Text, Just "B2"])
                 ]
             )
-            (D.sortBy [D.Asc (F.col @Text "key")] (leftJoin ["key"] df1 df2))
+            (D.sortBy [D.Asc (F.col Text "key")] (leftJoin ["key"] df1 df2))
         )
 
 testRightJoin :: Test
@@ -82,7 +82,7 @@ testRightJoin =
                 , ("B", D.fromList ["B0" :: Text, "B1", "B2"])
                 ]
             )
-            (D.sortBy [D.Asc (F.col @Text "key")] (rightJoin ["key"] df1 df2))
+            (D.sortBy [D.Asc (F.col Text "key")] (rightJoin ["key"] df1 df2))
         )
 
 tdf1 :: DT.TypedDataFrame [DT.Column "key" Text, DT.Column "A" Text]
@@ -102,7 +102,7 @@ testInnerJoinTyped =
                 , ("B", D.fromList ["B0" :: Text, "B1", "B2"])
                 ]
             )
-            (DT.thaw $ DT.sortBy [DT.asc (DT.col @"key")] (DT.innerJoin @'["key"] tdf1 tdf2))
+            (DT.thaw $ DT.sortBy [DT.asc (DT.col "key")] (DT.innerJoin ["key"] tdf1 tdf2))
         )
 
 testLeftJoinTyped :: Test
@@ -116,7 +116,7 @@ testLeftJoinTyped =
                 , ("B", D.fromList [Just "B0", Just "B1" :: Maybe Text, Just "B2"])
                 ]
             )
-            (DT.thaw $ DT.sortBy [DT.asc (DT.col @"key")] (DT.leftJoin @'["key"] tdf1 tdf2))
+            (DT.thaw $ DT.sortBy [DT.asc (DT.col "key")] (DT.leftJoin ["key"] tdf1 tdf2))
         )
 
 -- A right-hand frame whose payload column is already optional.
@@ -150,13 +150,13 @@ testLeftJoinTypedOptional =
                     )
                 ]
             )
-            (DT.thaw $ DT.sortBy [DT.asc (DT.col @"key")] joined)
+            (DT.thaw $ DT.sortBy [DT.asc (DT.col "key")] joined)
         )
   where
     joined ::
         DT.TypedDataFrame
             [DT.Column "key" Text, DT.Column "A" Text, DT.Column "C" (Maybe Int)]
-    joined = DT.leftJoin @'["key"] tdf1 tdfOptional
+    joined = DT.leftJoin ["key"] tdf1 tdfOptional
 
 testRightJoinTyped :: Test
 testRightJoinTyped =
@@ -169,7 +169,7 @@ testRightJoinTyped =
                 , ("B", D.fromList ["B0" :: Text, "B1", "B2"])
                 ]
             )
-            (DT.thaw $ DT.sortBy [DT.asc (DT.col @"key")] (DT.rightJoin @'["key"] tdf1 tdf2))
+            (DT.thaw $ DT.sortBy [DT.asc (DT.col "key")] (DT.rightJoin ["key"] tdf1 tdf2))
         )
 
 staffDf :: D.DataFrame
@@ -216,7 +216,7 @@ testFullOuterJoin =
                     )
                 ]
             )
-            (D.sortBy [D.Asc (F.col @Text "Name")] (fullOuterJoin ["Name"] studentDf staffDf))
+            (D.sortBy [D.Asc (F.col Text "Name")] (fullOuterJoin ["Name"] studentDf staffDf))
         )
 
 dfL :: D.DataFrame
@@ -247,7 +247,7 @@ testInnerJoinWithCollisions =
                 , ("Ronly", D.fromList [10 :: Int, 11])
                 ]
             )
-            (D.sortBy [D.Asc (F.col @Text "key")] (innerJoin ["key"] dfL dfR))
+            (D.sortBy [D.Asc (F.col Text "key")] (innerJoin ["key"] dfL dfR))
         )
 
 testLeftJoinWithCollisions :: Test
@@ -265,7 +265,7 @@ testLeftJoinWithCollisions =
                 , ("Ronly", D.fromList [Just 10 :: Maybe Int, Just 11, Nothing])
                 ]
             )
-            (D.sortBy [D.Asc (F.col @Text "key")] (leftJoin ["key"] dfL dfR))
+            (D.sortBy [D.Asc (F.col Text "key")] (leftJoin ["key"] dfL dfR))
         )
 
 testRightJoinWithCollisions :: Test
@@ -283,7 +283,7 @@ testRightJoinWithCollisions =
                 , ("Lonly", D.fromList [Just "L0" :: Maybe Text, Just "L1", Nothing])
                 ]
             )
-            (D.sortBy [D.Asc (F.col @Text "key")] (rightJoin ["key"] dfL dfR))
+            (D.sortBy [D.Asc (F.col Text "key")] (rightJoin ["key"] dfL dfR))
         )
 
 testOuterJoinWithCollisions :: Test
@@ -306,7 +306,7 @@ testOuterJoinWithCollisions =
                 , ("Ronly", D.fromList [Just 10 :: Maybe Int, Just 11, Nothing, Just 13])
                 ]
             )
-            (D.sortBy [D.Asc (F.col @Text "key")] (fullOuterJoin ["key"] dfL dfR))
+            (D.sortBy [D.Asc (F.col Text "key")] (fullOuterJoin ["key"] dfL dfR))
         )
 
 testInnerJoinMissingKey :: Test

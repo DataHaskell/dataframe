@@ -108,5 +108,5 @@ declareColumnsWithPrefix' prefix df =
             ty <- typeFromString (words tyStr)
             let n = mkName (T.unpack nm)
             sig <- sigD n [t|Expr $(pure ty)|]
-            val <- valD (varP n) (normalB [|col $(TH.lift raw)|]) []
+            val <- valD (varP n) (normalB [| col $(pure $ TypeE ty) $(TH.lift raw) |]) []
             pure [sig, val]

@@ -1,7 +1,7 @@
-{-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE RequiredTypeArguments #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 
@@ -132,8 +132,8 @@ instance Monoid ColumnOrdering where
     mempty = ColumnOrdering M.empty
 
 -- | Register a type as orderable for decision-tree splits.
-orderable :: forall a. (Columnable a, Ord a) => ColumnOrdering
-orderable = ColumnOrdering (M.singleton (SomeTypeRep (typeRep @a)) (OrdDict (Proxy @a)))
+orderable :: forall a -> (Columnable a, Ord a) => ColumnOrdering
+orderable a = ColumnOrdering (M.singleton (SomeTypeRep (typeRep @a)) (OrdDict (Proxy @a)))
 
 -- | All standard numeric, text, and primitive types.
 defaultColumnOrdering :: ColumnOrdering
@@ -141,24 +141,24 @@ defaultColumnOrdering = mconcat (numericOrderings ++ otherOrderings)
 
 numericOrderings :: [ColumnOrdering]
 numericOrderings =
-    [ orderable @Int
-    , orderable @Int8
-    , orderable @Int16
-    , orderable @Int32
-    , orderable @Int64
-    , orderable @Word
-    , orderable @Word8
-    , orderable @Word16
-    , orderable @Word32
-    , orderable @Word64
-    , orderable @Integer
-    , orderable @Double
-    , orderable @Float
+    [ orderable Int
+    , orderable Int8
+    , orderable Int16
+    , orderable Int32
+    , orderable Int64
+    , orderable Word
+    , orderable Word8
+    , orderable Word16
+    , orderable Word32
+    , orderable Word64
+    , orderable Integer
+    , orderable Double
+    , orderable Float
     ]
 
 otherOrderings :: [ColumnOrdering]
 otherOrderings =
-    [orderable @Bool, orderable @Char, orderable @T.Text, orderable @String]
+    [orderable Bool, orderable Char, orderable T.Text, orderable String]
 
 -- | Existential @Ord@ dictionary keyed by type representation.
 data OrdDict where

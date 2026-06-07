@@ -30,7 +30,7 @@ testData =
         , ("y", DI.fromVector (V.fromList [Just 10, Nothing, Just 30 :: Maybe Int]))
         ]
 
--- | col @Int .+ col @(Maybe Int)  should give Maybe Int column
+-- | col Int .+ col (Maybe Int)  should give Maybe Int column
 addIntMaybeInt :: Test
 addIntMaybeInt =
     TestCase
@@ -40,12 +40,12 @@ addIntMaybeInt =
             ( DI.getColumn "result" $
                 D.derive
                     "result"
-                    (F.col @Int "x" .+ F.col @(Maybe Int) "y")
+                    (F.col Int "x" .+ F.col (Maybe Int) "y")
                     testData
             )
         )
 
--- | col @(Maybe Int) .+ col @Int  should give Maybe Int column
+-- | col (Maybe Int) .+ col Int  should give Maybe Int column
 addMaybeIntInt :: Test
 addMaybeIntInt =
     TestCase
@@ -55,12 +55,12 @@ addMaybeIntInt =
             ( DI.getColumn "result" $
                 D.derive
                     "result"
-                    (F.col @(Maybe Int) "y" .+ F.col @Int "x")
+                    (F.col (Maybe Int) "y" .+ F.col Int "x")
                     testData
             )
         )
 
--- | col @Int .+ col @Int  (same-type non-nullable) should give Int column
+-- | col Int .+ col Int  (same-type non-nullable) should give Int column
 addIntInt :: Test
 addIntInt =
     TestCase
@@ -70,12 +70,12 @@ addIntInt =
             ( DI.getColumn "result" $
                 D.derive
                     "result"
-                    (F.col @Int "x" .+ F.col @Int "x")
+                    (F.col Int "x" .+ F.col Int "x")
                     testData
             )
         )
 
--- | col @(Maybe Int) .+ col @(Maybe Int)  should give Maybe Int column
+-- | col (Maybe Int) .+ col (Maybe Int)  should give Maybe Int column
 addMaybeMaybe :: Test
 addMaybeMaybe =
     TestCase
@@ -85,7 +85,7 @@ addMaybeMaybe =
             ( DI.getColumn "result" $
                 D.derive
                     "result"
-                    (F.col @(Maybe Int) "y" .+ F.col @(Maybe Int) "y")
+                    (F.col (Maybe Int) "y" .+ F.col (Maybe Int) "y")
                     testData
             )
         )
@@ -102,7 +102,7 @@ subIntMaybeInt =
             ( DI.getColumn "result" $
                 D.derive
                     "result"
-                    (F.col @Int "x" .- F.col @(Maybe Int) "y")
+                    (F.col Int "x" .- F.col (Maybe Int) "y")
                     testData
             )
         )
@@ -119,7 +119,7 @@ eqIntMaybeInt =
             ( DI.getColumn "result" $
                 D.derive
                     "result"
-                    (F.col @Int "x" .== F.col @(Maybe Int) "y" :: Expr (Maybe Bool))
+                    (F.col Int "x" .== F.col (Maybe Int) "y" :: Expr (Maybe Bool))
                     testData
             )
         )
@@ -134,7 +134,7 @@ eqIntInt =
             ( DI.getColumn "result" $
                 D.derive
                     "result"
-                    (F.col @Int "x" .== F.lit (1 :: Int) :: Expr Bool)
+                    (F.col Int "x" .== F.lit (1 :: Int) :: Expr Bool)
                     testData
             )
         )
@@ -155,7 +155,7 @@ nullLiftMaybeInt =
             ( DI.getColumn "result" $
                 D.derive
                     "result"
-                    (F.nullLift negate (F.col @(Maybe Int) "y") :: Expr (Maybe Int))
+                    (F.nullLift negate (F.col (Maybe Int) "y") :: Expr (Maybe Int))
                     testData
             )
         )
@@ -170,7 +170,7 @@ nullLiftInt =
             ( DI.getColumn "result" $
                 D.derive
                     "result"
-                    (F.nullLift negate (F.col @Int "x") :: Expr Int)
+                    (F.nullLift negate (F.col Int "x") :: Expr Int)
                     testData
             )
         )
@@ -185,7 +185,7 @@ nullLift2IntMaybeInt =
             ( DI.getColumn "result" $
                 D.derive
                     "result"
-                    (F.nullLift2 (+) (F.col @Int "x") (F.col @(Maybe Int) "y") :: Expr (Maybe Int))
+                    (F.nullLift2 (+) (F.col Int "x") (F.col (Maybe Int) "y") :: Expr (Maybe Int))
                     testData
             )
         )
@@ -200,7 +200,7 @@ nullLift2MaybeIntInt =
             ( DI.getColumn "result" $
                 D.derive
                     "result"
-                    (F.nullLift2 (+) (F.col @(Maybe Int) "y") (F.col @Int "x") :: Expr (Maybe Int))
+                    (F.nullLift2 (+) (F.col (Maybe Int) "y") (F.col Int "x") :: Expr (Maybe Int))
                     testData
             )
         )
@@ -215,7 +215,7 @@ nullLift2IntInt =
             ( DI.getColumn "result" $
                 D.derive
                     "result"
-                    (F.nullLift2 (+) (F.col @Int "x") (F.col @Int "x") :: Expr Int)
+                    (F.nullLift2 (+) (F.col Int "x") (F.col Int "x") :: Expr Int)
                     testData
             )
         )
@@ -237,7 +237,7 @@ crossData =
             )
         ]
 
--- | col @Int .+ col @Double → Double
+-- | col Int .+ col Double → Double
 addIntDouble :: Test
 addIntDouble =
     TestCase
@@ -245,11 +245,11 @@ addIntDouble =
             "Int .+ Double = Double"
             (Just $ DI.fromList [2.5, 4.5, 6.5 :: Double])
             ( DI.getColumn "result" $
-                D.derive "result" (F.col @Int "x" .+ F.col @Double "d") crossData
+                D.derive "result" (F.col Int "x" .+ F.col Double "d") crossData
             )
         )
 
--- | col @Double .+ col @Int → Double
+-- | col Double .+ col Int → Double
 addDoubleInt :: Test
 addDoubleInt =
     TestCase
@@ -257,11 +257,11 @@ addDoubleInt =
             "Double .+ Int = Double"
             (Just $ DI.fromList [2.5, 4.5, 6.5 :: Double])
             ( DI.getColumn "result" $
-                D.derive "result" (F.col @Double "d" .+ F.col @Int "x") crossData
+                D.derive "result" (F.col Double "d" .+ F.col Int "x") crossData
             )
         )
 
--- | col @(Maybe Int) .+ col @Double → Maybe Double
+-- | col (Maybe Int) .+ col Double → Maybe Double
 addMaybeIntDouble :: Test
 addMaybeIntDouble =
     TestCase
@@ -271,11 +271,11 @@ addMaybeIntDouble =
                 DI.fromVector (V.fromList [Just 11.5, Nothing, Just 33.5 :: Maybe Double])
             )
             ( DI.getColumn "result" $
-                D.derive "result" (F.col @(Maybe Int) "y" .+ F.col @Double "d") crossData
+                D.derive "result" (F.col (Maybe Int) "y" .+ F.col Double "d") crossData
             )
         )
 
--- | col @Int .+ col @(Maybe Double) → Maybe Double
+-- | col Int .+ col (Maybe Double) → Maybe Double
 addIntMaybeDouble :: Test
 addIntMaybeDouble =
     TestCase
@@ -285,11 +285,11 @@ addIntMaybeDouble =
                 DI.fromVector (V.fromList [Just 11.5, Nothing, Just 33.5 :: Maybe Double])
             )
             ( DI.getColumn "result" $
-                D.derive "result" (F.col @Int "x" .+ F.col @(Maybe Double) "md") crossData
+                D.derive "result" (F.col Int "x" .+ F.col (Maybe Double) "md") crossData
             )
         )
 
--- | col @(Maybe Int) .+ col @(Maybe Double) → Maybe Double
+-- | col (Maybe Int) .+ col (Maybe Double) → Maybe Double
 addMaybeIntMaybeDouble :: Test
 addMaybeIntMaybeDouble =
     TestCase
@@ -301,12 +301,12 @@ addMaybeIntMaybeDouble =
             ( DI.getColumn "result" $
                 D.derive
                     "result"
-                    (F.col @(Maybe Int) "y" .+ F.col @(Maybe Double) "md")
+                    (F.col (Maybe Int) "y" .+ F.col (Maybe Double) "md")
                     crossData
             )
         )
 
--- | col @Int .- col @Double → Double
+-- | col Int .- col Double → Double
 subIntDouble :: Test
 subIntDouble =
     TestCase
@@ -314,11 +314,11 @@ subIntDouble =
             "Int .- Double = Double"
             (Just $ DI.fromList [-0.5, -0.5, -0.5 :: Double])
             ( DI.getColumn "result" $
-                D.derive "result" (F.col @Int "x" .- F.col @Double "d") crossData
+                D.derive "result" (F.col Int "x" .- F.col Double "d") crossData
             )
         )
 
--- | col @Int .* col @Double → Double
+-- | col Int .* col Double → Double
 mulIntDouble :: Test
 mulIntDouble =
     TestCase
@@ -326,11 +326,11 @@ mulIntDouble =
             "Int .* Double = Double"
             (Just $ DI.fromList [1.5, 5.0, 10.5 :: Double])
             ( DI.getColumn "result" $
-                D.derive "result" (F.col @Int "x" .* F.col @Double "d") crossData
+                D.derive "result" (F.col Int "x" .* F.col Double "d") crossData
             )
         )
 
--- | col @Double .- col @Int → Double
+-- | col Double .- col Int → Double
 subDoubleInt :: Test
 subDoubleInt =
     TestCase
@@ -338,11 +338,11 @@ subDoubleInt =
             "Double .- Int = Double"
             (Just $ DI.fromList [0.5, 0.5, 0.5 :: Double])
             ( DI.getColumn "result" $
-                D.derive "result" (F.col @Double "d" .- F.col @Int "x") crossData
+                D.derive "result" (F.col Double "d" .- F.col Int "x") crossData
             )
         )
 
--- | col @(Maybe Int) .- col @Double → Maybe Double
+-- | col (Maybe Int) .- col Double → Maybe Double
 subMaybeIntDouble :: Test
 subMaybeIntDouble =
     TestCase
@@ -352,11 +352,11 @@ subMaybeIntDouble =
                 DI.fromVector (V.fromList [Just 8.5, Nothing, Just 26.5 :: Maybe Double])
             )
             ( DI.getColumn "result" $
-                D.derive "result" (F.col @(Maybe Int) "y" .- F.col @Double "d") crossData
+                D.derive "result" (F.col (Maybe Int) "y" .- F.col Double "d") crossData
             )
         )
 
--- | col @Int .- col @(Maybe Double) → Maybe Double
+-- | col Int .- col (Maybe Double) → Maybe Double
 subIntMaybeDouble :: Test
 subIntMaybeDouble =
     TestCase
@@ -367,11 +367,11 @@ subIntMaybeDouble =
                     (V.fromList [Just (-9.5), Nothing, Just (-27.5) :: Maybe Double])
             )
             ( DI.getColumn "result" $
-                D.derive "result" (F.col @Int "x" .- F.col @(Maybe Double) "md") crossData
+                D.derive "result" (F.col Int "x" .- F.col (Maybe Double) "md") crossData
             )
         )
 
--- | col @(Maybe Int) .- col @(Maybe Double) → Maybe Double
+-- | col (Maybe Int) .- col (Maybe Double) → Maybe Double
 subMaybeIntMaybeDouble :: Test
 subMaybeIntMaybeDouble =
     TestCase
@@ -384,12 +384,12 @@ subMaybeIntMaybeDouble =
             ( DI.getColumn "result" $
                 D.derive
                     "result"
-                    (F.col @(Maybe Int) "y" .- F.col @(Maybe Double) "md")
+                    (F.col (Maybe Int) "y" .- F.col (Maybe Double) "md")
                     crossData
             )
         )
 
--- | col @Double .* col @Int → Double
+-- | col Double .* col Int → Double
 mulDoubleInt :: Test
 mulDoubleInt =
     TestCase
@@ -397,11 +397,11 @@ mulDoubleInt =
             "Double .* Int = Double"
             (Just $ DI.fromList [1.5, 5.0, 10.5 :: Double])
             ( DI.getColumn "result" $
-                D.derive "result" (F.col @Double "d" .* F.col @Int "x") crossData
+                D.derive "result" (F.col Double "d" .* F.col Int "x") crossData
             )
         )
 
--- | col @(Maybe Int) .* col @Double → Maybe Double
+-- | col (Maybe Int) .* col Double → Maybe Double
 mulMaybeIntDouble :: Test
 mulMaybeIntDouble =
     TestCase
@@ -411,11 +411,11 @@ mulMaybeIntDouble =
                 DI.fromVector (V.fromList [Just 15.0, Nothing, Just 105.0 :: Maybe Double])
             )
             ( DI.getColumn "result" $
-                D.derive "result" (F.col @(Maybe Int) "y" .* F.col @Double "d") crossData
+                D.derive "result" (F.col (Maybe Int) "y" .* F.col Double "d") crossData
             )
         )
 
--- | col @Int .* col @(Maybe Double) → Maybe Double
+-- | col Int .* col (Maybe Double) → Maybe Double
 mulIntMaybeDouble :: Test
 mulIntMaybeDouble =
     TestCase
@@ -425,11 +425,11 @@ mulIntMaybeDouble =
                 DI.fromVector (V.fromList [Just 10.5, Nothing, Just 91.5 :: Maybe Double])
             )
             ( DI.getColumn "result" $
-                D.derive "result" (F.col @Int "x" .* F.col @(Maybe Double) "md") crossData
+                D.derive "result" (F.col Int "x" .* F.col (Maybe Double) "md") crossData
             )
         )
 
--- | col @(Maybe Int) .* col @(Maybe Double) → Maybe Double
+-- | col (Maybe Int) .* col (Maybe Double) → Maybe Double
 mulMaybeIntMaybeDouble :: Test
 mulMaybeIntMaybeDouble =
     TestCase
@@ -441,7 +441,7 @@ mulMaybeIntMaybeDouble =
             ( DI.getColumn "result" $
                 D.derive
                     "result"
-                    (F.col @(Maybe Int) "y" .* F.col @(Maybe Double) "md")
+                    (F.col (Maybe Int) "y" .* F.col (Maybe Double) "md")
                     crossData
             )
         )
@@ -459,7 +459,7 @@ divData =
             )
         ]
 
--- | col @Int ./ col @Double → Double
+-- | col Int ./ col Double → Double
 divIntDouble :: Test
 divIntDouble =
     TestCase
@@ -467,11 +467,11 @@ divIntDouble =
             "Int ./ Double = Double"
             (Just $ DI.fromList [2.0, 2.0, 2.0 :: Double])
             ( DI.getColumn "result" $
-                D.derive "result" (F.col @Int "x" ./ F.col @Double "d") divData
+                D.derive "result" (F.col Int "x" ./ F.col Double "d") divData
             )
         )
 
--- | col @Double ./ col @Int → Double
+-- | col Double ./ col Int → Double
 divDoubleInt :: Test
 divDoubleInt =
     TestCase
@@ -479,11 +479,11 @@ divDoubleInt =
             "Double ./ Int = Double"
             (Just $ DI.fromList [0.5, 0.5, 0.5 :: Double])
             ( DI.getColumn "result" $
-                D.derive "result" (F.col @Double "d" ./ F.col @Int "x") divData
+                D.derive "result" (F.col Double "d" ./ F.col Int "x") divData
             )
         )
 
--- | col @(Maybe Int) ./ col @Double → Maybe Double
+-- | col (Maybe Int) ./ col Double → Maybe Double
 divMaybeIntDouble :: Test
 divMaybeIntDouble =
     TestCase
@@ -493,11 +493,11 @@ divMaybeIntDouble =
                 DI.fromVector (V.fromList [Just 4.0, Nothing, Just 2.0 :: Maybe Double])
             )
             ( DI.getColumn "result" $
-                D.derive "result" (F.col @(Maybe Int) "y" ./ F.col @Double "d") divData
+                D.derive "result" (F.col (Maybe Int) "y" ./ F.col Double "d") divData
             )
         )
 
--- | col @Int ./ col @(Maybe Double) → Maybe Double
+-- | col Int ./ col (Maybe Double) → Maybe Double
 divIntMaybeDouble :: Test
 divIntMaybeDouble =
     TestCase
@@ -507,11 +507,11 @@ divIntMaybeDouble =
                 DI.fromVector (V.fromList [Just 2.0, Nothing, Just 2.0 :: Maybe Double])
             )
             ( DI.getColumn "result" $
-                D.derive "result" (F.col @Int "x" ./ F.col @(Maybe Double) "md") divData
+                D.derive "result" (F.col Int "x" ./ F.col (Maybe Double) "md") divData
             )
         )
 
--- | col @(Maybe Int) ./ col @(Maybe Double) → Maybe Double
+-- | col (Maybe Int) ./ col (Maybe Double) → Maybe Double
 divMaybeIntMaybeDouble :: Test
 divMaybeIntMaybeDouble =
     TestCase
@@ -521,7 +521,7 @@ divMaybeIntMaybeDouble =
                 DI.fromVector (V.fromList [Just 4.0, Nothing, Just 2.0 :: Maybe Double])
             )
             ( DI.getColumn "result" $
-                D.derive "result" (F.col @(Maybe Int) "y" ./ F.col @(Maybe Double) "md") divData
+                D.derive "result" (F.col (Maybe Int) "y" ./ F.col (Maybe Double) "md") divData
             )
         )
 
@@ -541,75 +541,75 @@ typedCrossData =
     either (error . show) id $
         DT.freezeWithError @CrossSchema crossData
 
--- | Typed: col @"x" .+ col @"d"  → Double
+-- | Typed: col "x" .+ col "d"  → Double
 typedAddIntDouble :: Test
 typedAddIntDouble =
     TestCase
         ( assertEqual
             "Typed: Int .+ Double = Double"
             [2.5, 4.5, 6.5 :: Double]
-            ( DT.columnAsList @"result" $
-                DT.derive @"result" (TE.col @"x" TE..+ TE.col @"d") typedCrossData
+            ( DT.columnAsList "result" $
+                DT.derive "result" (TE.col "x" TE..+ TE.col "d") typedCrossData
             )
         )
 
--- | Typed: col @"y" .+ col @"d"  → Maybe Double
+-- | Typed: col "y" .+ col "d"  → Maybe Double
 typedAddMaybeIntDouble :: Test
 typedAddMaybeIntDouble =
     TestCase
         ( assertEqual
             "Typed: Maybe Int .+ Double = Maybe Double"
             [Just 11.5, Nothing, Just 33.5]
-            ( DT.columnAsList @"result" $
-                DT.derive @"result" (TE.col @"y" TE..+ TE.col @"d") typedCrossData
+            ( DT.columnAsList "result" $
+                DT.derive "result" (TE.col "y" TE..+ TE.col "d") typedCrossData
             )
         )
 
--- | Typed: col @"x" .+ col @"md"  → Maybe Double
+-- | Typed: col "x" .+ col "md"  → Maybe Double
 typedAddIntMaybeDouble :: Test
 typedAddIntMaybeDouble =
     TestCase
         ( assertEqual
             "Typed: Int .+ Maybe Double = Maybe Double"
             [Just 11.5, Nothing, Just 33.5]
-            ( DT.columnAsList @"result" $
-                DT.derive @"result" (TE.col @"x" TE..+ TE.col @"md") typedCrossData
+            ( DT.columnAsList "result" $
+                DT.derive "result" (TE.col "x" TE..+ TE.col "md") typedCrossData
             )
         )
 
--- | Typed: col @"y" .+ col @"md"  → Maybe Double
+-- | Typed: col "y" .+ col "md"  → Maybe Double
 typedAddMaybeIntMaybeDouble :: Test
 typedAddMaybeIntMaybeDouble =
     TestCase
         ( assertEqual
             "Typed: Maybe Int .+ Maybe Double = Maybe Double"
             [Just 20.5, Nothing, Just 60.5]
-            ( DT.columnAsList @"result" $
-                DT.derive @"result" (TE.col @"y" TE..+ TE.col @"md") typedCrossData
+            ( DT.columnAsList "result" $
+                DT.derive "result" (TE.col "y" TE..+ TE.col "md") typedCrossData
             )
         )
 
--- | Typed: col @"x" .- col @"d"  → Double
+-- | Typed: col "x" .- col "d"  → Double
 typedSubIntDouble :: Test
 typedSubIntDouble =
     TestCase
         ( assertEqual
             "Typed: Int .- Double = Double"
             [-0.5, -0.5, -0.5 :: Double]
-            ( DT.columnAsList @"result" $
-                DT.derive @"result" (TE.col @"x" TE..- TE.col @"d") typedCrossData
+            ( DT.columnAsList "result" $
+                DT.derive "result" (TE.col "x" TE..- TE.col "d") typedCrossData
             )
         )
 
--- | Typed: col @"x" .* col @"d"  → Double
+-- | Typed: col "x" .* col "d"  → Double
 typedMulIntDouble :: Test
 typedMulIntDouble =
     TestCase
         ( assertEqual
             "Typed: Int .* Double = Double"
             [1.5, 5.0, 10.5 :: Double]
-            ( DT.columnAsList @"result" $
-                DT.derive @"result" (TE.col @"x" TE..* TE.col @"d") typedCrossData
+            ( DT.columnAsList "result" $
+                DT.derive "result" (TE.col "x" TE..* TE.col "d") typedCrossData
             )
         )
 
@@ -624,17 +624,17 @@ typedTestData =
     either (error . show) id $
         DT.freezeWithError @TestSchema testData
 
--- | Typed: col @"x" .+ col @"y"  should give Maybe Int column
+-- | Typed: col "x" .+ col "y"  should give Maybe Int column
 typedAddIntMaybeInt :: Test
 typedAddIntMaybeInt =
     TestCase
         ( assertEqual
             "Typed: Int .+ Maybe Int = Maybe Int"
             [Just 11, Nothing, Just 33]
-            ( DT.columnAsList @"result" $
+            ( DT.columnAsList "result" $
                 DT.derive
-                    @"result"
-                    (TE.col @"x" TE..+ TE.col @"y")
+                    "result"
+                    (TE.col "x" TE..+ TE.col "y")
                     typedTestData
             )
         )
@@ -646,10 +646,10 @@ typedNullLiftMaybeInt =
         ( assertEqual
             "Typed nullLift negate (Maybe Int) propagates Nothing"
             [Just (-10), Nothing, Just (-30 :: Int)]
-            ( DT.columnAsList @"result" $
+            ( DT.columnAsList "result" $
                 DT.derive
-                    @"result"
-                    (TE.nullLift negate (TE.col @"y") :: TExpr TestSchema (Maybe Int))
+                    "result"
+                    (TE.nullLift negate (TE.col "y") :: TExpr TestSchema (Maybe Int))
                     typedTestData
             )
         )
@@ -661,40 +661,40 @@ typedNullLiftInt =
         ( assertEqual
             "Typed nullLift negate (Int) gives Int column"
             [-1, -2, -3 :: Int]
-            ( DT.columnAsList @"result" $
+            ( DT.columnAsList "result" $
                 DT.derive
-                    @"result"
-                    (TE.nullLift negate (TE.col @"x") :: TExpr TestSchema Int)
+                    "result"
+                    (TE.nullLift negate (TE.col "x") :: TExpr TestSchema Int)
                     typedTestData
             )
         )
 
--- | Typed: nullLift2 (+) col @"x" col @"y" → Maybe Int
+-- | Typed: nullLift2 (+) col "x" col "y" → Maybe Int
 typedNullLift2IntMaybeInt :: Test
 typedNullLift2IntMaybeInt =
     TestCase
         ( assertEqual
             "Typed nullLift2 (+) Int (Maybe Int) = Maybe Int"
             [Just 11, Nothing, Just 33 :: Maybe Int]
-            ( DT.columnAsList @"result" $
+            ( DT.columnAsList "result" $
                 DT.derive
-                    @"result"
-                    (TE.nullLift2 (+) (TE.col @"x") (TE.col @"y") :: TExpr TestSchema (Maybe Int))
+                    "result"
+                    (TE.nullLift2 (+) (TE.col "x") (TE.col "y") :: TExpr TestSchema (Maybe Int))
                     typedTestData
             )
         )
 
--- | Typed: col @"y" .== col @"y"  should give Maybe Bool column
+-- | Typed: col "y" .== col "y"  should give Maybe Bool column
 typedEqMaybeMaybe :: Test
 typedEqMaybeMaybe =
     TestCase
         ( assertEqual
             "Typed: Maybe Int .== Maybe Int = Maybe Bool"
             [Just True, Nothing, Just True]
-            ( DT.columnAsList @"result" $
+            ( DT.columnAsList "result" $
                 DT.derive
-                    @"result"
-                    (TE.col @"y" TE..== TE.col @"y")
+                    "result"
+                    (TE.col "y" TE..== TE.col "y")
                     typedTestData
             )
         )

@@ -87,7 +87,7 @@ prop_stratifiedSplit_deterministic _ =
                 [ ("label", Col.fromList (replicate 50 ("A" :: T.Text) ++ replicate 50 "B"))
                 , ("val", Col.fromList ([1 .. 100] :: [Int]))
                 ]
-        (tr, va) = D.stratifiedSplit (mkStdGen 314) 0.7 (D.col @T.Text "label") df
+        (tr, va) = D.stratifiedSplit (mkStdGen 314) 0.7 (D.col T.Text "label") df
      in fst (dataframeDimensions tr) + fst (dataframeDimensions va) == 100
 
 strataDf :: DataFrame
@@ -100,7 +100,7 @@ strataDf =
 unit_stratifiedSample_full :: Test
 unit_stratifiedSample_full =
     TestCase $
-        let sampled = D.stratifiedSample (mkStdGen 42) 1.0 (D.col @T.Text "label") strataDf
+        let sampled = D.stratifiedSample (mkStdGen 42) 1.0 (D.col T.Text "label") strataDf
          in assertEqual
                 "p=1.0 preserves row count"
                 (fst $ dataframeDimensions strataDf)
@@ -109,7 +109,7 @@ unit_stratifiedSample_full =
 unit_stratifiedSplit_rowCount :: Test
 unit_stratifiedSplit_rowCount =
     TestCase $
-        let (tr, va) = D.stratifiedSplit (mkStdGen 99) 0.8 (D.col @T.Text "label") strataDf
+        let (tr, va) = D.stratifiedSplit (mkStdGen 99) 0.8 (D.col T.Text "label") strataDf
          in assertEqual
                 "train+validation == total"
                 (fst $ dataframeDimensions strataDf)
@@ -123,7 +123,7 @@ unit_stratifiedSplit_singleRowStratum =
                     [ ("label", Col.fromList (["A", "A", "A", "A", "A", "B"] :: [T.Text]))
                     , ("val", Col.fromList ([1 .. 6] :: [Int]))
                     ]
-            (tr, va) = D.stratifiedSplit (mkStdGen 7) 0.8 (D.col @T.Text "label") tinyDf
+            (tr, va) = D.stratifiedSplit (mkStdGen 7) 0.8 (D.col T.Text "label") tinyDf
          in assertEqual
                 "single-row stratum: no rows lost"
                 (fst $ dataframeDimensions tinyDf)
@@ -152,7 +152,7 @@ unit_stratifiedSplit_proportions =
                         )
                     , ("val", Col.fromList ([1 .. aCount + bCount] :: [Int]))
                     ]
-            (tr, va) = D.stratifiedSplit (mkStdGen 42) 0.8 (D.col @T.Text "label") df
+            (tr, va) = D.stratifiedSplit (mkStdGen 42) 0.8 (D.col T.Text "label") df
             origProp = labelProportion "label" "A" df
             trProp = labelProportion "label" "A" tr
             vaProp = labelProportion "label" "A" va

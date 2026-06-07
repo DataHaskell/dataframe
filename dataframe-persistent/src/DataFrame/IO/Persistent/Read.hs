@@ -1,6 +1,6 @@
-{-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RequiredTypeArguments #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
@@ -233,15 +233,15 @@ selectToDataFrame filters opts =
 
 entitiesToDataFrame :: forall r. (PersistEntity r) => [Entity r] -> DataFrame
 entitiesToDataFrame ents =
-    assembleInferred ("id" : entityFieldNames @r) (map entityRow ents)
+    assembleInferred ("id" : entityFieldNames r) (map entityRow ents)
 
 -- @keyToValues@ decodes any key (single or backend) without a @ToBackendKey@
 -- constraint; single-column keys (the common case) yield the @id@ column.
 entityRow :: (PersistEntity r) => Entity r -> [PersistValue]
 entityRow (Entity k v) = keyToValues k ++ toPersistFields v
 
-entityFieldNames :: forall r. (PersistEntity r) => [Text]
-entityFieldNames =
+entityFieldNames :: forall r -> (PersistEntity r) => [Text]
+entityFieldNames r =
     map
         (unFieldNameHS . fieldHaskell)
         (getEntityFields (entityDef (Nothing :: Maybe r)))

@@ -1,7 +1,7 @@
-{-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE RequiredTypeArguments #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 
@@ -200,21 +200,21 @@ numericCols df = concatMap (numExprsOfColumn df) (columnNames df)
 
 numExprsOfColumn :: DataFrame -> T.Text -> [NumExpr]
 numExprsOfColumn df colName = case unsafeGetColumn colName df of
-    UnboxedColumn Nothing (_ :: VU.Vector b) -> strictNumeric @b colName
-    BoxedColumn (Just _) (_ :: V.Vector b) -> nullableNumeric @b colName
-    UnboxedColumn (Just _) (_ :: VU.Vector b) -> nullableNumeric @b colName
+    UnboxedColumn Nothing (_ :: VU.Vector b) -> strictNumeric b colName
+    BoxedColumn (Just _) (_ :: V.Vector b) -> nullableNumeric b colName
+    UnboxedColumn (Just _) (_ :: VU.Vector b) -> nullableNumeric b colName
     _ -> []
 
-strictNumeric :: forall b. (Columnable b) => T.Text -> [NumExpr]
-strictNumeric c = case testEquality (typeRep @b) (typeRep @Double) of
+strictNumeric :: forall b -> (Columnable b) => T.Text -> [NumExpr]
+strictNumeric b c = case testEquality (typeRep @b) (typeRep @Double) of
     Just Refl -> [NDouble (Col c)]
-    Nothing -> case sIntegral @b of
+    Nothing -> case sIntegral b of
         STrue -> [NDouble (F.toDouble (Col @b c))]
         SFalse -> []
 
-nullableNumeric :: forall b. (Columnable b) => T.Text -> [NumExpr]
-nullableNumeric c = case testEquality (typeRep @b) (typeRep @Double) of
+nullableNumeric :: forall b -> (Columnable b) => T.Text -> [NumExpr]
+nullableNumeric b c = case testEquality (typeRep @b) (typeRep @Double) of
     Just Refl -> [NMaybeDouble (Col @(Maybe b) c)]
-    Nothing -> case sIntegral @b of
+    Nothing -> case sIntegral b of
         STrue -> [NMaybeDouble (F.whenPresent (realToFrac @b @Double) (Col @(Maybe b) c))]
         SFalse -> []

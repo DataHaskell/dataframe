@@ -1,7 +1,7 @@
-{-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RequiredTypeArguments #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 
@@ -30,7 +30,7 @@ then wrap it. Returns 'Nothing' on mismatch.
 -}
 freeze ::
     forall cols. (KnownSchema cols) => D.DataFrame -> Maybe (TypedDataFrame cols)
-freeze df = case validateSchema @cols df of
+freeze df = case validateSchema cols df of
     Left _ -> Nothing
     Right _ -> Just (TDF df)
 
@@ -39,7 +39,7 @@ freezeWithError ::
     forall cols.
     (KnownSchema cols) =>
     D.DataFrame -> Either T.Text (TypedDataFrame cols)
-freezeWithError df = case validateSchema @cols df of
+freezeWithError df = case validateSchema cols df of
     Left err -> Left err
     Right _ -> Right (TDF df)
 
@@ -56,10 +56,10 @@ unsafeFreeze :: D.DataFrame -> TypedDataFrame cols
 unsafeFreeze = TDF
 
 validateSchema ::
-    forall cols.
+    forall cols ->
     (KnownSchema cols) =>
     D.DataFrame -> Either T.Text ()
-validateSchema df = mapM_ checkCol (schemaEvidence @cols)
+validateSchema cols df = mapM_ checkCol (schemaEvidence cols)
   where
     checkCol :: (T.Text, SomeTypeRep) -> Either T.Text ()
     checkCol (name, expectedRep) = case D.getColumn name df of

@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RequiredTypeArguments #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeApplications #-}
 
@@ -53,7 +54,7 @@ run = do
                 , "max" .= F.maximum quantity
                 , "mean" .= F.mean quantity
                 ]
-            |> D.sortBy [D.Desc (F.col "sum" `asTypeOf` quantity)]
+            |> D.sortBy [D.Desc (F.col' "sum" `asTypeOf` quantity)]
 
     let firstOrder =
             df

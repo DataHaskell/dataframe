@@ -86,11 +86,11 @@ groupBy names df
                         case testEquality (typeRep @a) (typeRep @Double) of
                             Just Refl -> hashUnboxed mh ubm mixDouble v
                             Nothing ->
-                                case sIntegral @a of
+                                case sIntegral a of
                                     STrue ->
                                         hashUnboxed mh ubm (\h d -> mixInt h (fromIntegral @a @Int d)) v
                                     SFalse ->
-                                        case sFloating @a of
+                                        case sFloating a of
                                             STrue ->
                                                 hashUnboxed mh ubm (\h d -> mixDouble h (realToFrac d :: Double)) v
                                             SFalse ->

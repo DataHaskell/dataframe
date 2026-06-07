@@ -214,10 +214,10 @@ main = do
     let schema =
             Schema $
                 M.fromList
-                    [ ("id", schemaType @Int)
-                    , ("x", schemaType @Double)
-                    , ("y", schemaType @Double)
-                    , ("category", schemaType @T.Text)
+                    [ ("id", schemaType Int)
+                    , ("x", schemaType Double)
+                    , ("y", schemaType Double)
+                    , ("category", schemaType T.Text)
                     ]
 
     -- Q1: Preview — limit 20, no filter.
@@ -233,7 +233,7 @@ main = do
     runQuery "Q2 — filter (x > 0.999), limit 20" $
         L.runDataFrame $
             L.take 20 $
-                L.filter (col @Double "x" .> lit (0.999 :: Double)) $
+                L.filter (col Double "x" .> lit (0.999 :: Double)) $
                     L.scanCsv schema pathT
 
     -- Q3: Filter + derive + select + limit.
@@ -243,8 +243,8 @@ main = do
         L.runDataFrame $
             L.take 20 $
                 L.select ["id", "z"] $
-                    L.derive "z" (col @Double "x" * col @Double "y") $
-                        L.filter (col @Double "x" .> lit (0.999 :: Double)) $
+                    L.derive "z" (col Double "x" * col Double "y") $
+                        L.filter (col Double "x" .> lit (0.999 :: Double)) $
                             L.scanCsv schema pathT
 
     -- Q4: Filter fusion demo.
@@ -254,8 +254,8 @@ main = do
     runQuery "Q4 — filter fusion: (x > 0.5) . (y > 0.5), limit 20" $
         L.runDataFrame $
             L.take 20 $
-                L.filter (col @Double "y" .> lit (0.5 :: Double)) $
-                    L.filter (col @Double "x" .> lit (0.5 :: Double)) $
+                L.filter (col Double "y" .> lit (0.5 :: Double)) $
+                    L.filter (col Double "x" .> lit (0.5 :: Double)) $
                         L.scanCsv schema pathT
 
     -- Q5: Full scan, heavy filter, count results.
@@ -269,7 +269,7 @@ main = do
         )
         $ L.runDataFrame
         $ L.select ["id", "x"]
-        $ L.filter (col @Double "x" .> lit (0.999 :: Double))
+        $ L.filter (col Double "x" .> lit (0.999 :: Double))
         $ L.scanCsv schema pathT
 
     putStrLn "\nDone."

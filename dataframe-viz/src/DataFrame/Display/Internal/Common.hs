@@ -1,4 +1,3 @@
-{-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE ExplicitNamespaces #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
@@ -175,9 +174,9 @@ vectorToDoubles :: forall a. (Columnable a, Show a) => V.Vector a -> [Double]
 vectorToDoubles vec =
     case testEquality (typeRep @a) (typeRep @Double) of
         Just Refl -> V.toList vec
-        Nothing -> case sIntegral @a of
+        Nothing -> case sIntegral a of
             STrue -> V.toList $ V.map fromIntegral vec
-            SFalse -> case sFloating @a of
+            SFalse -> case sFloating a of
                 STrue -> V.toList $ V.map realToFrac vec
                 SFalse ->
                     error $ "Column is not numeric (type: " ++ show (typeRep @a) ++ ")"
@@ -187,9 +186,9 @@ unboxedVectorToDoubles ::
 unboxedVectorToDoubles vec =
     case testEquality (typeRep @a) (typeRep @Double) of
         Just Refl -> VU.toList vec
-        Nothing -> case sIntegral @a of
+        Nothing -> case sIntegral a of
             STrue -> VU.toList $ VU.map fromIntegral vec
-            SFalse -> case sFloating @a of
+            SFalse -> case sFloating a of
                 STrue -> VU.toList $ VU.map realToFrac vec
                 SFalse ->
                     error $ "Column is not numeric (type: " ++ show (typeRep @a) ++ ")"

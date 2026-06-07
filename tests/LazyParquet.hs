@@ -19,17 +19,17 @@ allTypesSchema :: Schema
 allTypesSchema =
     Schema $
         M.fromList
-            [ ("id", schemaType @Int32)
-            , ("bool_col", schemaType @Bool)
-            , ("tinyint_col", schemaType @Int32)
-            , ("smallint_col", schemaType @Int32)
-            , ("int_col", schemaType @Int32)
-            , ("bigint_col", schemaType @Int64)
-            , ("float_col", schemaType @Float)
-            , ("double_col", schemaType @Double)
-            , ("date_string_col", schemaType @T.Text)
-            , ("string_col", schemaType @T.Text)
-            , ("timestamp_col", schemaType @UTCTime)
+            [ ("id", schemaType Int32)
+            , ("bool_col", schemaType Bool)
+            , ("tinyint_col", schemaType Int32)
+            , ("smallint_col", schemaType Int32)
+            , ("int_col", schemaType Int32)
+            , ("bigint_col", schemaType Int64)
+            , ("float_col", schemaType Float)
+            , ("double_col", schemaType Double)
+            , ("date_string_col", schemaType T.Text)
+            , ("string_col", schemaType T.Text)
+            , ("timestamp_col", schemaType UTCTime)
             ]
 
 plainPath :: FilePath
@@ -64,7 +64,7 @@ filterPushdown =
             actual <-
                 L.runDataFrame
                     ( L.filter
-                        (F.geq (F.col @Int32 "id") (F.lit 6))
+                        (F.geq (F.col Int32 "id") (F.lit 6))
                         (L.scanParquet allTypesSchema (T.pack plainPath))
                     )
             assertEqual "filterPushdown" (2, 11) (D.dimensions actual)
@@ -80,7 +80,7 @@ filterAndProject =
                     ( L.select
                         ["id", "bool_col"]
                         ( L.filter
-                            (F.geq (F.col @Int32 "id") (F.lit 6))
+                            (F.geq (F.col Int32 "id") (F.lit 6))
                             (L.scanParquet allTypesSchema (T.pack plainPath))
                         )
                     )

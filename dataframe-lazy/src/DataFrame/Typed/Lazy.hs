@@ -1,8 +1,8 @@
-{-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE KindSignatures #-}
+{-# LANGUAGE RequiredTypeArguments #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 
@@ -136,21 +136,21 @@ take n (TLD ldf) = TLD (L.take n ldf)
 
 -- | Add a computed column.
 derive ::
-    forall name a cols.
+    forall name -> forall a cols.
     (KnownSymbol name, C.Columnable a, AssertAbsent name cols) =>
     TExpr cols a ->
     TypedLazyDataFrame cols ->
     TypedLazyDataFrame (Snoc cols (Column name a))
-derive (TExpr expr) (TLD ldf) =
+derive name (TExpr expr) (TLD ldf) =
     TLD (L.derive (T.pack (symbolVal (Proxy @name))) expr ldf)
 
 -- | Retain only the listed columns.
 select ::
-    forall (names :: [Symbol]) cols.
+    forall (names :: [Symbol]) -> forall cols.
     (AllKnownSymbol names, AssertAllPresent names cols) =>
     TypedLazyDataFrame cols ->
     TypedLazyDataFrame (SubsetSchema names cols)
-select (TLD ldf) = TLD (L.select (DataFrame.Typed.Schema.symbolVals @names) ldf)
+select names (TLD ldf) = TLD (L.select (DataFrame.Typed.Schema.symbolVals names) ldf)
 
 -- | A typed lazy grouped query.
 newtype TypedLazyGrouped (keys :: [Symbol]) (cols :: [Type]) = TLG
@@ -163,7 +163,7 @@ groupBy ::
     (AllKnownSymbol keys, AssertAllPresent keys cols) =>
     TypedLazyDataFrame cols ->
     TypedLazyGrouped keys cols
-groupBy (TLD ldf) = TLG (DataFrame.Typed.Schema.symbolVals @keys, ldf)
+groupBy (TLD ldf) = TLG (DataFrame.Typed.Schema.symbolVals keys, ldf)
 
 -- | Aggregate a grouped lazy query.
 aggregate ::

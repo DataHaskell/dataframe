@@ -1,9 +1,9 @@
-{-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE ExplicitNamespaces #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE ForeignFunctionInterface #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RequiredTypeArguments #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 
@@ -254,30 +254,30 @@ inferTargetType target df = dispatchType (columnTypeRep (unsafeGetColumn target 
 fitTreeWithType ::
     T.Text -> TreeConfig -> T.Text -> DataFrame -> IO BS.ByteString
 fitTreeWithType ttag cfg target df = case ttag of
-    "int" -> fit @Int
-    "int8" -> fit @Int8
-    "int16" -> fit @Int16
-    "int32" -> fit @Int32
-    "int64" -> fit @Int64
-    "word" -> fit @Word
-    "word8" -> fit @Word8
-    "word16" -> fit @Word16
-    "word32" -> fit @Word32
-    "word64" -> fit @Word64
-    "integer" -> fit @Integer
-    "double" -> fit @Double
-    "float" -> fit @Float
-    "bool" -> fit @Bool
-    "char" -> fit @Char
-    "text" -> fit @T.Text
-    "string" -> fit @String
+    "int" -> fit Int
+    "int8" -> fit Int8
+    "int16" -> fit Int16
+    "int32" -> fit Int32
+    "int64" -> fit Int64
+    "word" -> fit Word
+    "word8" -> fit Word8
+    "word16" -> fit Word16
+    "word32" -> fit Word32
+    "word64" -> fit Word64
+    "integer" -> fit Integer
+    "double" -> fit Double
+    "float" -> fit Float
+    "bool" -> fit Bool
+    "char" -> fit Char
+    "text" -> fit T.Text
+    "string" -> fit String
     other ->
         ioError . userError $
             "DataFrame.FFI.fitTreeWithType: unsupported target type tag: "
                 ++ T.unpack other
   where
-    fit :: forall a. (Columnable a, Ord a) => IO BS.ByteString
-    fit = do
+    fit :: forall a -> (Columnable a, Ord a) => IO BS.ByteString
+    fit a = do
         let expr = fitDecisionTree @a cfg (Col @a target) df
         case encodeExprToBytes expr of
             Right bs -> return bs

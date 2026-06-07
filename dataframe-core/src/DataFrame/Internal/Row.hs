@@ -158,7 +158,7 @@ toRowVector names df = V.generate (fst (dataframeDimensions df)) (mkRowRep df na
 
 ==== __Examples__
 
->>> map (rowValue (F.col @Int "age")) (toRowList df)
+>>> map (rowValue (F.col Int "age")) (toRowList df)
 [25,30, ...]
 -}
 rowValue :: forall a. Expr a -> [(T.Text, Any)] -> Maybe a

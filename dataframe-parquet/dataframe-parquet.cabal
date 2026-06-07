@@ -58,7 +58,7 @@ library
                         pinch >= 0.5 && < 1,
                         snappy-hs ^>= 0.1,
                         streamly-bytestring >= 0.2.0 && < 0.4,
-                        streamly-core >= 0.2.3 && < 0.4,
+                        streamly-core >= 0.3.0 && < 0.4,
                         text >= 2.0 && < 3,
                         time >= 1.12 && < 2,
                         vector ^>= 0.13,

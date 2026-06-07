@@ -1,10 +1,10 @@
-{-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE ExplicitNamespaces #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE InstanceSigs #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE RequiredTypeArguments #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 
@@ -173,14 +173,14 @@ asTextWith fmt mTrunc d =
                     )
 
         getType :: Column -> T.Text
-        showMaybeType :: forall a. (Typeable a) => String
-        showMaybeType =
+        showMaybeType :: forall a -> (Typeable a) => String
+        showMaybeType a =
             let s = show (typeRep @a)
              in "Maybe " <> if ' ' `elem` s then "(" <> s <> ")" else s
         getType (BoxedColumn Nothing (_ :: V.Vector a)) = T.pack $ show (typeRep @a)
-        getType (BoxedColumn (Just _) (_ :: V.Vector a)) = T.pack $ showMaybeType @a
+        getType (BoxedColumn (Just _) (_ :: V.Vector a)) = T.pack $ showMaybeType a
         getType (UnboxedColumn Nothing (_ :: VU.Vector a)) = T.pack $ show (typeRep @a)
-        getType (UnboxedColumn (Just _) (_ :: VU.Vector a)) = T.pack $ showMaybeType @a
+        getType (UnboxedColumn (Just _) (_ :: VU.Vector a)) = T.pack $ showMaybeType a
 
         -- Separate out cases dynamically so we don't end up making round trip
         -- string copies.

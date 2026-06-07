@@ -66,9 +66,9 @@ For a given column calculating the mean and median is fairly straightfoward and 
 ```haskell
 import qualified DataFrame.Functions as F
 
-D.mean (F.col @Double "housing_median_age") df
+D.mean (F.col Double "housing_median_age") df
 
-D.median (F.col @Double "housing_median_age") df
+D.median (F.col Double "housing_median_age") df
 ```
 
 Note: You need to pass the expression for the column into these functions not the column name so the program knows that you are actually calling `mean` or `median` on a column containing numbers.
@@ -103,7 +103,7 @@ From the small sample it does seem like there are some wild deviations. The firs
 ```haskell
 df |> D.derive "deviation" (abs (median_house_value - (F.mean median_house_value)))
    |> D.select ["median_house_value", "deviation"]
-   |> D.mean (F.col @Double "deviation")
+   |> D.mean (F.col Double "deviation")
 ```
 
 Getting the mean of the deviations was as simple as tacking `D.mean "deviation"` to the end of our existing pipeline. Composability is a big strength of Haskell code.
@@ -125,7 +125,7 @@ $(D.declareColumns withDeviation)
 import Data.Maybe
 
 sumOfSqureDifferences = withDeviation |> D.derive "deviation^2" (F.pow deviation 2)
-                                      |> D.sum (F.col @Double "deviation^2")
+                                      |> D.sum (F.col Double "deviation^2")
 
 n = fromIntegral (fst (D.dimensions df) - 1)
 
@@ -136,7 +136,7 @@ The standard deviation being larger than the mean absolute deviation means we do
 We can calculate the standard deviation in one line as follows:
 
 ```haskell
-D.standardDeviation (F.col @Double "median_house_value") df
+D.standardDeviation (F.col Double "median_house_value") df
 ```
 
 ## Interquartile range (IQR)
@@ -147,7 +147,7 @@ The IQR is a more robust measure of spread than the variance or standard deviati
 For our dataset:
 
 ```haskell
-D.interQuartileRange (F.col @Double "median_house_value") df
+D.interQuartileRange (F.col Double "median_house_value") df
 ```
 
 This is larger than the standard deviation but not by much. This means that outliers don't have a significant influence on the distribution and most values are close to typical.
@@ -158,7 +158,7 @@ Variance is the square of the standard deviation. It is much more sensitive to o
 In our example it's a very large number:
 
 ``` haskell
-D.variance (F.col @Double "median_house_value") df
+D.variance (F.col Double "median_house_value") df
 ```
 
 The variance is more useful when comparing different datasets. If the variance of house prices in Minnesota was lower than California this would mean there were much fewer really cheap and really expensive house in Minnesota.
@@ -173,7 +173,7 @@ The intuition behind why a positive skew is left shifted follows from the formul
 A skewness score between -0.5 and 0.5 means the data has little skew. A score between -0.5 and -1 or 0.5 and 1 means the data has moderate skew. A skewness greater than 1 or less than -1 means the data is heavily skewed.
 
 ```haskell
-D.skewness (F.col @Double "median_house_value") df
+D.skewness (F.col Double "median_house_value") df
 ```
 So the median house value is moderately skewed to the left. That is, there are more houses that are cheaper than the mean values and a tail of expensive outliers. Having lived in California, I can confirm that this data reflects reality.
 
@@ -212,7 +212,7 @@ import Granite.Svg
 import qualified Data.Text.IO as T
 import qualified Data.Text as T
 
-let houseValues = D.columnAsList (F.col @Double "median_house_value") df
+let houseValues = D.columnAsList (F.col Double "median_house_value") df
 
 T.putStrLn $
       histogram

@@ -1,9 +1,9 @@
-{-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE MultiWayIf #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE RequiredTypeArguments #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 
@@ -45,14 +45,14 @@ import DataFrame.Operators (
 
 simplify :: forall a. (Columnable a) => Expr a -> Expr a
 simplify e
-    | isBoolish @a = fixpoint (10 :: Int) e
+    | isBoolish a = fixpoint (10 :: Int) e
     | otherwise = e
   where
     fixpoint 0 x = x
     fixpoint n x = let x' = simplifyB x in if eqExpr x x' then x else fixpoint (n - 1) x'
 
-isBoolish :: forall a. (Columnable a) => Bool
-isBoolish =
+isBoolish :: forall a -> (Columnable a) => Bool
+isBoolish a =
     case ( testEquality (typeRep @a) (typeRep @Bool)
          , testEquality (typeRep @a) (typeRep @(Maybe Bool))
          ) of
@@ -196,8 +196,8 @@ isLower c = c == CGt || c == CGeq
 isUpper c = c == CLt || c == CLeq
 
 -- | True if @x@ is a @Maybe _@ type.
-isMaybeTy :: forall x. (Columnable x) => Bool
-isMaybeTy = case typeRep @x of
+isMaybeTy :: forall x -> (Columnable x) => Bool
+isMaybeTy x = case typeRep @x of
     App con _ -> case eqTypeRep con (typeRep @Maybe) of Just HRefl -> True; _ -> False
     _ -> False
 
@@ -221,12 +221,12 @@ integralColE :: forall c. (Columnable c) => Expr c -> Bool
 integralColE (Unary op _) = unaryName op == "toDouble"
 integralColE _ =
     or
-        [ matches @Int
-        , matches @(Maybe Int)
+        [ matches Int
+        , matches (Maybe Int)
         ]
   where
-    matches :: forall t. (Columnable t) => Bool
-    matches = case testEquality (typeRep @c) (typeRep @t) of Just Refl -> True; _ -> False
+    matches :: forall t -> (Columnable t) => Bool
+    matches t = case testEquality (typeRep @c) (typeRep @t) of Just Refl -> True; _ -> False
 
 atomOf :: forall a. (Columnable a) => Expr a -> Maybe Atom
 atomOf (Unary fm (Binary (op :: op c b r) (colE :: Expr c) litE))
@@ -237,7 +237,7 @@ atomOf (Unary fm (Binary (op :: op c b r) (colE :: Expr c) litE))
 atomOf (Binary (op :: op c b a) (colE :: Expr c) litE)
     | Just cmp <- cmpOf op
     , Just t <- litDouble litE =
-        let nk = if isMaybeTy @c then UnknownOnNull else Total
+        let nk = if isMaybeTy c then UnknownOnNull else Total
          in Just (Atom cmp t (show (normalize colE)) nk (integralColE colE))
 atomOf _ = Nothing
 

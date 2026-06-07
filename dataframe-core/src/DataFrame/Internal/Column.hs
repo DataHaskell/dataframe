@@ -1,4 +1,3 @@
-{-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE DataKinds #-}
@@ -11,8 +10,11 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE RequiredTypeArguments #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE TypeAbstractions #-}
+{-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
 
@@ -158,7 +160,7 @@ Always attaches a bitmap so the column is recognized as nullable even when
 no 'Nothing' values are present (preserves the Maybe type marker).
 -}
 fromMaybeVec :: forall a. (Columnable a) => VB.Vector (Maybe a) -> Column
-fromMaybeVec v = case sUnbox @a of
+fromMaybeVec v = case sUnbox a of
     STrue -> fromMaybeVecUnboxed v
     SFalse ->
         let n = VB.length v
@@ -233,7 +235,7 @@ allMissing _ = False
 
 -- | Checks if a column contains numeric values.
 isNumeric :: Column -> Bool
-isNumeric (UnboxedColumn _ (_vec :: VU.Vector a)) = case sNumeric @a of
+isNumeric (UnboxedColumn _ (_vec :: VU.Vector a)) = case sNumeric a of
     STrue -> True
     _ -> False
 isNumeric (BoxedColumn _ (_vec :: VB.Vector a)) = case testEquality (typeRep @a) (typeRep @Integer) of
@@ -244,8 +246,8 @@ isNumeric (BoxedColumn _ (_vec :: VB.Vector a)) = case testEquality (typeRep @a)
 For nullable columns (@BoxedColumn (Just _)@ or @UnboxedColumn (Just _)@),
 also returns @True@ when @a = Maybe b@ and the column stores @b@ internally.
 -}
-hasElemType :: forall a. (Columnable a) => Column -> Bool
-hasElemType = \case
+hasElemType :: forall a -> (Columnable a) => Column -> Bool
+hasElemType a = \case
     BoxedColumn bm (_column :: VB.Vector b) -> checkBoxed bm (typeRep @b)
     UnboxedColumn bm (_column :: VU.Vector b) -> checkUnboxed bm (typeRep @b)
   where
@@ -277,13 +279,13 @@ of a column.
 -}
 columnTypeString :: Column -> String
 columnTypeString column = case column of
-    BoxedColumn Nothing (_ :: VB.Vector a) -> show (typeRep @a)
-    BoxedColumn (Just _) (_ :: VB.Vector a) -> showMaybeType @a
-    UnboxedColumn Nothing (_ :: VU.Vector a) -> show (typeRep @a)
-    UnboxedColumn (Just _) (_ :: VU.Vector a) -> showMaybeType @a
+    BoxedColumn @a Nothing _ -> show (typeRep @a)
+    BoxedColumn @a (Just _) _ -> showMaybeType a
+    UnboxedColumn @a Nothing _ -> show (typeRep @a)
+    UnboxedColumn @a (Just _) _ -> showMaybeType a
   where
-    showMaybeType :: forall a. (Typeable a) => String
-    showMaybeType =
+    showMaybeType :: forall a -> (Typeable a) => String
+    showMaybeType a =
         let s = show (typeRep @a)
          in "Maybe " ++ if ' ' `elem` s then "(" ++ s ++ ")" else s
 
@@ -370,7 +372,7 @@ instance Eq Column where
 Given each Rep we tell the `toColumnRep` function which Column type to pick.
 -}
 class ColumnifyRep (r :: Rep) a where
-    toColumnRep :: VB.Vector a -> Column
+    toColumnRep :: forall r' -> (r ~ r') => VB.Vector a -> Column
 
 -- | Constraint synonym for what we can put into columns.
 type Columnable a =
@@ -389,22 +391,19 @@ instance
     (Columnable a, VU.Unbox a) =>
     ColumnifyRep 'RUnboxed a
     where
-    toColumnRep :: (Columnable a, VUM.Unbox a) => VB.Vector a -> Column
-    toColumnRep v = UnboxedColumn Nothing (VU.convert v)
+    toColumnRep _ v = UnboxedColumn Nothing (VU.convert v)
 
 instance
     (Columnable a) =>
     ColumnifyRep 'RBoxed a
     where
-    toColumnRep :: (Columnable a) => VB.Vector a -> Column
-    toColumnRep = BoxedColumn Nothing
+    toColumnRep _ = BoxedColumn Nothing
 
 instance
     (Columnable a) =>
     ColumnifyRep 'RNullableBoxed (Maybe a)
     where
-    toColumnRep :: (Columnable a) => VB.Vector (Maybe a) -> Column
-    toColumnRep = fromMaybeVec
+    toColumnRep _ = fromMaybeVec
 
 {- | O(n) Convert a vector to a column. Automatically picks the best representation of a vector to store the underlying data in.
 
@@ -420,7 +419,7 @@ fromVector ::
     forall a.
     (Columnable a, ColumnifyRep (KindOf a) a) =>
     VB.Vector a -> Column
-fromVector = toColumnRep @(KindOf a)
+fromVector = toColumnRep (KindOf a)
 
 {- | O(n) Convert an unboxed vector to a column. This avoids the extra conversion if you already have the data in an unboxed vector.
 
@@ -449,7 +448,7 @@ fromList ::
     forall a.
     (Columnable a, ColumnifyRep (KindOf a) a) =>
     [a] -> Column
-fromList = toColumnRep @(KindOf a) . VB.fromList
+fromList = toColumnRep (KindOf a) . VB.fromList
 
 {- | O(n) Create a column of random elements within a range.
 
@@ -477,9 +476,9 @@ mkRandom pureGen k lo hi = fromList $ go pureGen k
 
 -- An internal helper for type errors
 throwTypeMismatch ::
-    forall (a :: Type) (b :: Type).
+    forall (a :: Type) (b :: Type) ->
     (Typeable a, Typeable b) => Either DataFrameException Column
-throwTypeMismatch =
+throwTypeMismatch a b =
     Left $
         TypeMismatchException
             MkTypeErrorContext
@@ -508,7 +507,7 @@ mapColumn f = \case
             let !n = VB.length col
              in -- Build result directly without intermediate Maybe vector to avoid
                 -- fusion forcing null slots via VU.convert.
-                Right $ case sUnbox @c of
+                Right $ case sUnbox c of
                     STrue -> UnboxedColumn Nothing $
                         VU.generate n $ \i ->
                             f
@@ -526,10 +525,10 @@ mapColumn f = \case
         Nothing -> case testEquality (typeRep @a) (typeRep @b) of
             Just Refl ->
                 -- user maps over inner type a; preserve bitmap
-                Right $ case sUnbox @c of
+                Right $ case sUnbox c of
                     STrue -> UnboxedColumn bm (VU.generate (VB.length col) (f . VB.unsafeIndex col))
                     SFalse -> BoxedColumn bm (VB.map f col)
-            Nothing -> throwTypeMismatch @a @b
+            Nothing -> throwTypeMismatch a b
 
     runUnboxed ::
         forall a.
@@ -538,7 +537,7 @@ mapColumn f = \case
     runUnboxed bm col = case testEquality (typeRep @b) (typeRep @(Maybe a)) of
         Just Refl ->
             let !n = VU.length col
-             in Right $ case sUnbox @c of
+             in Right $ case sUnbox c of
                     STrue -> UnboxedColumn Nothing $
                         VU.generate n $ \i ->
                             f
@@ -554,10 +553,10 @@ mapColumn f = \case
                                     else Nothing
                                 )
         Nothing -> case testEquality (typeRep @a) (typeRep @b) of
-            Just Refl -> Right $ case sUnbox @c of
+            Just Refl -> Right $ case sUnbox c of
                 STrue -> UnboxedColumn bm (VU.map f col)
                 SFalse -> BoxedColumn bm (VB.generate (VU.length col) (f . VU.unsafeIndex col))
-            Nothing -> throwTypeMismatch @a @b
+            Nothing -> throwTypeMismatch a b
 {-# INLINEABLE mapColumn #-}
 
 -- | Applies a function that returns an unboxed result to an unboxed vector, storing the result in a column.
@@ -574,23 +573,23 @@ imapColumn f = \case
         (Columnable a) =>
         Maybe Bitmap -> VB.Vector a -> Either DataFrameException Column
     runBoxed bm col = case testEquality (typeRep @a) (typeRep @b) of
-        Just Refl -> Right $ case sUnbox @c of
+        Just Refl -> Right $ case sUnbox c of
             STrue ->
                 UnboxedColumn
                     bm
                     (VU.generate (VB.length col) (\i -> f i (VB.unsafeIndex col i)))
             SFalse -> BoxedColumn bm (VB.imap f col)
-        Nothing -> throwTypeMismatch @a @b
+        Nothing -> throwTypeMismatch a b
 
     runUnboxed ::
         forall a.
         (Columnable a, VU.Unbox a) =>
         Maybe Bitmap -> VU.Vector a -> Either DataFrameException Column
     runUnboxed bm col = case testEquality (typeRep @a) (typeRep @b) of
-        Just Refl -> Right $ case sUnbox @c of
+        Just Refl -> Right $ case sUnbox c of
             STrue -> UnboxedColumn bm (VU.imap f col)
             SFalse -> BoxedColumn bm (VB.imap f (VG.convert col))
-        Nothing -> throwTypeMismatch @a @b
+        Nothing -> throwTypeMismatch a b
 
 -- | O(1) Gets the number of elements in the column.
 columnLength :: Column -> Int
@@ -917,7 +916,7 @@ foldLinearGroups f seed col rowToGroup nGroups
     -- indirection per read/write) and returns UnboxedColumn directly —
     -- avoiding a round-trip through VB.Vector.
     runWith :: ((Int -> IO acc) -> (Int -> acc -> IO ()) -> IO ()) -> IO Column
-    runWith body = case sUnbox @acc of
+    runWith body = case sUnbox acc of
         STrue -> do
             accs <- VUM.replicate nGroups seed
             body (VUM.unsafeRead accs) (VUM.unsafeWrite accs)
@@ -1027,7 +1026,7 @@ zipWithColumns f (UnboxedColumn bmL (column :: VU.Vector d)) (UnboxedColumn bmR 
             -- Fast path: both plain unboxed, no bitmaps involved in the output type
             | isNothing bmL
             , isNothing bmR ->
-                pure $ case sUnbox @c of
+                pure $ case sUnbox c of
                     STrue -> UnboxedColumn Nothing (VU.zipWith f column other)
                     SFalse -> fromVector $ VB.zipWith f (VG.convert column) (VG.convert other)
         -- Type mismatch or bitmap involvement: fall through to general toVector path
@@ -1468,7 +1467,7 @@ toDoubleVector column =
             Just Refl -> case bm of
                 Nothing -> Right f
                 Just bitmap -> Right $ VU.imap (\i x -> if bitmapTestBit bitmap i then x else read "NaN") f
-            Nothing -> case sFloating @a of
+            Nothing -> case sFloating a of
                 STrue ->
                     Right
                         ( VU.imap
@@ -1478,7 +1477,7 @@ toDoubleVector column =
                             )
                             f
                         )
-                SFalse -> case sIntegral @a of
+                SFalse -> case sIntegral a of
                     STrue ->
                         Right
                             ( VU.imap
@@ -1550,7 +1549,7 @@ toFloatVector column =
             Just Refl -> case bm of
                 Nothing -> Right f
                 Just bitmap -> Right $ VU.imap (\i x -> if bitmapTestBit bitmap i then x else read "NaN") f
-            Nothing -> case sFloating @a of
+            Nothing -> case sFloating a of
                 STrue ->
                     Right
                         ( VU.imap
@@ -1560,7 +1559,7 @@ toFloatVector column =
                             )
                             f
                         )
-                SFalse -> case sIntegral @a of
+                SFalse -> case sIntegral a of
                     STrue ->
                         Right
                             ( VU.imap
@@ -1631,9 +1630,9 @@ toIntVector column =
     case column of
         UnboxedColumn _ (f :: VU.Vector a) -> case testEquality (typeRep @a) (typeRep @Int) of
             Just Refl -> Right f
-            Nothing -> case sFloating @a of
+            Nothing -> case sFloating a of
                 STrue -> Right (VU.map (round . (realToFrac :: a -> Double)) f)
-                SFalse -> case sIntegral @a of
+                SFalse -> case sIntegral a of
                     STrue -> Right (VU.map fromIntegral f)
                     SFalse ->
                         Left $

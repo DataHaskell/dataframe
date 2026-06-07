@@ -26,7 +26,7 @@ write a `persistent` entity, a `persistLowerCase` block, or any instances.
 | Tier | You write | You get |
 |------|-----------|---------|
 | **Runtime** | `readTable db "artists"` | a `DataFrame`, types inferred from the schema |
-| **Typed** | `$(declareTable db "artists")` + `readTableTyped @Schema` | a compile-time schema type; columns checked by `col @"Name"` |
+| **Typed** | `$(declareTable db "artists")` + `readTableTyped @Schema` | a compile-time schema type; columns checked by `col "Name"` |
 | **Persistent** | `$(declareEntity db "artists")` | a full `persistent` entity: typed `Filter` DSL, write-back |
 
 ## Tier 0: runtime reads
@@ -78,7 +78,7 @@ D.toMarkdown' <$> readTableWith "./data/chinook.db" "artists" (allRows & limit 3
 
 `declareTable` reads the schema at compile time and emits just the schema type. You read into it
 with `readTableTyped`, where the schema is a type argument and the database and table are ordinary
-values. Column references go through `col @"Name"`, checked against the schema, so a typo or a wrong
+values. Column references go through `col "Name"`, checked against the schema, so a typo or a wrong
 type is a compile error. Nothing is keyed on a generated function name.
 
 ```haskell
@@ -107,18 +107,18 @@ artists = readTableTyped @ArtistsSchema "./data/chinook.db" "artists"
 D.toMarkdown' . D.take 5 . DT.thaw <$> artists
 ```
 
-Column access is checked against the schema. `col @"Name"` only compiles because `"Name"` is a
+Column access is checked against the schema. `col "Name"` only compiles because `"Name"` is a
 column of `ArtistsSchema` (its element type is `Maybe Text`):
 
 ```haskell
-DT.columnAsList @"Name" . DT.take 3 <$> artists
+DT.columnAsList "Name" . DT.take 3 <$> artists
 ```
 
 A filter on a column that doesn't exist (or has the wrong type) is a compile error rather than a
 runtime surprise:
 
 ```haskell
-D.toMarkdown' . DT.thaw . DT.filterWhere (DT.col @"Name" .==. DT.lit (Just "Accept")) <$> artists
+D.toMarkdown' . DT.thaw . DT.filterWhere (DT.col "Name" .==. DT.lit (Just "Accept")) <$> artists
 ```
 
 Because the database is a value, reading the same table from two sources to join them is just two

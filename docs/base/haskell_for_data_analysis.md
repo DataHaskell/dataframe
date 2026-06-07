@@ -99,11 +99,11 @@ The type of `D.take` is `Int -> DataFrame -> DataFrame` — an integer in, a dat
 
 ### Opting into stronger type safety
 
-`F.col @Type "colName"` tells the compiler what type to expect in a column. If you get the type wrong you hear about it immediately.
+`F.col Type "colName"` tells the compiler what type to expect in a column. If you get the type wrong you hear about it immediately.
 
 ```haskell
 -- Runtime-checked (flexible):
-D.mean (F.col @Double "High Temperature (C)") weather
+D.mean (F.col Double "High Temperature (C)") weather
 
 -- Compile-time-checked — $(D.declareColumns …) generates typed bindings:
 $(D.declareColumns weather)
@@ -165,9 +165,9 @@ Passing a character instead of an integer to `take`:
 Passing a `Double` column expression where an `Int` is expected:
 
 ```haskell
--- D.mean (F.col @Int "longitude") housing
+-- D.mean (F.col Int "longitude") housing
 -- error: Couldn't match type 'Double' with 'Int' for column "longitude"
--- Fix: D.mean (F.col @Double "longitude") housing
+-- Fix: D.mean (F.col Double "longitude") housing
 ```
 
 Errors tell you the exact location and what went wrong. Over time you learn to read them as precise hints.
@@ -214,13 +214,13 @@ The companions `filterNothing` and `filterAllNothing` do the opposite — they l
 
 ```haskell
 TIO.putStrLn $ D.toMarkdown
-    (D.impute (F.col @(Maybe Int) "id") 0 messy)
+    (D.impute (F.col (Maybe Int) "id") 0 messy)
 ```
 
 Notice the `@(Maybe Int)` type annotation — it tells the imputer what type the column holds. Passing the wrong type throws a clear runtime error:
 
 ```haskell
--- D.impute (F.col @(Maybe Double) "id") 0 messy
+-- D.impute (F.col (Maybe Double) "id") 0 messy
 -- Exception: Type Mismatch — expected 'Maybe Double' but column is 'Maybe Integer'
 ```
 
@@ -230,7 +230,7 @@ Notice the `@(Maybe Int)` type annotation — it tells the imputer what type the
 
 ```haskell
 TIO.putStrLn $ D.toMarkdown $ D.take 10
-    (D.imputeWith F.mean (F.col @(Maybe Double) "total_bedrooms") housing)
+    (D.imputeWith F.mean (F.col (Maybe Double) "total_bedrooms") housing)
 ```
 
 ### Removing duplicates
@@ -282,23 +282,23 @@ TIO.putStrLn $ D.toMarkdown meat
 
 ```haskell
 TIO.putStrLn $ D.toMarkdown
-    (D.derive "kilograms" (F.col @Double "ounces" * 0.03) meat)
+    (D.derive "kilograms" (F.col Double "ounces" * 0.03) meat)
 ```
 
 ### Expressions and F.col
 
-`F.col @Type "name"` creates an *expression* — a typed reference to a column that can be combined with arithmetic operators, boolean operators, or custom functions.
+`F.col Type "name"` creates an *expression* — a typed reference to a column that can be combined with arithmetic operators, boolean operators, or custom functions.
 
 ```
-F.col @Double "ounces"   -- :: Expr Double
-F.col @Text   "food"     -- :: Expr Text
+F.col Double "ounces"   -- :: Expr Double
+F.col Text   "food"     -- :: Expr Text
 ```
 
 You can compose expressions:
 
 ```haskell
 roomsPerHousehold = D.derive "rooms_per_household"
-    (F.col @Double "total_rooms" / F.col @Double "households")
+    (F.col Double "total_rooms" / F.col Double "households")
     housing
 
 TIO.putStrLn $ D.toMarkdown (D.take 5 roomsPerHousehold)
@@ -321,7 +321,7 @@ meatToAnimal "nova lox"    = "salmon"
 meatToAnimal _             = "unknown"
 
 TIO.putStrLn $ D.toMarkdown
-    (D.derive "animal" (F.lift meatToAnimal (F.col @Text "food")) meat)
+    (D.derive "animal" (F.lift meatToAnimal (F.col Text "food")) meat)
 ```
 
 ### Recoding values
@@ -332,7 +332,7 @@ TIO.putStrLn $ D.toMarkdown
 animalMapping = [("bacon","pig"),("pulled pork","pig"),("pastrami","cow"),("corned beef","cow"),("honey ham","pig"),("nova lox","salmon")]
 
 TIO.putStrLn $ D.toMarkdown
-    (D.derive "animal2" (F.recode animalMapping (F.col @Text "food")) meat)
+    (D.derive "animal2" (F.recode animalMapping (F.col Text "food")) meat)
 ```
 
 ### Opting into stronger type safety
@@ -502,7 +502,7 @@ TIO.putStrLn $ D.toMarkdown (D.take 5 withIncomeCast)
 
 All of the above reads the entire file into memory upfront. For datasets larger than available RAM, `DataFrame.Lazy` offers a pull-based streaming executor: operations build a logical plan tree and nothing is read from disk until `runDataFrame` is called. The optimizer pushes `filter` predicates down to the scan, so unneeded rows are discarded before any column is allocated.
 
-The Lazy path requires an explicit schema — there is no inference. Build one with `schemaType @T`:
+The Lazy path requires an explicit schema — there is no inference. Build one with `schemaType T`:
 
 ```haskell
 -- cabal: build-depends: containers
@@ -511,16 +511,16 @@ import DataFrame.Internal.Schema (Schema (..), schemaType)
 import qualified Data.Map.Strict as M
 
 housingSchema = Schema $ M.fromList
-    [ ("longitude",          schemaType @Double)
-    , ("latitude",           schemaType @Double)
-    , ("housing_median_age", schemaType @Double)
-    , ("total_rooms",        schemaType @Double)
-    , ("total_bedrooms",     schemaType @(Maybe Double))
-    , ("population",         schemaType @Double)
-    , ("households",         schemaType @Double)
-    , ("median_income",      schemaType @Double)
-    , ("median_house_value", schemaType @Double)
-    , ("ocean_proximity",    schemaType @T.Text)
+    [ ("longitude",          schemaType Double)
+    , ("latitude",           schemaType Double)
+    , ("housing_median_age", schemaType Double)
+    , ("total_rooms",        schemaType Double)
+    , ("total_bedrooms",     schemaType (Maybe Double))
+    , ("population",         schemaType Double)
+    , ("households",         schemaType Double)
+    , ("median_income",      schemaType Double)
+    , ("median_house_value", schemaType Double)
+    , ("ocean_proximity",    schemaType T.Text)
     ]
 ```
 
@@ -529,7 +529,7 @@ Build and run a lazy pipeline:
 ```haskell
 lazyQuery =
     L.scanCsv housingSchema "../data/housing.csv"
-        |> L.filter (F.col @Double "median_house_value" .>=. 300000)
+        |> L.filter (F.col Double "median_house_value" .>=. 300000)
         |> L.select ["longitude","latitude","median_house_value","ocean_proximity"]
         |> L.take 10
 
@@ -611,7 +611,7 @@ Three functions manipulate `Text` columns inside expressions.
 emails = D.fromNamedColumns
     [ ("email", D.fromList ["alice@example.com", "bob@haskell.org", "cara@data.io" :: T.Text]) ]
 
-emailParts = D.derive "parts" (F.splitOn "@" (F.col @T.Text "email")) emails
+emailParts = D.derive "parts" (F.splitOn "@" (F.col T.Text "email")) emails
 
 TIO.putStrLn $ D.toMarkdown emailParts
 ```
@@ -621,7 +621,7 @@ TIO.putStrLn $ D.toMarkdown emailParts
 `F.match pattern expr` returns `Just` the first regex match, or `Nothing` if there is none:
 
 ```haskell
-domains = D.derive "domain" (F.match "[a-z]+\\.[a-z]+" (F.col @T.Text "email")) emails
+domains = D.derive "domain" (F.match "[a-z]+\\.[a-z]+" (F.col T.Text "email")) emails
 
 TIO.putStrLn $ D.toMarkdown domains
 ```
@@ -631,7 +631,7 @@ TIO.putStrLn $ D.toMarkdown domains
 `F.matchAll pattern expr` returns a list of *all* matches:
 
 ```haskell
-withWords = D.derive "words" (F.matchAll "[a-z]+" (F.col @T.Text "email")) emails
+withWords = D.derive "words" (F.matchAll "[a-z]+" (F.col T.Text "email")) emails
 
 TIO.putStrLn $ D.toMarkdown withWords
 ```
@@ -650,7 +650,7 @@ events = D.fromNamedColumns
     , ("date_text",  D.fromList ["2025-03-01","2025-06-15","2025-09-30" :: T.Text])
     ]
 
-withDates = D.derive "date" (F.parseDate @Day "%Y-%m-%d" (F.col @T.Text "date_text")) events
+withDates = D.derive "date" (F.parseDate @Day "%Y-%m-%d" (F.col T.Text "date_text")) events
 
 TIO.putStrLn $ D.toMarkdown withDates
 ```
@@ -849,7 +849,7 @@ Histograms show the distribution of a single numeric variable.
 ```haskell
 import qualified DataFrame.Display.Terminal.Plot as P
 
-houseValues = D.columnAsList (F.col @Double "median_house_value") housing
+houseValues = D.columnAsList (F.col Double "median_house_value") housing
 
 TIO.putStrLn $
     histogram
@@ -875,8 +875,8 @@ P.plotHistogram "median_house_value" housing
 Scatter plots reveal relationships between two numeric variables.
 
 ```haskell
-incomes = D.columnAsList (F.col @Double "median_income") housing
-values  = D.columnAsList (F.col @Double "median_house_value") housing
+incomes = D.columnAsList (F.col Double "median_income") housing
+values  = D.columnAsList (F.col Double "median_house_value") housing
 
 TIO.putStrLn $
     scatter
@@ -915,7 +915,7 @@ P.plotBoxPlots ["median_house_value", "median_income"] housing
 Line graphs show trends along a continuous x-axis. The second argument is a list of y-axis column names.
 
 ```haskell
-ages = D.columnAsList (F.col @Double "housing_median_age") housing
+ages = D.columnAsList (F.col Double "housing_median_age") housing
 
 TIO.putStrLn $
     lineGraph
@@ -937,10 +937,10 @@ P.plotCorrelationMatrix housing
 
 ### Opting into stronger type safety
 
-Using `F.col @Double` in `D.columnAsList` ensures only numeric columns reach the plotting functions. Passing a `Text` column to a histogram is a compile error:
+Using `F.col Double` in `D.columnAsList` ensures only numeric columns reach the plotting functions. Passing a `Text` column to a histogram is a compile error:
 
 ```haskell
--- D.columnAsList (F.col @Double "ocean_proximity") housing
+-- D.columnAsList (F.col Double "ocean_proximity") housing
 -- error: column "ocean_proximity" has type Text, not Double
 ```
 
@@ -960,11 +960,11 @@ import DataFrame.Operators (as)
 grouped = D.groupBy ["ocean_proximity"] housing
 
 summary = D.aggregate
-    [ F.count  (F.col @Double "median_house_value") `as` "count"
-    , F.mean   (F.col @Double "median_house_value") `as` "mean_value"
-    , F.median (F.col @Double "median_house_value") `as` "median_value"
-    , F.maximum (F.col @Double "median_house_value") `as` "max_value"
-    , F.minimum (F.col @Double "median_house_value") `as` "min_value"
+    [ F.count  (F.col Double "median_house_value") `as` "count"
+    , F.mean   (F.col Double "median_house_value") `as` "mean_value"
+    , F.median (F.col Double "median_house_value") `as` "median_value"
+    , F.maximum (F.col Double "median_house_value") `as` "max_value"
+    , F.minimum (F.col Double "median_house_value") `as` "min_value"
     ] grouped
 
 TIO.putStrLn $ D.toMarkdown summary
@@ -999,7 +999,7 @@ $(D.declareColumns meat)
 meatGrouped = D.groupBy ["food"] meat
 
 meatSummary = D.aggregate
-    [ F.count (F.col @T.Text "food") `as` "count"
+    [ F.count (F.col T.Text "food") `as` "count"
     , F.sum   ounces                 `as` "total_oz"
     , F.mean  ounces                 `as` "mean_oz"
     ] meatGrouped
@@ -1012,7 +1012,7 @@ TIO.putStrLn $ D.toMarkdown meatSummary
 `D.frequencies expr df` returns a frequency table — row counts and percentages for each unique value:
 
 ```haskell
-TIO.putStrLn $ D.toMarkdown (D.frequencies (F.col @T.Text "ocean_proximity") housing)
+TIO.putStrLn $ D.toMarkdown (D.frequencies (F.col T.Text "ocean_proximity") housing)
 ```
 
 ### Pearson correlation
@@ -1031,7 +1031,7 @@ Aggregate first, then derive new columns from the summary:
 totalRows = fromIntegral (D.nRows housing) :: Double
 
 withShare = D.derive "pct_of_total"
-    (F.toDouble (F.col @Int "count") / F.lit totalRows * F.lit 100.0)
+    (F.toDouble (F.col Int "count") / F.lit totalRows * F.lit 100.0)
     summary
 
 TIO.putStrLn $ D.toMarkdown withShare
@@ -1043,8 +1043,8 @@ A full group-normalise pipeline: group → compute mean and stddev → derive z-
 
 ```haskell
 incomeByProx = D.aggregate
-    [ F.mean   (F.col @Double "median_income") `as` "mean_income"
-    , F.stddev (F.col @Double "median_income") `as` "stddev_income"
+    [ F.mean   (F.col Double "median_income") `as` "mean_income"
+    , F.stddev (F.col Double "median_income") `as` "stddev_income"
     ] (D.groupBy ["ocean_proximity"] housing)
 
 TIO.putStrLn $ D.toMarkdown incomeByProx
@@ -1071,7 +1071,7 @@ A type-level mistake on an aggregated column — say, treating `count` (an `Int`
 
 ### Motivation
 
-Throughout this guide we have used `F.col @Type "colName"` to reference columns. The expressions are typed (the `@Type` annotation is checked), but the schema of the *dataframe* is not in the Haskell type. This creates a subtle foot-gun: an `Expr` built against one dataframe can be silently applied to a completely different dataframe — the compiler will accept it, but at runtime you get either a missing-column error or, worse, wrong results from a same-named column with different semantics.
+Throughout this guide we have used `F.col Type "colName"` to reference columns. The expressions are typed (the `@Type` annotation is checked), but the schema of the *dataframe* is not in the Haskell type. This creates a subtle foot-gun: an `Expr` built against one dataframe can be silently applied to a completely different dataframe — the compiler will accept it, but at runtime you get either a missing-column error or, worse, wrong results from a same-named column with different semantics.
 
 `DataFrame.Typed` solves this by moving the full column schema into the type system. The schema becomes a type-level list of `DT.Column "name" Type` entries. If a column does not exist in a `TypedDataFrame`, or if you use it with the wrong type, the code will not compile.
 
@@ -1115,12 +1115,12 @@ thousing <- either (error . show) id . DT.freezeWithError @Housing <$> D.readCsv
 
 ### Typed transforms
 
-`DT.col @"colName"` looks up the column in the schema at compile time. The type of the expression is inferred automatically — no `@Type` annotation needed. `DT.derive @"newCol"` adds the column to the schema type so subsequent steps can reference it:
+`DT.col "colName"` looks up the column in the schema at compile time. The type of the expression is inferred automatically — no `@Type` annotation needed. `DT.derive "newCol"` adds the column to the schema type so subsequent steps can reference it:
 
 ```haskell
 typedResult = thousing
-    |> DT.derive @"rooms_per_household"    (DT.col @"total_rooms" / DT.col @"households")
-    |> DT.derive @"bedrooms_per_household" (DT.col @"total_bedrooms" / DT.col @"households")
+    |> DT.derive "rooms_per_household"    (DT.col "total_rooms" / DT.col "households")
+    |> DT.derive "bedrooms_per_household" (DT.col "total_bedrooms" / DT.col "households")
 
 TIO.putStrLn $ D.toMarkdown (DT.thaw typedResult)
 ```
@@ -1132,7 +1132,7 @@ TIO.putStrLn $ D.toMarkdown (DT.thaw typedResult)
 ```haskell
 typedGrouped = thousing
     |> DT.groupBy @'["ocean_proximity"]
-    |> DT.aggregate (DT.as @"count" (DT.count (DT.col @"median_house_value")))
+    |> DT.aggregate (DT.as @"count" (DT.count (DT.col "median_house_value")))
 
 TIO.putStrLn $ D.toMarkdown (DT.thaw typedGrouped)
 ```
@@ -1143,7 +1143,7 @@ TIO.putStrLn $ D.toMarkdown (DT.thaw typedGrouped)
 
 | Layer | Best for |
 |---|---|
-| Eager string API (`F.col @T "name"`) | exploration, quick scripts, one-off analyses |
+| Eager string API (`F.col T "name"`) | exploration, quick scripts, one-off analyses |
 | `FrameM` | multi-step transformation pipelines where threading `df` by hand is noisy |
 | `DataFrame.Lazy` | files larger than RAM; push-down filters; ETL pipelines |
 | `DataFrame.Typed` | production pipelines where schema correctness must be guaranteed at compile time |

@@ -13,7 +13,7 @@ import Test.HUnit
 hash-bucket order) can be compared deterministically.
 -}
 sortByA :: D.DataFrame -> D.DataFrame
-sortByA = D.sortBy [D.Asc (F.col @Int "A")]
+sortByA = D.sortBy [D.Asc (F.col Int "A")]
 
 dfA :: D.DataFrame
 dfA =

@@ -1,5 +1,5 @@
-{-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE RequiredTypeArguments #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 
@@ -58,14 +58,14 @@ fitDecisionTree :: forall a. (Columnable a, Ord a) => TreeConfig -> Expr a -> Da
 fitDecisionTree cfg (Col target) df =
     pruneExpr (treeToExpr (taoOptimizeCV @a cfg target condVecs df indices initialTree))
   where
-    condVecs = candidatePool @a cfg target df
+    condVecs = candidatePool a cfg target df
     initialTree = buildCartTree @a cfg target df
     indices = V.enumFromN 0 (nRows df)
 fitDecisionTree _ expr _ = error ("Cannot create tree for compound expression: " ++ show expr)
 
 -- | The deduplicated numeric + discrete candidate pool for a target column.
-candidatePool :: forall a. (Columnable a, Ord a) => TreeConfig -> T.Text -> DataFrame -> [CondVec]
-candidatePool cfg target df = dedupCVByExpr (numericCVs ++ discreteCVs)
+candidatePool :: forall a -> (Columnable a, Ord a) => TreeConfig -> T.Text -> DataFrame -> [CondVec]
+candidatePool a cfg target df = dedupCVByExpr (numericCVs ++ discreteCVs)
   where
     dfNoTarget = exclude [target] df
     numericCVs = numericCondVecs cfg dfNoTarget df
@@ -89,8 +89,8 @@ partitionDataFrame :: Expr Bool -> DataFrame -> (DataFrame, DataFrame)
 partitionDataFrame cond df = (filterWhere cond df, filterWhere (F.not cond) df)
 
 -- | Laplace-smoothed Gini impurity of the target distribution.
-calculateGini :: forall a. (Columnable a, Ord a) => T.Text -> DataFrame -> Double
-calculateGini target df
+calculateGini :: forall a -> (Columnable a, Ord a) => T.Text -> DataFrame -> Double
+calculateGini a target df
     | n == 0 = 0
     | otherwise = 1 - sum (map (^ (2 :: Int)) probs)
   where

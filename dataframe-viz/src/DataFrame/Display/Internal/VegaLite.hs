@@ -1,9 +1,9 @@
-{-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE PolyKinds #-}
+{-# LANGUAGE RequiredTypeArguments #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 
@@ -164,8 +164,8 @@ emptySpec m = VLSpec m [] [] Nothing 600 400 []
 'Quantitative', date/time → 'Temporal', everything else → 'Nominal'. @Maybe a@
 classifies as its inner type.
 -}
-fieldTypeOf :: forall a. (Columnable a) => FieldType
-fieldTypeOf = classify (typeRep @a)
+fieldTypeOf :: forall a -> (Columnable a) => FieldType
+fieldTypeOf a = classify (typeRep @a)
 
 classify :: forall k (x :: k). TypeRep x -> FieldType
 classify tr
@@ -214,7 +214,7 @@ stored under the given fallback name.
 resolveField ::
     forall a. (Columnable a) => DataFrame -> T.Text -> Expr a -> ResolvedField
 resolveField df fallbackName expr =
-    let ft = fieldTypeOf @a
+    let ft = fieldTypeOf a
         (name, col) = case expr of
             Col cname -> (cname, lookupCol cname)
             _ -> (fallbackName, materialiseExpr df expr)

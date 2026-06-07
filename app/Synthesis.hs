@@ -31,7 +31,7 @@ type RawPredSchema =
     '[DT.Column "Survived" (Maybe Int), DT.Column "prediction" Int]
 
 prediction :: D.Expr Int
-prediction = F.col @Int "prediction"
+prediction = F.col "prediction"
 
 main :: IO ()
 main = do
@@ -39,9 +39,9 @@ main = do
     rawTest <- D.readCsv "./data/titanic/test.csv"
 
     train <-
-        maybe (fail "train.csv schema mismatch") pure (DT.freeze @TrainSchema rawTrain)
+        maybe (fail "train.csv schema mismatch") pure (DT.freeze TrainSchema rawTrain)
     test <-
-        maybe (fail "test.csv schema mismatch") pure (DT.freeze @TestSchema rawTest)
+        maybe (fail "test.csv schema mismatch") pure (DT.freeze TestSchema rawTest)
 
     let (trainDf, validDf) =
             D.randomSplit (mkStdGen 4232) 0.7 (DT.thaw (clean train))
@@ -66,7 +66,7 @@ main = do
                             }
                     }
                 )
-                (F.fromMaybe 0 (F.col @(Maybe Int) "Survived"))
+                (F.fromMaybe 0 (F.col (Maybe Int) "Survived"))
                 (trainDf |> D.exclude ["PassengerId"])
 
     print model
@@ -95,7 +95,7 @@ clean ::
     DT.TypedDataFrame cols ->
     DT.TypedDataFrame
         ( DT.RenameManyInSchema
-            '[ '("Name", "title")
+             [ '("Name", "title")
              , '("Cabin", "cabin_prefix")
              , '("Pclass", "passenger_class")
              , '("SibSp", "number_of_siblings_and_spouses")
@@ -105,15 +105,15 @@ clean ::
         )
 clean tdf =
     tdf
-        |> DT.replaceColumn @"Ticket" (DT.nullLift (T.filter isAlpha) (DT.col @"Ticket"))
-        |> DT.replaceColumn @"Name" (DT.nullLift extractTitle (DT.col @"Name"))
-        |> DT.replaceColumn @"Cabin" (DT.nullLift (T.take 1) (DT.col @"Cabin"))
+        |> DT.replaceColumn "Ticket" (DT.nullLift (T.filter isAlpha) (DT.col "Ticket"))
+        |> DT.replaceColumn "Name" (DT.nullLift extractTitle (DT.col "Name"))
+        |> DT.replaceColumn "Cabin" (DT.nullLift (T.take 1) (DT.col "Cabin"))
         |> DT.renameMany
-            @'[ '("Name", "title")
-              , '("Cabin", "cabin_prefix")
-              , '("Pclass", "passenger_class")
-              , '("SibSp", "number_of_siblings_and_spouses")
-              , '("Parch", "number_of_parents_and_children")
+              [ ("Name", "title")
+              , ("Cabin", "cabin_prefix")
+              , ("Pclass", "passenger_class")
+              , ("SibSp", "number_of_siblings_and_spouses")
+              , ("Parch", "number_of_parents_and_children")
               ]
 
 -- | Extract title (e.g. "Mr", "Mrs") from a full Titanic passenger name.
@@ -129,11 +129,11 @@ extractTitle fullName =
 computeAccuracy :: D.DataFrame -> Double
 computeAccuracy df =
     let tdf =
-            DT.impute @"Survived" 0 $
+            DT.impute "Survived" 0 $
                 DT.unsafeFreeze @RawPredSchema $
                     df |> D.select ["Survived", "prediction"]
-        survived = DT.col @"Survived"
-        predCol = DT.col @"prediction"
+        survived = DT.col "Survived"
+        predCol = DT.col "prediction"
         count expr = fromIntegral (DT.nRows (DT.filterWhere expr tdf))
         tp = count ((survived DT..==. DT.lit 1) DT..&&. (predCol DT..==. DT.lit 1))
         tn = count ((survived DT..==. DT.lit 0) DT..&&. (predCol DT..==. DT.lit 0))

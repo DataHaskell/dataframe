@@ -5,6 +5,7 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RankNTypes #-}
+{-# LANGUaGE RequiredTypeArguments #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE UndecidableInstances #-}
@@ -85,7 +86,7 @@ add the result into `alias` column but
 
 ==== __Examples__
 
->>> (z, df') = deriveWithExpr "z" (F.col @Int "x" + F.col "y") df
+>>> (z, df') = deriveWithExpr "z" (F.col Int "x" + F.col "y") df
 >>> filterWhere (z .>= 50)
 -}
 deriveWithExpr ::

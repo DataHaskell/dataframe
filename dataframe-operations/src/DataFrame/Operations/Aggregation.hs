@@ -69,11 +69,11 @@ computeRowHashes indices df = runST $ do
                         Just Refl ->
                             hashKeyUnboxed mv ubm mixDouble v
                         Nothing ->
-                            case sIntegral @a of
+                            case sIntegral a of
                                 STrue ->
                                     hashKeyUnboxed mv ubm (\h d -> mixInt h (fromIntegral @a @Int d)) v
                                 SFalse ->
-                                    case sFloating @a of
+                                    case sFloating a of
                                         STrue ->
                                             hashKeyUnboxed mv ubm (\h d -> mixDouble h (realToFrac d :: Double)) v
                                         SFalse ->

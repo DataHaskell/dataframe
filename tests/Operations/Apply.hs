@@ -225,7 +225,7 @@ imputeHappyPath =
         ( assertEqual
             "impute fills Nothing with the given value"
             (Just $ DI.UnboxedColumn Nothing (VU.fromList [1 :: Int, 0, 3]))
-            (DI.getColumn "opt" $ impute (F.col @(Maybe Int) "opt") 0 imputeData)
+            (DI.getColumn "opt" $ impute (F.col (Maybe Int) "opt") 0 imputeData)
         )
 
 imputeColumnNotFound :: Test
@@ -234,7 +234,7 @@ imputeColumnNotFound =
         ( assertExpectException
             "[Error Case]"
             (DE.columnNotFound "missing" "impute" (D.columnNames imputeData))
-            (print $ impute (F.col @(Maybe Int) "missing") 0 imputeData)
+            (print $ impute (F.col (Maybe Int) "missing") 0 imputeData)
         )
 
 imputeOnNonOptional :: Test
@@ -243,7 +243,7 @@ imputeOnNonOptional =
         ( assertEqual
             "impute is a no-op on a non-nullable column"
             imputeData
-            (impute (F.col @(Maybe Int) "plain") 0 imputeData)
+            (impute (F.col (Maybe Int) "plain") 0 imputeData)
         )
 
 imputePlainNoOp :: Test
@@ -252,7 +252,7 @@ imputePlainNoOp =
         ( assertEqual
             "impute with non-Maybe expr is always a no-op"
             imputeData
-            (impute (F.col @Int "plain") 0 imputeData)
+            (impute (F.col Int "plain") 0 imputeData)
         )
 
 imputeWithPlainNoOp :: Test
@@ -261,7 +261,7 @@ imputeWithPlainNoOp =
         ( assertEqual
             "imputeWith with non-Maybe expr is always a no-op"
             imputeData
-            (imputeWith id (F.col @Int "plain") imputeData)
+            (imputeWith id (F.col Int "plain") imputeData)
         )
 
 tests :: [Test]

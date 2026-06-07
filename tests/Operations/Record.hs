@@ -234,15 +234,15 @@ deriveSchemaSplice = TestCase $ do
         (M.keys (IS.elements orderSchema))
     assertEqual
         "order_id is Int64"
-        (Just (IS.schemaType @Int64))
+        (Just (IS.schemaType Int64))
         (M.lookup "order_id" (IS.elements orderSchema))
     assertEqual
         "region is Text"
-        (Just (IS.schemaType @T.Text))
+        (Just (IS.schemaType T.Text))
         (M.lookup "region" (IS.elements orderSchema))
     assertEqual
         "amount is Double"
-        (Just (IS.schemaType @Double))
+        (Just (IS.schemaType Double))
         (M.lookup "amount" (IS.elements orderSchema))
 
 deriveSchemaNullable :: Test
@@ -253,15 +253,15 @@ deriveSchemaNullable = TestCase $ do
         (M.keys (IS.elements userSchema))
     assertEqual
         "user_id is Int64"
-        (Just (IS.schemaType @Int64))
+        (Just (IS.schemaType Int64))
         (M.lookup "user_id" (IS.elements userSchema))
     assertEqual
         "user_name is Maybe Text"
-        (Just (IS.schemaType @(Maybe T.Text)))
+        (Just (IS.schemaType (Maybe T.Text)))
         (M.lookup "user_name" (IS.elements userSchema))
     assertEqual
         "user_age is Maybe Int"
-        (Just (IS.schemaType @(Maybe Int)))
+        (Just (IS.schemaType (Maybe Int)))
         (M.lookup "user_age" (IS.elements userSchema))
 
 deriveSchemaWide :: Test
@@ -272,11 +272,11 @@ deriveSchemaWide = TestCase $ do
         (M.size (IS.elements wideSchema))
     assertEqual
         "f1 is Int"
-        (Just (IS.schemaType @Int))
+        (Just (IS.schemaType Int))
         (M.lookup "f1" (IS.elements wideSchema))
     assertEqual
         "f8 is Int"
-        (Just (IS.schemaType @Int))
+        (Just (IS.schemaType Int))
         (M.lookup "f8" (IS.elements wideSchema))
 
 deriveSchemaReadsCsv :: Test
@@ -335,7 +335,7 @@ deriveSchemaAccessorDerive = TestCase $ do
     assertEqual
         "accessor composes in derive expression"
         [20.0, 40.0]
-        (D.columnAsList (D.col @Double "double_amount") df')
+        (D.columnAsList (D.col Double "double_amount") df')
 
 labelColumnFilter :: Test
 labelColumnFilter = TestCase $ do
@@ -346,7 +346,7 @@ labelColumnFilter = TestCase $ do
         Left e -> assertFailure (T.unpack e)
         Right xs ->
             assertEqual
-                "#region OverloadedLabel resolves to col @\"region\""
+                "#region OverloadedLabel resolves to col \"region\""
                 [Order 1 "us" 10.0]
                 xs
 

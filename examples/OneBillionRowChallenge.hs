@@ -16,13 +16,13 @@ import DataFrame.Operators
 
 run :: IO ()
 run = do
-    let city = F.col @Text "names"
-    let measurement = F.col @Double "temperature"
+    let city = F.col Text "names"
+    let measurement = F.col Double "temperature"
     let schema =
             Schema $
                 M.fromList
-                    [ (F.name city, schemaType @Text)
-                    , (F.name measurement, schemaType @Double)
+                    [ (F.name city, schemaType Text)
+                    , (F.name measurement, schemaType Double)
                     ]
 
     startCalculation <- getCurrentTime

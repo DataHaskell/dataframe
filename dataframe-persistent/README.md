@@ -26,7 +26,7 @@ write a `persistent` entity, a `persistLowerCase` block, or any instances.
 | Tier | You write | You get |
 |------|-----------|---------|
 | **Runtime** | `readTable db "artists"` | a `DataFrame`, types inferred from the schema |
-| **Typed** | `$(declareTable db "artists")` + `readTableTyped @Schema` | a compile-time schema type; columns checked by `col @"Name"` |
+| **Typed** | `$(declareTable db "artists")` + `readTableTyped Schema` | a compile-time schema type; columns checked by `col "Name"` |
 | **Persistent** | `$(declareEntity db "artists")` | a full `persistent` entity: typed `Filter` DSL, write-back |
 
 ## Tier 0: runtime reads
@@ -114,7 +114,7 @@ D.toMarkdown' <$> readTableWith "./data/chinook.db" "artists" (allRows & limit 3
 
 `declareTable` reads the schema at compile time and emits just the schema type. You read into it
 with `readTableTyped`, where the schema is a type argument and the database and table are ordinary
-values. Column references go through `col @"Name"`, checked against the schema, so a typo or a wrong
+values. Column references go through `col "Name"`, checked against the schema, so a typo or a wrong
 type is a compile error. Nothing is keyed on a generated function name.
 
 ```haskell
@@ -134,11 +134,11 @@ $(declareTable "./data/chinook.db" "artists")
 
 > <!-- scripths:mime text/plain -->
 
-`readTableTyped @ArtistsSchema` reads any database/table into a `TypedDataFrame ArtistsSchema` (it
+`readTableTyped ArtistsSchema` reads any database/table into a `TypedDataFrame ArtistsSchema` (it
 validates the schema as it reads). You can bind your own reader:
 
 ```haskell
-artists = readTableTyped @ArtistsSchema "./data/chinook.db" "artists"
+artists = readTableTyped ArtistsSchema "./data/chinook.db" "artists"
 ```
 
 > <!-- scripths:mime text/plain -->
@@ -158,11 +158,11 @@ D.toMarkdown' . D.take 5 . DT.thaw <$> artists
 > | 4               | Just "Alanis Morissette" |
 > | 5               | Just "Alice In Chains"   |
 
-Column access is checked against the schema. `col @"Name"` only compiles because `"Name"` is a
+Column access is checked against the schema. `col "Name"` only compiles because `"Name"` is a
 column of `ArtistsSchema` (its element type is `Maybe Text`):
 
 ```haskell
-DT.columnAsList @"Name" . DT.take 3 <$> artists
+DT.columnAsList "Name" . DT.take 3 <$> artists
 ```
 
 > <!-- scripths:mime text/plain -->
@@ -172,7 +172,7 @@ A filter on a column that doesn't exist (or has the wrong type) is a compile err
 runtime surprise:
 
 ```haskell
-D.toMarkdown' . DT.thaw . DT.filterWhere (DT.col @"Name" .==. DT.lit (Just "Accept")) <$> artists
+D.toMarkdown' . DT.thaw . DT.filterWhere (DT.col "Name" .==. DT.lit (Just "Accept")) <$> artists
 ```
 
 > <!-- scripths:mime text/plain -->
@@ -181,15 +181,15 @@ D.toMarkdown' . DT.thaw . DT.filterWhere (DT.col @"Name" .==. DT.lit (Just "Acce
 > | 2               | Just "Accept"      |
 
 Because the database is a value, reading the same table from two sources to join them is just two
-calls with the same `@ArtistsSchema`:
+calls with the same `ArtistsSchema`:
 
 ```text
-a <- readTableTyped @ArtistsSchema "europe.sqlite" "artists"
-b <- readTableTyped @ArtistsSchema "us.sqlite"     "artists"
+a <- readTableTyped ArtistsSchema "europe.sqlite" "artists"
+b <- readTableTyped ArtistsSchema "us.sqlite"     "artists"
 -- DT.thaw a / DT.thaw b, then DataFrame.innerJoin on "ArtistId", etc.
 ```
 
-(`readSqlTyped @cols db "SELECT ... JOIN ..."` does the same for an arbitrary query. The Postgres
+(`readSqlTyped cols db "SELECT ... JOIN ..."` does the same for an arbitrary query. The Postgres
 section below reads this same `ArtistsSchema` from a different backend.)
 
 ## Tier 2: generate a `persistent` entity
