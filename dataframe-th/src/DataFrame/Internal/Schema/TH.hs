@@ -52,7 +52,7 @@ deriveSchema tyName = do
         tupleE (colName, _, fTy) =
             TupE
                 [ Just (AppE (VarE 'T.pack) (LitE (StringL colName)))
-                , Just (AppTypeE (VarE 'schemaType) fTy)
+                , Just (AppE (VarE 'schemaType) (TypeE fTy))
                 ]
         schemaBody =
             AppE (VarE 'makeSchema) (ListE (map tupleE entries))
@@ -67,7 +67,10 @@ deriveSchema tyName = do
                         (VarP accName)
                         ( NormalB
                             ( AppE
-                                (VarE 'col)
+                                ( AppE
+                                    (VarE 'col)
+                                    (TypeE fTy)
+                                )
                                 ( AppE
                                     (VarE 'T.pack)
                                     (LitE (StringL colName))

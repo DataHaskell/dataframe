@@ -1,10 +1,11 @@
-{-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE RequiredTypeArguments #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeAbstractions #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
@@ -123,12 +124,12 @@ filterJust \@\"x\" df
 @
 -}
 filterJust ::
-    forall name cols.
+    forall name -> forall cols.
     ( KnownSymbol name
     , AssertPresent name cols
     ) =>
     TypedDataFrame cols -> TypedDataFrame (StripMaybeAt name cols)
-filterJust (TDF df) = unsafeFreeze (D.filterJust colName df)
+filterJust name (TDF df) = unsafeFreeze (D.filterJust colName df)
   where
     colName = T.pack (symbolVal (Proxy @name))
 
@@ -136,12 +137,12 @@ filterJust (TDF df) = unsafeFreeze (D.filterJust colName df)
 Schema is preserved (column types unchanged, just fewer rows).
 -}
 filterNothing ::
-    forall name cols.
+    forall name -> forall cols.
     ( KnownSymbol name
     , AssertPresent name cols
     ) =>
     TypedDataFrame cols -> TypedDataFrame cols
-filterNothing (TDF df) = TDF (D.filterNothing colName df)
+filterNothing name (TDF df) = TDF (D.filterNothing colName df)
   where
     colName = T.pack (symbolVal (Proxy @name))
 
@@ -206,7 +207,7 @@ df' = derive \@\"total\" (col \@\"price\" * col \@\"qty\") df
 @
 -}
 derive ::
-    forall name a cols.
+    forall name -> forall a cols.
     ( KnownSymbol name
     , Columnable a
     , AssertAbsent name cols
@@ -214,12 +215,12 @@ derive ::
     TExpr cols a ->
     TypedDataFrame cols ->
     TypedDataFrame (Snoc cols (T.Column name a))
-derive (TExpr expr) (TDF df) = unsafeFreeze (D.derive colName expr df)
+derive name (TExpr expr) (TDF df) = unsafeFreeze (D.derive colName expr df)
   where
     colName = T.pack (symbolVal (Proxy @name))
 
 impute ::
-    forall name a cols.
+    forall name -> forall a cols.
     ( KnownSymbol name
     , Columnable a
     , Maybe a ~ Lookup name cols
@@ -227,105 +228,105 @@ impute ::
     a ->
     TypedDataFrame cols ->
     TypedDataFrame (Impute name cols)
-impute value (TDF df) =
+impute name @a value (TDF df) =
     unsafeFreeze
-        (D.derive colName (DF.fromMaybe value (DF.col @(Maybe a) colName)) df)
+        (D.derive colName (DF.fromMaybe value (DF.col (Maybe a) colName)) df)
   where
     colName = T.pack (symbolVal (Proxy @name))
 
 -- | Select a subset of columns by name.
 select ::
-    forall (names :: [Symbol]) cols.
+    forall (names :: [Symbol]) -> forall cols.
     (AllKnownSymbol names, AssertAllPresent names cols) =>
     TypedDataFrame cols -> TypedDataFrame (SubsetSchema names cols)
-select (TDF df) = unsafeFreeze (D.select (symbolVals @names) df)
+select names (TDF df) = unsafeFreeze (D.select (symbolVals names) df)
 
 -- | Exclude columns by name.
 exclude ::
-    forall (names :: [Symbol]) cols.
+    forall (names :: [Symbol]) -> forall cols.
     (AllKnownSymbol names) =>
     TypedDataFrame cols -> TypedDataFrame (ExcludeSchema names cols)
-exclude (TDF df) = unsafeFreeze (D.exclude (symbolVals @names) df)
+exclude names (TDF df) = unsafeFreeze (D.exclude (symbolVals names) df)
 
 -- | Rename a column.
 rename ::
-    forall old new cols.
+    forall old new -> forall cols.
     (KnownSymbol old, KnownSymbol new) =>
     TypedDataFrame cols -> TypedDataFrame (RenameInSchema old new cols)
-rename (TDF df) = unsafeFreeze (D.rename oldName newName df)
+rename old new (TDF df) = unsafeFreeze (D.rename oldName newName df)
   where
     oldName = T.pack (symbolVal (Proxy @old))
     newName = T.pack (symbolVal (Proxy @new))
 
 -- | Rename multiple columns from a type-level list of pairs.
 renameMany ::
-    forall (pairs :: [(Symbol, Symbol)]) cols.
+    forall (pairs :: [(Symbol, Symbol)]) -> forall cols.
     (AllKnownPairs pairs) =>
     TypedDataFrame cols -> TypedDataFrame (RenameManyInSchema pairs cols)
-renameMany (TDF df) = unsafeFreeze (foldRenames (pairVals @pairs) df)
+renameMany pairs (TDF df) = unsafeFreeze (foldRenames (pairVals pairs) df)
   where
     foldRenames [] df' = df'
     foldRenames ((old, new) : rest) df' = foldRenames rest (D.rename old new df')
 
 -- | Insert a new column from a Foldable container.
 insert ::
-    forall name a cols t.
+    forall name -> forall a cols t.
     ( KnownSymbol name
     , Columnable a
     , Foldable t
     , AssertAbsent name cols
     ) =>
     t a -> TypedDataFrame cols -> TypedDataFrame (T.Column name a ': cols)
-insert xs (TDF df) = unsafeFreeze (D.insert colName xs df)
+insert name xs (TDF df) = unsafeFreeze (D.insert colName xs df)
   where
     colName = T.pack (symbolVal (Proxy @name))
 
 -- | Insert a raw 'Column' value.
 insertColumn ::
-    forall name a cols.
+    forall name -> forall a cols.
     ( KnownSymbol name
     , Columnable a
     , AssertAbsent name cols
     ) =>
     C.Column -> TypedDataFrame cols -> TypedDataFrame (T.Column name a ': cols)
-insertColumn col (TDF df) = unsafeFreeze (D.insertColumn colName col df)
+insertColumn name col (TDF df) = unsafeFreeze (D.insertColumn colName col df)
   where
     colName = T.pack (symbolVal (Proxy @name))
 
 -- | Insert a boxed 'Vector'.
 insertVector ::
-    forall name a cols.
+    forall name -> forall a cols.
     ( KnownSymbol name
     , Columnable a
     , AssertAbsent name cols
     ) =>
     V.Vector a -> TypedDataFrame cols -> TypedDataFrame (T.Column name a ': cols)
-insertVector vec (TDF df) = unsafeFreeze (D.insertVector colName vec df)
+insertVector name vec (TDF df) = unsafeFreeze (D.insertVector colName vec df)
   where
     colName = T.pack (symbolVal (Proxy @name))
 
 -- | Clone an existing column under a new name.
 cloneColumn ::
-    forall old new cols.
+    forall old new -> forall cols.
     ( KnownSymbol old
     , KnownSymbol new
     , AssertPresent old cols
     , AssertAbsent new cols
     ) =>
     TypedDataFrame cols -> TypedDataFrame (T.Column new (Lookup old cols) ': cols)
-cloneColumn (TDF df) = unsafeFreeze (D.cloneColumn oldName newName df)
+cloneColumn old new (TDF df) = unsafeFreeze (D.cloneColumn oldName newName df)
   where
     oldName = T.pack (symbolVal (Proxy @old))
     newName = T.pack (symbolVal (Proxy @new))
 
 -- | Drop a column by name.
 dropColumn ::
-    forall name cols.
+    forall name -> forall cols.
     ( KnownSymbol name
     , AssertPresent name cols
     ) =>
     TypedDataFrame cols -> TypedDataFrame (RemoveColumn name cols)
-dropColumn (TDF df) = unsafeFreeze (D.exclude [colName] df)
+dropColumn name (TDF df) = unsafeFreeze (D.exclude [colName] df)
   where
     colName = T.pack (symbolVal (Proxy @name))
 
@@ -333,14 +334,14 @@ dropColumn (TDF df) = unsafeFreeze (D.exclude [colName] df)
 The column must already exist and the new type must match.
 -}
 replaceColumn ::
-    forall name a cols.
+    forall name -> forall a cols.
     ( KnownSymbol name
     , Columnable a
     , a ~ SafeLookup name cols
     , AssertPresent name cols
     ) =>
     TExpr cols a -> TypedDataFrame cols -> TypedDataFrame cols
-replaceColumn (TExpr expr) (TDF df) = unsafeFreeze (D.derive colName expr df)
+replaceColumn name (TExpr expr) (TDF df) = unsafeFreeze (D.derive colName expr df)
   where
     colName = T.pack (symbolVal (Proxy @name))
 
@@ -396,17 +397,17 @@ columnNames (TDF df) = D.columnNames df
 
 -- | Helper class for extracting [(Text, Text)] from type-level pairs.
 class AllKnownPairs (pairs :: [(Symbol, Symbol)]) where
-    pairVals :: [(T.Text, T.Text)]
+    pairVals :: forall pairs' -> (pairs ~ pairs') => [(T.Text, T.Text)]
 
 instance AllKnownPairs '[] where
-    pairVals = []
+    pairVals _ = []
 
 instance
     (KnownSymbol a, KnownSymbol b, AllKnownPairs rest) =>
     AllKnownPairs ('(a, b) ': rest)
     where
-    pairVals =
+    pairVals _ =
         ( T.pack (symbolVal (Proxy @a))
         , T.pack (symbolVal (Proxy @b))
         )
-            : pairVals @rest
+            : pairVals rest

@@ -197,7 +197,7 @@ testDataFrameOperations = TestCase $ withTestDb $ do
         assertEqual "Young users count" 2 (nRows youngUsers)
 
         -- Sort operation
-        let sorted = DF.sortBy [DF.Asc (F.col @Int "age")] df
+        let sorted = DF.sortBy [DF.Asc (F.col Int "age")] df
         let ages = DF.columnAsList test_user_age sorted
         assertEqual "Ages sorted" [25, 28, 30, 35] ages
 

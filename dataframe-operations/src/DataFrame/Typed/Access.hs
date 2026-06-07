@@ -1,7 +1,8 @@
-{-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE RequiredTypeArguments #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeAbstractions #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
@@ -28,28 +29,28 @@ import DataFrame.Typed.Types (TypedDataFrame (..))
 the schema. The column must exist (enforced at compile time).
 -}
 columnAsVector ::
-    forall name cols a.
+    forall name -> forall cols a.
     ( KnownSymbol name
     , a ~ SafeLookup name cols
     , Columnable a
     , AssertPresent name cols
     ) =>
     TypedDataFrame cols -> V.Vector a
-columnAsVector (TDF df) =
+columnAsVector name @_ @a (TDF df) =
     either throw id $ D.columnAsVector (Col @a colName) df
   where
     colName = T.pack (symbolVal (Proxy @name))
 
 -- | Retrieve a column as a list, with the type determined by the schema.
 columnAsList ::
-    forall name cols a.
+    forall name -> forall cols a.
     ( KnownSymbol name
     , a ~ SafeLookup name cols
     , Columnable a
     , AssertPresent name cols
     ) =>
     TypedDataFrame cols -> [a]
-columnAsList (TDF df) =
+columnAsList name @_ @a (TDF df) =
     D.columnAsList (Col @a colName) df
   where
     colName = T.pack (symbolVal (Proxy @name))

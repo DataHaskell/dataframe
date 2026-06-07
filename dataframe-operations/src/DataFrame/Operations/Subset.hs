@@ -208,7 +208,7 @@ filterBy = flip filter
 
 {- | O(k) filters the dataframe with a boolean expression.
 
-> filterWhere (F.col @Int x + F.col y F.> 5) df
+> filterWhere (F.col Int x + F.col y F.> 5) df
 -}
 filterWhere :: Expr Bool -> DataFrame -> DataFrame
 filterWhere expr df =
@@ -408,7 +408,7 @@ sample :: (RandomGen g) => g -> Double -> DataFrame -> DataFrame
 sample pureGen p df =
     let
         rand = mkRandom pureGen (fst (dataframeDimensions df)) (0 :: Double) 1
-        cRand = col @Double "__rand__"
+        cRand = col Double "__rand__"
      in
         df
             & insertColumn (name cRand) rand
@@ -429,7 +429,7 @@ randomSplit ::
 randomSplit pureGen p df =
     let
         rand = mkRandom pureGen (fst (dataframeDimensions df)) (0 :: Double) 1
-        cRand = col @Double "__rand__"
+        cRand = col Double "__rand__"
         withRand = df & insertColumn (name cRand) rand
      in
         ( withRand
@@ -454,7 +454,7 @@ kFolds :: (RandomGen g) => g -> Int -> DataFrame -> [DataFrame]
 kFolds pureGen folds df =
     let
         rand = mkRandom pureGen (fst (dataframeDimensions df)) (0 :: Double) 1
-        cRand = col @Double "__rand__"
+        cRand = col Double "__rand__"
         withRand = df & insertColumn (name cRand) rand
         partitionSize = 1 / fromIntegral folds
         singleFold n d =

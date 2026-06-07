@@ -23,7 +23,7 @@ same underlying `DataFrame` type at runtime.
 | **Frame monad** | x | - | Sequential pipelines where an intermediate column feeds later steps |
 | **Typed** | x | x | Production code, libraries, anywhere a schema change should be a compile error |
 
-**Untyped** is what most of this guide uses: expressions built with `F.col @Type "name"` and
+**Untyped** is what most of this guide uses: expressions built with `F.col Type "name"` and
 operations like `D.derive`, `D.filterWhere`, `D.groupBy`.  Column names are strings — typos only
 surface at runtime.
 
@@ -34,8 +34,8 @@ The whole computation stays pure — `execFrameM df m` just runs it.
 
 **Typed** wraps `DataFrame` in a phantom type that tracks the full schema as a type-level list of
 `Column "name" Type` entries.  The `freeze`/`freezeWithError` boundary validates the runtime
-frame against the declared schema.  After that, every column access (`T.col @"salary"`), every
-derivation (`T.derive @"bonus"`), and every `select`/`exclude`/`rename` is checked at compile time.
+frame against the declared schema.  After that, every column access (`T.col "salary"`), every
+derivation (`T.derive "bonus"`), and every `select`/`exclude`/`rename` is checked at compile time.
 Operations like `T.filterAllJust` go further — they change the **type**, promoting `Maybe Int`
 columns to `Int` in the result schema so that downstream code can no longer treat them as optional.
 
@@ -293,7 +293,7 @@ python> df.sort_values(by='E')
 Since we don't support row indexes, we only provide column-based sorting. You specify the sort direction and column names:
 
 ```haskell
-dataframe> D.sortBy [D.Asc (F.col @Transport "E")] df
+dataframe> D.sortBy [D.Asc (F.col Transport "E")] df
 -------------------------------------------------------
    A    |     B      |   C   |  D  |     E     |   F   
 --------|------------|-------|-----|-----------|-------
@@ -393,8 +393,8 @@ import qualified DataFrame as D
 import qualified DataFrame.Functions as F
 import DataFrame.Operators
 
-df |> D.derive "doubled_A" (F.col @Double "A" * F.lit 2)
-   |> D.filterWhere (F.col @Double "doubled_A" .>. F.lit 1.0)
+df |> D.derive "doubled_A" (F.col Double "A" * F.lit 2)
+   |> D.filterWhere (F.col Double "doubled_A" .>. F.lit 1.0)
    |> D.select ["date", "doubled_A"]
 ```
 
@@ -407,7 +407,7 @@ but forget to update `filterWhere`, the error only appears when the code runs.
 import DataFrame.Monad
 
 execFrameM df $ do
-    doubledA <- deriveM "doubled_A" (F.col @Double "A" * F.lit 2)
+    doubledA <- deriveM "doubled_A" (F.col Double "A" * F.lit 2)
     filterWhereM (doubledA .>. F.lit 1.0)
     modifyM (D.select ["date", "doubled_A"])
 ```
@@ -437,13 +437,13 @@ type MySchema = '[ T.Column "date" Day
 case T.freeze @MySchema df of
     Nothing  -> error "schema mismatch at startup"
     Just tdf ->
-        tdf |> T.derive @"doubled_A" (T.col @"A" * T.lit 2)
-            |> T.filterWhere (T.col @"doubled_A" .>. T.lit 1.0)
+        tdf |> T.derive "doubled_A" (T.col "A" * T.lit 2)
+            |> T.filterWhere (T.col "doubled_A" .>. T.lit 1.0)
             |> T.select @'["date", "doubled_A"]
 ```
 
-**Why it's better**: `T.col @"A"` is a compile-time error if the column `"A"` does not exist in
-`MySchema` or has the wrong type.  The same applies to `T.col @"doubled_A"` in `filterWhere` — if
+**Why it's better**: `T.col "A"` is a compile-time error if the column `"A"` does not exist in
+`MySchema` or has the wrong type.  The same applies to `T.col "doubled_A"` in `filterWhere` — if
 you accidentally filter before deriving, or use the wrong type annotation, the code does not
 compile.  Typos in column names, wrong aggregation types, and schema-breaking refactors are all
 caught before the program runs.
@@ -481,7 +481,7 @@ python> df.fillna(5)
 In Haskell, we use the `impute` function:
 
 ```haskell
-dataframe> D.impute (F.col @Integer "G") 5 df'
+dataframe> D.impute (F.col Integer "G") 5 df'
 -----------------------------------------------------------------
    A    |     B      |   C   |  D  |     E     |   F    |    G   
 --------|------------|-------|-----|-----------|--------|--------
@@ -643,8 +643,8 @@ main = do
     let year d = let (y, _, _) = toGregorian d in y
     
     print $ df_csv
-          |> D.derive "birth_year" (F.lift year (F.col @Day "birthdate"))
-          |> D.derive "bmi" (F.col @Double "weight" / (F.pow (F.col @Double "height") 2))
+          |> D.derive "birth_year" (F.lift year (F.col Day "birthdate"))
+          |> D.derive "bmi" (F.col Double "weight" / (F.pow (F.col Double "height") 2))
           |> D.select ["name", "birth_year", "bmi"]
 ```
 
@@ -666,7 +666,7 @@ main = do
 
 1. `derive "birth_year"` creates a new column by extracting years from birthdates
    - `F.lift` adapts a regular Haskell function to work with columns
-   - `F.col @Day "birthdate"` references the birthdate column with explicit type
+   - `F.col Day "birthdate"` references the birthdate column with explicit type
 2. `derive "bmi"` creates another column with the BMI formula
    - `F.pow <col> 2` squares the height
    - Division works directly on column expressions
@@ -721,7 +721,7 @@ df_csv
 **However**, you can use standard Haskell functions to reduce repetition:
 
 ```haskell
-let reduce name = D.derive (name <> "-5%") ((F.col @Double name) * (F.lit 0.95))
+let reduce name = D.derive (name <> "-5%") ((F.col Double name) * (F.lit 0.95))
 df_csv
     |> foldl (flip reduce) ["weight", "height"]
     |> D.select ["name", "weight-5%", "height-5%"]
@@ -813,9 +813,9 @@ Alternatively, you can use `filterWhere` with boolean expression combinations:
 
 ```haskell
 df_csv
-  |> D.filterWhere ((F.col @Int "birth_year" .>=. 1982)
-                    .&&. (F.col @Int "birth_year" .<=. 1996)
-                    .&&. (F.col @Double "height" .>. 1.7))
+  |> D.filterWhere ((F.col Int "birth_year" .>=. 1982)
+                    .&&. (F.col Int "birth_year" .<=. 1996)
+                    .&&. (F.col Double "height" .>. 1.7))
 ```
 
 ### Grouping and Aggregation
@@ -841,9 +841,9 @@ let decade d = let (y, _, _) = toGregorian d
                 in (y `div` 10) * 10
 
 df_csv
-    |> D.derive "decade" (F.lift decade (F.col @Day "birthdate"))
+    |> D.derive "decade" (F.lift decade (F.col Day "birthdate"))
     |> D.groupBy ["decade"]
-    |> D.aggregate [F.count (F.col @Day "decade") `as` "Count"]
+    |> D.aggregate [F.count (F.col Day "decade") `as` "Count"]
 ```
 
 **Output:**
@@ -890,11 +890,11 @@ let decade d = let (y, _, _) = toGregorian d
                 in (y `div` 10) * 10
 
 df_csv
-    |> D.derive "decade" (F.lift decade (F.col @Day "birthdate"))
+    |> D.derive "decade" (F.lift decade (F.col Day "birthdate"))
     |> D.groupBy ["decade"]
-    |> D.aggregate [ F.count (F.col @Day "decade") `as` "sample_size"
-                   , F.mean (F.col @Double "weight") `as` "avg_weight"
-                   , F.max (F.col @Double "height") `as` "tallest"
+    |> D.aggregate [ F.count (F.col Day "decade") `as` "sample_size"
+                   , F.mean (F.col Double "weight") `as` "avg_weight"
+                   , F.max (F.col Double "height") `as` "tallest"
                    ]
 ```
 
@@ -911,7 +911,7 @@ df_csv
 ```
 
 The `aggregate` function takes a list of aggregation expressions. Each expression specifies:
-- What column to aggregate (`F.col @Type "name"`)
+- What column to aggregate (`F.col Type "name"`)
 - What aggregation to perform (`mean`, `max`, `count`, etc.)
 - What to name the result (`as "new_name"`)
 
@@ -945,13 +945,13 @@ let decade d = let (y, _, _) = toGregorian d
     firstName = head . T.split (== ' ')
 
 df_csv
-    |> D.derive "name" (F.lift firstName (F.col @T.Text "name"))
-    |> D.derive "decade" (F.lift decade (F.col @Day "birthdate"))
+    |> D.derive "name" (F.lift firstName (F.col T.Text "name"))
+    |> D.derive "decade" (F.lift decade (F.col Day "birthdate"))
     |> D.exclude ["birthdate"]
     |> D.groupBy ["decade"]
-    |> D.aggregate [ F.mean (F.col @Double "weight") `as` "avg_weight"
-                   , F.mean (F.col @Double "height") `as` "avg_height"
-                   , F.collect (F.col @T.Text "name") `as` "names"
+    |> D.aggregate [ F.mean (F.col Double "weight") `as` "avg_weight"
+                   , F.mean (F.col Double "height") `as` "avg_height"
+                   , F.collect (F.col T.Text "name") `as` "names"
                    ]
 ```
 
@@ -982,15 +982,15 @@ let decade d = let (y, _, _) = toGregorian d in (y `div` 10) * 10
     firstName = head . T.split (== ' ')
 
 execFrameM df_csv $ do
-    modifyM (D.derive "name"   (F.lift firstName (F.col @T.Text "name")))
-    modifyM (D.derive "decade" (F.lift decade    (F.col @Day    "birthdate")))
+    modifyM (D.derive "name"   (F.lift firstName (F.col T.Text "name")))
+    modifyM (D.derive "decade" (F.lift decade    (F.col Day    "birthdate")))
     modifyM (D.exclude ["birthdate"])
     shape <- inspectM D.dimensions   -- peek: how many rows/cols so far?
     modifyM (D.groupBy ["decade"])
     modifyM $ D.aggregate
-        [ F.mean    (F.col @Double "weight") `as` "avg_weight"
-        , F.mean    (F.col @Double "height") `as` "avg_height"
-        , F.collect (F.col @T.Text "name")   `as` "names"
+        [ F.mean    (F.col Double "weight") `as` "avg_weight"
+        , F.mean    (F.col Double "height") `as` "avg_height"
+        , F.collect (F.col T.Text "name")   `as` "names"
         ]
 ```
 
@@ -1019,14 +1019,14 @@ type BirthdateSchema = '[ T.Column "name"      T.Text
 example :: T.TypedDataFrame BirthdateSchema -> IO ()
 example tdf = do
     let result = T.aggregate
-                    ( T.as @"avg_weight" (T.mean    (T.col @"weight"))
-                    . T.as @"avg_height" (T.mean    (T.col @"height"))
-                    . T.as @"names"      (T.collect (T.col @"name"))
+                    ( T.as @"avg_weight" (T.mean    (T.col "weight"))
+                    . T.as @"avg_height" (T.mean    (T.col "height"))
+                    . T.as @"names"      (T.collect (T.col "name"))
                     )
                     (T.groupBy @'["decade"] tdf')
         tdf' = tdf
-            |> T.derive @"name"   (T.lift firstName (T.col @"name"))
-            |> T.derive @"decade" (T.lift decade    (T.col @"birthdate"))
+            |> T.derive "name"   (T.lift firstName (T.col "name"))
+            |> T.derive "decade" (T.lift decade    (T.col "birthdate"))
             |> T.exclude @'["birthdate"]
     print (T.thaw result)
   where
@@ -1034,7 +1034,7 @@ example tdf = do
     firstName = head . T.split (== ' ')
 ```
 
-**Why it's better**: `T.as @"avg_weight" (T.mean (T.col @"weight"))` is checked in two ways at
+**Why it's better**: `T.as @"avg_weight" (T.mean (T.col "weight"))` is checked in two ways at
 compile time — `"weight"` must exist in the schema with type `Double`, and the result column
 `"avg_weight"` will have type `Double` in the output schema.  A wrong output-type annotation causes
 a type error before the program runs.
@@ -1071,18 +1071,18 @@ import DataFrame.Internal.Schema (Schema, schemaType)
 import Data.Proxy (Proxy (..))
 
 mySchema :: Schema
-mySchema = [ ("name",   schemaType @T.Text)
-           , ("weight", schemaType @Double)
-           , ("height", schemaType @Double)
+mySchema = [ ("name",   schemaType T.Text)
+           , ("weight", schemaType Double)
+           , ("height", schemaType Double)
            ]
 
 result :: IO DataFrame
 result = L.runDataFrame $
     L.scanCsv mySchema "data.csv"
-    |> L.filter (F.col @Double "height" .>. F.lit 1.7)
+    |> L.filter (F.col Double "height" .>. F.lit 1.7)
     |> L.select ["name", "weight", "height"]
-    |> L.derive "bmi" (F.col @Double "weight" ./
-                       (F.col @Double "height" * F.col @Double "height"))
+    |> L.derive "bmi" (F.col Double "weight" ./
+                       (F.col Double "height" * F.col Double "height"))
 ```
 
 **When Polars lazy is excellent too**: Polars lazy is mature, fast, and ergonomic for Python
@@ -1110,7 +1110,7 @@ workflows.  Its type inference is automatic — you rarely need to declare schem
 result :: IO DataFrame
 result = L.runDataFrame $
     L.scanParquet mySchema "warehouse/events.parquet"
-    |> L.filter  (F.col @T.Text "country" .==. F.lit "US")
+    |> L.filter  (F.col T.Text "country" .==. F.lit "US")
     |> L.select  ["event_id", "country", "revenue"]
     |> L.take   1000
 ```
@@ -1154,7 +1154,7 @@ starwars %>%
 import qualified Data.Text as T
 
 starwars 
-  |> D.filterWhere (F.col @Text "species" .==. "Droid")
+  |> D.filterWhere (F.col Text "species" .==. "Droid")
 ```
 
 **Output (truncated for readability):**
@@ -1240,7 +1240,7 @@ starwars
   -- Remove the maybes.
   |> D.filterJust "mass"
   |> D.filterJust "height"
-  |> D.derive "bmi" (F.col @Double "mass" / F.pow (F.col @Double "height" / F.lit 100) 2)
+  |> D.derive "bmi" (F.col Double "mass" / F.pow (F.col Double "height" / F.lit 100) 2)
   |> D.select ["name", "height", "mass", "bmi"]
   |> D.take 5
 ```
@@ -1346,7 +1346,7 @@ starwars
   |> D.aggregate [ F.mean mass `as` "mean_mass"
                  , F.count mass `as` "count"
                  ]
-  |> D.filterWhere ((F.col @Int "count" .>. 1) .&&. (F.col @Double "mean_mass" .>. 50))
+  |> D.filterWhere ((F.col Int "count" .>. 1) .&&. (F.col Double "mean_mass" .>. 50))
 ```
 
 **Output:**
@@ -1383,8 +1383,8 @@ import DataFrame.Monad
 execFrameM starwars $ do
     modifyM D.filterAllJust          -- drop rows with any Nothing
     bmiCol <- deriveM "bmi"
-                  (F.col @Double "mass"
-                   / F.pow (F.col @Double "height" / F.lit 100) 2)
+                  (F.col Double "mass"
+                   / F.pow (F.col Double "height" / F.lit 100) 2)
     filterWhereM (bmiCol .>. F.lit 20.0)
     modifyM (D.select ["name", "height", "mass", "bmi"])
 ```
@@ -1416,16 +1416,16 @@ example :: T.TypedDataFrame StarwarsSchema -> T.TypedDataFrame _
 example tdf =
     let stripped = T.filterAllJust tdf
         -- After filterAllJust, "height" and "mass" are Double (not Maybe Double)
-        withBmi = T.derive @"bmi"
-                      (T.col @"mass" / (T.col @"height" / T.lit 100) ^ 2)
+        withBmi = T.derive "bmi"
+                      (T.col "mass" / (T.col "height" / T.lit 100) ^ 2)
                       stripped
     in withBmi
-        |> T.filterWhere (T.col @"bmi" .>. T.lit 20.0)
+        |> T.filterWhere (T.col "bmi" .>. T.lit 20.0)
         |> T.select @'["name", "height", "mass", "bmi"]
 ```
 
-**Why it's better**: after `T.filterAllJust`, `T.col @"height"` has type `TExpr cols Double` —
-using it in an arithmetic expression just works.  Before the strip, `T.col @"height"` has type
+**Why it's better**: after `T.filterAllJust`, `T.col "height"` has type `TExpr cols Double` —
+using it in an arithmetic expression just works.  Before the strip, `T.col "height"` has type
 `TExpr cols (Maybe Double)`, so the same arithmetic expression would be a type error.  The
 compiler enforces that you handle missing values before doing math on them.
 
@@ -1523,7 +1523,7 @@ purchases$amount |> sum()
 **dataframe:**
 
 ```haskell
-D.sum (F.col @Int "amount") df
+D.sum (F.col Int "amount") df
 -- 17210
 ```
 
@@ -1571,7 +1571,7 @@ definitions, each with a substantial type signature, to express "group by countr
 
 ```haskell
 df |> D.groupBy ["country"]
-   |> D.aggregate [F.sum (F.col @Int "amount") `as` "total"]
+   |> D.aggregate [F.sum (F.col Int "amount") `as` "total"]
 ```
 
 ```
@@ -1615,9 +1615,9 @@ the input (`Amount`, `Discount`), and adding a new field requires more type-leve
 **dataframe:**
 
 ```haskell
-df |> D.derive "net" (F.col @Int "amount" - F.col @Int "discount")
+df |> D.derive "net" (F.col Int "amount" - F.col Int "discount")
    |> D.groupBy ["country"]
-   |> D.aggregate [F.sum (F.col @Int "net") `as` "total"]
+   |> D.aggregate [F.sum (F.col Int "net") `as` "total"]
 ```
 
 ```
@@ -1664,12 +1664,12 @@ purchases |>
 **dataframe:**
 
 ```haskell
-let med = D.median (F.col @Double "amount") df
+let med = D.median (F.col Double "amount") df
 
-df |> D.filterWhere (F.col @Double "amount" .<=. F.lit (med * 10))
-   |> D.derive "net" (F.col @Int "amount" - F.col @Int "discount")
+df |> D.filterWhere (F.col Double "amount" .<=. F.lit (med * 10))
+   |> D.derive "net" (F.col Int "amount" - F.col Int "discount")
    |> D.groupBy ["country"]
-   |> D.aggregate [F.sum (F.col @Int "net") `as` "total"]
+   |> D.aggregate [F.sum (F.col Int "net") `as` "total"]
 ```
 
 ### Filter within groups
@@ -1715,13 +1715,13 @@ original grouped data, and filter each group separately. This is the point in th
 -- Compute each country's median and join it back
 let medians = df
         |> D.groupBy ["country"]
-        |> D.aggregate [F.median (F.col @Double "amount") `as` "country_median"]
+        |> D.aggregate [F.median (F.col Double "amount") `as` "country_median"]
 
 D.innerJoin ["country"] df medians
-   |> D.filterWhere (F.col @Double "amount" .<=. F.col @Double "country_median" * 10)
-   |> D.derive "net" (F.col @Int "amount" - F.col @Int "discount")
+   |> D.filterWhere (F.col Double "amount" .<=. F.col Double "country_median" * 10)
+   |> D.derive "net" (F.col Int "amount" - F.col Int "discount")
    |> D.groupBy ["country"]
-   |> D.aggregate [F.sum (F.col @Int "net") `as` "total"]
+   |> D.aggregate [F.sum (F.col Int "net") `as` "total"]
 ```
 
 Not quite as concise as R (which has implicit grouped-filter semantics), but still a
@@ -1753,12 +1753,12 @@ main = do
         Nothing  -> putStrLn "Schema mismatch!"
         Just tdf -> do
             let result = T.aggregate
-                    (T.as @"total" (T.sum (T.col @"amount")))
+                    (T.as @"total" (T.sum (T.col "amount")))
                     (T.groupBy @'["country"] tdf)
             print (T.thaw result)
 ```
 
-`T.col @"amount"` is checked against `PurchaseSchema` at compile time — same guarantee as
+`T.col "amount"` is checked against `PurchaseSchema` at compile time — same guarantee as
 Frames' vinyl records, but without the lens imports, `Foldl` plumbing, or map-reduce pipeline.
 
 ### Key differences from Frames
@@ -1766,7 +1766,7 @@ Frames' vinyl records, but without the lens imports, `Foldl` plumbing, or map-re
 | | Frames | dataframe |
 |---|---|---|
 | **Record type** | Vinyl `Record '[Field1, Field2, ...]` | Untyped `DataFrame` or phantom-typed `TypedDataFrame` |
-| **Column access** | Lens (`r ^. amount`) or `rgetField @Amount r` | Expression DSL (`F.col @Int "amount"`) or TH-generated bindings (`amount`) |
+| **Column access** | Lens (`r ^. amount`) or `rgetField @Amount r` | Expression DSL (`F.col Int "amount"`) or TH-generated bindings (`amount`) |
 | **GroupBy + aggregate** | Map-reduce fold pipeline (unpack, assign, reduce) | `D.groupBy` + `D.aggregate` |
 | **Naming results** | Output shares input field names; new fields require type-level work | `as "name"` on any aggregation expression |
 | **Deriving columns** | Define new record fields or manipulate type-level lists | `D.derive "name" expr` |
@@ -1796,13 +1796,13 @@ and opt into compile-time types when you need them.
 
 **Untyped**
 ```haskell
-df |> D.derive "bonus" (F.col @Double "salary" * F.lit 0.1)
+df |> D.derive "bonus" (F.col Double "salary" * F.lit 0.1)
 ```
 
 **Frame monad**
 ```haskell
 execFrameM df $ do
-    bonus <- deriveM "bonus" (F.col @Double "salary" * F.lit 0.1)
+    bonus <- deriveM "bonus" (F.col Double "salary" * F.lit 0.1)
     -- `bonus` is now an Expr Double you can reuse without repeating "bonus"
     ...
 ```
@@ -1810,24 +1810,24 @@ execFrameM df $ do
 **Typed**
 ```haskell
 -- T.derive prepends Column "bonus" Double to the schema type
-tdf |> T.derive @"bonus" (T.col @"salary" * T.lit 0.1)
+tdf |> T.derive "bonus" (T.col "salary" * T.lit 0.1)
 ```
 
 #### Filtering rows
 
 **Untyped**
 ```haskell
-df |> D.filterWhere (F.col @Double "salary" .>. F.lit 50000)
+df |> D.filterWhere (F.col Double "salary" .>. F.lit 50000)
 ```
 
 **Frame monad**
 ```haskell
-execFrameM df $ filterWhereM (F.col @Double "salary" .>. F.lit 50000)
+execFrameM df $ filterWhereM (F.col Double "salary" .>. F.lit 50000)
 ```
 
 **Typed**
 ```haskell
-tdf |> T.filterWhere (T.col @"salary" .>. T.lit 50000)
+tdf |> T.filterWhere (T.col "salary" .>. T.lit 50000)
 ```
 
 #### Grouping and aggregating
@@ -1835,8 +1835,8 @@ tdf |> T.filterWhere (T.col @"salary" .>. T.lit 50000)
 **Untyped**
 ```haskell
 df |> D.groupBy ["dept"]
-   |> D.aggregate [ F.mean  (F.col @Double "salary") `as` "avg_salary"
-                  , F.count (F.col @Double "salary") `as` "n"
+   |> D.aggregate [ F.mean  (F.col Double "salary") `as` "avg_salary"
+                  , F.count (F.col Double "salary") `as` "n"
                   ]
 ```
 
@@ -1845,16 +1845,16 @@ df |> D.groupBy ["dept"]
 execFrameM df $ do
     modifyM (D.groupBy ["dept"])
     modifyM $ D.aggregate
-        [ F.mean  (F.col @Double "salary") `as` "avg_salary"
-        , F.count (F.col @Double "salary") `as` "n"
+        [ F.mean  (F.col Double "salary") `as` "avg_salary"
+        , F.count (F.col Double "salary") `as` "n"
         ]
 ```
 
 **Typed**
 ```haskell
 T.aggregate
-    ( T.as @"avg_salary" (T.mean  (T.col @"salary"))
-    . T.as @"n"          (T.count (T.col @"salary"))
+    ( T.as @"avg_salary" (T.mean  (T.col "salary"))
+    . T.as @"n"          (T.count (T.col "salary"))
     )
     (T.groupBy @'["dept"] tdf)
 ```
@@ -1867,14 +1867,14 @@ T.aggregate
 df |> D.filterJust "col"
 
 -- Fill Nothing with a default
-df |> D.impute (F.col @Type "col") defaultVal
+df |> D.impute (F.col Type "col") defaultVal
 ```
 
 **Frame monad**
 ```haskell
 execFrameM df $ do
-    col' <- filterJustM (F.col @(Maybe Double) "col")
-    _    <- imputeM (F.col @(Maybe Int) "other") 0
+    col' <- filterJustM (F.col (Maybe Double) "col")
+    _    <- imputeM (F.col (Maybe Int) "other") 0
     ...
 ```
 
@@ -1894,9 +1894,9 @@ import qualified DataFrame.Lazy as L
 
 result <- L.runDataFrame $
     L.scanCsv mySchema "large_file.csv"
-    |> L.filter  (F.col @Double "revenue" .>. F.lit 1000)
+    |> L.filter  (F.col Double "revenue" .>. F.lit 1000)
     |> L.select  ["id", "region", "revenue"]
-    |> L.derive  "tax" (F.col @Double "revenue" * F.lit 0.2)
+    |> L.derive  "tax" (F.col Double "revenue" * F.lit 0.2)
     |> L.take   10000
 ```
 
@@ -1908,7 +1908,7 @@ The optimizer pushes the filter into the scan and drops unreferenced columns bef
 Our library often requires type annotations to disambiguate operations:
 
 ```haskell
-F.col @Double "weight"  -- Specify column contains Doubles
+F.col Double "weight"  -- Specify column contains Doubles
 F.lit @Int 5            -- Specify literal is an Int
 filter "col" (== ("text" :: T.Text))  -- Specify string type
 ```

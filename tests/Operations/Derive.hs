@@ -40,8 +40,8 @@ deriveWAI =
                     "test4"
                     ( F.lift2
                         (++)
-                        (F.lift show (F.col @Int "test1"))
-                        (F.lift (: ([] :: [Char])) (F.col @Char "test3"))
+                        (F.lift show (F.col Int "test1"))
+                        (F.lift (: ([] :: [Char])) (F.col Char "test3"))
                     )
                     testData
             )
@@ -53,13 +53,13 @@ deriveWAITyped =
         ( assertEqual
             "typed derive works with column expression"
             (zipWith (\n c -> show n ++ [c]) ([1 .. 26] :: [Int]) ['a' .. 'z'])
-            ( DT.columnAsList @"test4" $
+            ( DT.columnAsList "test4" $
                 DT.derive
-                    @"test4"
+                    "test4"
                     ( DT.lift2
                         (++)
-                        (DT.lift show (DT.col @"test1"))
-                        (DT.lift (: ([] :: [Char])) (DT.col @"test3"))
+                        (DT.lift show (DT.col "test1"))
+                        (DT.lift (: ([] :: [Char])) (DT.col "test3"))
                     )
                     ( either
                         (error . show)

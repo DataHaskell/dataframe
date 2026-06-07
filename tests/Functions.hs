@@ -76,7 +76,7 @@ testSum =
                 , ("sum", DI.fromList (replicate 10 (55 :: Int)))
                 ]
             )
-            (D.derive "sum" (F.sum (F.col @Int "A")) df)
+            (D.derive @Int "sum" (F.sum (F.col Int "A")) df)
         )
 
 tests :: [Test]

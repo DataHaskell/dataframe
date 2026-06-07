@@ -29,7 +29,7 @@ dataframe> :script dataframe.ghci
 💡  Use prefix 'D' for core functionality.
         ● E.g. D.readCsv "/path/to/file"
 💡  Use prefix 'F' for expression functions.
-        ● E.g. F.sum (F.col @Int "value")
+        ● E.g. F.sum (F.col Int "value")
 
 ✅ Ready.
 dataframe> df <- D.readCsv "./data/arbuthnot.csv"
@@ -179,8 +179,8 @@ year, but there is a faster way. If we add the vector for baptisms for boys to
 that of girls, Haskell will compute all sums simultaneously.
 
 ```haskell
-dataframe> bs = D.columnAsList @Int "boys" df
-dataframe> gs = D.columnAsList @Int "girls" df
+dataframe> bs = D.columnAsList Int "boys" df
+dataframe> gs = D.columnAsList Int "girls" df
 dataframe> zipWith (+) bs gs
 ```
 
@@ -193,7 +193,7 @@ We'll be using this new vector to generate some plots, so we'll want to save it
 as a permanent column in our data frame.
 
 ```haskell
-dataframe> withTotal = df |> D.derive "total" (F.col @Int "boys" + F.col @Int "girls")
+dataframe> withTotal = df |> D.derive "total" (F.col Int "boys" + F.col Int "girls")
 dataframe> D.take 10 withTotal
 ```
 
@@ -214,7 +214,7 @@ This is essentially equivalent to going through each row and adding up the boys
 and girls counts for that year and recording that value in a new column called
 total.
 
-The `F.col @Int "boys" + F.col @Int "girls"` part is how we right expressions for our dataframe. Read left to right, this expression says take the `Int` called boys and add it to the `Int` column called girls. This saves us the work of having to work with vectors directly. But having to remember the name and type of each column is tedious and error prone. We can ask Haskell to expose correct references to these columns by using `:declareColumns`.
+The `F.col Int "boys" + F.col Int "girls"` part is how we right expressions for our dataframe. Read left to right, this expression says take the `Int` called boys and add it to the `Int` column called girls. This saves us the work of having to work with vectors directly. But having to remember the name and type of each column is tedious and error prone. We can ask Haskell to expose correct references to these columns by using `:declareColumns`.
 
 ```haskell
 dataframe> :declareColumns df
@@ -353,7 +353,7 @@ dataframe> :script dataframe.ghci
 💡  Use prefix 'D' for core functionality.
         ● E.g. D.readCsv "/path/to/file"
 💡  Use prefix 'F' for expression functions.
-        ● E.g. F.sum (F.col @Int "value")
+        ● E.g. F.sum (F.col Int "value")
 
 ✅ Ready.
 dataframe> df <- D.readCsv "./data/present.csv"

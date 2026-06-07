@@ -1,4 +1,3 @@
-{-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE ExplicitNamespaces #-}
 {-# LANGUAGE FlexibleContexts #-}
@@ -9,6 +8,8 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE TypeAbstractions #-}
+{-# LANGUAGE RequiredTypeArguments #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# OPTIONS_GHC -Wno-orphans #-}
 
@@ -341,7 +342,7 @@ materialize _ (Group _) =
 efficient representation.
 -}
 broadcastScalar :: forall a. (Columnable a) => Int -> a -> Column
-broadcastScalar n v = case sUnbox @a of
+broadcastScalar n v = case sUnbox a of
     STrue -> fromUnboxedVector (VU.replicate n v)
     SFalse -> fromVector (V.replicate n v)
 
@@ -402,7 +403,7 @@ branchValue cond (Scalar l) r =
 branchValue cond l (Scalar r) =
     liftValue2 (\c lv -> if c then lv else r) cond l
 branchValue (Flat cc) (Flat lc) (Flat rc) =
-    Flat <$> branchColumn @a cc lc rc
+    Flat <$> branchColumn a cc lc rc
 branchValue (Group cgs) (Group lgs) (Group rgs)
     | V.length cgs == V.length lgs
         && V.length lgs == V.length rgs =
@@ -410,7 +411,7 @@ branchValue (Group cgs) (Group lgs) (Group rgs)
             <$> V.generateM
                 (V.length cgs)
                 ( \i ->
-                    branchColumn @a (cgs V.! i) (lgs V.! i) (rgs V.! i)
+                    branchColumn a (cgs V.! i) (lgs V.! i) (rgs V.! i)
                 )
 branchValue _ _ _ =
     Left $
@@ -423,13 +424,13 @@ branchValue _ _ _ =
 columns, produce the element-wise selection.
 -}
 branchColumn ::
-    forall a.
+    forall a ->
     (Columnable a) =>
     Column ->
     Column ->
     Column ->
     Either DataFrameException Column
-branchColumn cc lc rc = do
+branchColumn a cc lc rc = do
     cs <- toVector @Bool @V.Vector cc
     ls <- toVector @a @V.Vector lc
     rs <- toVector @a @V.Vector rc
@@ -526,8 +527,8 @@ promoteColumnWith ::
     (Columnable a, Columnable b, Read a) =>
     (Either String a -> b) -> Column -> Either DataFrameException Column
 promoteColumnWith onResult col
-    | hasElemType @b col = Right col
-    | hasElemType @a col = mapColumn @a (onResult . Right) col
+    | hasElemType b col = Right col
+    | hasElemType a col = mapColumn @a (onResult . Right) col
     | Just result <- tryMaybeWrap @a @b onResult col = result
     | otherwise =
         case testEquality (typeRep @a) (typeRep @Double) of
@@ -546,19 +547,19 @@ promoteToDoubleWith ::
     (Either String Double -> b) -> Column -> Either DataFrameException Column
 promoteToDoubleWith onResult col = case col of
     UnboxedColumn Nothing (v :: VU.Vector c) ->
-        case sFloating @c of
+        case sFloating c of
             STrue ->
                 Right $
                     fromVector @b
                         (V.map (onResult . Right . (realToFrac :: c -> Double)) (VG.convert v))
-            SFalse -> case sIntegral @c of
+            SFalse -> case sIntegral c of
                 STrue ->
                     Right $
                         fromVector @b
                             (V.map (onResult . Right . (fromIntegral :: c -> Double)) (VG.convert v))
-                SFalse -> castMismatch @c @b
+                SFalse -> castMismatch c b
     UnboxedColumn (Just bm) (v :: VU.Vector c) ->
-        case sFloating @c of
+        case sFloating c of
             STrue ->
                 Right $
                     fromVector @b
@@ -567,7 +568,7 @@ promoteToDoubleWith onResult col = case col of
                                 then onResult (Right (realToFrac (VU.unsafeIndex v i) :: Double))
                                 else onResult (Left "null")
                         )
-            SFalse -> case sIntegral @c of
+            SFalse -> case sIntegral c of
                 STrue ->
                     Right $
                         fromVector @b
@@ -576,7 +577,7 @@ promoteToDoubleWith onResult col = case col of
                                     then onResult (Right (fromIntegral (VU.unsafeIndex v i) :: Double))
                                     else onResult (Left "null")
                             )
-                SFalse -> castMismatch @c @b
+                SFalse -> castMismatch c b
     BoxedColumn _ _ -> tryParseWith @Double onResult col
 
 promoteToFloatWith ::
@@ -585,19 +586,19 @@ promoteToFloatWith ::
     (Either String Float -> b) -> Column -> Either DataFrameException Column
 promoteToFloatWith onResult col = case col of
     UnboxedColumn Nothing (v :: VU.Vector c) ->
-        case sFloating @c of
+        case sFloating c of
             STrue ->
                 Right $
                     fromVector @b
                         (V.map (onResult . Right . (realToFrac :: c -> Float)) (VG.convert v))
-            SFalse -> case sIntegral @c of
+            SFalse -> case sIntegral c of
                 STrue ->
                     Right $
                         fromVector @b
                             (V.map (onResult . Right . (fromIntegral :: c -> Float)) (VG.convert v))
-                SFalse -> castMismatch @c @b
+                SFalse -> castMismatch c b
     UnboxedColumn (Just bm) (v :: VU.Vector c) ->
-        case sFloating @c of
+        case sFloating c of
             STrue ->
                 Right $
                     fromVector @b
@@ -606,7 +607,7 @@ promoteToFloatWith onResult col = case col of
                                 then onResult (Right (realToFrac (VU.unsafeIndex v i) :: Float))
                                 else onResult (Left "null")
                         )
-            SFalse -> case sIntegral @c of
+            SFalse -> case sIntegral c of
                 STrue ->
                     Right $
                         fromVector @b
@@ -615,7 +616,7 @@ promoteToFloatWith onResult col = case col of
                                     then onResult (Right (fromIntegral (VU.unsafeIndex v i) :: Float))
                                     else onResult (Left "null")
                             )
-                SFalse -> castMismatch @c @b
+                SFalse -> castMismatch c b
     BoxedColumn _ _ -> tryParseWith @Float onResult col
 
 promoteToIntWith ::
@@ -624,19 +625,19 @@ promoteToIntWith ::
     (Either String Int -> b) -> Column -> Either DataFrameException Column
 promoteToIntWith onResult col = case col of
     UnboxedColumn Nothing (v :: VU.Vector c) ->
-        case sFloating @c of
+        case sFloating c of
             STrue ->
                 Right $
                     fromVector @b
                         (V.map (onResult . Right . (round . (realToFrac :: c -> Double))) (VG.convert v))
-            SFalse -> case sIntegral @c of
+            SFalse -> case sIntegral c of
                 STrue ->
                     Right $
                         fromVector @b
                             (V.map (onResult . Right . (fromIntegral :: c -> Int)) (VG.convert v))
-                SFalse -> castMismatch @c @b
+                SFalse -> castMismatch c b
     UnboxedColumn (Just bm) (v :: VU.Vector c) ->
-        case sFloating @c of
+        case sFloating c of
             STrue ->
                 Right $
                     fromVector @b
@@ -645,7 +646,7 @@ promoteToIntWith onResult col = case col of
                                 then onResult (Right (round (realToFrac (VU.unsafeIndex v i) :: Double)))
                                 else onResult (Left "null")
                         )
-            SFalse -> case sIntegral @c of
+            SFalse -> case sIntegral c of
                 STrue ->
                     Right $
                         fromVector @b
@@ -654,7 +655,7 @@ promoteToIntWith onResult col = case col of
                                     then onResult (Right (fromIntegral (VU.unsafeIndex v i) :: Int))
                                     else onResult (Left "null")
                             )
-                SFalse -> castMismatch @c @b
+                SFalse -> castMismatch c b
     BoxedColumn _ _ -> tryParseWith @Int onResult col
 
 -- | Single parse primitive: apply @onResult@ to the result of 'reads'.
@@ -696,7 +697,7 @@ tryParseWith onResult col = case col of
                                                 else onResult (Left "null")
                                         )
                                         v
-                    Nothing -> castMismatch @c @b
+                    Nothing -> castMismatch c b
     UnboxedColumn bm (v :: VU.Vector c) -> case bm of
         Nothing -> Right $ fromVector @b $ V.map (parseWith onResult . show) (V.convert v)
         Just bitmap ->
@@ -742,10 +743,10 @@ tryMaybeWrap _onResult col = case col of
     _ -> Nothing
 
 castMismatch ::
-    forall src tgt.
+    forall src tgt ->
     (Typeable src, Typeable tgt) =>
     Either DataFrameException Column
-castMismatch =
+castMismatch src tgt =
     Left $
         TypeMismatchException
             MkTypeErrorContext
@@ -775,7 +776,7 @@ eval (FlatCtx df) (Col name) =
         Nothing ->
             Left $ ColumnsNotFoundException [name] "" (M.keys $ columnIndices df)
         Just c
-            | hasElemType @a c -> Right (Flat c)
+            | hasElemType a c -> Right (Flat c)
             | otherwise ->
                 Left $
                     TypeMismatchException
@@ -796,7 +797,7 @@ eval (GroupCtx gdf) (Col name) =
                     ""
                     (M.keys $ columnIndices $ fullDataframe gdf)
         Just c
-            | hasElemType @a c ->
+            | hasElemType a c ->
                 Right (Group (sliceGroups c (offsets gdf) (valueIndices gdf)))
             | otherwise ->
                 Left $

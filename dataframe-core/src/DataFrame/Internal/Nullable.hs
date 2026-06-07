@@ -1,7 +1,7 @@
-{-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE FunctionalDependencies #-}
+{-# LANGUAGE RequiredTypeArguments #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
@@ -364,38 +364,38 @@ When @a ~ b@ the coercions are identity; otherwise one operand is widened
 (e.g. 'Int' → 'Double').
 -}
 class (Columnable (Promote a b)) => NumericWidenOp a b where
-    widen1 :: a -> Promote a b
-    widen2 :: b -> Promote a b
+    widen1 :: forall a' b' -> (a ~ a', b ~ b') => a -> Promote a b
+    widen2 :: forall a' b' -> (a ~ a', b ~ b') => b -> Promote a b
 
 -- | Same type: identity coercions.
 instance {-# OVERLAPPING #-} (Columnable a) => NumericWidenOp a a where
-    widen1 = id
-    widen2 = id
+    widen1 _ _ = id
+    widen2 _ _ = id
 
-instance NumericWidenOp Int Double where widen1 = fromIntegral; widen2 = id
+instance NumericWidenOp Int Double where widen1 _ _ = fromIntegral; widen2 _ _ = id
 instance NumericWidenOp Double Int where
-    widen1 = id
-    widen2 = fromIntegral
-instance NumericWidenOp Float Double where widen1 = realToFrac; widen2 = id
+    widen1 _ _ = id
+    widen2 _ _ = fromIntegral
+instance NumericWidenOp Float Double where widen1 _ _ = realToFrac; widen2 _ _ = id
 instance NumericWidenOp Double Float where
-    widen1 = id
-    widen2 = realToFrac
-instance NumericWidenOp Int32 Float where widen1 = fromIntegral; widen2 = id
+    widen1 _ _ = id
+    widen2 _ _ = realToFrac
+instance NumericWidenOp Int32 Float where widen1 _ _ = fromIntegral; widen2 _ _ = id
 instance NumericWidenOp Float Int32 where
-    widen1 = id
-    widen2 = fromIntegral
-instance NumericWidenOp Int32 Double where widen1 = fromIntegral; widen2 = id
+    widen1 _ _ = id
+    widen2 _ _ = fromIntegral
+instance NumericWidenOp Int32 Double where widen1 _ _ = fromIntegral; widen2 _ _ = id
 instance NumericWidenOp Double Int32 where
-    widen1 = id
-    widen2 = fromIntegral
-instance NumericWidenOp Int64 Float where widen1 = fromIntegral; widen2 = id
+    widen1 _ _ = id
+    widen2 _ _ = fromIntegral
+instance NumericWidenOp Int64 Float where widen1 _ _ = fromIntegral; widen2 _ _ = id
 instance NumericWidenOp Float Int64 where
-    widen1 = id
-    widen2 = fromIntegral
-instance NumericWidenOp Int64 Double where widen1 = fromIntegral; widen2 = id
+    widen1 _ _ = id
+    widen2 _ _ = fromIntegral
+instance NumericWidenOp Int64 Double where widen1 _ _ = fromIntegral; widen2 _ _ = id
 instance NumericWidenOp Double Int64 where
-    widen1 = id
-    widen2 = fromIntegral
+    widen1 _ _ = id
+    widen2 _ _ = fromIntegral
 
 -- | Apply an arithmetic function after widening both operands to their common type.
 widenArithOp ::
@@ -405,7 +405,7 @@ widenArithOp ::
     a ->
     b ->
     Promote a b
-widenArithOp f x y = f (widen1 @a @b x) (widen2 @a @b y)
+widenArithOp f x y = f (widen1 a b x) (widen2 a b y)
 
 -- | Apply a comparison function after widening both operands to their common type.
 widenCmpOp ::
@@ -415,7 +415,7 @@ widenCmpOp ::
     a ->
     b ->
     Bool
-widenCmpOp f x y = f (widen1 @a @b x) (widen2 @a @b y)
+widenCmpOp f x y = f (widen1 a b x) (widen2 a b y)
 
 -- | Result type of a widening binary operator, accounting for nullable wrappers.
 type WidenResult a b = NullLift2Result a b (Promote (BaseType a) (BaseType b))
@@ -429,61 +429,61 @@ Floating types still dominate (Double > Float), and any two integral types
 (same or mixed) are both widened to Double.
 -}
 class (Columnable (PromoteDiv a b)) => DivWidenOp a b where
-    divWiden1 :: a -> PromoteDiv a b
-    divWiden2 :: b -> PromoteDiv a b
+    divWiden1 :: forall a' b' -> (a ~ a', b ~ b') => a -> PromoteDiv a b
+    divWiden2 :: forall a' b' -> (a ~ a', b ~ b') => b -> PromoteDiv a b
 
 -- Floating same-type (identity)
-instance DivWidenOp Double Double where divWiden1 = id; divWiden2 = id
-instance DivWidenOp Float Float where divWiden1 = id; divWiden2 = id
+instance DivWidenOp Double Double where divWiden1 _ _ = id; divWiden2 _ _ = id
+instance DivWidenOp Float Float where divWiden1 _ _ = id; divWiden2 _ _ = id
 
 -- Mixed Double/Float
-instance DivWidenOp Double Float where divWiden1 = id; divWiden2 = realToFrac
-instance DivWidenOp Float Double where divWiden1 = realToFrac; divWiden2 = id
+instance DivWidenOp Double Float where divWiden1 _ _ = id; divWiden2 _ _ = realToFrac
+instance DivWidenOp Float Double where divWiden1 _ _ = realToFrac; divWiden2 _ _ = id
 
 -- Double beats integral
-instance DivWidenOp Double Int where divWiden1 = id; divWiden2 = fromIntegral
-instance DivWidenOp Int Double where divWiden1 = fromIntegral; divWiden2 = id
-instance DivWidenOp Double Int32 where divWiden1 = id; divWiden2 = fromIntegral
-instance DivWidenOp Int32 Double where divWiden1 = fromIntegral; divWiden2 = id
-instance DivWidenOp Double Int64 where divWiden1 = id; divWiden2 = fromIntegral
-instance DivWidenOp Int64 Double where divWiden1 = fromIntegral; divWiden2 = id
+instance DivWidenOp Double Int where divWiden1 _ _ = id; divWiden2 _ _ = fromIntegral
+instance DivWidenOp Int Double where divWiden1 _ _ = fromIntegral; divWiden2 _ _ = id
+instance DivWidenOp Double Int32 where divWiden1 _ _ = id; divWiden2 _ _ = fromIntegral
+instance DivWidenOp Int32 Double where divWiden1 _ _ = fromIntegral; divWiden2 _ _ = id
+instance DivWidenOp Double Int64 where divWiden1 _ _ = id; divWiden2 _ _ = fromIntegral
+instance DivWidenOp Int64 Double where divWiden1 _ _ = fromIntegral; divWiden2 _ _ = id
 
 -- Float beats integral
-instance DivWidenOp Float Int where divWiden1 = id; divWiden2 = fromIntegral
-instance DivWidenOp Int Float where divWiden1 = fromIntegral; divWiden2 = id
-instance DivWidenOp Float Int32 where divWiden1 = id; divWiden2 = fromIntegral
-instance DivWidenOp Int32 Float where divWiden1 = fromIntegral; divWiden2 = id
-instance DivWidenOp Float Int64 where divWiden1 = id; divWiden2 = fromIntegral
-instance DivWidenOp Int64 Float where divWiden1 = fromIntegral; divWiden2 = id
+instance DivWidenOp Float Int where divWiden1 _ _ = id; divWiden2 _ _ = fromIntegral
+instance DivWidenOp Int Float where divWiden1 _ _ = fromIntegral; divWiden2 _ _ = id
+instance DivWidenOp Float Int32 where divWiden1 _ _ = id; divWiden2 _ _ = fromIntegral
+instance DivWidenOp Int32 Float where divWiden1 _ _ = fromIntegral; divWiden2 _ _ = id
+instance DivWidenOp Float Int64 where divWiden1 _ _ = id; divWiden2 _ _ = fromIntegral
+instance DivWidenOp Int64 Float where divWiden1 _ _ = fromIntegral; divWiden2 _ _ = id
 
 -- Integral × integral → Double
 instance DivWidenOp Int Int where
-    divWiden1 = fromIntegral
-    divWiden2 = fromIntegral
+    divWiden1 _ _ = fromIntegral
+    divWiden2 _ _ = fromIntegral
 instance DivWidenOp Int32 Int32 where
-    divWiden1 = fromIntegral
-    divWiden2 = fromIntegral
+    divWiden1 _ _ = fromIntegral
+    divWiden2 _ _ = fromIntegral
 instance DivWidenOp Int64 Int64 where
-    divWiden1 = fromIntegral
-    divWiden2 = fromIntegral
+    divWiden1 _ _ = fromIntegral
+    divWiden2 _ _ = fromIntegral
 instance DivWidenOp Int Int32 where
-    divWiden1 = fromIntegral
-    divWiden2 = fromIntegral
+    divWiden1 _ _ = fromIntegral
+    divWiden2 _ _ = fromIntegral
 instance DivWidenOp Int32 Int where
-    divWiden1 = fromIntegral
-    divWiden2 = fromIntegral
+    divWiden1 _ _ = fromIntegral
+    divWiden2 _ _ = fromIntegral
 instance DivWidenOp Int Int64 where
-    divWiden1 = fromIntegral
-    divWiden2 = fromIntegral
+    divWiden1 _ _ = fromIntegral
+    divWiden2 _ _ = fromIntegral
 instance DivWidenOp Int64 Int where
-    divWiden1 = fromIntegral
-    divWiden2 = fromIntegral
+    divWiden1 _ _ = fromIntegral
+    divWiden2 _ _ = fromIntegral
 instance DivWidenOp Int32 Int64 where
-    divWiden1 = fromIntegral
-    divWiden2 = fromIntegral
+    divWiden1 _ _ = fromIntegral
+    divWiden2 _ _ = fromIntegral
 instance DivWidenOp Int64 Int32 where
-    divWiden1 = fromIntegral
-    divWiden2 = fromIntegral
+    divWiden1 _ _ = fromIntegral
+    divWiden2 _ _ = fromIntegral
 
 -- | Apply an arithmetic function after widening both operands via 'PromoteDiv'.
 divArithOp ::
@@ -493,7 +493,7 @@ divArithOp ::
     a ->
     b ->
     PromoteDiv a b
-divArithOp f x y = f (divWiden1 @a @b x) (divWiden2 @a @b y)
+divArithOp f x y = f (divWiden1 a b x) (divWiden2 a b y)
 
 -- | Result type of a division-widening binary operator, accounting for nullable wrappers.
 type WidenResultDiv a b =

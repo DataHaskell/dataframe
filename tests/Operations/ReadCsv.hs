@@ -34,7 +34,7 @@ specifyTypesNoInferenceFallback =
                 D.defaultReadOptions
                     { D.typeSpec =
                         D.SpecifyTypes
-                            [("year", D.schemaType @Int)]
+                            [("year", D.schemaType Int)]
                             D.NoInference
                     }
                 arbuthnotPath
@@ -56,7 +56,7 @@ specifyTypesInferFallback =
                 D.defaultReadOptions
                     { D.typeSpec =
                         D.SpecifyTypes
-                            [("year", D.schemaType @Int)]
+                            [("year", D.schemaType Int)]
                             (D.InferFromSample 100)
                     }
                 arbuthnotPath

@@ -1,4 +1,3 @@
-{-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
@@ -44,7 +43,7 @@ groupBy ::
     forall (keys :: [Symbol]) cols.
     (AllKnownSymbol keys, AssertAllPresent keys cols) =>
     TypedDataFrame cols -> TypedGrouped keys cols
-groupBy (TDF df) = TGD (DA.groupBy (symbolVals @keys) df)
+groupBy (TDF df) = TGD (DA.groupBy (symbolVals keys) df)
 
 {- | Build a named aggregation entry. The result column name is supplied via
 @TypeApplications@; the underlying expression is validated against the

@@ -293,7 +293,7 @@ Convert the text labels to integers using our Iris type:
 >             df
 >                 |> D.derive
 >                     "variety"
->                     (F.lift (fromEnum . read @Iris . T.unpack) (F.col "variety"))
+>                     (F.lift (fromEnum . read @Iris . T.unpack) (F.col' "variety"))
 
 The `|>` operator pipes data left-to-right (like Unix pipes or method chaining).
 This converts: "Setosa" → 0, "Versicolor" → 1, "Virginica" → 2
@@ -323,8 +323,8 @@ Extract the four measurement columns as our features:
 
 Extract the labels (species) as integers:
 
->     let trainLabels = either throw id (D.columnAsIntVector (F.col @Int "variety") trainDf)
->     let testLabels = either throw id (D.columnAsIntVector (F.col @Int "variety") testDf)
+>     let trainLabels = either throw id (D.columnAsIntVector (F.col Int "variety") trainDf)
+>     let testLabels = either throw id (D.columnAsIntVector (F.col Int "variety") testDf)
 
 Convert labels to one-hot encoding for neural network training:
 - 0 (Setosa) → [1.0, 0.0, 0.0]

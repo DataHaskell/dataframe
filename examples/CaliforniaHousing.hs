@@ -1,6 +1,7 @@
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE NumericUnderscores #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RequiredTypeArguments #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeApplications #-}
@@ -76,11 +77,11 @@ normalizeFeatures df =
             ( \name d ->
                 let
                     -- Convenience reference to the column.
-                    col = F.col @Double name
+                    col = F.col Prelude.Double name
                  in
                     D.derive name ((col - F.minimum col) / (F.maximum col - F.minimum col)) d
             )
-            (D.columnNames (df |> D.selectBy [D.byProperty (D.hasElemType @Double)]))
+            (D.columnNames (df |> D.selectBy [D.byProperty (D.hasElemType Prelude.Double)]))
 
 model :: Linear -> Tensor -> Tensor
 model state input = squeezeAll $ linear state input

@@ -85,7 +85,7 @@ Let's say we want to filter all flowers whose petal width is greater than 6. We 
 There are a couple of core functions we can use to define columns:
 
 ```haskell
-F.col @Int "x" -- this says "I have an int column called 'x'"
+F.col Int "x" -- this says "I have an int column called 'x'"
 F.lit @Int 5   -- this says "I have a literal value `5` that is an integer`.
 ```
 
@@ -94,11 +94,11 @@ Expressions support regular math operations:
 ```haskell
 -- Take the value at x and add 5 to it.
 -- The type of this is `Expr Int`
-F.col @Int "x" + F.lit @Int 5
+F.col Int "x" + F.lit @Int 5
 
 -- Compute the sine of the column x and add the cosine of 0.5.
 -- The type of this is `Expr Double`
-sin (F.col @Double "x") + cos (F.lit @Double 0.5)
+sin (F.col Double "x") + cos (F.lit @Double 0.5)
 ```
 
 However, for comparison operations we have a special syntax. Same-type (non-nullable) operators are wrapped in dots on both sides; nullable-aware operators use a single leading dot.
@@ -106,7 +106,7 @@ However, for comparison operations we have a special syntax. Same-type (non-null
 ```haskell
 -- Is x greater than 5? (both sides are non-nullable Int)
 -- The type of this is `Expr Bool`
-F.col @Int "x" .>=. F.lit @Int 5
+F.col Int "x" .>=. F.lit @Int 5
 ```
 
 The expression language eliminates a class of bugs from column operations (like adding a string to an integer).
@@ -116,7 +116,7 @@ Armed with this knowledge, we can go back and filter all flowers with petal leng
 We can see from the sample we printed before that `petal.length` is of type `Double`. We write the expression as follows:
 
 ```haskell
-df |> D.filterWhere (F.col @Double "petal.length" .>. F.lit @Double 6)
+df |> D.filterWhere (F.col Double "petal.length" .>. F.lit @Double 6)
    |> D.select ["petal.width", "petal.length", "variety"]
 ```
 
@@ -126,7 +126,7 @@ Suppose we write out the wrong types in the expression. That is suppose we say t
 
 ```haskell
 -- This fails at runtime because "petal.length" is Double, not Int:
-df |> D.filterWhere (F.col @Int "petal.length" .>. F.lit @Int 6)
+df |> D.filterWhere (F.col Int "petal.length" .>. F.lit @Int 6)
 ```
 
 ![Screenshot of filtering with type error](./_static/filter_wrong_type.png)

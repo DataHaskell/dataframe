@@ -91,9 +91,9 @@ For a given column calculating the mean and median is fairly straightfoward and 
 ```haskell
 import qualified DataFrame.Functions as F
 
-D.mean (F.col @Double "housing_median_age") df
+D.mean (F.col Double "housing_median_age") df
 
-D.median (F.col @Double "housing_median_age") df
+D.median (F.col Double "housing_median_age") df
 
 ```
 
@@ -150,7 +150,7 @@ From the small sample it does seem like there are some wild deviations. The firs
 ```haskell
 df |> D.derive "deviation" (abs (median_house_value - (F.mean median_house_value)))
    |> D.select ["median_house_value", "deviation"]
-   |> D.mean (F.col @Double "deviation")
+   |> D.mean (F.col Double "deviation")
 
 ```
 
@@ -177,7 +177,7 @@ $(D.declareColumns withDeviation)
 import Data.Maybe
 
 sumOfSqureDifferences = withDeviation |> D.derive "deviation^2" (F.pow deviation 2)
-                                      |> D.sum (F.col @Double "deviation^2")
+                                      |> D.sum (F.col Double "deviation^2")
 
 n = fromIntegral (fst (D.dimensions df) - 1)
 
@@ -193,7 +193,7 @@ We can calculate the standard deviation in one line as follows:
 
 
 ```haskell
-D.standardDeviation (F.col @Double "median_house_value") df
+D.standardDeviation (F.col Double "median_house_value") df
 
 ```
 
@@ -209,7 +209,7 @@ For our dataset:
 
 
 ```haskell
-D.interQuartileRange (F.col @Double "median_house_value") df
+D.interQuartileRange (F.col Double "median_house_value") df
 
 ```
 
@@ -225,7 +225,7 @@ In our example it's a very large number:
 
 
 ```haskell
-D.variance (F.col @Double "median_house_value") df
+D.variance (F.col Double "median_house_value") df
 
 ```
 
@@ -245,7 +245,7 @@ A skewness score between -0.5 and 0.5 means the data has little skew. A score be
 
 
 ```haskell
-D.skewness (F.col @Double "median_house_value") df
+D.skewness (F.col Double "median_house_value") df
 
 ```
 
@@ -305,7 +305,7 @@ import Granite.Svg
 import qualified Data.Text.IO as T
 import qualified Data.Text as T
 
-let houseValues = D.columnAsList (F.col @Double "median_house_value") df
+let houseValues = D.columnAsList (F.col Double "median_house_value") df
 
 T.putStrLn $
       histogram

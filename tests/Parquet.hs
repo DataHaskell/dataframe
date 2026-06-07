@@ -98,7 +98,7 @@ allTypesPlainSnappy = testBothReadParquetPaths $ \readParquet ->
     TestCase
         ( assertEqual
             "allTypesPlainSnappy"
-            (D.filter (F.col @Int32 "id") (`elem` [6, 7]) allTypes)
+            (D.filter (F.col Int32 "id") (`elem` [6, 7]) allTypes)
             (unsafePerformIO (readParquet "./tests/data/alltypes_plain.snappy.parquet"))
         )
 
@@ -107,7 +107,7 @@ allTypesDictionary = testBothReadParquetPaths $ \readParquet ->
     TestCase
         ( assertEqual
             "allTypesPlainSnappy"
-            (D.filter (F.col @Int32 "id") (`elem` [0, 1]) allTypes)
+            (D.filter (F.col Int32 "id") (`elem` [0, 1]) allTypes)
             (unsafePerformIO (readParquet "./tests/data/alltypes_dictionary.parquet"))
         )
 
@@ -153,7 +153,7 @@ predicateWithOpts =
                         , D.predicate =
                             Just
                                 ( F.geq
-                                    (F.col @Int32 "id")
+                                    (F.col Int32 "id")
                                     (F.lit (6 :: Int32))
                                 )
                         }
@@ -176,7 +176,7 @@ predicateUsesNonSelectedColumnWithOpts =
                         , D.predicate =
                             Just
                                 ( F.geq
-                                    (F.col @Int32 "id")
+                                    (F.col Int32 "id")
                                     (F.lit (6 :: Int32))
                                 )
                         }
@@ -209,10 +209,10 @@ safeColumnsWithOpts =
             safeDf
         assertBool
             "safeColumns id type"
-            (hasElemType @(Maybe Int32) (unsafeGetColumn "id" safeDf))
+            (hasElemType (Maybe Int32) (unsafeGetColumn "id" safeDf))
         assertBool
             "safeColumns bool_col type"
-            (hasElemType @(Maybe Bool) (unsafeGetColumn "bool_col" safeDf))
+            (hasElemType (Maybe Bool) (unsafeGetColumn "bool_col" safeDf))
 
 safeColumnsWithSelectedColumns :: Test
 safeColumnsWithSelectedColumns =
@@ -233,10 +233,10 @@ safeColumnsWithSelectedColumns =
             df
         assertBool
             "safeColumns projected id type"
-            (hasElemType @(Maybe Int32) (unsafeGetColumn "id" df))
+            (hasElemType (Maybe Int32) (unsafeGetColumn "id" df))
         assertBool
             "safeColumns projected bool_col type"
-            (hasElemType @(Maybe Bool) (unsafeGetColumn "bool_col" df))
+            (hasElemType (Maybe Bool) (unsafeGetColumn "bool_col" df))
 
 predicateWithOptsAcrossFiles :: Test
 predicateWithOptsAcrossFiles =
@@ -252,7 +252,7 @@ predicateWithOptsAcrossFiles =
                             , D.predicate =
                                 Just
                                     ( F.geq
-                                        (F.col @Int32 "id")
+                                        (F.col Int32 "id")
                                         (F.lit (6 :: Int32))
                                     )
                             }
@@ -1059,7 +1059,7 @@ byteStreamSplitExtendedGzip =
 -- columns as raw-byte text; proper float16 value decoding is not yet
 -- implemented.
 -- TODO: When IEEE 754 half-precision (float16) decoding is implemented,
--- add a value-level assertion using hasElemType @Float (or a dedicated
+-- add a value-level assertion using hasElemType Float (or a dedicated
 -- Float16 type if one is introduced). Verify that the decoded values match
 -- the known reference values for float16_nonzeros_and_nans.parquet.
 -- The column should no longer be exposed as raw-byte Text.

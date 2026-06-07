@@ -69,8 +69,8 @@ fieldTypeInference = TestCase $ do
             C.toVegaSpec
                 ( C.chart mixedFrame
                     & C.mark C.Point
-                    & C.enc C.X (col @Double "a")
-                    & C.enc C.Y (col @T.Text "g")
+                    & C.enc C.X (col Double "a")
+                    & C.enc C.Y (col T.Text "g")
                 )
     assertEqual
         "numeric column -> quantitative"
@@ -84,7 +84,7 @@ fieldTypeInference = TestCase $ do
 boxIsBoxplot :: Test
 boxIsBoxplot = TestCase $ do
     let spec =
-            C.toVegaSpec (C.chart numFrame & C.mark C.Boxplot & C.enc C.Y (col @Double "a"))
+            C.toVegaSpec (C.chart numFrame & C.mark C.Boxplot & C.enc C.Y (col Double "a"))
     assertEqual
         "Chart box uses boxplot mark"
         (Just (String "boxplot"))
@@ -103,7 +103,7 @@ legacyBoxIsBoxplot = TestCase $ do
 nanBecomesNull :: Test
 nanBecomesNull = TestCase $ do
     let df = D.fromNamedColumns [("a", D.fromList ([0 / 0, 1.0] :: [Double]))]
-        spec = C.toVegaSpec (C.chart df & C.enc C.Y (col @Double "a"))
+        spec = C.toVegaSpec (C.chart df & C.enc C.Y (col Double "a"))
         firstA = lookupKey "a" (fromMaybe Null (dataValues spec V.!? 0))
     assertEqual "NaN inlines as null" (Just Null) firstA
 
@@ -111,7 +111,7 @@ escapingSafe :: Test
 escapingSafe = TestCase $ do
     let weird = "we\"ir\\d"
         df = D.fromNamedColumns [(weird, D.fromList ([1.0, 2.0] :: [Double]))]
-        spec = C.toVegaSpec (C.chart df & C.enc C.X (col @Double weird))
+        spec = C.toVegaSpec (C.chart df & C.enc C.X (col Double weird))
         row0 = fromMaybe Null (dataValues spec V.!? 0)
     assertBool
         "weird column name present as a data key"
@@ -125,7 +125,7 @@ computedExpr :: Test
 computedExpr = TestCase $ do
     let spec =
             C.toVegaSpec
-                (C.chart numFrame & C.enc C.Y (col @Double "a" + col @Double "a"))
+                (C.chart numFrame & C.enc C.Y (col Double "a" + col Double "a"))
         row0 = fromMaybe Null (dataValues spec V.!? 0)
     assertEqual
         "computed field named after channel"
@@ -145,15 +145,15 @@ typedParity = TestCase $ do
             C.toVegaSpec
                 ( C.chart numFrame
                     & C.mark C.Point
-                    & C.enc C.X (col @Double "a")
-                    & C.enc C.Y (col @Double "b")
+                    & C.enc C.X (col Double "a")
+                    & C.enc C.Y (col Double "b")
                 )
         specT =
             CT.toVegaSpec
                 ( CT.chart tdf
                     & CT.mark CT.Point
-                    & CT.enc CT.X (DT.col @"a")
-                    & CT.enc CT.Y (DT.col @"b")
+                    & CT.enc CT.X (DT.col "a")
+                    & CT.enc CT.Y (DT.col "b")
                 )
     assertEqual "typed spec equals untyped spec" specU specT
 

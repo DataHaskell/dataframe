@@ -70,7 +70,7 @@ deriveEntityToDataFrame entityName = do
                 trace (nm <> " :: Expr " <> show ty) pure ()
                 let n = mkName nm
                 sig <- sigD n [t|Expr $(pure ty)|]
-                val <- valD (varP n) (normalB [|col $(lift colName)|]) []
+                val <- valD (varP n) (normalB [|col $(pure $ TypeE ty) $(lift colName)|]) []
                 pure [sig, val]
 
             return (instanceDec : concat dataframeExprs)

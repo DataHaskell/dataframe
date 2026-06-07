@@ -34,19 +34,19 @@ pathEntailment =
     [ prunesTo
         "ancestor entails child keeps true subtree"
         ( Branch
-            (F.col @Double "age" .> F.lit (50 :: Double))
-            (Branch (F.col @Double "age" .> F.lit (30 :: Double)) (Leaf "a") (Leaf "b"))
+            (F.col Double "age" .> F.lit (50 :: Double))
+            (Branch (F.col Double "age" .> F.lit (30 :: Double)) (Leaf "a") (Leaf "b"))
             (Leaf "c")
         )
-        (Branch (F.col @Double "age" .> F.lit (50 :: Double)) (Leaf "a") (Leaf "c"))
+        (Branch (F.col Double "age" .> F.lit (50 :: Double)) (Leaf "a") (Leaf "c"))
     , prunesTo
         "ancestor refutes child keeps false subtree"
         ( Branch
-            (F.col @Double "age" .> F.lit (50 :: Double))
-            (Branch (F.col @Double "age" .< F.lit (40 :: Double)) (Leaf "a") (Leaf "b"))
+            (F.col Double "age" .> F.lit (50 :: Double))
+            (Branch (F.col Double "age" .< F.lit (40 :: Double)) (Leaf "a") (Leaf "b"))
             (Leaf "c")
         )
-        (Branch (F.col @Double "age" .> F.lit (50 :: Double)) (Leaf "b") (Leaf "c"))
+        (Branch (F.col Double "age" .> F.lit (50 :: Double)) (Leaf "b") (Leaf "c"))
     ]
 
 falseEdgeGate :: [Test]
@@ -54,16 +54,16 @@ falseEdgeGate =
     [ prunesTo
         "integral false edge entails child"
         ( Branch
-            (F.toDouble (F.col @Int "ai") .> F.lit (50 :: Double))
+            (F.toDouble (F.col Int "ai") .> F.lit (50 :: Double))
             (Leaf "c")
             ( Branch
-                (F.toDouble (F.col @Int "ai") .< F.lit (60 :: Double))
+                (F.toDouble (F.col Int "ai") .< F.lit (60 :: Double))
                 (Leaf "a")
                 (Leaf "b")
             )
         )
         ( Branch
-            (F.toDouble (F.col @Int "ai") .> F.lit (50 :: Double))
+            (F.toDouble (F.col Int "ai") .> F.lit (50 :: Double))
             (Leaf "c")
             (Leaf "a")
         )
@@ -73,13 +73,13 @@ sameBranchCollapse :: [Test]
 sameBranchCollapse =
     [ prunesTo
         "equal leaves collapse the branch"
-        (Branch (F.col @Double "age" .> F.lit (50 :: Double)) (Leaf "a") (Leaf "a"))
+        (Branch (F.col Double "age" .> F.lit (50 :: Double)) (Leaf "a") (Leaf "a"))
         (Leaf "a")
     , prunesTo
         "collapse cascades upward"
         ( Branch
-            (F.col @Double "age" .> F.lit (50 :: Double))
-            (Branch (F.col @Double "hours" .> F.lit (40 :: Double)) (Leaf "a") (Leaf "a"))
+            (F.col Double "age" .> F.lit (50 :: Double))
+            (Branch (F.col Double "hours" .> F.lit (40 :: Double)) (Leaf "a") (Leaf "a"))
             (Leaf "a")
         )
         (Leaf "a")
@@ -90,22 +90,22 @@ preservedTrees =
     [ preserved
         "child not tight enough is kept"
         ( Branch
-            (F.col @Double "age" .> F.lit (50 :: Double))
-            (Branch (F.col @Double "age" .> F.lit (60 :: Double)) (Leaf "a") (Leaf "b"))
+            (F.col Double "age" .> F.lit (50 :: Double))
+            (Branch (F.col Double "age" .> F.lit (60 :: Double)) (Leaf "a") (Leaf "b"))
             (Leaf "c")
         )
     , preserved
         "double false edge is kept (NaN)"
         ( Branch
-            (F.col @Double "weight" .> F.lit (50 :: Double))
+            (F.col Double "weight" .> F.lit (50 :: Double))
             (Leaf "c")
-            (Branch (F.col @Double "weight" .< F.lit (60 :: Double)) (Leaf "a") (Leaf "b"))
+            (Branch (F.col Double "weight" .< F.lit (60 :: Double)) (Leaf "a") (Leaf "b"))
         )
     , preserved
         "cross-column descendant is kept"
         ( Branch
-            (F.col @Double "age" .> F.lit (50 :: Double))
-            (Branch (F.col @Double "income" .> F.lit (30000 :: Double)) (Leaf "a") (Leaf "b"))
+            (F.col Double "age" .> F.lit (50 :: Double))
+            (Branch (F.col Double "income" .> F.lit (30000 :: Double)) (Leaf "a") (Leaf "b"))
             (Leaf "c")
         )
     ]

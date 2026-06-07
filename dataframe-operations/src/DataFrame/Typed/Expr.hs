@@ -1,4 +1,3 @@
-{-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DisambiguateRecordFields #-}
 {-# LANGUAGE FlexibleContexts #-}
@@ -7,6 +6,7 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE RequiredTypeArguments #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
@@ -29,15 +29,15 @@ type Schema = '[Column \"age\" Int, Column \"salary\" Double]
 
 -- This compiles:
 goodExpr :: TExpr Schema Double
-goodExpr = col \@\"salary\"
+goodExpr = col \"salary\"
 
 -- This gives a compile-time error (column not found):
 badExpr :: TExpr Schema Double
-badExpr = col \@\"nonexistent\"
+badExpr = col \"nonexistent\"
 
 -- This gives a compile-time error (type mismatch):
 wrongType :: TExpr Schema Int
-wrongType = col \@\"salary\"  -- salary is Double, not Int
+wrongType = col \"salary\"  -- salary is Double, not Int
 @
 -}
 module DataFrame.Typed.Expr (
@@ -179,17 +179,17 @@ salary = col \@\"salary\"
 @
 -}
 col ::
-    forall (name :: Symbol) cols a.
+    forall (name :: Symbol) -> forall cols a.
     ( KnownSymbol name
     , a ~ SafeLookup name cols
     , Columnable a
     , AssertPresent name cols
     ) =>
     TExpr cols a
-col = TExpr (Col (T.pack (symbolVal (Proxy @name))))
+col name = TExpr (Col (T.pack (symbolVal (Proxy @name))))
 
 {- | Use a column name as an @OverloadedLabels@ label: @#age@ is sugar for
-@col \@\"age\"@. Enable @OverloadedLabels@ at the use site.
+@col \"age\"@. Enable @OverloadedLabels@ at the use site.
 
 @
 adults = filterWhere (#age .>=. lit 18) people
@@ -203,7 +203,7 @@ instance
     ) =>
     IsLabel name (TExpr cols a)
     where
-    fromLabel = col @name
+    fromLabel = col name
 
 {- | Create a literal expression. Valid for any schema since it
 references no columns.
@@ -601,10 +601,10 @@ collect :: (Columnable a) => TExpr cols a -> TExpr cols [a]
 collect (TExpr e) = TExpr (F.collect e)
 
 over ::
-    forall (names :: [Symbol]) cols a.
+    forall (names :: [Symbol]) -> forall cols a.
     (Columnable a, AllKnownSymbol names, AssertAllPresent names cols) =>
     TExpr cols a -> TExpr cols a
-over (TExpr e) = TExpr{unTExpr = F.over (symbolVals @names) e}
+over names (TExpr e) = TExpr{unTExpr = F.over (symbolVals names) e}
 
 -------------------------------------------------------------------------------
 -- Cast / coercion expressions

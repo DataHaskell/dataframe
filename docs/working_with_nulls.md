@@ -55,14 +55,14 @@ D.filterAllJust df
 import qualified DataFrame.Functions as F
 
 -- Replace every Nothing in "score" with 0
-D.impute (F.col @(Maybe Int) "score") 0 df
+D.impute (F.col (Maybe Int) "score") 0 df
 ```
 
 ### Fill with a computed aggregate (mean, median, etc.)
 
 ```haskell
 -- Replace every Nothing in "score" with the mean of the non-missing values
-D.imputeWith F.mean (F.col @(Maybe Int) "score") df
+D.imputeWith F.mean (F.col (Maybe Int) "score") df
 ```
 
 `imputeWith` accepts any aggregate expression (`F.mean`, `F.median`, a custom fold, etc.) and computes it over the non-null rows before filling.
@@ -79,7 +79,7 @@ These work on non-nullable columns and return plain `Bool`.
 
 ```haskell
 -- Both columns must be non-nullable
-D.filterWhere (F.col @Int "id" .==. F.lit 2) df
+D.filterWhere (F.col Int "id" .==. F.lit 2) df
 ```
 
 ### Nullable-aware operators (`.+`, `.-`, `.*`, `./`, `.==`, `.<`, …)
@@ -90,10 +90,10 @@ These accept any combination of nullable and non-nullable operands and propagate
 import DataFrame.Operators
 
 -- Int column + Maybe Int column → Maybe Int column
-D.derive "adjusted" (F.col @Int "id" .+ F.col @(Maybe Int) "score") df
+D.derive "adjusted" (F.col Int "id" .+ F.col (Maybe Int) "score") df
 
 -- Comparison: Maybe Int .== Int → Maybe Bool column
-D.derive "match" (F.col @(Maybe Int) "score" .== F.lit 90) df
+D.derive "match" (F.col (Maybe Int) "score" .== F.lit 90) df
 ```
 
 The result type is determined at compile time:
@@ -111,16 +111,16 @@ When the built-in operators don't cover your function, use `nullLift` (unary) an
 
 ```haskell
 -- Unary: negate over Maybe Int column → Maybe Int
-D.derive "neg_score" (F.nullLift negate (F.col @(Maybe Int) "score")) df
+D.derive "neg_score" (F.nullLift negate (F.col (Maybe Int) "score")) df
 
 -- Unary: negate over plain Int column → Int (no wrapping)
-D.derive "neg_id" (F.nullLift negate (F.col @Int "id")) df
+D.derive "neg_id" (F.nullLift negate (F.col Int "id")) df
 
 -- Binary: mixed nullable — result type follows the same table above
-D.derive "sum" (F.nullLift2 (+) (F.col @Int "id") (F.col @(Maybe Int) "score")) df
+D.derive "sum" (F.nullLift2 (+) (F.col Int "id") (F.col (Maybe Int) "score")) df
 
 -- Binary: custom function, both non-nullable
-D.derive "product" (F.nullLift2 (*) (F.col @Int "id") (F.col @Int "id")) df
+D.derive "product" (F.nullLift2 (*) (F.col Int "id") (F.col Int "id")) df
 ```
 
 `nullLift` / `nullLift2` work for **any** function, including those returning a different type:
@@ -130,7 +130,7 @@ import qualified Data.Text as T
 
 -- Convert nullable Int to nullable Text
 D.derive "score_text"
-    (F.nullLift (T.pack . show) (F.col @(Maybe Int) "score"))
+    (F.nullLift (T.pack . show) (F.col (Maybe Int) "score"))
     df
 -- produces a Maybe Text column
 ```
@@ -140,7 +140,7 @@ D.derive "score_text"
 `whenBothPresent` predates `nullLift2` and is retained for backward compatibility. It handles the both-nullable case for operands of the same type:
 
 ```haskell
-F.whenBothPresent (+) (F.col @(Maybe Int) "a") (F.col @(Maybe Int) "b")
+F.whenBothPresent (+) (F.col (Maybe Int) "a") (F.col (Maybe Int) "b")
 -- equivalent to: F.nullLift2 (+) ...
 ```
 
@@ -168,7 +168,7 @@ This means you rarely need to write `D.apply @(Maybe Int) (fmap negate)` explici
 
 ```haskell
 -- Wrap the plain Int "id" column in Maybe
-D.derive "maybe_id" (F.cast @(Maybe Int) Nothing "id") df
+D.derive "maybe_id" (F.cast (Maybe Int) Nothing "id") df
 -- if "id" is already Maybe Int, the column is used as-is
 -- if "id" is plain Int, each value is wrapped in Just
 ```
@@ -176,7 +176,7 @@ D.derive "maybe_id" (F.cast @(Maybe Int) Nothing "id") df
 `F.unsafeCast` strips `Maybe` when you know (at runtime) there are no `Nothing` values:
 
 ```haskell
-D.derive "bare_score" (F.coerce @Int "score") df
+D.derive "bare_score" (F.coerce Int "score") df
 ```
 
 ---
@@ -198,11 +198,11 @@ stripped = T.filterAllJust typedDf
 
 -- Nullable-aware expression
 sumExpr :: TE.TExpr MySchema (Maybe Int)
-sumExpr = TE.col @"id" TE..+ TE.col @"score"   -- Int + Maybe Int → Maybe Int
+sumExpr = TE.col "id" TE..+ TE.col "score"   -- Int + Maybe Int → Maybe Int
 
 -- nullLift on a typed expression
 negScore :: TE.TExpr MySchema (Maybe Int)
-negScore = TE.nullLift negate (TE.col @"score")
+negScore = TE.nullLift negate (TE.col "score")
 ```
 
 ### `filterAllJust` removes `Maybe` from the schema type

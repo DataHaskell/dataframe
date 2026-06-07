@@ -104,19 +104,19 @@ main = do
                     assertEqual "row count after take 2" 2 (Core.nRows df)
                 , TestLabel "select projects to fewer columns" $ TestCase $ do
                     fdf <- scan
-                    fdf' <- Fusion.select @'["id", "name"] fdf
+                    fdf' <- Fusion.select '["id", "name"] fdf
                     df <- thaw <$> Fusion.run fdf'
                     assertEqual "columns after select" 2 (Core.nColumns df)
                 , TestLabel "filter drops non-matching rows" $ TestCase $ do
                     fdf <- scan
-                    let pred_ = Fusion.col @"id" Fusion..>. Fusion.lit (2 :: Int)
+                    let pred_ = Fusion.col "id" Fusion..>. Fusion.lit (2 :: Int)
                     fdf' <- Fusion.filter pred_ fdf
                     df <- thaw <$> Fusion.run fdf'
                     assertEqual "row count after filter id > 2" 2 (Core.nRows df)
                 , TestLabel "derive adds a computed column" $ TestCase $ do
                     fdf <- scan
-                    let doubled = Fusion.col @"score" Fusion..*. Fusion.lit (2.0 :: Double)
-                    fdf' <- Fusion.derive @"doubled" doubled fdf
+                    let doubled = Fusion.col "score" Fusion..*. Fusion.lit (2.0 :: Double)
+                    fdf' <- Fusion.derive "doubled" doubled fdf
                     df <- thaw <$> Fusion.run fdf'
                     assertEqual "row count after derive" 4 (Core.nRows df)
                     assertEqual "column count after derive" 4 (Core.nColumns df)
@@ -130,7 +130,7 @@ main = do
                     -- group by name, sum scores (each name unique here, so 4 groups)
                     fdf' <-
                         Fusion.aggregate
-                            (Fusion.as @"total" (Fusion.sum (Fusion.col @"score")))
+                            (Fusion.as @"total" (Fusion.sum (Fusion.col "score")))
                             (Fusion.groupBy @'["name"] fdf)
                     df <- thaw <$> Fusion.run fdf'
                     assertEqual "row count after groupBy" 4 (Core.nRows df)

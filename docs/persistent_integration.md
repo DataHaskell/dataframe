@@ -111,13 +111,13 @@ analyzeUsers = runSqlite "test.db" $ do
         
         -- Derive columns
         let withAgeGroup = DF.derive "age_group"
-                (F.ifThenElse (F.col @Int "age" `F.lt` F.lit 30)
+                (F.ifThenElse (F.col Int "age" `F.lt` F.lit 30)
                     (F.lit @Text "young")
                     (F.lit @Text "adult"))
                 df
         
         -- Get column values
-        let ages = DF.columnAsList (F.col @Int "age") sorted
+        let ages = DF.columnAsList (F.col Int "age") sorted
         print ages  -- [25, 28, 30, 35]
 ```
 

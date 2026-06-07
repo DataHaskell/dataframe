@@ -207,9 +207,9 @@ featuresOfColumn df c = case unsafeGetColumn c df of
 
 numericFeature :: forall b. (Columnable b, VU.Unbox b) => T.Text -> VU.Vector b -> [CartFeature]
 numericFeature c v = case testEquality (typeRep @b) (typeRep @Double) of
-    Just Refl -> [CartFeature v (\t -> F.col @Double c .<=. F.lit t)]
-    Nothing -> case sIntegral @b of
-        STrue -> [CartFeature (VU.map fromIntegral v) (\t -> F.toDouble (F.col @b c) .<=. F.lit t)]
+    Just Refl -> [CartFeature v (\t -> F.col Double c .<=. F.lit t)]
+    Nothing -> case sIntegral b of
+        STrue -> [CartFeature (VU.map fromIntegral v) (\t -> F.toDouble (F.col b c) .<=. F.lit t)]
         SFalse -> []
 
 oneHotFeatures :: forall b. (Columnable b) => Int -> T.Text -> V.Vector b -> [CartFeature]
@@ -219,7 +219,7 @@ oneHotFeatures nAll c v = case testEquality (typeRep @b) (typeRep @T.Text) of
 
 oneHot :: Int -> T.Text -> V.Vector T.Text -> T.Text -> CartFeature
 oneHot nAll c v cat =
-    CartFeature (VU.generate nAll (\i -> if v V.! i == cat then 1 else 0)) (const (F.col @T.Text c ./=. F.lit cat))
+    CartFeature (VU.generate nAll (\i -> if v V.! i == cat then 1 else 0)) (const (F.col T.Text c ./=. F.lit cat))
 
 -- | Target column as string labels (matches pandas @y.astype(str)@).
 cartTargetLabels :: T.Text -> DataFrame -> V.Vector T.Text

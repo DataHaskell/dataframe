@@ -814,10 +814,10 @@ You must specify the type via type applications.
 
 ==== __Examples__
 
->>> columnAsVector (F.col @Int "age") df
+>>> columnAsVector (F.col Int "age") df
 Right [25, 30, 35, ...]
 
->>> columnAsVector (F.col @Text "name") df
+>>> columnAsVector (F.col Text "name") df
 Right ["Alice", "Bob", "Charlie", ...]
 -}
 columnAsVector ::
@@ -918,10 +918,10 @@ You must specify the type via type applications.
 
 ==== __Examples__
 
->>> columnAsList @Int "age" df
+>>> columnAsList Int "age" df
 [25, 30, 35, ...]
 
->>> columnAsList @Text "name" df
+>>> columnAsList Text "name" df
 ["Alice", "Bob", "Charlie", ...]
 
 ==== __Throws__

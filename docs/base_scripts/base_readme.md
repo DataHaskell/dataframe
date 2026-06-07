@@ -94,8 +94,8 @@ sales = D.fromNamedColumns
 -- Group by product and compute totals
 sales
     |> D.groupBy ["product"]
-    |> D.aggregate [ F.sum (F.col @Int "amount") `as` "total"
-                   , F.count (F.col @Int "amount") `as` "orders"
+    |> D.aggregate [ F.sum (F.col Int "amount") `as` "total"
+                   , F.count (F.col Int "amount") `as` "orders"
                    ]
     |> D.toMarkdown'
 ```
@@ -125,7 +125,7 @@ D.dimensions df
 D.describeColumns df |> D.toMarkdown'
 ```
 
-The `:declareColumns` macro (`$(D.declareColumns df)` outside the REPL) generates typed column references from a dataframe, so you can use column names directly in expressions instead of writing `F.col @Double "median_income"` every time:
+The `:declareColumns` macro (`$(D.declareColumns df)` outside the REPL) generates typed column references from a dataframe, so you can use column names directly in expressions instead of writing `F.col Double "median_income"` every time:
 
 ```haskell
 $(D.declareColumns df)
@@ -187,8 +187,8 @@ Compare this to the manual version which requires spelling out every column name
 ```haskell
 -- Without TH — every column needs its name and type spelled out
 df |> D.derive "rooms_per_household"
-        (F.col @Double "total_rooms" / F.col @Double "households")
-   |> D.filterWhere (F.col @Double "median_income" .>. F.lit 5)
+        (F.col Double "total_rooms" / F.col Double "households")
+   |> D.filterWhere (F.col Double "median_income" .>. F.lit 5)
    |> D.take 5
    |> D.toMarkdown'
 ```
@@ -264,7 +264,7 @@ typed-dataframe machinery), there's a companion splice in
 $(D.deriveSchema ''Order)
 -- emits:
 --   orderSchema     :: Schema
---   orderSchema     = makeSchema [("order_id", schemaType @Int64), ...]
+--   orderSchema     = makeSchema [("order_id", schemaType Int64), ...]
 --   orderOrderId    :: Expr Int64
 --   orderOrderId    = col "order_id"
 --   orderRegion     :: Expr Text
@@ -319,9 +319,9 @@ employees <- D.readCsv "./data/employees.csv"
 case DT.freeze @EmployeeSchema employees of
     Nothing  -> "Schema mismatch!"
     Just tdf -> tdf
-        |> DT.derive @"bonus" (DT.col @"salary" * DT.lit 0.1)
-        |> DT.filterWhere (DT.col @"salary" DT..>. DT.lit 50000)
-        |> DT.select @'["name", "bonus"]
+        |> DT.derive "bonus" (DT.col "salary" * DT.lit 0.1)
+        |> DT.filterWhere (DT.col "salary" DT..>. DT.lit 50000)
+        |> DT.select ["name", "bonus"]
         |> DT.thaw
         |> D.toMarkdown'
 ```
@@ -330,11 +330,11 @@ case DT.freeze @EmployeeSchema employees of
 
 ```text
 -- Typo in column name -> compile error
-tdf |> DT.filterWhere (DT.col @"slary" DT..>. DT.lit 50000)
+tdf |> DT.filterWhere (DT.col "slary" DT..>. DT.lit 50000)
 -- error: Column "slary" not found in schema
 
 -- Wrong type -> compile error
-tdf |> DT.filterWhere (DT.col @"name" DT..>. DT.lit 50000)
+tdf |> DT.filterWhere (DT.col "name" DT..>. DT.lit 50000)
 -- error: Couldn't match type 'Text' with 'Double'
 ```
 
@@ -352,7 +352,7 @@ Just stdf = DT.freeze @ScoreSchema scoresDf
 
 -- filterAllJust drops the null row and changes the column type from
 -- (Maybe Double) to Double, so `scaled` can multiply it directly.
-DT.thaw (DT.filterAllJust stdf |> DT.derive @"scaled" (DT.col @"score" * DT.lit 100)) |> D.toMarkdown'
+DT.thaw (DT.filterAllJust stdf |> DT.derive "scaled" (DT.col "score" * DT.lit 100)) |> D.toMarkdown'
 ```
 
 ## Features
@@ -361,7 +361,7 @@ DT.thaw (DT.filterAllJust stdf |> DT.derive @"scaled" (DT.col @"score" * DT.lit 
 
 **Operations**: filter, select, derive, groupBy, aggregate, joins (inner, left, right, full outer), sort, sample, stratified sample, distinct, k-fold splits.
 
-**Expressions**: typed column references (`F.col @Double "x"`), arithmetic, comparisons, logical operators, nullable-aware three-valued logic (`.==`, `.&&`), string matching (`like`, `regex`), casting, and user-defined functions via `lift`/`lift2`.
+**Expressions**: typed column references (`F.col Double "x"`), arithmetic, comparisons, logical operators, nullable-aware three-valued logic (`.==`, `.&&`), string matching (`like`, `regex`), casting, and user-defined functions via `lift`/`lift2`.
 
 **Statistics**: mean, median, mode, variance, standard deviation, percentiles, inter-quartile range, correlation, skewness, frequency tables, imputation.
 
@@ -384,23 +384,23 @@ import qualified DataFrame.Lazy as L
 import DataFrame.Internal.Schema (schemaType, makeSchema)
 
 housingSchema = makeSchema
-    [ ("longitude",          schemaType @Double)
-    , ("latitude",           schemaType @Double)
-    , ("housing_median_age", schemaType @Double)
-    , ("total_rooms",        schemaType @Double)
-    , ("total_bedrooms",     schemaType @(Maybe Double))
-    , ("population",         schemaType @Double)
-    , ("households",         schemaType @Double)
-    , ("median_income",      schemaType @Double)
-    , ("median_house_value", schemaType @Double)
-    , ("ocean_proximity",    schemaType @Text)
+    [ ("longitude",          schemaType Double)
+    , ("latitude",           schemaType Double)
+    , ("housing_median_age", schemaType Double)
+    , ("total_rooms",        schemaType Double)
+    , ("total_bedrooms",     schemaType (Maybe Double))
+    , ("population",         schemaType Double)
+    , ("households",         schemaType Double)
+    , ("median_income",      schemaType Double)
+    , ("median_house_value", schemaType Double)
+    , ("ocean_proximity",    schemaType Text)
     ]
 
 lazyResult <- L.runDataFrame $
     L.scanCsv housingSchema "./data/housing.csv"
-    |> L.filter  (F.col @Double "median_income" .>. F.lit 5)
+    |> L.filter  (F.col Double "median_income" .>. F.lit 5)
     |> L.derive  "value_per_income"
-                 (F.col @Double "median_house_value" / F.col @Double "median_income")
+                 (F.col Double "median_house_value" / F.col Double "median_income")
     |> L.select  ["ocean_proximity", "median_house_value", "value_per_income"]
     |> L.take 1000
 

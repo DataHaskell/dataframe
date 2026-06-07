@@ -1,4 +1,3 @@
-{-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveTraversable #-}
@@ -7,6 +6,7 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE RequiredTypeArguments #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
@@ -94,11 +94,11 @@ instance SBoolI 'True where sbool = STrue
 instance SBoolI 'False where sbool = SFalse
 
 -- | Type-level function to determine whether or not a type is unboxa
-sUnbox :: forall a. (SBoolI (Unboxable a)) => SBool (Unboxable a)
-sUnbox = sbool @(Unboxable a)
+sUnbox :: forall a -> (SBoolI (Unboxable a)) => SBool (Unboxable a)
+sUnbox a = sbool @(Unboxable a)
 
-sNumeric :: forall a. (SBoolI (Numeric a)) => SBool (Numeric a)
-sNumeric = sbool @(Numeric a)
+sNumeric :: forall a -> (SBoolI (Numeric a)) => SBool (Numeric a)
+sNumeric a = sbool @(Numeric a)
 
 type family When (flag :: Bool) (c :: Constraint) :: Constraint where
     When 'True c = c
@@ -120,8 +120,8 @@ type family IntegralTypes (a :: Type) :: Bool where
     IntegralTypes Word64 = 'True
     IntegralTypes _ = 'False
 
-sIntegral :: forall a. (SBoolI (IntegralTypes a)) => SBool (IntegralTypes a)
-sIntegral = sbool @(IntegralTypes a)
+sIntegral :: forall a -> (SBoolI (IntegralTypes a)) => SBool (IntegralTypes a)
+sIntegral a = sbool @(IntegralTypes a)
 
 type IntegralIf a = When (IntegralTypes a) (Integral a)
 
@@ -130,8 +130,8 @@ type family FloatingTypes (a :: Type) :: Bool where
     FloatingTypes Double = 'True
     FloatingTypes _ = 'False
 
-sFloating :: forall a. (SBoolI (FloatingTypes a)) => SBool (FloatingTypes a)
-sFloating = sbool @(FloatingTypes a)
+sFloating :: forall a -> (SBoolI (FloatingTypes a)) => SBool (FloatingTypes a)
+sFloating a = sbool @(FloatingTypes a)
 
 type FloatingIf a = When (FloatingTypes a) (Real a, Fractional a)
 

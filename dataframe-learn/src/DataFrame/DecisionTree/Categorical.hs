@@ -1,7 +1,7 @@
-{-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE RequiredTypeArguments #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 
@@ -183,10 +183,10 @@ catValueListsFor :: (Ord a, Ord target) => CatCtx target -> V.Vector a -> [[a]]
 catValueListsFor ctx = catValueLists (ccBinary ctx) (ccPos ctx) (ccTargets ctx) (ccSubsetCap ctx)
 
 -- | True for numeric columns (handled by the numeric pool, not here).
-isNumericKind :: forall a. (Columnable a) => Bool
-isNumericKind = case sFloating @a of
+isNumericKind :: forall a -> (Columnable a) => Bool
+isNumericKind a = case sFloating a of
     STrue -> True
-    SFalse -> case sIntegral @a of
+    SFalse -> case sIntegral a of
         STrue -> True
         SFalse -> False
 
@@ -208,7 +208,7 @@ nonNullColConds ctx colName column =
 
 nullableColConds :: forall a target. (Columnable a, Ord target) => CatCtx target -> T.Text -> Bitmap -> V.Vector a -> [Expr Bool]
 nullableColConds ctx colName bm column
-    | isNumericKind @a || V.null valid = []
+    | isNumericKind a || V.null valid = []
     | otherwise = fromMaybe [] (withOrdFrom @a (ccOrds ctx) (map (orEqs (eqJustFor @a colName)) (catValueListsFor ctx valid)))
   where
     valid = validBoxedValues bm column
@@ -233,29 +233,29 @@ isDisallowedPair cfg l r =
 
 pairConds :: ColumnOrdering -> DataFrame -> (T.Text, T.Text) -> [Expr Bool]
 pairConds ords df (l, r) = case (unsafeGetColumn l df, unsafeGetColumn r df) of
-    (BoxedColumn Nothing (_ :: V.Vector a), BoxedColumn Nothing (_ :: V.Vector b)) -> strictPairConds @a @b l r
-    (BoxedColumn (Just _) (_ :: V.Vector a), BoxedColumn (Just _) (_ :: V.Vector b)) -> nullablePairConds @a @b ords l r
+    (BoxedColumn Nothing (_ :: V.Vector a), BoxedColumn Nothing (_ :: V.Vector b)) -> strictPairConds a b l r
+    (BoxedColumn (Just _) (_ :: V.Vector a), BoxedColumn (Just _) (_ :: V.Vector b)) -> nullablePairConds a b ords l r
     _ -> []
 
-strictPairConds :: forall a b. (Columnable a, Columnable b) => T.Text -> T.Text -> [Expr Bool]
-strictPairConds l r = case testEquality (typeRep @a) (typeRep @b) of
+strictPairConds :: forall a b -> (Columnable a, Columnable b) => T.Text -> T.Text -> [Expr Bool]
+strictPairConds a b l r = case testEquality (typeRep @a) (typeRep @b) of
     Just Refl -> [Col @a l .==. Col @a r]
     Nothing -> []
 
-nullablePairConds :: forall a b. (Columnable a, Columnable b) => ColumnOrdering -> T.Text -> T.Text -> [Expr Bool]
-nullablePairConds ords l r = case testEquality (typeRep @a) (typeRep @b) of
+nullablePairConds :: forall a b -> (Columnable a, Columnable b) => ColumnOrdering -> T.Text -> T.Text -> [Expr Bool]
+nullablePairConds a b ords l r = case testEquality (typeRep @a) (typeRep @b) of
     Nothing -> []
-    Just Refl -> nullableEqOrLe @a ords l r
+    Just Refl -> nullableEqOrLe a ords l r
 
-nullableEqOrLe :: forall a. (Columnable a) => ColumnOrdering -> T.Text -> T.Text -> [Expr Bool]
-nullableEqOrLe ords l r
-    | isTextType @a = eqOnly
+nullableEqOrLe :: forall a -> (Columnable a) => ColumnOrdering -> T.Text -> T.Text -> [Expr Bool]
+nullableEqOrLe a ords l r
+    | isTextType a = eqOnly
     | otherwise = maybe eqOnly (++ eqOnly) (withOrdFrom @a ords [Col @(Maybe a) l .<=. Col @(Maybe a) r])
   where
     eqOnly = [Col @(Maybe a) l .==. Col @(Maybe a) r]
 
-isTextType :: forall a. (Columnable a) => Bool
-isTextType = case testEquality (typeRep @a) (typeRep @T.Text) of
+isTextType :: forall a -> (Columnable a) => Bool
+isTextType a = case testEquality (typeRep @a) (typeRep @T.Text) of
     Just Refl -> True
     Nothing -> False
 

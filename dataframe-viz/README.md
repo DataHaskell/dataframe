@@ -64,9 +64,9 @@ df = fromNamedColumns
     , ("region", fromList (["INLAND","NEAR BAY","INLAND","NEAR OCEAN","ISLAND","INLAND","NEAR BAY","INLAND"] :: [Text]))
     ]
 
-income = F.col @Double "income"
-value  = F.col @Double "value"
-region = F.col @Text   "region"
+income = F.col Double "income"
+value  = F.col Double "value"
+region = F.col Text   "region"
 
 -- show a Vega-Lite spec without its (verbose) inlined data.
 -- Returns String so scripths prints it raw rather than show-escaped.

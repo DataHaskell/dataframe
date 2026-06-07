@@ -1,9 +1,9 @@
-{-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE ExplicitNamespaces #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE RequiredTypeArguments #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 
@@ -310,16 +310,16 @@ buildSchema pairs = do
     return (makeSchema sch)
   where
     resolve (name, tag) = case tag of
-        "int" -> return (name, schemaType @Int)
-        "int8" -> return (name, schemaType @Int8)
-        "int16" -> return (name, schemaType @Int16)
-        "int32" -> return (name, schemaType @Int32)
-        "int64" -> return (name, schemaType @Int64)
-        "double" -> return (name, schemaType @Double)
-        "float" -> return (name, schemaType @Float)
-        "bool" -> return (name, schemaType @Bool)
-        "text" -> return (name, schemaType @T.Text)
-        "string" -> return (name, schemaType @String)
+        "int" -> return (name, schemaType Int)
+        "int8" -> return (name, schemaType Int8)
+        "int16" -> return (name, schemaType Int16)
+        "int32" -> return (name, schemaType Int32)
+        "int64" -> return (name, schemaType Int64)
+        "double" -> return (name, schemaType Double)
+        "float" -> return (name, schemaType Float)
+        "bool" -> return (name, schemaType Bool)
+        "text" -> return (name, schemaType T.Text)
+        "string" -> return (name, schemaType String)
         other ->
             ioError . userError $
                 "DataFrame.IR.buildSchema: unsupported schema type tag '"
@@ -336,28 +336,28 @@ runFrequencies colName df = dispatchType (columnTypeRep (unsafeGetColumn colName
     columnTypeRep (UnboxedColumn _ (_ :: VU.Vector a)) = SomeTypeRep (typeRep @a)
     columnTypeRep (BoxedColumn _ (_ :: V.Vector a)) = SomeTypeRep (typeRep @a)
 
-    fr :: forall a. (Columnable a, Ord a) => IO DataFrame
-    fr = return $ Stats.frequencies (Col @a colName) df
+    fr :: forall a -> (Columnable a, Ord a) => IO DataFrame
+    fr a = return $ Stats.frequencies (Col @a colName) df
 
     dispatchType :: SomeTypeRep -> IO DataFrame
     dispatchType (SomeTypeRep tr)
-        | Just HRefl <- eqTypeRep tr (typeRep @Int) = fr @Int
-        | Just HRefl <- eqTypeRep tr (typeRep @Int8) = fr @Int8
-        | Just HRefl <- eqTypeRep tr (typeRep @Int16) = fr @Int16
-        | Just HRefl <- eqTypeRep tr (typeRep @Int32) = fr @Int32
-        | Just HRefl <- eqTypeRep tr (typeRep @Int64) = fr @Int64
-        | Just HRefl <- eqTypeRep tr (typeRep @Word) = fr @Word
-        | Just HRefl <- eqTypeRep tr (typeRep @Word8) = fr @Word8
-        | Just HRefl <- eqTypeRep tr (typeRep @Word16) = fr @Word16
-        | Just HRefl <- eqTypeRep tr (typeRep @Word32) = fr @Word32
-        | Just HRefl <- eqTypeRep tr (typeRep @Word64) = fr @Word64
-        | Just HRefl <- eqTypeRep tr (typeRep @Integer) = fr @Integer
-        | Just HRefl <- eqTypeRep tr (typeRep @Double) = fr @Double
-        | Just HRefl <- eqTypeRep tr (typeRep @Float) = fr @Float
-        | Just HRefl <- eqTypeRep tr (typeRep @Bool) = fr @Bool
-        | Just HRefl <- eqTypeRep tr (typeRep @Char) = fr @Char
-        | Just HRefl <- eqTypeRep tr (typeRep @T.Text) = fr @T.Text
-        | Just HRefl <- eqTypeRep tr (typeRep @String) = fr @String
+        | Just HRefl <- eqTypeRep tr (typeRep @Int) = fr Int
+        | Just HRefl <- eqTypeRep tr (typeRep @Int8) = fr Int8
+        | Just HRefl <- eqTypeRep tr (typeRep @Int16) = fr Int16
+        | Just HRefl <- eqTypeRep tr (typeRep @Int32) = fr Int32
+        | Just HRefl <- eqTypeRep tr (typeRep @Int64) = fr Int64
+        | Just HRefl <- eqTypeRep tr (typeRep @Word) = fr Word
+        | Just HRefl <- eqTypeRep tr (typeRep @Word8) = fr Word8
+        | Just HRefl <- eqTypeRep tr (typeRep @Word16) = fr Word16
+        | Just HRefl <- eqTypeRep tr (typeRep @Word32) = fr Word32
+        | Just HRefl <- eqTypeRep tr (typeRep @Word64) = fr Word64
+        | Just HRefl <- eqTypeRep tr (typeRep @Integer) = fr Integer
+        | Just HRefl <- eqTypeRep tr (typeRep @Double) = fr Double
+        | Just HRefl <- eqTypeRep tr (typeRep @Float) = fr Float
+        | Just HRefl <- eqTypeRep tr (typeRep @Bool) = fr Bool
+        | Just HRefl <- eqTypeRep tr (typeRep @Char) = fr Char
+        | Just HRefl <- eqTypeRep tr (typeRep @T.Text) = fr T.Text
+        | Just HRefl <- eqTypeRep tr (typeRep @String) = fr String
         | otherwise =
             ioError . userError $
                 "DataFrame.IR.Frequencies: unsupported column type for '"

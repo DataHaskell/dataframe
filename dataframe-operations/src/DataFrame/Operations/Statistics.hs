@@ -219,9 +219,9 @@ _getColumnAsDouble :: T.Text -> DataFrame -> Maybe (VU.Vector Double)
 _getColumnAsDouble name df = case getColumn name df of
     Just (UnboxedColumn _ (f :: VU.Vector a)) -> case testEquality (typeRep @a) (typeRep @Double) of
         Just Refl -> Just f
-        Nothing -> case sIntegral @a of
+        Nothing -> case sIntegral a of
             STrue -> Just (VU.map fromIntegral f)
-            SFalse -> case sFloating @a of
+            SFalse -> case sFloating a of
                 STrue -> Just (VU.map realToFrac f)
                 SFalse -> Nothing
     Nothing ->

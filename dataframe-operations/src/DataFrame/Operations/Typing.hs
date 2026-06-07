@@ -1,8 +1,8 @@
-{-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RequiredTypeArguments #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 
@@ -417,10 +417,10 @@ parseWithTypes resolveMode ts df
     -- 'SafeReadMode'. @toStr@ converts column elements to a 'String' ready for
     -- 'Read'.
     plainType ::
-        forall a b.
+        forall a -> forall b.
         (Columnable a, Read a) =>
         SafeReadMode -> V.Vector b -> (b -> String) -> Column
-    plainType mode col toStr = case mode of
+    plainType a mode col toStr = case mode of
         NoSafeRead -> fromVector (V.map ((read @a) . toStr) col)
         MaybeRead -> fromVector (V.map ((readMaybe @a) . toStr) col)
         EitherRead -> fromVector (V.map ((readEitherRaw @a) . toStr) col)
@@ -443,14 +443,14 @@ parseWithTypes resolveMode ts df
                     Nothing -> case testEquality (typeRep @a) (typeRep @b) of
                         Just Refl -> c
                         Nothing -> case testEquality (typeRep @T.Text) (typeRep @b) of
-                            Just Refl -> plainType @a mode col T.unpack
-                            Nothing -> plainType @a mode col show
+                            Just Refl -> plainType a mode col T.unpack
+                            Nothing -> plainType a mode col show
                 _ -> c
         _ -> case testEquality (typeRep @a) (typeRep @b) of
             Just Refl -> c
             Nothing -> case testEquality (typeRep @T.Text) (typeRep @b) of
-                Just Refl -> plainType @a mode col T.unpack
-                Nothing -> plainType @a mode col show
+                Just Refl -> plainType a mode col T.unpack
+                Nothing -> plainType a mode col show
     asType _ _ c = c
 
 readAsMaybe :: (Read a) => String -> Maybe a
