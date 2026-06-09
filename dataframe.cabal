@@ -1,6 +1,6 @@
 cabal-version:      3.0
 name:               dataframe
-version:            2.1.0.2
+version:            2.1.0.3
 
 synopsis: A fast, safe, and intuitive DataFrame library.
 
@@ -120,9 +120,9 @@ library
                         DataFrame.Typed.Record,
                         DataFrame.Typed.Generic
     build-depends:    base >= 4 && <5,
-                      dataframe-core ^>= 1.0,
+                      dataframe-core ^>= 1.0.2,
                       dataframe-json ^>= 1.0,
-                      dataframe-operations ^>= 1.1,
+                      dataframe-operations ^>= 1.1.0.2,
                       dataframe-parsing ^>= 1.0,
                       dataframe-viz ^>= 1.0,
                       dataframe-learn ^>= 1.0
@@ -146,7 +146,7 @@ library
                             DataFrame.IO.Parquet.Seeking,
                             DataFrame.IO.Parquet.Time,
                             DataFrame.IO.Utils.RandomAccess
-        build-depends:   dataframe-parquet ^>= 1.0
+        build-depends:   dataframe-parquet ^>= 1.0.1.1
         cpp-options:     -DWITH_PARQUET
 
     -- The lazy executor calls both CSV and Parquet readers directly, so
@@ -165,7 +165,7 @@ library
         cpp-options:     -DWITH_LAZY
 
     if !flag(no-th)
-        build-depends:   dataframe-th ^>= 1.0
+        build-depends:   dataframe-th ^>= 1.0.1.1
         cpp-options:     -DWITH_TH
         exposed-modules: DataFrame.TH,
                          DataFrame.Typed.TH
@@ -194,12 +194,12 @@ library arrow-bridge
         buildable: False
     build-depends:
         base        >= 4   && < 5,
-        dataframe-core ^>= 1.0,
+        dataframe-core ^>= 1.0.2,
         dataframe-csv ^>= 1.0,
         dataframe-json ^>= 1.0,
         dataframe-lazy ^>= 1.0,
-        dataframe-operations ^>= 1.1,
-        dataframe-parquet ^>= 1.0,
+        dataframe-operations ^>= 1.1.0.2,
+        dataframe-parquet ^>= 1.0.1.1,
         dataframe-parsing ^>= 1.0,
         text        >= 2.0 && < 3,
         aeson       >= 0.11 && < 3,

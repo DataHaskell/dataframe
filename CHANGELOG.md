@@ -1,5 +1,17 @@
 # Revision history for dataframe
 
+## 2.1.0.3
+### Packaging
+* Fix dependency resolution for the `dataframe` meta-package and its satellites
+  so a clean `cabal install dataframe` resolves and builds. `dataframe-core
+  1.0.2.0` introduced the `UnaryOp`/`BinaryOp` typeclasses whose method names
+  overlap the `UnUDF`/`BinUDF` record fields; only `dataframe-operations >= 1.1`
+  enables the disambiguation. The bounds now keep the two in lockstep:
+  `dataframe-operations 1.1.0.2` requires `dataframe-core >= 1.0.2 && < 1.1`,
+  and `dataframe-parquet 1.0.1.1` / `dataframe-th 1.0.1.1` publish their
+  `dataframe-operations ^>= 1.1` bound. The meta re-pins its lower bounds to the
+  fixed satellite versions.
+
 ## 0.1.3.0.0
 ### New features
 * New `DataFrame.Typed.TH.deriveSchemaFromType` Template Haskell splice generates a typed schema synonym and a `HasSchema` instance from a Haskell record ADT. Pair with `DataFrame.fromRecords` / `DataFrame.toRecords` (or `DataFrame.Typed.fromRecordsTyped` / `toRecordsTyped`) to convert between `[Order]` and `DataFrame`/`TypedDataFrame OrderSchema`. Field names are translated `camelCase → snake_case` by default; the transform is configurable via `SchemaOptions`.
