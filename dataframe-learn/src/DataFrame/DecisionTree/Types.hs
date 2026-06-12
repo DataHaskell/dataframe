@@ -5,8 +5,9 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 
--- | Shared types, configuration and ordering machinery for the decision-tree
--- learner. Imported by every other @DataFrame.DecisionTree.*@ module.
+{- | Shared types, configuration and ordering machinery for the decision-tree
+learner. Imported by every other @DataFrame.DecisionTree.*@ module.
+-}
 module DataFrame.DecisionTree.Types (
     Tree (..),
     treeDepth,
@@ -38,8 +39,9 @@ import System.Environment (lookupEnv)
 import System.IO.Unsafe (unsafePerformIO)
 import Type.Reflection (SomeTypeRep (..), typeRep)
 
--- | A fitted tree: a leaf value, or an internal node testing a boolean
--- expression with @True@ routing left.
+{- | A fitted tree: a leaf value, or an internal node testing a boolean
+expression with @True@ routing left.
+-}
 data Tree a
     = Leaf !a
     | Branch !(Expr Bool) !(Tree a) !(Tree a)
@@ -49,8 +51,9 @@ treeDepth :: Tree a -> Int
 treeDepth (Leaf _) = 0
 treeDepth (Branch _ l r) = 1 + max (treeDepth l) (treeDepth r)
 
--- | A row the parent node must route to a specific child for the subtrees to
--- classify it correctly (the TAO objective is the count of misroutes).
+{- | A row the parent node must route to a specific child for the subtrees to
+classify it correctly (the TAO objective is the count of misroutes).
+-}
 data CarePoint = CarePoint
     { cpIndex :: !Int
     , cpCorrectDir :: !Direction
@@ -121,8 +124,9 @@ defaultTreeConfig =
         , pureReplacementLinear = False
         }
 
--- | Which column types support ordering for splits. Register a type with
--- 'orderable' and combine with @<>@.
+{- | Which column types support ordering for splits. Register a type with
+'orderable' and combine with @<>@.
+-}
 newtype ColumnOrdering = ColumnOrdering (M.Map SomeTypeRep OrdDict)
 
 instance Semigroup ColumnOrdering where
@@ -164,8 +168,9 @@ otherOrderings =
 data OrdDict where
     OrdDict :: (Columnable a, Ord a) => Proxy a -> OrdDict
 
--- | Run @k@ with the @Ord a@ instance recovered from the ordering registry,
--- or 'Nothing' when @a@ is not registered.
+{- | Run @k@ with the @Ord a@ instance recovered from the ordering registry,
+or 'Nothing' when @a@ is not registered.
+-}
 withOrdFrom ::
     forall a r. (Columnable a) => ColumnOrdering -> ((Ord a) => r) -> Maybe r
 withOrdFrom (ColumnOrdering m) k = case M.lookup (SomeTypeRep (typeRep @a)) m of

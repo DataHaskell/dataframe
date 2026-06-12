@@ -3,9 +3,10 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 
--- | Top-level fitting: assemble the candidate pool, seed from CART, run TAO,
--- and convert the result to an expression. Also the probability-tree variant
--- ('fitProbTree') that annotates leaves with class distributions.
+{- | Top-level fitting: assemble the candidate pool, seed from CART, run TAO,
+and convert the result to an expression. Also the probability-tree variant
+('fitProbTree') that annotates leaves with class distributions.
+-}
 module DataFrame.DecisionTree.Fit (
     treeToExpr,
     fitDecisionTree,
@@ -24,7 +25,12 @@ module DataFrame.DecisionTree.Fit (
 ) where
 
 import DataFrame.DecisionTree.Cart (buildCartTree)
-import DataFrame.DecisionTree.Categorical (TargetInfo (..), discreteConditions, discreteCondVecs, mkTargetInfo)
+import DataFrame.DecisionTree.Categorical (
+    TargetInfo (..),
+    discreteCondVecs,
+    discreteConditions,
+    mkTargetInfo,
+ )
 import DataFrame.DecisionTree.CondVec (CondVec)
 import DataFrame.DecisionTree.Numeric (numericCondVecs, numericConditions)
 import DataFrame.DecisionTree.Pool (dedupCVByExpr, nubByExpr)
@@ -54,9 +60,11 @@ treeToExpr (Leaf v) = Lit v
 treeToExpr (Branch cond left right) = F.ifThenElse cond (treeToExpr left) (treeToExpr right)
 
 -- | Fit a TAO decision tree (CART-seeded) and return it as an expression.
-fitDecisionTree :: forall a. (Columnable a, Ord a) => TreeConfig -> Expr a -> DataFrame -> Expr a
+fitDecisionTree ::
+    forall a. (Columnable a, Ord a) => TreeConfig -> Expr a -> DataFrame -> Expr a
 fitDecisionTree cfg (Col target) df =
-    pruneExpr (treeToExpr (taoOptimizeCV @a cfg target condVecs df indices initialTree))
+    pruneExpr
+        (treeToExpr (taoOptimizeCV @a cfg target condVecs df indices initialTree))
   where
     condVecs = candidatePool @a cfg target df
     initialTree = buildCartTree @a cfg target df
@@ -64,18 +72,24 @@ fitDecisionTree cfg (Col target) df =
 fitDecisionTree _ expr _ = error ("Cannot create tree for compound expression: " ++ show expr)
 
 -- | The deduplicated numeric + discrete candidate pool for a target column.
-candidatePool :: forall a. (Columnable a, Ord a) => TreeConfig -> T.Text -> DataFrame -> [CondVec]
+candidatePool ::
+    forall a.
+    (Columnable a, Ord a) => TreeConfig -> T.Text -> DataFrame -> [CondVec]
 candidatePool cfg target df = dedupCVByExpr (numericCVs ++ discreteCVs)
   where
     dfNoTarget = exclude [target] df
     numericCVs = numericCondVecs cfg dfNoTarget df
     discreteCVs = discreteCondVecs (targetInfoOrEmpty @a target df) cfg dfNoTarget
 
-targetInfoOrEmpty :: forall a. (Columnable a, Ord a) => T.Text -> DataFrame -> TargetInfo a
+targetInfoOrEmpty ::
+    forall a. (Columnable a, Ord a) => T.Text -> DataFrame -> TargetInfo a
 targetInfoOrEmpty target df = fromMaybe (TargetInfo False Nothing V.empty) (mkTargetInfo @a target df)
 
 -- | Fit a tree at a given depth from a raw condition list (CART + TAO + prune).
-buildTree :: forall a. (Columnable a, Ord a) => TreeConfig -> Int -> T.Text -> [Expr Bool] -> DataFrame -> Expr a
+buildTree ::
+    forall a.
+    (Columnable a, Ord a) =>
+    TreeConfig -> Int -> T.Text -> [Expr Bool] -> DataFrame -> Expr a
 buildTree cfg depth target conds df =
     pruneExpr (treeToExpr (taoOptimize @a cfg target conds df indices tree))
   where
@@ -89,7 +103,8 @@ partitionDataFrame :: Expr Bool -> DataFrame -> (DataFrame, DataFrame)
 partitionDataFrame cond df = (filterWhere cond df, filterWhere (F.not cond) df)
 
 -- | Laplace-smoothed Gini impurity of the target distribution.
-calculateGini :: forall a. (Columnable a, Ord a) => T.Text -> DataFrame -> Double
+calculateGini ::
+    forall a. (Columnable a, Ord a) => T.Text -> DataFrame -> Double
 calculateGini target df
     | n == 0 = 0
     | otherwise = 1 - sum (map (^ (2 :: Int)) probs)
@@ -106,7 +121,8 @@ majorityValue target df
   where
     counts = getCounts @a target df
 
-getCounts :: forall a. (Columnable a, Ord a) => T.Text -> DataFrame -> M.Map a Int
+getCounts ::
+    forall a. (Columnable a, Ord a) => T.Text -> DataFrame -> M.Map a Int
 getCounts target df = case interpret @a df (Col target) of
     Left e -> throw e
     Right (TColumn column) -> case toVector @a column of
@@ -131,7 +147,9 @@ percentileOfVec p vals
 type ProbTree a = Tree (M.Map a Double)
 
 -- | Normalised class probabilities over a subset of training rows.
-probsFromIndices :: forall a. (Columnable a, Ord a) => T.Text -> DataFrame -> V.Vector Int -> M.Map a Double
+probsFromIndices ::
+    forall a.
+    (Columnable a, Ord a) => T.Text -> DataFrame -> V.Vector Int -> M.Map a Double
 probsFromIndices target df indices = case interpret @a df (Col target) of
     Right (TColumn column) -> either (const M.empty) (normaliseCounts indices) (toVector @a column)
     _ -> M.empty
@@ -139,30 +157,51 @@ probsFromIndices target df indices = case interpret @a df (Col target) of
 normaliseCounts :: (Ord a) => V.Vector Int -> V.Vector a -> M.Map a Double
 normaliseCounts indices vals = M.map (\c -> fromIntegral c / total) counts
   where
-    counts = V.foldl' (\acc i -> M.insertWith (+) (vals V.! i) (1 :: Int) acc) M.empty indices
+    counts =
+        V.foldl'
+            (\acc i -> M.insertWith (+) (vals V.! i) (1 :: Int) acc)
+            M.empty
+            indices
     total = fromIntegral (V.length indices) :: Double
 
--- | Re-label a fitted tree's leaves with class distributions, routing the
--- training data through the (unchanged) split conditions.
-buildProbTree :: forall a. (Columnable a, Ord a) => Tree a -> T.Text -> DataFrame -> V.Vector Int -> ProbTree a
+{- | Re-label a fitted tree's leaves with class distributions, routing the
+training data through the (unchanged) split conditions.
+-}
+buildProbTree ::
+    forall a.
+    (Columnable a, Ord a) =>
+    Tree a -> T.Text -> DataFrame -> V.Vector Int -> ProbTree a
 buildProbTree (Leaf _) target df indices = Leaf (probsFromIndices @a target df indices)
 buildProbTree (Branch cond left right) target df indices =
-    Branch cond (buildProbTree @a left target df l) (buildProbTree @a right target df r)
+    Branch
+        cond
+        (buildProbTree @a left target df l)
+        (buildProbTree @a right target df r)
   where
     (l, r) = partitionIndices cond df indices
 
 -- | Fit a TAO tree and return one probability expression per class.
-fitProbTree :: forall a. (Columnable a, Ord a) => TreeConfig -> Expr a -> DataFrame -> M.Map a (Expr Double)
+fitProbTree ::
+    forall a.
+    (Columnable a, Ord a) =>
+    TreeConfig -> Expr a -> DataFrame -> M.Map a (Expr Double)
 fitProbTree cfg (Col target) df = probExprs (buildProbTree @a pruned target df indices)
   where
-    conds = nubByExpr (numericConditions cfg dfNoTarget ++ discreteConditions (targetInfoOrEmpty @a target df) cfg dfNoTarget)
+    conds =
+        nubByExpr
+            ( numericConditions cfg dfNoTarget
+                ++ discreteConditions (targetInfoOrEmpty @a target df) cfg dfNoTarget
+            )
     dfNoTarget = exclude [target] df
     indices = V.enumFromN 0 (nRows df)
-    pruned = pruneDead (taoOptimize @a cfg target conds df indices (buildCartTree @a cfg target df))
+    pruned =
+        pruneDead
+            (taoOptimize @a cfg target conds df indices (buildCartTree @a cfg target df))
 fitProbTree _ expr _ = error ("Cannot create prob tree for compound expression: " ++ show expr)
 
 -- | Convert a 'ProbTree' into one @Expr Double@ per class.
-probExprs :: forall a. (Columnable a, Ord a) => ProbTree a -> M.Map a (Expr Double)
+probExprs ::
+    forall a. (Columnable a, Ord a) => ProbTree a -> M.Map a (Expr Double)
 probExprs tree = M.fromList [(c, classExpr c tree) | c <- nub (allClasses tree)]
 
 allClasses :: ProbTree a -> [a]

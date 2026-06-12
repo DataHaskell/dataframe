@@ -1,9 +1,10 @@
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE OverloadedStrings #-}
 
--- | Candidate-pool scoring and boolean expansion: penalized scoring, diverse
--- top-K selection, AND/OR saturation, and structural/truth-vector dedup. The
--- per-node scoring scans run in parallel chunks.
+{- | Candidate-pool scoring and boolean expansion: penalized scoring, diverse
+top-K selection, AND/OR saturation, and structural/truth-vector dedup. The
+per-node scoring scans run in parallel chunks.
+-}
 module DataFrame.DecisionTree.Pool (
     evalWithPenaltyVec,
     primaryColExpr,
@@ -21,9 +22,25 @@ module DataFrame.DecisionTree.Pool (
     nubByExpr,
 ) where
 
-import DataFrame.DecisionTree.CondVec (CondVec (..), combineAndVec, combineOrVec, countErrorsByVec)
-import DataFrame.DecisionTree.Types (CarePoint, SynthConfig (..), TreeConfig (..))
-import DataFrame.Internal.Expression (Expr, compareExpr, eSize, eqExpr, getColumns, normalize)
+import DataFrame.DecisionTree.CondVec (
+    CondVec (..),
+    combineAndVec,
+    combineOrVec,
+    countErrorsByVec,
+ )
+import DataFrame.DecisionTree.Types (
+    CarePoint,
+    SynthConfig (..),
+    TreeConfig (..),
+ )
+import DataFrame.Internal.Expression (
+    Expr,
+    compareExpr,
+    eSize,
+    eqExpr,
+    getColumns,
+    normalize,
+ )
 
 import Control.Parallel.Strategies (parListChunk, rdeepseq, using)
 import Data.Function (on)
@@ -33,16 +50,18 @@ import qualified Data.Set as Set
 import qualified Data.Text as T
 import qualified Data.Vector.Unboxed as VU
 
--- | Penalized score of a candidate: care-point errors plus a complexity
--- penalty, tie-broken by expression size.
+{- | Penalized score of a candidate: care-point errors plus a complexity
+penalty, tie-broken by expression size.
+-}
 evalWithPenaltyVec :: TreeConfig -> [CarePoint] -> CondVec -> (Int, Int)
 evalWithPenaltyVec cfg carePoints cv = (countErrorsByVec (cvVec cv) carePoints + penalty, sz)
   where
     sz = eSize (cvExpr cv)
     penalty = floor (complexityPenalty (synthConfig cfg) * fromIntegral sz)
 
--- | First referenced column of a condition (a sentinel for literal-only ones),
--- used by 'takeDiverse' to enforce per-column diversity.
+{- | First referenced column of a condition (a sentinel for literal-only ones),
+used by 'takeDiverse' to enforce per-column diversity.
+-}
 primaryColExpr :: Expr Bool -> T.Text
 primaryColExpr e = case getColumns e of
     [] -> "<noncol>"
@@ -51,8 +70,9 @@ primaryColExpr e = case getColumns e of
 primaryColCV :: CondVec -> T.Text
 primaryColCV = primaryColExpr . cvExpr
 
--- | Keep the first @k@ of an already-sorted list, admitting at most @quota@ per
--- primary column (@Nothing@ disables the per-column cap).
+{- | Keep the first @k@ of an already-sorted list, admitting at most @quota@ per
+primary column (@Nothing@ disables the per-column cap).
+-}
 takeDiverse :: Int -> Maybe Int -> (a -> T.Text) -> [a] -> [a]
 takeDiverse k Nothing _ = take k
 takeDiverse k (Just quota) primary = go M.empty 0
@@ -65,36 +85,51 @@ takeDiverse k (Just quota) primary = go M.empty 0
       where
         !col = primary x
 
--- | Chunk size for the parallel per-node candidate scans; tuned by an -N
--- sweep, not correctness-affecting.
+{- | Chunk size for the parallel per-node candidate scans; tuned by an -N
+sweep, not correctness-affecting.
+-}
 candidateParChunk :: Int
 candidateParChunk = 64
 
--- | Decorate candidates with their penalty in parallel chunks, forcing only
--- the @(Int, Int)@ key so the order (hence later sorts/minima) is preserved.
+{- | Decorate candidates with their penalty in parallel chunks, forcing only
+the @(Int, Int)@ key so the order (hence later sorts/minima) is preserved.
+-}
 decorate :: (CondVec -> (Int, Int)) -> [CondVec] -> [((Int, Int), CondVec)]
 decorate penaltyCV xs = zip (map penaltyCV xs `using` parListChunk candidateParChunk rdeepseq) xs
 
 -- | The diverse top-@expressionPairs@ valid candidates by penalty.
 sortedTopK :: TreeConfig -> (CondVec -> (Int, Int)) -> [CondVec] -> [CondVec]
 sortedTopK cfg penaltyCV validCondVecs =
-    map snd (takeDiverse (expressionPairs cfg) (perColumnQuota (synthConfig cfg)) (primaryColCV . snd) sorted)
+    map
+        snd
+        ( takeDiverse
+            (expressionPairs cfg)
+            (perColumnQuota (synthConfig cfg))
+            (primaryColCV . snd)
+            sorted
+        )
   where
     sorted = sortBy (compare `on` fst) (decorate penaltyCV validCondVecs)
 
 -- | Lowest-penalty candidate after boolean saturation of the diverse top-K.
-bestDiscreteCandidate :: TreeConfig -> (CondVec -> (Int, Int)) -> [CondVec] -> Maybe CondVec
+bestDiscreteCandidate ::
+    TreeConfig -> (CondVec -> (Int, Int)) -> [CondVec] -> Maybe CondVec
 bestDiscreteCandidate _ _ [] = Nothing
 bestDiscreteCandidate cfg penaltyCV validCondVecs =
-    case saturateCandidates Structural (boolExpansion (synthConfig cfg)) (sortedTopK cfg penaltyCV validCondVecs) of
+    case saturateCandidates
+        Structural
+        (boolExpansion (synthConfig cfg))
+        (sortedTopK cfg penaltyCV validCondVecs) of
         [] -> Nothing
         xs -> Just (snd (minimumBy (compare `on` fst) (decorate penaltyCV xs)))
 
--- | AND/OR expansion of cached conditions to depth @maxDepth@ (each
--- combination is a single vector op, not an interpret).
+{- | AND/OR expansion of cached conditions to depth @maxDepth@ (each
+combination is a single vector op, not an interpret).
+-}
 boolExprsVec :: [CondVec] -> [CondVec] -> Int -> Int -> [CondVec]
 boolExprsVec baseExprs prevExprs depth maxDepth
-    | depth == 0 = baseExprs ++ boolExprsVec baseExprs prevExprs (depth + 1) maxDepth
+    | depth == 0 =
+        baseExprs ++ boolExprsVec baseExprs prevExprs (depth + 1) maxDepth
     | depth >= maxDepth = []
     | otherwise = combined ++ boolExprsVec baseExprs combined (depth + 1) maxDepth
   where
@@ -103,27 +138,38 @@ boolExprsVec baseExprs prevExprs depth maxDepth
 data DedupMode = Structural | TruthVector
     deriving (Eq, Show)
 
--- | Saturate the pool with AND/OR combinations, deduplicating structurally
--- (byte-identical, first occurrence kept) or by truth vector (opt-in).
+{- | Saturate the pool with AND/OR combinations, deduplicating structurally
+(byte-identical, first occurrence kept) or by truth vector (opt-in).
+-}
 saturateCandidates :: DedupMode -> Int -> [CondVec] -> [CondVec]
 saturateCandidates Structural maxDepth base = base' ++ go 1 base' seen0
   where
     (base', seen0) = admitKeys Set.empty base
     go !depth frontier seen
         | depth >= maxDepth || null frontier = []
-        | otherwise = let (admitted, seen') = admitKeys seen (roundProducts frontier base) in admitted ++ go (depth + 1) admitted seen'
+        | otherwise =
+            let (admitted, seen') = admitKeys seen (roundProducts frontier base)
+             in admitted ++ go (depth + 1) admitted seen'
 saturateCandidates TruthVector maxDepth base = M.elems (go 1 frontier0 reps0)
   where
     (reps0, frontier0) = admitVecs M.empty base
     go !depth frontier reps
         | depth >= maxDepth || null frontier = reps
-        | otherwise = let (reps', admitted) = admitVecs reps (roundProducts frontier base) in go (depth + 1) admitted reps'
+        | otherwise =
+            let (reps', admitted) = admitVecs reps (roundProducts frontier base)
+             in go (depth + 1) admitted reps'
 
--- | One combination round: @frontier × base@ via AND then OR, skipping
--- self-pairs (mirrors 'boolExprsVec' for byte-identical structural output).
+{- | One combination round: @frontier × base@ via AND then OR, skipping
+self-pairs (mirrors 'boolExprsVec' for byte-identical structural output).
+-}
 roundProducts :: [CondVec] -> [CondVec] -> [CondVec]
 roundProducts frontier base =
-    [c | e1 <- frontier, e2 <- base, not (eqExpr (cvExpr e1) (cvExpr e2)), c <- [combineAndVec e1 e2, combineOrVec e1 e2]]
+    [ c
+    | e1 <- frontier
+    , e2 <- base
+    , not (eqExpr (cvExpr e1) (cvExpr e2))
+    , c <- [combineAndVec e1 e2, combineOrVec e1 e2]
+    ]
 
 -- | Admit candidates with a not-yet-seen normalized form, preserving order.
 admitKeys :: Set.Set String -> [CondVec] -> ([CondVec], Set.Set String)
@@ -137,9 +183,13 @@ admitKeys = go []
 structuralKey :: CondVec -> String
 structuralKey = show . normalize . cvExpr
 
--- | Admit candidates by distinct truth vector, keeping the smallest-expression
--- representative per vector.
-admitVecs :: M.Map (VU.Vector Bool) CondVec -> [CondVec] -> (M.Map (VU.Vector Bool) CondVec, [CondVec])
+{- | Admit candidates by distinct truth vector, keeping the smallest-expression
+representative per vector.
+-}
+admitVecs ::
+    M.Map (VU.Vector Bool) CondVec ->
+    [CondVec] ->
+    (M.Map (VU.Vector Bool) CondVec, [CondVec])
 admitVecs = go []
   where
     go acc reps [] = (reps, reverse acc)

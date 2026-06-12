@@ -5,10 +5,11 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 
--- | Numeric split candidates: per-column Double expressions, arithmetic
--- expansion, and threshold conditions. 'numericCondVecs' materializes the
--- pool with a single interpret per distinct expression, deriving every
--- threshold/operator truth vector by direct comparison.
+{- | Numeric split candidates: per-column Double expressions, arithmetic
+expansion, and threshold conditions. 'numericCondVecs' materializes the
+pool with a single interpret per distinct expression, deriving every
+threshold/operator truth vector by direct comparison.
+-}
 module DataFrame.DecisionTree.Numeric (
     NumExpr (..),
     numExprCols,
@@ -67,11 +68,29 @@ combineNumExprs :: NumExpr -> NumExpr -> [NumExpr]
 combineNumExprs (NDouble e1) (NDouble e2) =
     map NDouble [e1 .+ e2, e1 .- e2, e1 .* e2, safeDivD e1 e2]
 combineNumExprs (NDouble e1) (NMaybeDouble e2) =
-    map NMaybeDouble [e1 .+ e2, e1 .- e2, e1 .* e2, safeDivMaybe (F.fromMaybe False (e2 ./= F.lit (0 :: Double))) (e1 ./ e2)]
+    map
+        NMaybeDouble
+        [ e1 .+ e2
+        , e1 .- e2
+        , e1 .* e2
+        , safeDivMaybe (F.fromMaybe False (e2 ./= F.lit (0 :: Double))) (e1 ./ e2)
+        ]
 combineNumExprs (NMaybeDouble e1) (NDouble e2) =
-    map NMaybeDouble [e1 .+ e2, e1 .- e2, e1 .* e2, safeDivMaybe (e2 ./= F.lit (0 :: Double)) (e1 ./ e2)]
+    map
+        NMaybeDouble
+        [ e1 .+ e2
+        , e1 .- e2
+        , e1 .* e2
+        , safeDivMaybe (e2 ./= F.lit (0 :: Double)) (e1 ./ e2)
+        ]
 combineNumExprs (NMaybeDouble e1) (NMaybeDouble e2) =
-    map NMaybeDouble [e1 .+ e2, e1 .- e2, e1 .* e2, safeDivMaybe (F.fromMaybe False (e2 ./= F.lit (0 :: Double))) (e1 ./ e2)]
+    map
+        NMaybeDouble
+        [ e1 .+ e2
+        , e1 .- e2
+        , e1 .* e2
+        , safeDivMaybe (F.fromMaybe False (e2 ./= F.lit (0 :: Double))) (e1 ./ e2)
+        ]
 
 numericConditions :: TreeConfig -> DataFrame -> [Expr Bool]
 numericConditions = generateNumericConds
@@ -92,10 +111,14 @@ thresholdsForExpr cfg df e =
 
 condsFromExpr :: NumExpr -> Double -> [Expr Bool]
 condsFromExpr (NDouble e) t = [e .<= F.lit t, e .>= F.lit t, e .< F.lit t, e .> F.lit t]
-condsFromExpr (NMaybeDouble e) t = map (F.fromMaybe False) [e .<= F.lit t, e .>= F.lit t, e .< F.lit t, e .> F.lit t]
+condsFromExpr (NMaybeDouble e) t =
+    map
+        (F.fromMaybe False)
+        [e .<= F.lit t, e .>= F.lit t, e .< F.lit t, e .> F.lit t]
 
--- | Percentile thresholds for a value list: sort once, index each percentile.
--- Shared by 'generateNumericConds' and 'numericCondVecs' for identical results.
+{- | Percentile thresholds for a value list: sort once, index each percentile.
+Shared by 'generateNumericConds' and 'numericCondVecs' for identical results.
+-}
 percentilesOf :: [Int] -> [Double] -> [Double]
 percentilesOf ps valsList
     | n == 0 = []
@@ -109,15 +132,17 @@ interpretDoubleCol df e = case interpret @Double df e of
     Right (TColumn column) -> either (const Nothing) Just (toVector @Double column)
     _ -> Nothing
 
-interpretMaybeDoubleCol :: DataFrame -> Expr (Maybe Double) -> Maybe (V.Vector (Maybe Double))
+interpretMaybeDoubleCol ::
+    DataFrame -> Expr (Maybe Double) -> Maybe (V.Vector (Maybe Double))
 interpretMaybeDoubleCol df e = case interpret @(Maybe Double) df e of
     Right (TColumn column) -> either (const Nothing) Just (toVector @(Maybe Double) column)
     _ -> Nothing
 
--- | Materialize the numeric pool with one interpret per distinct expression,
--- deriving each threshold/operator truth vector by direct comparison.
--- Byte-identical to materializing 'numericConditions' one at a time, but
--- avoids re-interpreting each LHS per threshold and operator.
+{- | Materialize the numeric pool with one interpret per distinct expression,
+deriving each threshold/operator truth vector by direct comparison.
+Byte-identical to materializing 'numericConditions' one at a time, but
+avoids re-interpreting each LHS per threshold and operator.
+-}
 numericCondVecs :: TreeConfig -> DataFrame -> DataFrame -> [CondVec]
 numericCondVecs cfg dfGen df = concatMap forExpr (numericExprsWithTerms (synthConfig cfg) dfGen)
   where
@@ -139,12 +164,14 @@ doubleCondsAt e vals n t =
   where
     gen p = VU.generate n (\i -> p (vals V.! i))
 
-condsForMaybe :: TreeConfig -> Expr (Maybe Double) -> V.Vector (Maybe Double) -> [CondVec]
+condsForMaybe ::
+    TreeConfig -> Expr (Maybe Double) -> V.Vector (Maybe Double) -> [CondVec]
 condsForMaybe cfg e mvals = concatMap (maybeCondsAt e mvals (V.length mvals)) ts
   where
     ts = percentilesOf (percentiles cfg) (map (fromMaybe 0) (V.toList mvals))
 
-maybeCondsAt :: Expr (Maybe Double) -> V.Vector (Maybe Double) -> Int -> Double -> [CondVec]
+maybeCondsAt ::
+    Expr (Maybe Double) -> V.Vector (Maybe Double) -> Int -> Double -> [CondVec]
 maybeCondsAt e mvals n t =
     [ CondVec (F.fromMaybe False (e .<= F.lit t)) (gen (<= t))
     , CondVec (F.fromMaybe False (e .>= F.lit t)) (gen (>= t))
@@ -154,13 +181,15 @@ maybeCondsAt e mvals n t =
   where
     gen p = VU.generate n (\i -> maybe False p (mvals V.! i))
 
--- | Arithmetic candidate expansion, generated already-deduped: each round
--- combines @frontier × base@ and admits only normalized-novel candidates.
--- Produces @base@ plus @maxExprDepth-1@ combination rounds.
+{- | Arithmetic candidate expansion, generated already-deduped: each round
+combines @frontier × base@ and admits only normalized-novel candidates.
+Produces @base@ plus @maxExprDepth-1@ combination rounds.
+-}
 numericExprsWithTerms :: SynthConfig -> DataFrame -> [NumExpr]
 numericExprsWithTerms cfg df
     | not (enableArithOps cfg) = base
-    | otherwise = base ++ expandRounds cfg base (max 0 (maxExprDepth cfg - 1)) base seen0
+    | otherwise =
+        base ++ expandRounds cfg base (max 0 (maxExprDepth cfg - 1)) base seen0
   where
     base = numericCols df
     seen0 = Set.fromList (map keyNum base)
@@ -177,9 +206,16 @@ isDisallowed cfg e1 e2 =
 
 roundProducts :: SynthConfig -> [NumExpr] -> [NumExpr] -> [NumExpr]
 roundProducts cfg frontier base =
-    [c | e1 <- frontier, e2 <- base, not (numExprEq e1 e2), not (isDisallowed cfg e1 e2), c <- combineNumExprs e1 e2]
+    [ c
+    | e1 <- frontier
+    , e2 <- base
+    , not (numExprEq e1 e2)
+    , not (isDisallowed cfg e1 e2)
+    , c <- combineNumExprs e1 e2
+    ]
 
-expandRounds :: SynthConfig -> [NumExpr] -> Int -> [NumExpr] -> Set.Set String -> [NumExpr]
+expandRounds ::
+    SynthConfig -> [NumExpr] -> Int -> [NumExpr] -> Set.Set String -> [NumExpr]
 expandRounds _ _ 0 _ _ = []
 expandRounds cfg base d frontier seen
     | null admitted = []
