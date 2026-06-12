@@ -219,6 +219,43 @@ testFullOuterJoin =
             (D.sortBy [D.Asc (F.col @Text "Name")] (fullOuterJoin ["Name"] studentDf staffDf))
         )
 
+testFullOuterJoinUnboxedKey :: Test
+testFullOuterJoinUnboxedKey =
+    TestCase
+        ( assertEqual
+            "Full outer join on an unboxed (Int) key column coalesces correctly"
+            ( D.fromNamedColumns
+                [ ("customer_id", D.fromList [1 :: Int, 2, 3, 4])
+                ,
+                    ( "amount"
+                    , D.fromList [Just 250.0 :: Maybe Double, Just 80.0, Nothing, Just 125.0]
+                    )
+                ,
+                    ( "name"
+                    , D.fromList [Just "Ada" :: Maybe Text, Just "Lin", Just "Grace", Nothing]
+                    )
+                ]
+            )
+            ( D.sortBy
+                [D.Asc (F.col @Int "customer_id")]
+                (fullOuterJoin ["customer_id"] ordersDf customersDf)
+            )
+        )
+
+ordersDf :: D.DataFrame
+ordersDf =
+    D.fromNamedColumns
+        [ ("customer_id", D.fromList [1 :: Int, 2, 4])
+        , ("amount", D.fromList [250.0 :: Double, 80.0, 125.0])
+        ]
+
+customersDf :: D.DataFrame
+customersDf =
+    D.fromNamedColumns
+        [ ("customer_id", D.fromList [1 :: Int, 2, 3])
+        , ("name", D.fromList ["Ada" :: Text, "Lin", "Grace"])
+        ]
+
 dfL :: D.DataFrame
 dfL =
     D.fromNamedColumns
@@ -459,6 +496,7 @@ tests =
     , TestLabel "rightJoin" testRightJoin
     , TestLabel "testRightJoinTyped" testRightJoinTyped
     , TestLabel "fullOuterJoin" testFullOuterJoin
+    , TestLabel "fullOuterJoinUnboxedKey" testFullOuterJoinUnboxedKey
     , TestLabel "innerJoinWithCollisions" testInnerJoinWithCollisions
     , TestLabel "leftJoinWithCollisions" testLeftJoinWithCollisions
     , TestLabel "rightJoinWithCollisions" testRightJoinWithCollisions

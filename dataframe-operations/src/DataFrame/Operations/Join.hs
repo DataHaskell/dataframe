@@ -1081,7 +1081,27 @@ assembleFullOuter csSet left right leftIxs rightIxs =
                                     lMaybe
                                     rMaybe
                     Nothing -> error "Cannot join columns of different types"
-        coalesceKeyColumn _ _ = error "fullOuterJoin: expected nullable column for key columns"
+        coalesceKeyColumn
+            (UnboxedColumn lBm (lCol :: VU.Vector a))
+            (UnboxedColumn rBm (rCol :: VU.Vector b)) =
+                case testEquality (typeRep @a) (typeRep @b) of
+                    Just Refl ->
+                        let validAt bm i = case bm of
+                                Just bm' -> bitmapTestBit bm' i
+                                Nothing -> True
+                            dat = VU.generate resultLen $ \i ->
+                                if validAt lBm i
+                                    then VU.unsafeIndex lCol i
+                                    else VU.unsafeIndex rCol i
+                         in D.fromUnboxedVector dat
+                    Nothing -> error "Cannot join columns of different types"
+        coalesceKeyColumn lc rc =
+            error $
+                "fullOuterJoin: key columns have mismatched storage representations "
+                    <> "(one boxed, one unboxed): "
+                    <> columnTypeString lc
+                    <> " vs "
+                    <> columnTypeString rc
      in D.fold
             ( \name df ->
                 if S.member name csSet
