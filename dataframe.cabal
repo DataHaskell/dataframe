@@ -229,7 +229,7 @@ executable synthesis
                       dataframe >= 1 && < 3,
                       dataframe-core ^>= 1.0,
                       dataframe-learn ^>= 1.0,
-                      dataframe-operations >= 1.1.0.3 && < 1.2
+                      dataframe-operations >= 1.1.0.3 && < 1.2,
                       random >= 1 && < 2,
                       text >= 2.0 && < 3
     hs-source-dirs:   app
