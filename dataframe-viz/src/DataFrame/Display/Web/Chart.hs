@@ -50,6 +50,7 @@ module DataFrame.Display.Web.Chart (
     regression,
     density,
     logScale,
+    includeZero,
     title,
     size,
 
@@ -78,6 +79,8 @@ import DataFrame.Display.Internal.VegaLite (
     FieldType (..),
     Mark (..),
     ResolvedField (..),
+    ScaleSpec (..),
+    ScaleType (..),
     Transform (DensityT, RegressionT),
     VLSpec (..),
     chanEnc,
@@ -155,9 +158,20 @@ binX, binY :: Chart -> Chart
 binX = withChannel X (\e -> e{ceBin = True})
 binY = withChannel Y (\e -> e{ceBin = True})
 
--- | Put a channel on a log scale.
+{- | Put a channel on a log scale. Like all channel modifiers, apply it
+after 'enc' on the same channel ('enc' replaces the whole encoding).
+-}
 logScale :: Channel -> Chart -> Chart
-logScale ch = withChannel ch (\e -> e{ceLogScale = True})
+logScale ch = withScale ch (\s -> s{scaleType = Just LogS})
+
+{- | Anchor (@True@) or release (@False@) a channel's scale at zero.
+Vega-Lite includes zero on quantitative scales by default, which squashes
+data far from the origin (e.g. geographic coordinates) against the chart
+edge; @includeZero X False@ lets the axis fit the data instead. Apply it
+after 'enc' on the same channel ('enc' replaces the whole encoding).
+-}
+includeZero :: Channel -> Bool -> Chart -> Chart
+includeZero ch b = withScale ch (\s -> s{scaleZero = Just b})
 
 -- | Facet into small multiples by a column (alias for 'column').
 facet :: (Columnable a) => Expr a -> Chart -> Chart
@@ -246,10 +260,18 @@ showChart c = do
 -- One-shot convenience plots (the simple single-line path)
 -- ---------------------------------------------------------------------------
 
--- | Scatter plot of two expressions.
+-- | Scatter plot of two expressions. Axes fit the data (no zero anchor).
 scatter ::
     (Columnable a, Columnable b) => Expr a -> Expr b -> DataFrame -> IO ()
-scatter xE yE df = showChart (chart df & mark Point & enc X xE & enc Y yE)
+scatter xE yE df =
+    showChart
+        ( chart df
+            & mark Point
+            & enc X xE
+            & enc Y yE
+            & includeZero X False
+            & includeZero Y False
+        )
 
 -- | Count of rows per category, as bars.
 bar :: (Columnable a) => Expr a -> DataFrame -> IO ()
@@ -260,9 +282,17 @@ histogram :: (Columnable a) => Expr a -> DataFrame -> IO ()
 histogram xE df =
     showChart (chart df & mark Bar & enc X xE & binX & aggregateOn Y Count)
 
--- | Line chart of @y@ over @x@.
+-- | Line chart of @y@ over @x@. Axes fit the data (no zero anchor).
 line :: (Columnable a, Columnable b) => Expr a -> Expr b -> DataFrame -> IO ()
-line xE yE df = showChart (chart df & mark Line & enc X xE & enc Y yE)
+line xE yE df =
+    showChart
+        ( chart df
+            & mark Line
+            & enc X xE
+            & enc Y yE
+            & includeZero X False
+            & includeZero Y False
+        )
 
 -- | Pie chart counting rows per category.
 pie :: (Columnable a) => Expr a -> DataFrame -> IO ()
@@ -287,6 +317,10 @@ withChannel ch f c =
      in if any ((== ch) . ceChannel) encs
             then c{chEncs = map (\e -> if ceChannel e == ch then f e else e) encs}
             else c{chEncs = encs ++ [f (chanEnc ch "" Quantitative)]}
+
+-- | Modify a channel's scale spec (creating the encoding if absent).
+withScale :: Channel -> (ScaleSpec -> ScaleSpec) -> Chart -> Chart
+withScale ch f = withChannel ch (\e -> e{ceScale = f (ceScale e)})
 
 aggVegaName :: Agg -> T.Text
 aggVegaName a = case a of

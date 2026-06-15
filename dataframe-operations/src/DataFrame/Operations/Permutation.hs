@@ -27,6 +27,7 @@ import DataFrame.Internal.DataFrame (
     unsafeGetColumn,
  )
 import DataFrame.Internal.Expression (Expr (Col), getColumns)
+import DataFrame.Internal.PackedText (packedSlice, sliceCmpBytes)
 import DataFrame.Operations.Core (dimensions)
 import DataFrame.Operations.Transformations (derive)
 import System.Random (Random (randomR), RandomGen)
@@ -117,6 +118,12 @@ sortOrderComparator (Asc (Col name :: Expr a)) df =
         UnboxedColumn _ (v :: VU.Vector b) -> case testEquality (typeRep @a) (typeRep @b) of
             Just Refl -> \i j -> compare (v `VU.unsafeIndex` i) (v `VU.unsafeIndex` j)
             Nothing -> \_ _ -> EQ
+        PackedText _ p -> case testEquality (typeRep @a) (typeRep @T.Text) of
+            Just Refl -> \i j ->
+                let (ai, oi, li) = packedSlice p i
+                    (aj, oj, lj) = packedSlice p j
+                 in sliceCmpBytes ai oi li aj oj lj
+            Nothing -> \_ _ -> EQ
 sortOrderComparator (Desc (Col name :: Expr a)) df =
     case unsafeGetColumn name df of
         BoxedColumn _ (v :: V.Vector b) -> case testEquality (typeRep @a) (typeRep @b) of
@@ -124,6 +131,12 @@ sortOrderComparator (Desc (Col name :: Expr a)) df =
             Nothing -> \_ _ -> EQ
         UnboxedColumn _ (v :: VU.Vector b) -> case testEquality (typeRep @a) (typeRep @b) of
             Just Refl -> \i j -> compare (v `VU.unsafeIndex` j) (v `VU.unsafeIndex` i)
+            Nothing -> \_ _ -> EQ
+        PackedText _ p -> case testEquality (typeRep @a) (typeRep @T.Text) of
+            Just Refl -> \i j ->
+                let (ai, oi, li) = packedSlice p i
+                    (aj, oj, lj) = packedSlice p j
+                 in sliceCmpBytes aj oj lj ai oi li
             Nothing -> \_ _ -> EQ
 sortOrderComparator _ _ = error "Sorting on compound column"
 

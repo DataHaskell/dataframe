@@ -42,7 +42,18 @@ import Data.Maybe
 import Data.Type.Equality (TestEquality (..))
 import Data.Word (Word8)
 import DataFrame.Errors
+import DataFrame.Internal.PackedText (
+    PackedTextData (..),
+    packedGather,
+    packedIndexText,
+    packedLength,
+    packedRowOffsetVec,
+    packedSlice,
+    packedTake,
+    sliceEqBytes,
+ )
 import DataFrame.Internal.Types
+import DataFrame.Internal.Utf8 (sliceTextVector)
 import System.IO.Unsafe (unsafePerformIO)
 import System.Random
 import Type.Reflection
@@ -60,6 +71,12 @@ data Column where
     BoxedColumn :: (Columnable a) => Maybe Bitmap -> VB.Vector a -> Column
     UnboxedColumn ::
         (Columnable a, VU.Unbox a) => Maybe Bitmap -> VU.Vector a -> Column
+    -- Bit-packed Text: a shared UTF-8 byte buffer + (n+1) row offsets + an
+    -- optional validity bitmap. No per-row Text header; Text is produced only
+    -- on demand. Behaves as a column of Text (or Maybe Text when a bitmap is
+    -- present). Only the CSV ingest path emits this; user-built Text columns
+    -- stay 'BoxedColumn'.
+    PackedText :: Maybe Bitmap -> {-# UNPACK #-} !PackedTextData -> Column
 
 {- | A mutable companion struct to dataframe columns.
 
@@ -187,12 +204,33 @@ fromMaybeVecUnboxed v =
 columnElemIsNull :: Column -> Int -> Bool
 columnElemIsNull (BoxedColumn (Just bm) _) i = not (bitmapTestBit bm i)
 columnElemIsNull (UnboxedColumn (Just bm) _) i = not (bitmapTestBit bm i)
+columnElemIsNull (PackedText (Just bm) _) i = not (bitmapTestBit bm i)
 columnElemIsNull _ _ = False
 
 -- | Return the 'Maybe Bitmap' from a column.
 columnBitmap :: Column -> Maybe Bitmap
 columnBitmap (BoxedColumn bm _) = bm
 columnBitmap (UnboxedColumn bm _) = bm
+columnBitmap (PackedText bm _) = bm
+
+{- | The universal cold fallback: decode a 'PackedText' into a
+@BoxedColumn Text@ using the exact 'sliceTextVector' path the boxed-Text
+builder used, so the result is bit-identical to materializing at freeze.
+Identity on every other column.
+-}
+materializePacked :: Column -> Column
+materializePacked (PackedText bm p) = case packedRowOffsetVec p of
+    Just (arr, offs) -> BoxedColumn bm (sliceTextVector arr offs)
+    -- Gathered/selected payload: rows are non-contiguous, decode per row.
+    Nothing -> BoxedColumn bm (VB.generate (packedLength p) (packedIndexText p))
+materializePacked c = c
+{-# INLINE materializePacked #-}
+
+-- | Whether a column is a 'PackedText'.
+isPackedText :: Column -> Bool
+isPackedText (PackedText _ _) = True
+isPackedText _ = False
+{-# INLINE isPackedText #-}
 
 -- ---------------------------------------------------------------------------
 -- End bitmap helpers
@@ -223,12 +261,14 @@ vectorFromTypedColumn (TColumn value) = either throw id (toVector value)
 hasMissing :: Column -> Bool
 hasMissing (BoxedColumn (Just _) _) = True
 hasMissing (UnboxedColumn (Just _) _) = True
+hasMissing (PackedText (Just _) _) = True
 hasMissing _ = False
 
 -- | Checks if a column contains only missing values.
 allMissing :: Column -> Bool
 allMissing (BoxedColumn (Just bm) col) = VU.all (== 0) bm && not (VB.null col)
 allMissing (UnboxedColumn (Just bm) col) = VU.all (== 0) bm && not (VU.null col)
+allMissing (PackedText (Just bm) p) = VU.all (== 0) bm && packedLength p > 0
 allMissing _ = False
 
 -- | Checks if a column contains numeric values.
@@ -239,6 +279,7 @@ isNumeric (UnboxedColumn _ (_vec :: VU.Vector a)) = case sNumeric @a of
 isNumeric (BoxedColumn _ (_vec :: VB.Vector a)) = case testEquality (typeRep @a) (typeRep @Integer) of
     Nothing -> False
     Just Refl -> True
+isNumeric (PackedText _ _) = False
 
 {- | Checks if a column is of a given type values.
 For nullable columns (@BoxedColumn (Just _)@ or @UnboxedColumn (Just _)@),
@@ -248,6 +289,7 @@ hasElemType :: forall a. (Columnable a) => Column -> Bool
 hasElemType = \case
     BoxedColumn bm (_column :: VB.Vector b) -> checkBoxed bm (typeRep @b)
     UnboxedColumn bm (_column :: VU.Vector b) -> checkUnboxed bm (typeRep @b)
+    PackedText bm _ -> checkBoxed bm (typeRep @T.Text)
   where
     -- Direct type match
     directMatch :: forall (b :: Type). TypeRep b -> Bool
@@ -271,6 +313,8 @@ columnVersionString column = case column of
     BoxedColumn (Just _) _ -> "NullableBoxed"
     UnboxedColumn Nothing _ -> "Unboxed"
     UnboxedColumn (Just _) _ -> "NullableUnboxed"
+    PackedText Nothing _ -> "Boxed"
+    PackedText (Just _) _ -> "NullableBoxed"
 
 {- | An internal/debugging function to get the type stored in the outermost vector
 of a column.
@@ -281,6 +325,8 @@ columnTypeString column = case column of
     BoxedColumn (Just _) (_ :: VB.Vector a) -> showMaybeType @a
     UnboxedColumn Nothing (_ :: VU.Vector a) -> show (typeRep @a)
     UnboxedColumn (Just _) (_ :: VU.Vector a) -> showMaybeType @a
+    PackedText Nothing _ -> show (typeRep @T.Text)
+    PackedText (Just _) _ -> showMaybeType @T.Text
   where
     showMaybeType :: forall a. (Typeable a) => String
     showMaybeType =
@@ -304,6 +350,7 @@ forceColumn (BoxedColumn (Just bm) (v :: VB.Vector a)) =
             | otherwise = go (i + 1)
      in go 0
 forceColumn (UnboxedColumn _ v) = v `seq` ()
+forceColumn (PackedText _ (PackedTextData arr offs sel)) = arr `seq` offs `seq` sel `seq` ()
 
 instance Show Column where
     show :: Column -> String
@@ -323,6 +370,7 @@ instance Show Column where
                 | i <- [0 .. n - 1]
                 ]
          in "[" ++ foldl (\acc e -> if null acc then e else acc ++ "," ++ e) "" elems ++ "]"
+    show c@(PackedText _ _) = show (materializePacked c)
 
 {- | Compare two nullable boxed columns element by element, skipping null slots.
 Uses a manual loop to avoid stream fusion forcing null-slot error thunks.
@@ -364,7 +412,32 @@ instance Eq Column where
                             )
                             a
                         )
+    (==) (PackedText bm1 p1) (PackedText bm2 p2) = eqPackedCols bm1 p1 bm2 p2
+    (==) lhs@(PackedText _ _) rhs = materializePacked lhs == rhs
+    (==) lhs rhs@(PackedText _ _) = lhs == materializePacked rhs
     (==) _ _ = False
+
+{- | Byte-slice equality of two packed-text columns, skipping null slots
+(a null compares equal only to a null), mirroring 'eqBoxedCols'.
+-}
+eqPackedCols ::
+    Maybe Bitmap -> PackedTextData -> Maybe Bitmap -> PackedTextData -> Bool
+eqPackedCols bm1 p1 bm2 p2
+    | packedLength p1 /= packedLength p2 = False
+    | otherwise = go 0
+  where
+    !n = packedLength p1
+    go !i
+        | i >= n = True
+        | nullA || nullB = (nullA == nullB) && go (i + 1)
+        | otherwise =
+            let (a1, o1, l1) = packedSlice p1 i
+                (a2, o2, l2) = packedSlice p2 i
+             in sliceEqBytes a1 o1 l1 a2 o2 l2 && go (i + 1)
+      where
+        nullA = maybe False (\bm -> not (bitmapTestBit bm i)) bm1
+        nullB = maybe False (\bm -> not (bitmapTestBit bm i)) bm2
+{-# INLINE eqPackedCols #-}
 
 {- | A class for converting a vector to a column of the appropriate type.
 Given each Rep we tell the `toColumnRep` function which Column type to pick.
@@ -497,6 +570,7 @@ mapColumn ::
 mapColumn f = \case
     BoxedColumn bm (col :: VB.Vector a) -> runBoxed bm col
     UnboxedColumn bm (col :: VU.Vector a) -> runUnboxed bm col
+    c@(PackedText _ _) -> mapColumn f (materializePacked c)
   where
     runBoxed ::
         forall a.
@@ -568,6 +642,7 @@ imapColumn ::
 imapColumn f = \case
     BoxedColumn bm (col :: VB.Vector a) -> runBoxed bm col
     UnboxedColumn bm (col :: VU.Vector a) -> runUnboxed bm col
+    c@(PackedText _ _) -> imapColumn f (materializePacked c)
   where
     runBoxed ::
         forall a.
@@ -596,6 +671,7 @@ imapColumn f = \case
 columnLength :: Column -> Int
 columnLength (BoxedColumn _ xs) = VB.length xs
 columnLength (UnboxedColumn _ xs) = VU.length xs
+columnLength (PackedText _ p) = packedLength p
 {-# INLINE columnLength #-}
 
 -- | O(n) Gets the number of non-null elements in the column.
@@ -604,6 +680,8 @@ numElements (BoxedColumn Nothing xs) = VB.length xs
 numElements (BoxedColumn (Just bm) _xs) = VU.foldl' (\acc b -> acc + popCount b) 0 bm
 numElements (UnboxedColumn Nothing xs) = VU.length xs
 numElements (UnboxedColumn (Just bm) _xs) = VU.foldl' (\acc b -> acc + popCount b) 0 bm
+numElements (PackedText Nothing p) = packedLength p
+numElements (PackedText (Just bm) _p) = VU.foldl' (\acc b -> acc + popCount b) 0 bm
 {-# INLINE numElements #-}
 
 -- | O(n) Takes the first n values of a column.
@@ -612,6 +690,8 @@ takeColumn n (BoxedColumn bm xs) =
     BoxedColumn (fmap (bitmapSlice 0 n) bm) (VG.take n xs)
 takeColumn n (UnboxedColumn bm xs) =
     UnboxedColumn (fmap (bitmapSlice 0 n) bm) (VG.take n xs)
+takeColumn n (PackedText bm p) =
+    PackedText (fmap (bitmapSlice 0 n) bm) (packedTake n p)
 {-# INLINE takeColumn #-}
 
 -- | O(n) Takes the last n values of a column.
@@ -625,6 +705,7 @@ sliceColumn start n (BoxedColumn bm xs) =
     BoxedColumn (fmap (bitmapSlice start n) bm) (VG.slice start n xs)
 sliceColumn start n (UnboxedColumn bm xs) =
     UnboxedColumn (fmap (bitmapSlice start n) bm) (VG.slice start n xs)
+sliceColumn start n c@(PackedText _ _) = sliceColumn start n (materializePacked c)
 {-# INLINE sliceColumn #-}
 
 -- | O(n) Selects the elements at a given set of indices. Does not change the order.
@@ -652,6 +733,18 @@ atIndicesStable indexes (UnboxedColumn bm column) =
             bm
         )
         (VU.unsafeBackpermute column indexes)
+atIndicesStable indexes (PackedText bm p) =
+    -- Slice-preserving: share the byte buffer, permute via a selection vector
+    -- instead of materializing boxed Text. Bitmap follows the same gather.
+    PackedText
+        ( fmap
+            ( \bm0 ->
+                buildBitmapFromValid $
+                    VU.map (\i -> if bitmapTestBit bm0 i then 1 else 0) indexes
+            )
+            bm
+        )
+        (packedGather indexes p)
 {-# INLINE atIndicesStable #-}
 
 {- | Like 'atIndicesStable' but treats negative indices as null.
@@ -663,6 +756,22 @@ gatherWithSentinel indices col =
         newBm = buildBitmapFromValid $ VU.generate n $ \i ->
             if VU.unsafeIndex indices i < 0 then 0 else 1
      in case col of
+            PackedText srcBm p ->
+                -- Slice-preserving sentinel gather: share the buffer, permute
+                -- offsets (negative sentinel -> empty slice), build the null
+                -- bitmap so -1 rows read as null in left/outer joins.
+                let bm = case srcBm of
+                        Nothing -> Just newBm
+                        Just sb ->
+                            Just
+                                ( mergeBitmaps
+                                    newBm
+                                    ( buildBitmapFromValid $ VU.generate n $ \i ->
+                                        let idx = VU.unsafeIndex indices i
+                                         in if idx >= 0 && bitmapTestBit sb idx then 1 else 0
+                                    )
+                                )
+                 in PackedText bm (packedGather indices p)
             BoxedColumn srcBm v ->
                 let dat = VB.generate n $ \i ->
                         let !idx = VU.unsafeIndex indices i
@@ -718,6 +827,7 @@ findIndices ::
 findIndices predicate = \case
     BoxedColumn _ (v :: VB.Vector b) -> run v VG.convert
     UnboxedColumn _ (v :: VU.Vector b) -> run v id
+    c@(PackedText _ _) -> findIndices predicate (materializePacked c)
   where
     run ::
         forall b v.
@@ -745,6 +855,7 @@ ifoldrColumn ::
 ifoldrColumn f acc = \case
     BoxedColumn _ column -> foldrWorker column
     UnboxedColumn _ column -> foldrWorker column
+    c@(PackedText _ _) -> ifoldrColumn f acc (materializePacked c)
   where
     foldrWorker ::
         forall c v.
@@ -771,6 +882,7 @@ foldlColumn ::
 foldlColumn f acc = \case
     BoxedColumn _ column -> foldlWorker column
     UnboxedColumn _ column -> foldlWorker column
+    c@(PackedText _ _) -> foldlColumn f acc (materializePacked c)
   where
     foldlWorker ::
         forall c v.
@@ -797,6 +909,7 @@ foldl1Column ::
 foldl1Column f = \case
     BoxedColumn _ column -> foldl1Worker column
     UnboxedColumn _ column -> foldl1Worker column
+    c@(PackedText _ _) -> foldl1Column f (materializePacked c)
   where
     foldl1Worker ::
         forall c v.
@@ -832,6 +945,7 @@ foldl1DirectGroups f col valueIndices offsets
     | otherwise = case col of
         UnboxedColumn _ (vec :: VU.Vector d) -> UnboxedColumn Nothing <$> foldl1Worker vec
         BoxedColumn _ (vec :: VB.Vector d) -> BoxedColumn Nothing <$> foldl1Worker vec
+        PackedText _ _ -> foldl1DirectGroups f (materializePacked col) valueIndices offsets
   where
     foldl1Worker ::
         forall c v.
@@ -885,6 +999,8 @@ foldLinearGroups f seed col rowToGroup nGroups
     | otherwise = case col of
         UnboxedColumn _ (vec :: VU.Vector d) -> foldLinearWorker vec
         BoxedColumn _ (vec :: VB.Vector d) -> foldLinearWorker vec
+        PackedText _ _ ->
+            foldLinearGroups f seed (materializePacked col) rowToGroup nGroups
   where
     foldLinearWorker ::
         forall c v.
@@ -933,6 +1049,7 @@ headColumn :: forall a. (Columnable a) => Column -> Either DataFrameException a
 headColumn = \case
     BoxedColumn _ col -> headWorker col
     UnboxedColumn _ col -> headWorker col
+    c@(PackedText _ _) -> headColumn (materializePacked c)
   where
     headWorker ::
         forall c v.
@@ -957,6 +1074,8 @@ headColumn = \case
 
 -- | An internal, column version of zip.
 zipColumns :: Column -> Column -> Column
+zipColumns l@(PackedText _ _) r = zipColumns (materializePacked l) r
+zipColumns l r@(PackedText _ _) = zipColumns l (materializePacked r)
 zipColumns (BoxedColumn _ column) (BoxedColumn _ other) = BoxedColumn Nothing (VG.zip column other)
 zipColumns (BoxedColumn _ column) (UnboxedColumn _ other) =
     BoxedColumn
@@ -978,6 +1097,8 @@ zipColumns (UnboxedColumn _ column) (UnboxedColumn _ other) = UnboxedColumn Noth
 -- | Merge two columns using `These`.
 mergeColumns :: Column -> Column -> Column
 mergeColumns colA colB = case (colA, colB) of
+    (PackedText _ _, _) -> mergeColumns (materializePacked colA) colB
+    (_, PackedText _ _) -> mergeColumns colA (materializePacked colB)
     (BoxedColumn bmA c1, BoxedColumn bmB c2) -> case (bmA, bmB) of
         (Just ba, Just bb) ->
             BoxedColumn Nothing $ mkVec c1 c2 $ \i v1 v2 ->
@@ -1096,9 +1217,15 @@ ensureOptional (BoxedColumn Nothing col) =
 ensureOptional c@(UnboxedColumn (Just _) _) = c
 ensureOptional (UnboxedColumn Nothing col) =
     UnboxedColumn (Just (allValidBitmap (VU.length col))) col
+ensureOptional c@(PackedText (Just _) _) = c
+ensureOptional (PackedText Nothing p) =
+    PackedText (Just (allValidBitmap (packedLength p))) p
 
 -- | Fills the end of a column, up to n, with null rows. Does nothing if column has length >= n.
 expandColumn :: Int -> Column -> Column
+expandColumn n c@(PackedText _ p)
+    | n <= packedLength p = c
+    | otherwise = expandColumn n (materializePacked c)
 expandColumn n column@(BoxedColumn bm col)
     | n <= VG.length col = column
     | otherwise =
@@ -1128,6 +1255,9 @@ expandColumn n column@(UnboxedColumn bm col)
 
 -- | Fills the beginning of a column, up to n, with null rows. Does nothing if column has length >= n.
 leftExpandColumn :: Int -> Column -> Column
+leftExpandColumn n c@(PackedText _ p)
+    | n <= packedLength p = c
+    | otherwise = leftExpandColumn n (materializePacked c)
 leftExpandColumn n column@(BoxedColumn bm col)
     | n <= VG.length col = column
     | otherwise =
@@ -1162,6 +1292,8 @@ Returns Nothing if the columns are of different types.
 -}
 concatColumns :: Column -> Column -> Either DataFrameException Column
 concatColumns left right = case (left, right) of
+    (PackedText _ _, _) -> concatColumns (materializePacked left) right
+    (_, PackedText _ _) -> concatColumns left (materializePacked right)
     (BoxedColumn bmL l, BoxedColumn bmR r) -> case testEquality (typeOf l) (typeOf r) of
         Just Refl ->
             let newBm = case (bmL, bmR) of
@@ -1220,6 +1352,9 @@ within a single Parquet column). Calls 'error' on mismatch.
 concatManyColumns :: [Column] -> Column
 concatManyColumns [] = fromList ([] :: [Maybe Int])
 concatManyColumns [c] = c
+concatManyColumns all'
+    | any isPackedText all' =
+        concatManyColumns (map materializePacked all')
 concatManyColumns (c0 : cs) = case c0 of
     BoxedColumn bm0 v0 ->
         let getCol (BoxedColumn bm v) = case testEquality (typeOf v0) (typeOf v) of
@@ -1263,8 +1398,11 @@ concatManyColumns (c0 : cs) = case c0 of
                              in concatBms ((merged, v1 <> v2) : rest')
                      in Just $ concatBms (zip expandedBms allVecs)
          in UnboxedColumn newBm (VU.concat allVecs)
+    PackedText _ _ -> concatManyColumns (map materializePacked (c0 : cs))
 
 concatColumnsEither :: Column -> Column -> Column
+concatColumnsEither l@(PackedText _ _) r = concatColumnsEither (materializePacked l) r
+concatColumnsEither l r@(PackedText _ _) = concatColumnsEither l (materializePacked r)
 concatColumnsEither (BoxedColumn bmL left) (BoxedColumn bmR right) = case testEquality (typeOf left) (typeOf right) of
     Nothing ->
         BoxedColumn Nothing $ fmap Left left <> fmap Right right
@@ -1325,6 +1463,7 @@ newMutableColumn n (BoxedColumn _ (_ :: VB.Vector a)) =
     MBoxedColumn <$> (VBM.new n :: IO (VBM.IOVector a))
 newMutableColumn n (UnboxedColumn _ (_ :: VU.Vector a)) =
     MUnboxedColumn <$> (VUM.new n :: IO (VUM.IOVector a))
+newMutableColumn n c@(PackedText _ _) = newMutableColumn n (materializePacked c)
 
 -- | Copy a column chunk into a mutable column starting at offset @off@.
 copyIntoMutableColumn :: MutableColumn -> Int -> Column -> IO ()
@@ -1336,6 +1475,8 @@ copyIntoMutableColumn (MUnboxedColumn (mv :: VUM.IOVector b)) off (UnboxedColumn
     case testEquality (typeRep @a) (typeRep @b) of
         Just Refl -> VG.imapM_ (\i x -> VUM.unsafeWrite mv (off + i) x) v
         Nothing -> error "copyIntoMutableColumn: Unboxed type mismatch"
+copyIntoMutableColumn mc off c@(PackedText _ _) =
+    copyIntoMutableColumn mc off (materializePacked c)
 copyIntoMutableColumn _ _ _ =
     error "copyIntoMutableColumn: constructor mismatch"
 
@@ -1394,6 +1535,7 @@ toVector ::
     forall a v.
     (VG.Vector v a, Columnable a) => Column -> Either DataFrameException (v a)
 toVector col = case col of
+    PackedText _ _ -> toVector (materializePacked col)
     BoxedColumn bm (inner :: VB.Vector c) ->
         -- Check if user wants Maybe c (nullable) or c directly
         case testEquality (typeRep @a) (typeRep @c) of
@@ -1464,6 +1606,7 @@ This allows optional numeric data to be represented in the resulting vector.
 toDoubleVector :: Column -> Either DataFrameException (VU.Vector Double)
 toDoubleVector column =
     case column of
+        PackedText _ _ -> toDoubleVector (materializePacked column)
         UnboxedColumn bm (f :: VU.Vector a) -> case testEquality (typeRep @a) (typeRep @Double) of
             Just Refl -> case bm of
                 Nothing -> Right f
@@ -1546,6 +1689,7 @@ Converting from 'Double' to 'Float' may result in loss of precision.
 toFloatVector :: Column -> Either DataFrameException (VU.Vector Float)
 toFloatVector column =
     case column of
+        PackedText _ _ -> toFloatVector (materializePacked column)
         UnboxedColumn bm (f :: VU.Vector a) -> case testEquality (typeRep @a) (typeRep @Float) of
             Just Refl -> case bm of
                 Nothing -> Right f
@@ -1629,6 +1773,7 @@ For example: 2.5 rounds to 2, 3.5 rounds to 4 (banker's rounding).
 toIntVector :: Column -> Either DataFrameException (VU.Vector Int)
 toIntVector column =
     case column of
+        PackedText _ _ -> toIntVector (materializePacked column)
         UnboxedColumn _ (f :: VU.Vector a) -> case testEquality (typeRep @a) (typeRep @Int) of
             Just Refl -> Right f
             Nothing -> case sFloating @a of

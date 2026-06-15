@@ -1,483 +1,371 @@
 {-# LANGUAGE BangPatterns #-}
-{-# LANGUAGE ExplicitNamespaces #-}
-{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE GADTs #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE TypeApplications #-}
-{-# LANGUAGE UndecidableInstances #-}
 
-module DataFrame.Synthesis where
+{- | Feature synthesis by bottom-up enumerative search with observational
+equivalence — the canonical enumerative method from Solar-Lezama's
+/Introduction to Program Synthesis/, hardened for a numeric, examples-only
+setting.
 
-import qualified DataFrame.Functions as F
-import DataFrame.Internal.Column
-import DataFrame.Internal.DataFrame (
-    DataFrame (..),
-    columnNames,
- )
-import DataFrame.Internal.Expression (
-    Expr (..),
-    eSize,
-    eqExpr,
- )
-import DataFrame.Internal.Interpreter (interpret)
-import DataFrame.Internal.Statistics
-import DataFrame.Operations.Core (columnAsDoubleVector)
-import qualified DataFrame.Operations.Statistics as Stats
-import DataFrame.Operations.Subset (exclude)
+Given a frame and a numeric target column, it searches for a small, interpretable
+arithmetic expression over the other columns whose values track the target. The
+specification is purely the example rows; there is no SMT solver and no logical
+spec. Deterministic and pure.
 
-import Control.Exception (throw)
-import Data.Function
-import qualified Data.List as L
-import qualified Data.Map as M
-import Data.Maybe (listToMaybe)
+The engine:
+
+  * enumerates programs by increasing AST size (so the first representative of any
+    behaviour is the smallest — interpretability for free);
+  * evaluates each candidate /incrementally/ by combining the cached result
+    vectors of its subprograms (one vector op), never re-interpreting the whole
+    tree;
+  * keeps exactly one program per /observational-equivalence/ class — candidates
+    producing the same column (up to a float tolerance) are interchangeable, so
+    duplicates are dropped rather than re-explored;
+  * breaks commutative symmetry (never both @a+b@ and @b+a@) and uses protected
+    operators (@sqrt|x|@, @log(|x|+1)@) plus a denominator guard so domain errors
+    never arise;
+  * caps each size layer by fit score when it grows large (a cost-guided
+    tractability bound over /distinct/ behaviours, not a lossy beam over raw
+    syntax).
+
+'fit' returns the best 'SynthesizedFeature'; 'predict' is its expression.
+'synthesizeFeatures' returns the whole ranked, deduplicated feature bank — useful
+as automated feature engineering feeding a downstream model.
+
+Deferred (documented next steps, not yet implemented): skeleton enumeration with
+closed-form least-squares coefficient fitting, hard-row counterexample sampling
+for very large frames, and piecewise (condition-abduction) features.
+-}
+module DataFrame.Synthesis (
+    LossFunction (..),
+    SynthesisConfig (..),
+    defaultSynthesisConfig,
+    SynthesizedFeature (..),
+    synthesizeFeatures,
+) where
+
+import Data.Bits (xor)
+import Data.Either (fromRight)
+import Data.List (sortBy)
+import qualified Data.Map.Strict as M
+import Data.Maybe (fromMaybe)
+import Data.Ord (Down (..), comparing)
 import qualified Data.Text as T
-import Data.Type.Equality
 import qualified Data.Vector.Unboxed as VU
-import DataFrame.Operators
-import Debug.Trace (trace)
-import Type.Reflection (typeRep)
+import Data.Word (Word64)
+import GHC.Float (castDoubleToWord64)
 
-generateConditions ::
-    TypedColumn Double -> [Expr Bool] -> [Expr Double] -> DataFrame -> [Expr Bool]
-generateConditions labels conds ps df =
-    let
-        newConds =
-            [ p .<= q
-            | p <- filter (not . isLiteral) ps
-            , q <- ps
-            , Prelude.not (eqExpr p q)
-            ]
-                ++ [ F.not p
-                   | p <- conds
-                   ]
-        expandedConds =
-            conds
-                ++ newConds
-                ++ [p .&& q | p <- newConds, q <- conds, Prelude.not (eqExpr p q)]
-                ++ [p .|| q | p <- newConds, q <- conds, Prelude.not (eqExpr p q)]
-     in
-        pickTopNBool df labels (deduplicate df expandedConds)
+import DataFrame.Featurize.Internal (featureNames)
+import qualified DataFrame.Functions as F
+import DataFrame.Internal.DataFrame (DataFrame)
+import DataFrame.Internal.Expression (Expr (..))
+import DataFrame.Internal.Statistics (
+    meanSquaredError,
+    mutualInformationBinned,
+    percentile',
+    variance',
+ )
+import DataFrame.Model (Fit (..), Predict (..))
+import DataFrame.Operations.Core (columnAsDoubleVector)
 
-generatePrograms ::
-    Bool ->
-    [Expr Bool] ->
-    [Expr Double] ->
-    [Expr Double] ->
-    [Expr Double] ->
-    [Expr Double]
-generatePrograms _ _ vars' constants [] = vars' ++ constants
-generatePrograms includeConds conds vars constants ps =
-    let
-        existingPrograms = ps ++ vars ++ constants
-     in
-        existingPrograms
-            ++ [ transform p
-               | p <- ps ++ vars
-               , Prelude.not (isConditional p)
-               , transform <-
-                    [ sqrt
-                    , abs
-                    , log . (+ Lit 1)
-                    , exp
-                    , sin
-                    , cos
-                    , F.relu
-                    , signum
-                    ]
-               ]
-            ++ [ F.pow p i
-               | p <- existingPrograms
-               , Prelude.not (isConditional p)
-               , i <- [2 .. 6]
-               ]
-            ++ [ p + q
-               | (i, p) <- zip [(0 :: Int) ..] existingPrograms
-               , (j, q) <- zip [(0 :: Int) ..] existingPrograms
-               , Prelude.not (isLiteral p && isLiteral q)
-               , Prelude.not (isConditional p || isConditional q)
-               , i >= j
-               ]
-            ++ [ p - q
-               | (i, p) <- zip [(0 :: Int) ..] existingPrograms
-               , (j, q) <- zip [(0 :: Int) ..] existingPrograms
-               , Prelude.not (isLiteral p && isLiteral q)
-               , Prelude.not (isConditional p || isConditional q)
-               , i /= j
-               ]
-            ++ ( if includeConds
-                    then
-                        [ F.min p q
-                        | (i, p) <- zip [(0 :: Int) ..] existingPrograms
-                        , (j, q) <- zip [(0 :: Int) ..] existingPrograms
-                        , Prelude.not (isLiteral p && isLiteral q)
-                        , Prelude.not (isConditional p || isConditional q)
-                        , Prelude.not (eqExpr p q)
-                        , i > j
-                        ]
-                            ++ [ F.max p q
-                               | (i, p) <- zip [(0 :: Int) ..] existingPrograms
-                               , (j, q) <- zip [(0 :: Int) ..] existingPrograms
-                               , Prelude.not (isLiteral p && isLiteral q)
-                               , Prelude.not (isConditional p || isConditional q)
-                               , Prelude.not (eqExpr p q)
-                               , i > j
-                               ]
-                            ++ [ F.ifThenElse cond r s
-                               | cond <- conds
-                               , r <- existingPrograms
-                               , s <- existingPrograms
-                               , Prelude.not (isConditional r || isConditional s)
-                               , Prelude.not (eqExpr r s)
-                               ]
-                    else []
-               )
-            ++ [ p * q
-               | (i, p) <- zip [(0 :: Int) ..] existingPrograms
-               , (j, q) <- zip [(0 :: Int) ..] existingPrograms
-               , Prelude.not (isLiteral p && isLiteral q)
-               , Prelude.not (isConditional p || isConditional q)
-               , i >= j
-               ]
-            ++ [ p / q
-               | p <- existingPrograms
-               , q <- existingPrograms
-               , Prelude.not (isLiteral p && isLiteral q)
-               , Prelude.not (isConditional p || isConditional q)
-               , Prelude.not (eqExpr p q)
-               ]
-
-isLiteral :: Expr a -> Bool
-isLiteral (Lit _) = True
-isLiteral _ = False
-
-isConditional :: Expr a -> Bool
-isConditional (If{}) = True
-isConditional _ = False
-
-deduplicate ::
-    forall a.
-    (Columnable a) =>
-    DataFrame ->
-    [Expr a] ->
-    [(Expr a, TypedColumn a)]
-deduplicate df = go [] . L.nubBy eqExpr . L.sortBy (\e1 e2 -> compare (eSize e1) (eSize e2))
-  where
-    go _ [] = []
-    go seen (x : xs)
-        | hasInvalid = go seen xs
-        | res `elem` seen = go seen xs
-        | otherwise = (x, res) : go (res : seen) xs
-      where
-        res = case interpret @a df x of
-            Left e -> throw e
-            Right v -> v
-        hasInvalid = case res of
-            (TColumn (UnboxedColumn _ (column :: VU.Vector b))) -> case testEquality (typeRep @Double) (typeRep @b) of
-                Just Refl -> VU.any (\n -> isNaN n || isInfinite n) column
-                Nothing -> False
-            _ -> False
-
--- | Checks if two programs generate the same outputs given all the same inputs.
-equivalent :: DataFrame -> Expr Double -> Expr Double -> Bool
-equivalent df p1 p2 = case (==) <$> interpret df p1 <*> interpret df p2 of
-    Left e -> throw e
-    Right v -> v
-
-synthesizeFeatureExpr ::
-    -- | Target expression
-    T.Text ->
-    BeamConfig ->
-    DataFrame ->
-    Either String (Expr Double)
-synthesizeFeatureExpr target cfg df =
-    let
-        df' = exclude [target] df
-        t = case interpret df (Col target) of
-            Left e -> throw e
-            Right v -> v
-     in
-        case beamSearch
-            df'
-            cfg
-            t
-            (percentiles df')
-            []
-            [] of
-            Nothing -> Left "No programs found"
-            Just p -> Right p
-
-f1FromBinary :: VU.Vector Double -> VU.Vector Double -> Maybe Double
-f1FromBinary trues preds =
-    let (!tp, !fp, !fn) =
-            VU.foldl' step (0 :: Int, 0 :: Int, 0 :: Int) $
-                VU.zip (VU.map (> 0) preds) (VU.map (> 0) trues)
-     in f1FromCounts tp fp fn
-  where
-    step (!tp, !fp, !fn) (!p, !t) =
-        case (p, t) of
-            (True, True) -> (tp + 1, fp, fn)
-            (True, False) -> (tp, fp + 1, fn)
-            (False, True) -> (tp, fp, fn + 1)
-            (False, False) -> (tp, fp, fn)
-
-f1FromCounts :: Int -> Int -> Int -> Maybe Double
-f1FromCounts tp fp fn =
-    let tp' = fromIntegral tp
-        fp' = fromIntegral fp
-        fn' = fromIntegral fn
-        precision = if tp' + fp' == 0 then 0 else tp' / (tp' + fp')
-        recall = if tp' + fn' == 0 then 0 else tp' / (tp' + fn')
-     in if precision + recall == 0
-            then Nothing
-            else Just (2 * precision * recall / (precision + recall))
-
-fitClassifier ::
-    -- | Target expression
-    T.Text ->
-    -- | Depth of search (Roughly, how many terms in the final expression)
-    Int ->
-    -- | Beam size - the number of candidate expressions to consider at a time.
-    Int ->
-    DataFrame ->
-    Either String (Expr Int)
-fitClassifier target d b df =
-    let
-        df' = exclude [target] df
-        t = case interpret df (Col target) of
-            Left e -> throw e
-            Right v -> v
-     in
-        case beamSearch
-            df'
-            (BeamConfig d b F1 True)
-            t
-            (percentiles df' ++ [Lit 1, Lit 0, Lit (-1)])
-            []
-            [] of
-            Nothing -> Left "No programs found"
-            Just p -> Right (F.ifThenElse (p .> (0 :: Expr Double)) 1 0)
-
-percentiles :: DataFrame -> [Expr Double]
-percentiles df =
-    let
-        doubleColumns =
-            map
-                (either throw id . ((`columnAsDoubleVector` df) . Col @Double))
-                (columnNames df)
-     in
-        concatMap
-            (\c -> map (Lit . roundTo2SigDigits . (`percentile'` c)) [1, 25, 75, 99])
-            doubleColumns
-            ++ map (Lit . roundTo2SigDigits . variance') doubleColumns
-            ++ map (Lit . roundTo2SigDigits . sqrt . variance') doubleColumns
-
-roundToSigDigits :: Int -> Double -> Double
-roundToSigDigits n x
-    | x == 0 = 0
-    | otherwise =
-        let magnitude = floor (logBase 10 (abs x))
-            scale = 10 ** fromIntegral (n - 1 - magnitude)
-         in fromIntegral (round (x * scale) :: Int) / scale
-
-roundTo2SigDigits :: Double -> Double
-roundTo2SigDigits = roundToSigDigits 2
-
-fitRegression ::
-    -- | Target expression
-    T.Text ->
-    -- | Depth of search (Roughly, how many terms in the final expression)
-    Int ->
-    -- | Beam size - the number of candidate expressions to consider at a time.
-    Int ->
-    DataFrame ->
-    Either String (Expr Double)
-fitRegression target d b df =
-    let
-        df' = exclude [target] df
-        targetMean = Stats.mean (Col @Double target) df
-        t = case interpret df (Col target) of
-            Left e -> throw e
-            Right v -> v
-        cfg = BeamConfig d b MeanSquaredError True
-        constants =
-            percentiles df'
-                ++ [Lit targetMean]
-                ++ [ F.pow p i
-                   | i <- [1 .. 6]
-                   , p <- [Lit 10, Lit 1, Lit 0.1]
-                   ]
-     in
-        case beamSearch df' cfg t constants [] [] of
-            Nothing -> Left "No programs found"
-            Just p -> Right p
-
+-- | How a candidate's output column is scored against the target (higher is better).
 data LossFunction
-    = PearsonCorrelation
-    | MutualInformation
-    | MeanSquaredError
-    | F1
+    = -- | Pearson @r²@: scale-invariant, the default for derived features.
+      PearsonCorrelation
+    | -- | Binned mutual information: captures nonlinear association.
+      MutualInformation
+    | -- | Negative mean squared error: for reproducing a target exactly.
+      MeanSquaredError
+    deriving (Eq, Show)
 
-getLossFunction ::
-    LossFunction -> (VU.Vector Double -> VU.Vector Double -> Maybe Double)
-getLossFunction f = case f of
-    MutualInformation ->
-        ( \l r ->
-            mutualInformationBinned
-                (Prelude.max 10 (ceiling (sqrt (fromIntegral (VU.length l) :: Double))))
-                l
-                r
-        )
-    PearsonCorrelation -> (\l r -> (^ (2 :: Int)) <$> correlation' l r)
-    MeanSquaredError -> (\l r -> fmap negate (meanSquaredError l r))
-    F1 -> f1FromBinary
+-- | Search hyperparameters.
+data SynthesisConfig = SynthesisConfig
+    { synMaxSize :: !Int
+    -- ^ Largest AST (node count) to enumerate.
+    , synBankCap :: !Int
+    -- ^ Max observationally-distinct programs kept per size layer.
+    , synLoss :: !LossFunction
+    , synTopK :: !Int
+    -- ^ How many ranked features to return in the bank.
+    }
+    deriving (Eq, Show)
 
-data BeamConfig = BeamConfig
-    { searchDepth :: Int
-    , beamLength :: Int
-    , lossFunction :: LossFunction
-    , includeConditionals :: Bool
+defaultSynthesisConfig :: SynthesisConfig
+defaultSynthesisConfig =
+    SynthesisConfig
+        { synMaxSize = 6
+        , synBankCap = 500
+        , synLoss = PearsonCorrelation
+        , synTopK = 16
+        }
+
+{- | A synthesized feature. 'sfExpr' is the best-scoring expression and 'sfFeatures'
+is the ranked, observationally-distinct bank (expression and its score).
+-}
+data SynthesizedFeature = SynthesizedFeature
+    { sfExpr :: !(Expr Double)
+    , sfScore :: !Double
+    , sfFeatures :: ![(Expr Double, Double)]
     }
 
-defaultBeamConfig :: BeamConfig
-defaultBeamConfig = BeamConfig 2 100 PearsonCorrelation False
+instance Fit SynthesisConfig (Expr Double) SynthesizedFeature where
+    fit = synthesizeFeatures
 
-beamSearch ::
-    DataFrame ->
-    -- | Parameters of the beam search.
-    BeamConfig ->
-    -- | Examples
-    TypedColumn Double ->
-    -- | Constants
-    [Expr Double] ->
-    -- | Conditions
-    [Expr Bool] ->
-    -- | Programs
-    [Expr Double] ->
-    Maybe (Expr Double)
-beamSearch df cfg outputs constants conds programs
-    | searchDepth cfg == 0 = case ps of
-        [] -> Nothing
-        (x : _) -> Just x
-    | otherwise =
-        beamSearch
-            df
-            (cfg{searchDepth = searchDepth cfg - 1})
-            outputs
-            constants
-            conditions
-            (generatePrograms (includeConditionals cfg) conditions vars constants ps)
+instance Predict SynthesizedFeature Double where
+    predict = sfExpr
+
+-- | A candidate's evaluated column over the example rows.
+type Output = VU.Vector Double
+
+data Prog = Prog
+    { progExpr :: !(Expr Double)
+    , progSize :: !Int
+    , progOut :: !Output
+    }
+
+-- | Search for expressions over the non-target columns that track @target@.
+synthesizeFeatures ::
+    SynthesisConfig -> Expr Double -> DataFrame -> SynthesizedFeature
+synthesizeFeatures cfg target df
+    | null leaves || VU.null tgt = SynthesizedFeature (Lit 0) (negate (1 / 0)) []
+    | otherwise = SynthesizedFeature best bestScore ranked
   where
-    vars = map Col names
-    conditions = generateConditions outputs conds (vars ++ constants) df
-    ps = pickTopN df outputs cfg $ deduplicate df programs
-    names = (map fst . L.sortBy (compare `on` snd) . M.toList . columnIndices) df
+    feats = featureNames target df
+    tgt = fromRight VU.empty (columnAsDoubleVector target df)
+    n = VU.length tgt
+    leaves = mkLeaves df feats n
+    bank = grow cfg tgt leaves
+    scored =
+        [ (progExpr p, progSize p, s)
+        | p <- bank
+        , Just s <- [scoreOf (synLoss cfg) tgt (progOut p)]
+        ]
+    sorted = sortBy (comparing (\(_, sz, s) -> (Down s, sz))) scored
+    ranked = [(e, s) | (e, _, s) <- take (synTopK cfg) sorted]
+    (best, bestScore) = case ranked of
+        ((e, s) : _) -> (e, s)
+        [] -> (Lit 0, negate (1 / 0))
 
-pickTopN ::
-    DataFrame ->
-    TypedColumn Double ->
-    BeamConfig ->
-    [(Expr Double, TypedColumn a)] ->
-    [Expr Double]
-pickTopN _ _ _ [] = []
-pickTopN df (TColumn column) cfg ps =
-    let
-        l = case toVector @Double @VU.Vector column of
-            Left e -> throw e
-            Right v -> v
-        ordered =
-            Prelude.take
-                (beamLength cfg)
-                ( map fst $
-                    L.sortBy
-                        ( \(_, c2) (_, c1) ->
-                            if maybe False isInfinite c1
-                                || maybe False isInfinite c2
-                                || maybe False isNaN c1
-                                || maybe False isNaN c2
-                                then LT
-                                else compare c1 c2
-                        )
-                        ( map
-                            (\(e, res) -> (e, getLossFunction (lossFunction cfg) l (asDoubleVector res)))
-                            ps
-                        )
-                )
-        asDoubleVector c =
-            let
-                (TColumn col') = c
-             in
-                case toVector @Double @VU.Vector col' of
-                    Left e -> throw e
-                    Right v -> VU.convert v
-        interpretDoubleVector e' =
-            let
-                (TColumn col') = case interpret df e' of
-                    Left err -> throw err
-                    Right v -> v
-             in
-                case toVector @Double @VU.Vector col' of
-                    Left err -> throw err
-                    Right v -> VU.convert v
-     in
-        trace
-            ( "Best loss: "
-                ++ show
-                    ( getLossFunction (lossFunction cfg) l . interpretDoubleVector
-                        <$> listToMaybe ordered
-                    )
-                ++ " "
-                ++ (if null ordered then "empty" else show (listToMaybe ordered))
-            )
-            ordered
+-- | Size-1 programs: numeric feature columns and a pool of constants, OE-deduped.
+mkLeaves :: DataFrame -> [T.Text] -> Int -> [Prog]
+mkLeaves df feats n = fst (dedupProgs M.empty candidates)
+  where
+    candidates =
+        [ Prog (Col name) 1 o
+        | name <- feats
+        , Right o <- [columnAsDoubleVector (Col name :: Expr Double) df]
+        ]
+            ++ [Prog (Lit v) 1 (VU.replicate n v) | v <- constantPool df feats]
 
-pickTopNBool ::
-    DataFrame ->
-    TypedColumn Double ->
-    [(Expr Bool, TypedColumn Bool)] ->
-    [Expr Bool]
-pickTopNBool _ _ [] = []
-pickTopNBool _df (TColumn column) ps =
-    let
-        l = case toVector @Double @VU.Vector column of
-            Left e -> throw e
-            Right v -> v
-        ordered =
-            Prelude.take
-                10
-                ( map fst $
-                    L.sortBy
-                        ( \(_, c2) (_, c1) ->
-                            if maybe False isInfinite c1
-                                || maybe False isInfinite c2
-                                || maybe False isNaN c1
-                                || maybe False isNaN c2
-                                then LT
-                                else compare c1 c2
-                        )
-                        ( map
-                            (\(e, res) -> (e, getLossFunction MutualInformation l (asDoubleVector res)))
-                            ps
-                        )
-                )
-        asDoubleVector c =
-            let
-                (TColumn col') = c
-             in
-                case toVector @Bool @VU.Vector col' of
-                    Left e -> throw e
-                    Right v -> VU.map (fromIntegral @Int @Double . fromEnum) v
-     in
-        ordered
+{- | Domain-informed constants: per-column quartiles, variance, and std, plus a few
+small integers. (Duplicates collapse under observational equivalence.)
+-}
+constantPool :: DataFrame -> [T.Text] -> [Double]
+constantPool df feats =
+    [0, 1, 2, -1]
+        ++ [ roundSig 2 v
+           | name <- feats
+           , Right c <- [columnAsDoubleVector (Col name :: Expr Double) df]
+           , v <-
+                [percentile' p c | p <- [1, 25, 75, 99]] ++ [variance' c, sqrt (variance' c)]
+           ]
 
-satisfiesExamples :: DataFrame -> TypedColumn Double -> Expr Double -> Bool
-satisfiesExamples df column expr =
-    let
-        result = case interpret df expr of
-            Left e -> throw e
-            Right v -> v
-     in
-        result == column
+-- | Grow the bank one size layer at a time, keeping one program per OE class.
+grow :: SynthesisConfig -> Output -> [Prog] -> [Prog]
+grow cfg tgt leaves = go 2 leaves (foldr (seenInsert . progOut) M.empty leaves)
+  where
+    go size bank seen
+        | size > synMaxSize cfg = bank
+        | otherwise =
+            let (kept, seen') = absorb cfg tgt seen (layer size bank)
+             in go (size + 1) (bank ++ kept) seen'
+
+-- | All candidate programs of exactly @size@ nodes, built from smaller ones.
+layer :: Int -> [Prog] -> [Prog]
+layer size bank = unaries ++ pows ++ comms ++ subs ++ divs
+  where
+    atSize s = filter ((== s) . progSize) bank
+    args1 = atSize (size - 1)
+    unaries =
+        [ Prog (mk e) size (VU.map f o)
+        | (mk, f) <- unaryProds
+        , Prog e _ o <- args1
+        ]
+    pows =
+        [ Prog (F.pow e k) size (VU.map (^ k) o)
+        | Prog e _ o <- args1
+        , k <- [2 .. 6 :: Int]
+        ]
+    comms =
+        [ Prog (mk ea eb) size (VU.zipWith f oa ob)
+        | (mk, f) <- commutativeProds
+        , (Prog ea _ oa, Prog eb _ ob) <- unorderedPairs size bank
+        ]
+    subs =
+        [ Prog (ea - eb) size (VU.zipWith (-) oa ob)
+        | (Prog ea _ oa, Prog eb _ ob) <- orderedPairs size bank
+        ]
+    divs =
+        [ Prog (ea / eb) size (VU.zipWith (/) oa ob)
+        | (Prog ea _ oa, Prog eb _ ob) <- orderedPairs size bank
+        , VU.all ((> 1e-9) . abs) ob
+        ]
+
+-- | Protected unary operators: total on all reals (no NaN/domain errors).
+unaryProds :: [(Expr Double -> Expr Double, Double -> Double)]
+unaryProds =
+    [ (sqrt . abs, sqrt . abs)
+    , (abs, abs)
+    , (\e -> log (abs e + 1), \x -> log (abs x + 1))
+    , (exp, exp)
+    , (sin, sin)
+    , (cos, cos)
+    , (F.relu, max 0)
+    , (signum, signum)
+    ]
+
+-- | Commutative binary operators (enumerated over unordered operand pairs).
+commutativeProds ::
+    [(Expr Double -> Expr Double -> Expr Double, Double -> Double -> Double)]
+commutativeProds =
+    [ ((+), (+))
+    , ((*), (*))
+    , (F.min, min)
+    , (F.max, max)
+    ]
+
+-- | Ordered operand pairs whose sizes sum to @size-1@ (for non-commutative ops).
+orderedPairs :: Int -> [Prog] -> [(Prog, Prog)]
+orderedPairs size bank =
+    [ (a, b)
+    | sa <- [1 .. size - 2]
+    , let sb = size - 1 - sa
+    , sb >= 1
+    , a <- atSize sa
+    , b <- atSize sb
+    ]
+  where
+    atSize s = filter ((== s) . progSize) bank
+
+-- | Unordered operand pairs (for commutative ops): each pair once.
+unorderedPairs :: Int -> [Prog] -> [(Prog, Prog)]
+unorderedPairs size bank =
+    [ (a, b)
+    | sa <- [1 .. size - 2]
+    , let sb = size - 1 - sa
+    , sb >= 1
+    , sa <= sb
+    , (i, a) <- zip [0 :: Int ..] (atSize sa)
+    , (j, b) <- zip [0 :: Int ..] (atSize sb)
+    , sa < sb || i <= j
+    ]
+  where
+    atSize s = filter ((== s) . progSize) bank
+
+{- | Keep the valid, observationally-novel candidates of a layer, then cap by fit
+score (cost-guided). Returns the kept programs and the updated OE-class set.
+-}
+absorb ::
+    SynthesisConfig -> Output -> Seen -> [Prog] -> ([Prog], Seen)
+absorb cfg tgt seen0 cands = (capLayer cfg tgt fresh, seen')
+  where
+    (fresh, seen') = dedupProgs seen0 cands
+
+-- | When a layer has more distinct programs than the cap, keep the best-scoring.
+capLayer :: SynthesisConfig -> Output -> [Prog] -> [Prog]
+capLayer cfg tgt progs
+    | length progs <= synBankCap cfg = progs
+    | otherwise = take (synBankCap cfg) (sortBy (comparing (Down . rank)) progs)
+  where
+    rank p = fromMaybe (negate (1 / 0)) (scoreOf (synLoss cfg) tgt (progOut p))
+
+-- | Fit score of an output against the target (higher is better), or @Nothing@.
+scoreOf :: LossFunction -> Output -> Output -> Maybe Double
+scoreOf lf tgt out
+    | VU.length out /= VU.length tgt = Nothing
+    | otherwise = finite $ case lf of
+        PearsonCorrelation -> pearsonR2 tgt out
+        MutualInformation -> mutualInformationBinned bins tgt out
+        MeanSquaredError -> negate <$> meanSquaredError tgt out
+  where
+    bins = max 10 (ceiling (sqrt (fromIntegral (VU.length tgt) :: Double)))
+    -- Belt-and-suspenders: drop any non-finite score so it cannot win the ranking.
+    finite (Just s) | isNaN s || isInfinite s = Nothing
+    finite ms = ms
+
+{- | Pearson @r²@ via the numerically stable centered two-pass formula. Returns
+'Nothing' when the feature (or target) is constant, and is bounded by
+Cauchy–Schwarz to @[0,1]@ — unlike the one-pass @n·Σxy − Σx·Σy@ form, which
+cancels catastrophically for low-variance features and can report @r² > 1@.
+-}
+pearsonR2 :: Output -> Output -> Maybe Double
+pearsonR2 ys xs
+    | n < 2 = Nothing
+    | sxx <= 0 || syy <= 0 = Nothing
+    | otherwise = Just (min 1 (sxy * sxy / (sxx * syy)))
+  where
+    n = VU.length xs
+    nf = fromIntegral n
+    mx = VU.sum xs / nf
+    my = VU.sum ys / nf
+    sxy = VU.sum (VU.zipWith (\x y -> (x - mx) * (y - my)) xs ys)
+    sxx = VU.sum (VU.map (\x -> (x - mx) * (x - mx)) xs)
+    syy = VU.sum (VU.map (\y -> (y - my) * (y - my)) ys)
+
+-- | An output is usable iff it is non-empty and free of NaN/±Inf.
+valid :: Output -> Bool
+valid o = not (VU.null o) && VU.all (\x -> not (isNaN x || isInfinite x)) o
+
+{- | Quantize an output to nine significant digits, so float noise (@x*2@ vs
+@x+x@) collapses while genuinely distinct features stay apart.
+-}
+quantize :: Output -> Output
+quantize = VU.map (\x -> if x == 0 then 0 else signum x * roundSig 9 (abs x))
+
+{- | The observational-equivalence class set: a map from a 64-bit FNV-1a
+fingerprint of the quantized output to the (usually one) quantized outputs with
+that fingerprint. Bucketing on the fingerprint keeps membership cheap, and
+verifying exact equality within the bucket makes a hash collision harmless — two
+genuinely different columns that happen to collide are kept apart, not merged.
+-}
+type Seen = M.Map Int [Output]
+
+-- | FNV-1a fingerprint of an already-quantized output's bit patterns.
+fpOf :: Output -> Int
+fpOf = fromIntegral . VU.foldl' step (1469598103934665603 :: Word64)
+  where
+    step !h x = (h `xor` castDoubleToWord64 x) * 1099511628211
+
+-- | Record an output's observational-equivalence class.
+seenInsert :: Output -> Seen -> Seen
+seenInsert o = M.insertWith (++) (fpOf q) [q]
+  where
+    q = quantize o
+
+-- | Round a positive double to @n@ significant digits.
+roundSig :: Int -> Double -> Double
+roundSig n x
+    | x == 0 = 0
+    | otherwise =
+        let magnitude = floor (logBase 10 (abs x)) :: Int
+            scale = 10 ** fromIntegral (n - 1 - magnitude)
+         in fromIntegral (round (x * scale) :: Integer) / scale
+
+{- | Keep the first valid program of each observational-equivalence class,
+preserving order; returns the kept programs and the grown class set.
+-}
+dedupProgs :: Seen -> [Prog] -> ([Prog], Seen)
+dedupProgs = go []
+  where
+    go acc s [] = (reverse acc, s)
+    go acc s (p : ps)
+        | not (valid o) = go acc s ps
+        | member = go acc s ps
+        | otherwise = go (p : acc) (M.insertWith (++) fp [q] s) ps
+      where
+        o = progOut p
+        q = quantize o
+        fp = fpOf q
+        member = maybe False (q `elem`) (M.lookup fp s)

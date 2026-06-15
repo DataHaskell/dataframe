@@ -24,6 +24,7 @@ import DataFrame.Errors (DataFrameException (..))
 import DataFrame.Internal.Column
 import DataFrame.Internal.DataFrame
 import DataFrame.Internal.Expression (Expr (..))
+import DataFrame.Internal.PackedText (packedIndexText, packedLength)
 import Type.Reflection (typeOf, typeRep)
 
 data Any where
@@ -177,6 +178,7 @@ mkRowFromArgs names df i = V.map get (V.fromList names)
                     (M.keys $ columnIndices df)
         Just (BoxedColumn bm column) -> cellAny bm i (column V.! i)
         Just (UnboxedColumn bm column) -> cellAny bm i (column VU.! i)
+        Just (PackedText bm p) -> cellAny bm i (packedIndexText p i)
 
 -- This function will return the items in the order that is specified
 -- by the user. For example, if the dataframe consists of the columns
@@ -200,5 +202,8 @@ mkRowRep df names i = V.generate (L.length names) (\index -> get (names' V.! ind
         Just (UnboxedColumn bm c) -> case c VU.!? i of
             Just e -> cellAny bm i e
             Nothing -> throwError name
+        Just (PackedText bm p)
+            | i < packedLength p -> cellAny bm i (packedIndexText p i)
+            | otherwise -> throwError name
         Nothing ->
             throw $ ColumnsNotFoundException [name] "mkRowRep" (M.keys $ columnIndices df)

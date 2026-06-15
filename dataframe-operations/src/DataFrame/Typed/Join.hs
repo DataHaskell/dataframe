@@ -26,7 +26,11 @@ import DataFrame.Typed.Types (TypedDataFrame (..))
 -- | Typed inner join on one or more key columns.
 innerJoin ::
     forall (keys :: [Symbol]) left right.
-    (AllKnownSymbol keys) =>
+    ( AllKnownSymbol keys
+    , AssertAllPresent keys left
+    , AssertAllPresent keys right
+    , AssertKeyTypesMatch keys left right
+    ) =>
     TypedDataFrame left ->
     TypedDataFrame right ->
     TypedDataFrame (InnerJoinSchema keys left right)
@@ -38,7 +42,11 @@ innerJoin (TDF l) (TDF r) =
 -- | Typed left join.
 leftJoin ::
     forall (keys :: [Symbol]) left right.
-    (AllKnownSymbol keys) =>
+    ( AllKnownSymbol keys
+    , AssertAllPresent keys left
+    , AssertAllPresent keys right
+    , AssertKeyTypesMatch keys left right
+    ) =>
     TypedDataFrame left ->
     TypedDataFrame right ->
     TypedDataFrame (LeftJoinSchema keys left right)
@@ -50,7 +58,11 @@ leftJoin (TDF l) (TDF r) =
 -- | Typed right join.
 rightJoin ::
     forall (keys :: [Symbol]) left right.
-    (AllKnownSymbol keys) =>
+    ( AllKnownSymbol keys
+    , AssertAllPresent keys left
+    , AssertAllPresent keys right
+    , AssertKeyTypesMatch keys left right
+    ) =>
     TypedDataFrame left ->
     TypedDataFrame right ->
     TypedDataFrame (RightJoinSchema keys left right)
@@ -62,7 +74,11 @@ rightJoin (TDF l) (TDF r) =
 -- | Typed full outer join.
 fullOuterJoin ::
     forall (keys :: [Symbol]) left right.
-    (AllKnownSymbol keys) =>
+    ( AllKnownSymbol keys
+    , AssertAllPresent keys left
+    , AssertAllPresent keys right
+    , AssertKeyTypesMatch keys left right
+    ) =>
     TypedDataFrame left ->
     TypedDataFrame right ->
     TypedDataFrame (FullOuterJoinSchema keys left right)

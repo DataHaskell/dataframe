@@ -15,6 +15,7 @@
 
 module DataFrame.Internal.Expression where
 
+import qualified Data.Map.Strict as M
 import Data.String
 import qualified Data.Text as T
 import Data.Type.Equality (TestEquality (testEquality), type (:~:) (Refl))
@@ -369,6 +370,44 @@ replaceExpr new old expr = case testEquality (typeRep @b) (typeRep @c) of
         (Binary op l r) -> Binary op (replaceExpr new old l) (replaceExpr new old r)
         (Agg op inner) -> Agg op (replaceExpr new old inner)
         (Over keys inner) -> Over keys (replaceExpr new old inner)
+
+{- | Simultaneously substitute column references using a map from column name to
+replacement expression. Unlike folding 'replaceExpr' over the bindings, this is a
+single parallel pass: every 'Col' reference is resolved against the original map,
+so a swap such as @{a ↦ col b, b ↦ col a}@ is handled correctly (sequential
+replacement would collapse both columns onto one).
+
+Only 'Col' references are substituted; raw-text references inside 'CastWith' and
+'Over' partition keys are left untouched (documented limitation — the fitted ML
+transforms that use this only ever emit @Col@/@Lit@/@Unary@/@Binary@/@If@). A
+binding whose replacement type does not match the referenced column's type is a
+programmer error and raises an exception.
+-}
+substituteColumns ::
+    forall a. (Columnable a) => M.Map T.Text UExpr -> Expr a -> Expr a
+substituteColumns subs = go
+  where
+    go :: forall b. (Columnable b) => Expr b -> Expr b
+    go e@(Col name) = case M.lookup name subs of
+        Nothing -> e
+        Just (UExpr (repl :: Expr c)) -> case testEquality (typeRep @b) (typeRep @c) of
+            Just Refl -> repl
+            Nothing ->
+                error $
+                    "substituteColumns: type mismatch for column "
+                        ++ show name
+                        ++ "; column has type "
+                        ++ show (typeRep @b)
+                        ++ " but replacement has type "
+                        ++ show (typeRep @c)
+    go e@(CastWith{}) = e
+    go (CastExprWith t f e) = CastExprWith t f (go e)
+    go e@(Lit _) = e
+    go (If cond l r) = If (go cond) (go l) (go r)
+    go (Unary op value) = Unary op (go value)
+    go (Binary op l r) = Binary op (go l) (go r)
+    go (Agg op inner) = Agg op (go inner)
+    go (Over keys inner) = Over keys (go inner)
 
 eSize :: Expr a -> Int
 eSize (Col _) = 1

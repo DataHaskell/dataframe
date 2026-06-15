@@ -6,7 +6,13 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 
-module DataFrame.Operations.Typing where
+-- The inference lattice (sample classification, 'ParsingAssumption',
+-- Int -> Double promotion) lives in "DataFrame.Operations.Inference"
+-- and is re-exported here for backwards compatibility.
+module DataFrame.Operations.Typing (
+    module DataFrame.Operations.Typing,
+    module DataFrame.Operations.Inference,
+) where
 
 import qualified Data.Map as M
 import qualified Data.Text as T
@@ -30,6 +36,7 @@ import DataFrame.Internal.Column (
     ensureOptional,
     finalizeParseResult,
     fromVector,
+    materializePacked,
  )
 import DataFrame.Internal.DataFrame (
     DataFrame (..),
@@ -39,10 +46,9 @@ import DataFrame.Internal.DataFrame (
 import DataFrame.Internal.Parsing
 import DataFrame.Internal.Schema
 import DataFrame.Operations.Core ()
+import DataFrame.Operations.Inference
 import Text.Read
 import Type.Reflection
-
-type DateFormat = String
 
 {- | How parse failures are surfaced in the resulting column.
 
@@ -228,14 +234,16 @@ handleBoolAssumption isNull cols =
         (parseUnboxedColumnWithPred False isNull readBool cols)
         (handleTextAssumption isNull cols)
 
+{- | Int columns: one fused pass with in-place Int -> Double promotion
+('promoteIntColumn'); a cell parsing as neither demotes to Text over
+the retained raw cells. 'readIntStrict' rejects overflow so a huge
+integer promotes to its true 'Double' value instead of wrapping.
+-}
 handleIntAssumption :: (T.Text -> Bool) -> V.Vector T.Text -> Column
 handleIntAssumption isNull cols =
-    case parseUnboxedColumnWithPred 0 isNull readInt cols of
-        Just (mbm, vec) -> UnboxedColumn mbm vec
-        Nothing ->
-            unboxedOrFallback
-                (parseUnboxedColumnWithPred 0 isNull readDouble cols)
-                (handleTextAssumption isNull cols)
+    case promoteIntColumn (\_ t -> isNull t) readIntStrict readDouble cols of
+        Just col -> col
+        Nothing -> handleTextAssumption isNull cols
 
 handleDoubleAssumption :: (T.Text -> Bool) -> V.Vector T.Text -> Column
 handleDoubleAssumption isNull cols =
@@ -334,14 +342,6 @@ convertNullish missing v = if isNullish v || v `elem` missing then Nothing else 
 convertOnlyEmpty :: T.Text -> Maybe T.Text
 convertOnlyEmpty v = if v == "" then Nothing else Just v
 
-parseTimeOpt :: DateFormat -> T.Text -> Maybe Day
-parseTimeOpt dateFormat s =
-    parseTimeM {- Accept leading/trailing whitespace -}
-        True
-        defaultTimeLocale
-        dateFormat
-        (T.unpack s)
-
 unsafeParseTime :: DateFormat -> T.Text -> Day
 unsafeParseTime dateFormat s =
     parseTimeOrError {- Accept leading/trailing whitespace -}
@@ -360,40 +360,6 @@ vecSameConstructor xs ys = (V.length xs == V.length ys) && V.and (V.zipWith hasS
     hasSameConstructor (Just _) (Just _) = True
     hasSameConstructor Nothing Nothing = True
     hasSameConstructor _ _ = False
-
-makeParsingAssumption ::
-    DateFormat -> V.Vector (Maybe T.Text) -> ParsingAssumption
-makeParsingAssumption dateFormat asMaybeText
-    -- All the examples are "NA", "Null", "", so we can't make any shortcut
-    -- assumptions and just have to go the long way.
-    | V.all (== Nothing) asMaybeText = NoAssumption
-    -- After accounting for nulls, parsing for Ints and Doubles results in the
-    -- same corresponding positions of Justs and Nothings, so we assume
-    -- that the best way to parse is Int
-    | vecSameConstructor asMaybeText asMaybeBool = BoolAssumption
-    | vecSameConstructor asMaybeText asMaybeInt
-        && vecSameConstructor asMaybeText asMaybeDouble =
-        IntAssumption
-    -- After accounting for nulls, the previous condition fails, so some (or none) can be parsed as Ints
-    -- and some can be parsed as Doubles, so we make the assumpotion of doubles.
-    | vecSameConstructor asMaybeText asMaybeDouble = DoubleAssumption
-    -- After accounting for nulls, parsing for Dates results in the same corresponding
-    -- positions of Justs and Nothings, so we assume that the best way to parse is Date.
-    | vecSameConstructor asMaybeText asMaybeDate = DateAssumption
-    | otherwise = TextAssumption
-  where
-    asMaybeBool = V.map (>>= readBool) asMaybeText
-    asMaybeInt = V.map (>>= readInt) asMaybeText
-    asMaybeDouble = V.map (>>= readDouble) asMaybeText
-    asMaybeDate = V.map (>>= parseTimeOpt dateFormat) asMaybeText
-
-data ParsingAssumption
-    = BoolAssumption
-    | IntAssumption
-    | DoubleAssumption
-    | DateAssumption
-    | NoAssumption
-    | TextAssumption
 
 {- | Re-type columns of a 'DataFrame' according to the supplied schema map.
 The caller provides a @resolveMode@ function that maps a column name to its
@@ -426,6 +392,9 @@ parseWithTypes resolveMode ts df
         EitherRead -> fromVector (V.map ((readEitherRaw @a) . toStr) col)
 
     asType :: SafeReadMode -> SchemaType -> Column -> Column
+    -- A raw CSV string column may arrive as PackedText; decode to boxed Text
+    -- so the re-parse arms below can read the cells.
+    asType mode st c@(PackedText _ _) = asType mode st (materializePacked c)
     asType mode (SType (_ :: P.Proxy a)) c@(BoxedColumn _ (col :: V.Vector b)) = case typeRep @a of
         App t1 _t2 -> case eqTypeRep t1 (typeRep @Maybe) of
             Just HRefl -> case testEquality (typeRep @a) (typeRep @b) of

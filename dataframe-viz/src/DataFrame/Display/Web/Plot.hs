@@ -136,6 +136,10 @@ renderSpec sz fields spec = do
     let spec' = spec{vlWidth = sz.width, vlHeight = sz.height}
     return $ T.unpack $ specHtml chartId fields spec'
 
+-- | Pin a channel's zero anchor explicitly, on or off.
+anchorZero :: Bool -> VL.ChannelEnc -> VL.ChannelEnc
+anchorZero b e = e{VL.ceScale = VL.defaultScale{VL.scaleZero = Just b}}
+
 -- ---------------------------------------------------------------------------
 -- Bar
 -- ---------------------------------------------------------------------------
@@ -226,16 +230,22 @@ histogram spec df = do
 -- Scatter
 -- ---------------------------------------------------------------------------
 
+{- | 'includeZero' anchors both axes at zero (Vega-Lite's own default).
+It is off by default so the axes fit the data, as expected of a scatter —
+data far from the origin (e.g. geographic coordinates) would otherwise be
+squashed against the chart edge.
+-}
 data Scatter = Scatter
     { x :: T.Text
     , y :: T.Text
     , color :: Maybe T.Text
     , title :: Maybe T.Text
     , size :: Size
+    , includeZero :: Bool
     }
 
 mkScatter :: T.Text -> T.Text -> Scatter
-mkScatter xc yc = Scatter xc yc Nothing Nothing defaultSize
+mkScatter xc yc = Scatter xc yc Nothing Nothing defaultSize False
 
 scatter :: (HasCallStack) => Scatter -> DataFrame -> IO String
 scatter spec df = do
@@ -245,7 +255,10 @@ scatter spec df = do
         xVals = extractNumericColumn spec.x df
         yVals = extractNumericColumn spec.y df
         baseFields = [numField spec.x xVals, numField spec.y yVals]
-        baseEncs = [chanEnc X spec.x Quantitative, chanEnc Y spec.y Quantitative]
+        baseEncs =
+            map
+                (anchorZero spec.includeZero)
+                [chanEnc X spec.x Quantitative, chanEnc Y spec.y Quantitative]
         (fields, encs) = case spec.color of
             Nothing -> (baseFields, baseEncs)
             Just grp ->
@@ -263,15 +276,20 @@ scatter spec df = do
 -- Line
 -- ---------------------------------------------------------------------------
 
+{- | 'includeZero' anchors the axes at zero (Vega-Lite's own default). Off
+by default so the axes fit the data — a line is position-encoded, so a
+forced zero baseline only squashes series far from the origin.
+-}
 data Line = Line
     { x :: T.Text
     , y :: [T.Text]
     , title :: Maybe T.Text
     , size :: Size
+    , includeZero :: Bool
     }
 
 mkLine :: T.Text -> [T.Text] -> Line
-mkLine xc ys = Line xc ys Nothing defaultSize
+mkLine xc ys = Line xc ys Nothing defaultSize False
 
 line :: (HasCallStack) => Line -> DataFrame -> IO String
 line spec df = do
@@ -297,8 +315,8 @@ line spec df = do
         vlSpec =
             (emptySpec VL.Line)
                 { vlEncodings =
-                    [ chanEnc X spec.x Quantitative
-                    , chanEnc Y "value" Quantitative
+                    [ anchorZero spec.includeZero (chanEnc X spec.x Quantitative)
+                    , anchorZero spec.includeZero (chanEnc Y "value" Quantitative)
                     , chanEnc Color "series" Nominal
                     ]
                 , vlTitle = Just chartTitle

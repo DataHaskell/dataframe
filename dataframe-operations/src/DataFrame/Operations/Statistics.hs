@@ -248,6 +248,7 @@ sum (Col name) df = case getColumn name df of
     Just ((BoxedColumn _ (column :: V.Vector a'))) -> case testEquality (typeRep @a') (typeRep @a) of
         Just Refl -> VG.sum column
         Nothing -> 0
+    Just (PackedText _ _) -> 0
 sum expr df = case interpret df expr of
     Left e -> throw e
     Right (TColumn xs) -> case toVector @a @V.Vector xs of

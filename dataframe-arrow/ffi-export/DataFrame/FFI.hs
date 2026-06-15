@@ -42,7 +42,7 @@ import DataFrame.IO.Arrow (dataframeToArrow)
 import DataFrame.IO.CSV.Fast (fastReadCsvWithSchema)
 import DataFrame.IR (PlanNode, executePlan)
 import DataFrame.IR.ExprJson (encodeExprToBytes)
-import DataFrame.Internal.Column (Column (..), Columnable)
+import DataFrame.Internal.Column (Column (..), Columnable, materializePacked)
 import DataFrame.Internal.DataFrame (DataFrame, unsafeGetColumn)
 import DataFrame.Internal.Expression (Expr (Col))
 
@@ -226,6 +226,7 @@ inferTargetType target df = dispatchType (columnTypeRep (unsafeGetColumn target 
     columnTypeRep :: Column -> SomeTypeRep
     columnTypeRep (UnboxedColumn _ (_ :: VU.Vector a)) = SomeTypeRep (typeRep @a)
     columnTypeRep (BoxedColumn _ (_ :: V.Vector a)) = SomeTypeRep (typeRep @a)
+    columnTypeRep c@(PackedText _ _) = columnTypeRep (materializePacked c)
 
     dispatchType :: SomeTypeRep -> T.Text
     dispatchType (SomeTypeRep tr)

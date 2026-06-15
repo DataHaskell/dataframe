@@ -1,7 +1,6 @@
 cabal-version:      3.0
 name:               dataframe
-version:            2.1.0.4
-
+version:            2.2.0.0
 synopsis: A fast, safe, and intuitive DataFrame library.
 
 description: A fast, safe, and intuitive DataFrame library for exploratory data analysis.
@@ -21,6 +20,8 @@ extra-source-files: cbits/arrow_abi.h
                     tests/data/typing/texts_with_empties.txt
                     tests/data/typing/texts_with_empties_and_nullish.txt
                     data/titanic/*.csv
+                    data/ml/*.csv
+                    data/ml/golden.json
                     data/sharded/*.parquet
                     tests/data/*.csv
                     tests/data/*.tsv
@@ -120,16 +121,16 @@ library
                         DataFrame.Typed.Record,
                         DataFrame.Typed.Generic
     build-depends:    base >= 4 && <5,
-                      dataframe-core ^>= 1.0.2,
+                      dataframe-core ^>= 1.1,
                       dataframe-json ^>= 1.0,
-                      dataframe-operations >= 1.1.0.3 && < 1.2,
-                      dataframe-parsing ^>= 1.0,
-                      dataframe-viz ^>= 1.0,
-                      dataframe-learn ^>= 1.0
+                      dataframe-operations >= 1.1.1 && < 1.2,
+                      dataframe-parsing ^>= 1.0.2,
+                      dataframe-viz ^>= 1.0.3,
+                      dataframe-learn ^>= 1.1
 
     if !flag(no-csv)
         reexported-modules: DataFrame.IO.CSV
-        build-depends:   dataframe-csv ^>= 1.0
+        build-depends:   dataframe-csv ^>= 1.0.2
         cpp-options:     -DWITH_CSV
 
     if !flag(no-parquet)
@@ -161,7 +162,7 @@ library
                             DataFrame.Lazy.Internal.Optimizer,
                             DataFrame.Lazy.Internal.Executor,
                             DataFrame.Typed.Lazy
-        build-depends:   dataframe-lazy ^>= 1.0
+        build-depends:   dataframe-lazy ^>= 1.0.2
         cpp-options:     -DWITH_LAZY
 
     if !flag(no-th)
@@ -194,13 +195,13 @@ library arrow-bridge
         buildable: False
     build-depends:
         base        >= 4   && < 5,
-        dataframe-core ^>= 1.0.2,
-        dataframe-csv ^>= 1.0,
+        dataframe-core ^>= 1.1,
+        dataframe-csv ^>= 1.0.2,
         dataframe-json ^>= 1.0,
-        dataframe-lazy ^>= 1.0,
-        dataframe-operations >= 1.1.0.3 && < 1.2,
+        dataframe-lazy ^>= 1.0.2,
+        dataframe-operations >= 1.1.1 && < 1.2,
         dataframe-parquet ^>= 1.0.1.1,
-        dataframe-parsing ^>= 1.0,
+        dataframe-parsing ^>= 1.0.2,
         text        >= 2.0 && < 3,
         aeson       >= 0.11 && < 3,
         bytestring  >= 0.11 && < 0.13,
@@ -214,7 +215,7 @@ executable dataframe-benchmark-example
     main-is: Benchmark.hs
     build-depends:    base >= 4 && < 5,
                       dataframe >= 1 && < 3,
-                      dataframe-operations >= 1.1.0.3 && < 1.2,
+                      dataframe-operations >= 1.1.1 && < 1.2,
                       random >= 1 && < 2,
                       time >= 1.12 && < 2,
                       vector ^>= 0.13,
@@ -227,9 +228,9 @@ executable synthesis
     main-is: Synthesis.hs
     build-depends:    base >= 4 && < 5,
                       dataframe >= 1 && < 3,
-                      dataframe-core ^>= 1.0,
-                      dataframe-learn ^>= 1.0,
-                      dataframe-operations >= 1.1.0.3 && < 1.2,
+                      dataframe-core ^>= 1.1,
+                      dataframe-learn ^>= 1.1,
+                      dataframe-operations >= 1.1.1 && < 1.2,
                       random >= 1 && < 2,
                       text >= 2.0 && < 3
     hs-source-dirs:   app
@@ -261,9 +262,9 @@ executable lazy-bench
                       bytestring >= 0.11 && < 0.13,
                       containers >= 0.6.7 && < 0.9,
                       dataframe >= 1 && < 3,
-                      dataframe-core ^>= 1.0,
-                      dataframe-lazy ^>= 1.0,
-                      dataframe-parsing ^>= 1.0,
+                      dataframe-core ^>= 1.1,
+                      dataframe-lazy ^>= 1.0.2,
+                      dataframe-parsing ^>= 1.0.2,
                       directory >= 1.3.0.0 && < 2,
                       random >= 1 && < 2,
                       text >= 2.0 && < 3,
@@ -293,6 +294,9 @@ test-suite tests
     import: warnings
     type: exitcode-stdio-1.0
     main-is: Main.hs
+    -- Threaded RTS with -N so the parallel-grouping parity test exercises the
+    -- real multi-capability fork path rather than the sequential fallback.
+    ghc-options: -threaded -rtsopts -with-rtsopts=-N
     -- The test runner imports CSV, JSON, Parquet, Lazy, and TH-derived
     -- schema modules. All features must be enabled for it to compile.
     if flag(no-csv) || flag(no-parquet) || flag(no-th)
@@ -302,8 +306,24 @@ test-suite tests
                    DecisionTree,
                    Functions,
                    GenDataFrame,
+                   Internal.ColumnBuilder,
+                   Internal.DictEncode,
+                   Internal.PackedText,
                    Internal.Parsing,
+                   PackedTextMigration,
+                   Learn.Numerics,
+                   Learn.Denotation,
+                   Learn.Models,
+                   Learn.Ensembles,
+                   Learn.Symbolic,
+                   Learn.SklearnParity,
+                   Learn.Synthesis,
+                   Learn.MetricsTests,
+                   Learn.Metamorphic,
+                   Learn.EdgeCases,
+                   Learn.NumericalRigor,
                    IO.CSV,
+                   IO.CsvGolden,
                    IO.JSON,
                    LinearSolver,
                    Operations.Aggregations,
@@ -312,6 +332,9 @@ test-suite tests
                    Operations.Derive,
                    Operations.Filter,
                    Operations.GroupBy,
+                   Operations.ParallelGroupBy,
+                   Operations.ParallelJoin,
+                   Operations.Inference,
                    Operations.InsertColumn,
                    Operations.Join,
                    Operations.Merge,
@@ -328,8 +351,10 @@ test-suite tests
                    Operations.Statistics,
                    Operations.Take,
                    Operations.Typing,
+                   Operations.VectorKernel,
                    Operations.Record,
                    LazyParquet,
+                   LazyParity,
                    Parquet,
                    ParquetTestData,
                    Plotting,
@@ -344,14 +369,14 @@ test-suite tests
                     aeson >= 0.11.0.0 && < 3,
                     bytestring >= 0.11 && < 0.13,
                     dataframe >= 1 && < 3,
-                    dataframe-core ^>= 1.0,
-                    dataframe-csv ^>= 1.0,
+                    dataframe-core ^>= 1.1,
+                    dataframe-csv ^>= 1.0.2,
                     dataframe-json ^>= 1.0,
-                    dataframe-lazy ^>= 1.0,
-                    dataframe-learn ^>= 1.0,
-                    dataframe-operations >= 1.1.0.3 && < 1.2,
+                    dataframe-lazy ^>= 1.0.2,
+                    dataframe-learn ^>= 1.1,
+                    dataframe-operations >= 1.1.1 && < 1.2,
                     dataframe-parquet ^>= 1.0,
-                    dataframe-parsing ^>= 1.0,
+                    dataframe-parsing ^>= 1.0.2,
                     HUnit ^>= 1.6,
                     QuickCheck >= 2 && < 3,
                     random-shuffle >= 0.0.4 && < 1,
@@ -359,6 +384,28 @@ test-suite tests
                     text >= 2.0 && < 3,
                     time >= 1.12 && < 2,
                     vector ^>= 0.13,
+                    temporary >= 1.3 && < 1.4,
+                    directory >= 1.3 && < 1.4,
                     containers >= 0.6.7 && < 0.9
+    hs-source-dirs: tests
+    default-language: Haskell2010
+
+-- Focused oracle for the packed-text column variant. Kept as its own suite so
+-- it can run independently of the (heavier) `tests` runner.
+test-suite packed-text
+    import: warnings
+    type: exitcode-stdio-1.0
+    main-is: PackedTextMain.hs
+    if flag(no-csv) || flag(no-parquet) || flag(no-th)
+        buildable: False
+    other-modules: Internal.PackedText
+    build-depends:  base >= 4 && < 5,
+                    bytestring >= 0.11 && < 0.13,
+                    dataframe >= 1 && < 3,
+                    dataframe-core ^>= 1.1,
+                    dataframe-operations >= 1.1.1 && < 1.2,
+                    HUnit ^>= 1.6,
+                    text >= 2.0 && < 3,
+                    vector ^>= 0.13
     hs-source-dirs: tests
     default-language: Haskell2010

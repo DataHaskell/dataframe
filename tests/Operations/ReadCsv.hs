@@ -42,10 +42,11 @@ specifyTypesNoInferenceFallback =
         case getColumn "year" df of
             Just col@(UnboxedColumn _ _) -> assertEqual "year should be Int" "Int" (columnTypeString col)
             _ -> assertFailure "expected UnboxedColumn for 'year'"
-        -- "boys" unspecified + NoInference → stays Text
+        -- "boys" unspecified + NoInference → stays Text (Boxed or PackedText)
         case getColumn "boys" df of
             Just col@(BoxedColumn _ _) -> assertEqual "boys should be Text" "Text" (columnTypeString col)
-            _ -> assertFailure "expected BoxedColumn for 'boys' with NoInference fallback"
+            Just col@(PackedText _ _) -> assertEqual "boys should be Text" "Text" (columnTypeString col)
+            _ -> assertFailure "expected Text column for 'boys' with NoInference fallback"
 
 -- SpecifyTypes with InferFromSample fallback: named column typed, rest inferred
 specifyTypesInferFallback :: Test
@@ -175,6 +176,7 @@ maybeReadCsv = TestLabel "csv_maybeRead" $ TestCase $ do
     case getColumn "score" df of
         Just (UnboxedColumn (Just _) _) -> pure () -- Int with bitmap
         Just (BoxedColumn (Just _) _) -> pure () -- Text-backed with bitmap
+        Just (PackedText (Just _) _) -> pure () -- packed Text with bitmap
         Just col ->
             assertFailure $
                 "MaybeRead should yield a nullable column, got "
@@ -268,9 +270,10 @@ perColumnEagerOverrides = TestLabel "csv_perColumnOverrides_eager" $ TestCase $ 
     -- wrap is still applied.
     case getColumn "name" df of
         Just (BoxedColumn (Just _) _) -> pure ()
+        Just (PackedText (Just _) _) -> pure ()
         Just col ->
             assertFailure $
-                "default MaybeRead for 'name' should yield BoxedColumn with bitmap, got "
+                "default MaybeRead for 'name' should yield a nullable Text column, got "
                     <> columnTypeString col
         Nothing -> assertFailure "name column missing"
 
@@ -332,6 +335,7 @@ overrideNoSafeReadDefaultWithMaybeRead =
         case getColumn "score" df of
             Just (UnboxedColumn (Just _) _) -> pure () -- Int with bitmap
             Just (BoxedColumn (Just _) _) -> pure () -- fallback Text with bitmap
+            Just (PackedText (Just _) _) -> pure () -- packed Text with bitmap
             Just col ->
                 assertFailure $
                     "'score' MaybeRead override should yield nullable column, got "
@@ -343,9 +347,10 @@ overrideNoSafeReadDefaultWithMaybeRead =
         -- the builder detects actual nulls.
         case getColumn "name" df of
             Just (BoxedColumn _ _) -> pure ()
+            Just (PackedText _ _) -> pure ()
             Just col ->
                 assertFailure $
-                    "'name' under NoSafeRead should be BoxedColumn, got "
+                    "'name' under NoSafeRead should be a Text column, got "
                         <> columnTypeString col
             Nothing -> assertFailure "name column missing"
 
@@ -450,9 +455,10 @@ overrideEitherReadDefaultWithMaybeRead =
         -- 'name': MaybeRead override → nullable Text column with bitmap.
         case getColumn "name" df of
             Just (BoxedColumn (Just _) _) -> pure ()
+            Just (PackedText (Just _) _) -> pure ()
             Just col ->
                 assertFailure $
-                    "'name' MaybeRead override should yield BoxedColumn with bitmap, got "
+                    "'name' MaybeRead override should yield a nullable Text column, got "
                         <> columnTypeString col
             Nothing -> assertFailure "name column missing"
         -- 'id': default EitherRead → Either Text Int (all values Right).

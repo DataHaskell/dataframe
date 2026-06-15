@@ -42,4 +42,16 @@
 size_t get_delimiter_indices(uint8_t *buf, size_t len, uint8_t separator,
                              size_t *indices, int *status);
 
+// Chunked parallel-scan entry points (see process_csv.c).  Both return
+// GDI_SIMD_UNAVAILABLE when the build/CPU lacks SIMD support.
+size_t count_delimiters_chunk(const uint8_t *buf, size_t base, size_t len,
+                              uint8_t separator, int start_in_quote,
+                              size_t *newline_count);
+
+size_t emit_delimiter_indices_chunk(const uint8_t *buf, size_t base,
+                                    size_t len, uint8_t separator,
+                                    int start_in_quote, size_t ordinal_base,
+                                    size_t *indices, size_t *rowends,
+                                    size_t *rowend_count);
+
 #endif

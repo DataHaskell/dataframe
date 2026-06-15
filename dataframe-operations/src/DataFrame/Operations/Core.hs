@@ -32,6 +32,7 @@ import DataFrame.Internal.Column (
     columnTypeString,
     fromList,
     fromVector,
+    materializePacked,
     toDoubleVector,
     toFloatVector,
     toIntVector,
@@ -538,6 +539,7 @@ describeColumns df =
                         countNulls
                         columnType
                         : acc
+    go acc i col@(PackedText _ _) = go acc i (materializePacked col)
 
 nulls :: Column -> Int
 nulls (BoxedColumn (Just bm) xs) =
@@ -552,6 +554,7 @@ nulls (BoxedColumn Nothing (xs :: V.Vector a)) = case testEquality (typeRep @a) 
 nulls (UnboxedColumn (Just bm) xs) =
     let n = VG.length xs
      in n - VU.foldl' (\acc b -> acc + popCount b) 0 bm
+nulls c@(PackedText _ _) = nulls (materializePacked c)
 nulls _ = 0
 
 {- | Creates a dataframe from a list of tuples with name and column.
@@ -748,12 +751,7 @@ toFloatMatrix df = case V.foldl'
         pure $
             V.generate
                 (fst (dataframeDimensions df))
-                ( \i ->
-                    foldl
-                        (\acc j -> acc `VU.snoc` ((m VG.! j) VG.! i))
-                        VU.empty
-                        [0 .. (V.length m - 1)]
-                )
+                (\i -> VU.generate (V.length m) (\j -> (m VG.! j) VG.! i))
 
 {- | Returns a dataframe as a two dimensional vector of doubles.
 
@@ -775,12 +773,7 @@ toDoubleMatrix df = case V.foldl'
         pure $
             V.generate
                 (fst (dataframeDimensions df))
-                ( \i ->
-                    foldl
-                        (\acc j -> acc `VU.snoc` ((m VG.! j) VG.! i))
-                        VU.empty
-                        [0 .. (V.length m - 1)]
-                )
+                (\i -> VU.generate (V.length m) (\j -> (m VG.! j) VG.! i))
 
 {- | Returns a dataframe as a two dimensional vector of ints.
 
@@ -801,12 +794,7 @@ toIntMatrix df = case V.foldl'
         pure $
             V.generate
                 (fst (dataframeDimensions df))
-                ( \i ->
-                    foldl
-                        (\acc j -> acc `VU.snoc` ((m VG.! j) VG.! i))
-                        VU.empty
-                        [0 .. (V.length m - 1)]
-                )
+                (\i -> VU.generate (V.length m) (\j -> (m VG.! j) VG.! i))
 
 {- | Get a specific column as a vector.
 
@@ -951,4 +939,6 @@ showDerivedExpressions df =
         Just (BoxedColumn Nothing (_ :: V.Vector a)) -> UExpr (Col @a name)
         Just (UnboxedColumn (Just _) (_ :: VU.Vector a)) -> UExpr (Col @(Maybe a) name)
         Just (UnboxedColumn Nothing (_ :: VU.Vector a)) -> UExpr (Col @a name)
+        Just (PackedText (Just _) _) -> UExpr (Col @(Maybe T.Text) name)
+        Just (PackedText Nothing _) -> UExpr (Col @T.Text name)
         Nothing -> error $ "showDerivedExpressions: column not found: " ++ T.unpack name

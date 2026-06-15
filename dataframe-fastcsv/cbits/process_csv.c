@@ -119,8 +119,12 @@ static uint64_t find_character_in_chunk(uint8_t *in, uint8_t c) {
 // I owe a debt to https://github.com/geofflangdale/simdcsv
 // Let's go ahead and assume `in` will only ever get 64 bytes
 // initial_quoted will be either all_ones ~0ULL or all_zeros 0ULL
+// Also reports the unquoted-newline bits through `newline_bits` so the
+// chunked scan can classify row ends without re-touching file bytes.
 #ifdef HAS_SIMD_CSV
-static uint64_t parse_chunk(uint8_t *in, uint8_t separator, uint64_t *initial_quoted) {
+static uint64_t parse_chunk_nl(uint8_t *in, uint8_t separator,
+                               uint64_t *initial_quoted,
+                               uint64_t *newline_bits) {
   uint64_t quotebits = find_character_in_chunk(in, QUOTE_CHAR);
   // See https://wunkolo.github.io/post/2020/05/pclmulqdq-tricks/
   // Also, section 3.1.1 of Parsing Gigabytes of JSON per Second,
@@ -144,8 +148,15 @@ static uint64_t parse_chunk(uint8_t *in, uint8_t separator, uint64_t *initial_qu
   uint64_t commabits = find_character_in_chunk(in, separator);
   uint64_t newlinebits = find_character_in_chunk(in, NEWLINE_CHAR);
 
-  uint64_t delimiter_bits = (commabits | newlinebits) & ~quotemask;
+  uint64_t not_quoted = ~quotemask;
+  *newline_bits = newlinebits & not_quoted;
+  uint64_t delimiter_bits = (commabits | newlinebits) & not_quoted;
   return delimiter_bits;
+}
+
+static uint64_t parse_chunk(uint8_t *in, uint8_t separator, uint64_t *initial_quoted) {
+  uint64_t newline_bits;
+  return parse_chunk_nl(in, separator, initial_quoted, &newline_bits);
 }
 #endif
 
@@ -201,6 +212,74 @@ size_t get_delimiter_indices(uint8_t *buf, size_t len, uint8_t separator,
   // SIMD not available or carryless multiplication not supported.
   // Signal fallback to Haskell implementation.
   (void)buf; (void)len; (void)separator; (void)indices;
+  return GDI_SIMD_UNAVAILABLE;
+#endif
+}
+
+// Chunked entry points for the parallel scan (Round-2 WS-E2).  A worker
+// owns a 64-byte-aligned byte range [base, base+len) of the file; the
+// caller supplies the quote parity at `base` (from a prefix-xor of
+// per-range quote counts, which is exact because every quote byte
+// toggles the PCLMUL parity chain).
+
+// Pass 1: exact delimiter / row-end counts for one range, so the flat
+// output arrays can be right-sized and each worker gets an exact write
+// offset.  `len` must be a multiple of 64.
+size_t count_delimiters_chunk(const uint8_t *buf, size_t base, size_t len,
+                              uint8_t separator, int start_in_quote,
+                              size_t *newline_count) {
+#ifdef HAS_SIMD_CSV
+  uint64_t initial_quoted = start_in_quote ? ALL_ONES_MASK : ALL_ZEROS_MASK;
+  size_t count = 0;
+  size_t newlines = 0;
+  for (size_t i = 0; i + 64 <= len; i += 64) {
+    uint64_t newline_bits;
+    uint64_t bits = parse_chunk_nl((uint8_t *)buf + base + i, separator,
+                                   &initial_quoted, &newline_bits);
+    count += (size_t)__builtin_popcountll(bits);
+    newlines += (size_t)__builtin_popcountll(newline_bits);
+  }
+  *newline_count = newlines;
+  return count;
+#else
+  (void)buf; (void)base; (void)len; (void)separator; (void)start_in_quote;
+  (void)newline_count;
+  return GDI_SIMD_UNAVAILABLE;
+#endif
+}
+
+// Pass 2: emit absolute delimiter byte positions into `indices` and, for
+// every unquoted newline, its delimiter ordinal (`ordinal_base` + local
+// position) into `rowends` -- the exact shape Haskell's classifyRowEnds
+// used to recompute by re-reading one file byte per delimiter.
+size_t emit_delimiter_indices_chunk(const uint8_t *buf, size_t base,
+                                    size_t len, uint8_t separator,
+                                    int start_in_quote, size_t ordinal_base,
+                                    size_t *indices, size_t *rowends,
+                                    size_t *rowend_count) {
+#ifdef HAS_SIMD_CSV
+  uint64_t initial_quoted = start_in_quote ? ALL_ONES_MASK : ALL_ZEROS_MASK;
+  size_t pos = 0;
+  size_t rc = 0;
+  for (size_t i = 0; i + 64 <= len; i += 64) {
+    uint64_t newline_bits;
+    uint64_t bits = parse_chunk_nl((uint8_t *)buf + base + i, separator,
+                                   &initial_quoted, &newline_bits);
+    while (bits != 0) {
+      size_t r = (size_t)__builtin_ctzll(bits);
+      indices[pos] = base + i + r;
+      if ((newline_bits >> r) & 1ULL) {
+        rowends[rc++] = ordinal_base + pos;
+      }
+      pos++;
+      bits &= bits - 1;
+    }
+  }
+  *rowend_count = rc;
+  return pos;
+#else
+  (void)buf; (void)base; (void)len; (void)separator; (void)start_in_quote;
+  (void)ordinal_base; (void)indices; (void)rowends; (void)rowend_count;
   return GDI_SIMD_UNAVAILABLE;
 #endif
 }

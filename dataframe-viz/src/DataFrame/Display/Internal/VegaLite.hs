@@ -21,6 +21,9 @@ module DataFrame.Display.Internal.VegaLite (
     Channel (..),
     FieldType (..),
     ChannelEnc (..),
+    ScaleSpec (..),
+    ScaleType (..),
+    defaultScale,
     Transform (..),
     VLSpec (..),
     emptySpec,
@@ -125,12 +128,28 @@ data ChannelEnc = ChannelEnc
     , ceType :: FieldType
     , ceAggregate :: Maybe T.Text
     , ceBin :: Bool
-    , ceLogScale :: Bool
+    , ceScale :: ScaleSpec
     }
 
--- | A bare channel encoding with no aggregation, binning, or log scale.
+-- | A bare channel encoding with no aggregation, binning, or scale options.
 chanEnc :: Channel -> T.Text -> FieldType -> ChannelEnc
-chanEnc ch fld ft = ChannelEnc ch fld ft Nothing False False
+chanEnc ch fld ft = ChannelEnc ch fld ft Nothing False defaultScale
+
+{- | Per-channel scale configuration, mirroring Vega-Lite's @scale@ object.
+'Nothing' fields leave the Vega-Lite default in place; grow this record
+(domain, nice, clamp, scheme, ...) as the public vocabulary grows.
+-}
+data ScaleSpec = ScaleSpec
+    { scaleType :: Maybe ScaleType
+    , scaleZero :: Maybe Bool
+    }
+    deriving (Eq, Show)
+
+data ScaleType = LogS
+    deriving (Eq, Show)
+
+defaultScale :: ScaleSpec
+defaultScale = ScaleSpec Nothing Nothing
 
 data Transform
     = -- | Fit @regression(yField) on xField@ (used inside a layer).
@@ -294,10 +313,23 @@ channelValue e =
             , Just ("type" .= fieldTypeName (ceType e))
             , fmap ("aggregate" .=) (ceAggregate e)
             , if ceBin e then Just ("bin" .= True) else Nothing
-            , if ceLogScale e
-                then Just ("scale" .= object ["type" .= ("log" :: T.Text)])
-                else Nothing
+            , fmap ("scale" .=) (scaleValue (ceScale e))
             ]
+
+-- | Render a scale spec, or 'Nothing' when every field is at its default.
+scaleValue :: ScaleSpec -> Maybe Value
+scaleValue s
+    | null pairs = Nothing
+    | otherwise = Just (object pairs)
+  where
+    pairs =
+        catMaybes
+            [ fmap (("type" .=) . scaleTypeName) (scaleType s)
+            , fmap ("zero" .=) (scaleZero s)
+            ]
+
+scaleTypeName :: ScaleType -> T.Text
+scaleTypeName LogS = "log"
 
 transformValue :: Transform -> Value
 transformValue (RegressionT yField xField) =

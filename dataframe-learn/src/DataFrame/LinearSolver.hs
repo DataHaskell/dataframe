@@ -1,9 +1,12 @@
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
-{- | L1-regularized logistic regression used as the per-node split solver in
-'DataFrame.DecisionTree'. Produces a sparse oblique hyperplane that can be
-compiled to an 'Expr Bool' over numeric columns.
+{- | Proximal-gradient (FISTA) solver for L1/L2-regularized generalized linear
+models. 'fitL1Logistic' is the binary logistic split solver used by
+'DataFrame.DecisionTree'; 'fitProx' generalizes it to any 'SmoothLoss'
+(squared loss for lasso/elastic-net, squared hinge for LinearSVC). Features are
+standardized internally and weights de-standardized, so the model applies to
+raw column values.
 -}
 module DataFrame.LinearSolver (
     -- * Model
@@ -13,14 +16,16 @@ module DataFrame.LinearSolver (
     SolverConfig (..),
     defaultSolverConfig,
 
-    -- * Solver
+    -- * Solvers
     fitL1Logistic,
+    fitProx,
 
     -- * Expr conversion
     modelToExpr,
 
     -- * Internals (exposed for testing)
     standardize,
+    columnStats,
     softThreshold,
     sigmoid,
     dotProduct,
@@ -28,6 +33,13 @@ module DataFrame.LinearSolver (
 
 import qualified DataFrame.Functions as F
 import DataFrame.Internal.Expression (Expr (..))
+import DataFrame.LinearAlgebra (Matrix, gram, scaleV)
+import DataFrame.LinearAlgebra.Eigen (powerIterTop)
+import DataFrame.LinearSolver.Loss (
+    SmoothLoss (..),
+    logisticLoss,
+    sigmoid,
+ )
 import DataFrame.Operators ((.*.), (.+.), (.>.))
 
 import Control.Monad.ST (ST, runST)
@@ -95,7 +107,44 @@ fitL1Logistic ::
     V.Vector T.Text ->
     LinearModel
 {-# INLINEABLE fitL1Logistic #-}
-fitL1Logistic cfg rows labels featureNames
+fitL1Logistic = runFista logisticLoss logisticLipschitz
+  where
+    logisticLipschitz _ keepN = fromIntegral (keepN + 1) / 4
+
+{- | Fit any 'SmoothLoss' with the elastic-net proximal-gradient engine. The
+Lipschitz constant uses the spectral norm of the standardized Gram matrix
+(power iteration), which is tight for squared and squared-hinge losses where
+the logistic trace bound would be far too loose.
+-}
+fitProx ::
+    SmoothLoss ->
+    SolverConfig ->
+    V.Vector (VU.Vector Double) ->
+    VU.Vector Double ->
+    V.Vector T.Text ->
+    LinearModel
+fitProx loss = runFista loss specNormLipschitz
+  where
+    specNormLipschitz xKept _ =
+        let n = V.length xKept
+            gramN = V.map (scaleV (1 / fromIntegral n)) (gram xKept)
+            (specNorm, _) = powerIterTop 50 gramN
+         in slCurvBound loss * (specNorm + 1)
+
+{- | Shared FISTA scaffolding: standardize, drop near-constant columns, run the
+inner loop, de-standardize. @lipschitzOf@ receives the standardized kept-feature
+matrix and the number of kept columns and returns the smooth-part Lipschitz
+bound; the L2 penalty contribution @λ₂@ is added here.
+-}
+runFista ::
+    SmoothLoss ->
+    (Matrix -> Int -> Double) ->
+    SolverConfig ->
+    V.Vector (VU.Vector Double) ->
+    VU.Vector Double ->
+    V.Vector T.Text ->
+    LinearModel
+runFista loss lipschitzOf cfg rows labels featureNames
     | n == 0 || d == 0 = zeroModel
     | otherwise =
         let (!means, !stds, !variances) = columnStats rows
@@ -106,14 +155,11 @@ fitL1Logistic cfg rows labels featureNames
                     let !meansKept = gatherBy keep means
                         !stdsKept = gatherBy keep stds
                         !xKept = V.map (standardizeRowKept keep means stds) rows
-                        -- Elastic-Net Lipschitz: standard logistic bound
-                        -- @(d+1)/4@ plus the L2 part's Hessian-norm
-                        -- contribution @λ₂·I@ (operator norm @λ₂@).
                         !lipschitz =
-                            fromIntegral (VU.length keep + 1) / 4
-                                + scL2Lambda cfg
+                            lipschitzOf xKept (VU.length keep) + scL2Lambda cfg
                         (!wStdKept, !bStd) =
                             fistaLoop
+                                loss
                                 (scL1Lambda cfg)
                                 (scL2Lambda cfg)
                                 lipschitz
@@ -270,48 +316,42 @@ softThreshold lambda v
     | v < -lambda = v + lambda
     | otherwise = 0
 
--- | Numerically stable logistic sigmoid.
-sigmoid :: Double -> Double
-sigmoid z
-    | z >= 0 = 1 / (1 + exp (-z))
-    | otherwise = let ez = exp z in ez / (1 + ez)
-
 {- | Dot product of two unboxed vectors. Caller must ensure equal length;
 lengths are not checked.
 -}
 dotProduct :: VU.Vector Double -> VU.Vector Double -> Double
 dotProduct u v = VU.sum (VU.zipWith (*) u v)
 
-{- | Gradient of the average binary logistic loss at @(w, b)@ for labels in
-@{\-1,+1}@. Returns @(gradW, gradB)@.
+{- | Gradient of the average loss at @(w, b)@. Returns @(gradW, gradB)@.
 
 Sample-weighted variant: when @sampleWeights@ is @Just ws@ the per-row
 contribution is multiplied by @ws[i]@. With weights of mean 1
 (i.e. @Σ w_i = N@; the class-balanced convention used by
 'fitLinearCandidate'), the @1/N@ normalisation is preserved exactly.
 -}
-logisticGradient ::
+lossGradient ::
+    SmoothLoss ->
     Maybe (VU.Vector Double) ->
     V.Vector (VU.Vector Double) ->
     VU.Vector Double ->
     VU.Vector Double ->
     Double ->
     (VU.Vector Double, Double)
-logisticGradient sampleWeights features labels w b = (gradW, gradB)
+lossGradient loss sampleWeights features labels w b = (gradW, gradB)
   where
     !invN = 1 / fromIntegral (V.length features)
-    !coeffs = rowCoeffs sampleWeights features labels w b invN
+    !coeffs = rowCoeffs loss sampleWeights features labels w b invN
     !gradW = accumulateGradW (VU.length w) features coeffs
     !gradB = VU.sum coeffs
 
-{- | Per-row loss coefficient. Without sample weights:
-@c_i = -y_i * sigmoid(-y_i * margin_i) / N@. With @Just ws@, each row's
-contribution is additionally multiplied by @ws[i]@.
+{- | Per-row loss coefficient @c_i = ℓ'(y_i, z_i) / N@ at margin
+@z_i = w·x_i + b@, optionally scaled by @ws[i]@.
 
 unsafeIndex is safe: @i@ ranges over @[0,n-1]@ and @labels@ /
 @sampleWeights@ both have length @n@ by construction.
 -}
 rowCoeffs ::
+    SmoothLoss ->
     Maybe (VU.Vector Double) ->
     V.Vector (VU.Vector Double) ->
     VU.Vector Double ->
@@ -319,12 +359,12 @@ rowCoeffs ::
     Double ->
     Double ->
     VU.Vector Double
-rowCoeffs sampleWeights features labels w b invN =
+rowCoeffs loss sampleWeights features labels w b invN =
     VU.generate (V.length features) $ \i ->
         let !yi = VU.unsafeIndex labels i
             !row = V.unsafeIndex features i
-            !margin = yi * (dotProduct w row + b)
-            !base = -(yi * sigmoid (-margin) * invN)
+            !z = dotProduct w row + b
+            !base = slGradZ loss yi z * invN
          in case sampleWeights of
                 Nothing -> base
                 Just ws -> base * VU.unsafeIndex ws i
@@ -350,6 +390,7 @@ proximal step is applied per FHT 2010 glmnet §2.6:
 @prox(z) = softThreshold(z, λ₁/lp) / (1 + λ₂/lp)@.
 -}
 fistaLoop ::
+    SmoothLoss ->
     Double ->
     Double ->
     Double ->
@@ -361,13 +402,13 @@ fistaLoop ::
     VU.Vector Double ->
     Double ->
     (VU.Vector Double, Double)
-fistaLoop lambda1 lambda2 lp maxIter tol sampleWeights features labels w0 b0 =
+fistaLoop loss lambda1 lambda2 lp maxIter tol sampleWeights features labels w0 b0 =
     go 0 w0 b0 w0 b0 1.0
   where
     !shrink = lambda1 / lp
     !ridgeDenom = 1 + lambda2 / lp
     !stepInv = 1 / lp
-    proxStep = fistaProxStep sampleWeights features labels shrink ridgeDenom stepInv
+    proxStep = fistaProxStep loss sampleWeights features labels shrink ridgeDenom stepInv
     go !iter !xWPrev !xBPrev !yW !yB !t
         | iter >= maxIter = (xWPrev, xBPrev)
         | iter > 0 && delta < tol = (xW, xB)
@@ -386,6 +427,7 @@ The Elastic-Net prox of @g(w) = λ₁·|w|₁ + (λ₂/2)·|w|²@ at step @1/lp@
 Teboulle 2009 §4). The intercept is unregularised (no L1 or L2 applied).
 -}
 fistaProxStep ::
+    SmoothLoss ->
     Maybe (VU.Vector Double) ->
     V.Vector (VU.Vector Double) ->
     VU.Vector Double ->
@@ -395,8 +437,8 @@ fistaProxStep ::
     VU.Vector Double ->
     Double ->
     (VU.Vector Double, Double)
-fistaProxStep sampleWeights features labels shrink ridgeDenom stepInv yW yB =
-    let (gW, gB) = logisticGradient sampleWeights features labels yW yB
+fistaProxStep loss sampleWeights features labels shrink ridgeDenom stepInv yW yB =
+    let (gW, gB) = lossGradient loss sampleWeights features labels yW yB
         !wNew =
             VU.zipWith
                 (\yi gi -> softThreshold shrink (yi - gi * stepInv) / ridgeDenom)

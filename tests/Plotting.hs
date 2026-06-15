@@ -1,4 +1,5 @@
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE DisambiguateRecordFields #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
@@ -136,6 +137,61 @@ computedExpr = TestCase $ do
         (Just (toJSON (2.0 :: Double)))
         (lookupKey "y" row0)
 
+includeZeroChart :: Test
+includeZeroChart = TestCase $ do
+    let spec =
+            C.toVegaSpec
+                ( C.chart numFrame
+                    & C.mark C.Point
+                    & C.enc C.X (col @Double "a")
+                    & C.enc C.Y (col @Double "b")
+                    & C.includeZero C.X False
+                )
+    assertEqual
+        "x scale drops the zero anchor"
+        (Just (toJSON False))
+        (jpath ["encoding", "x", "scale", "zero"] spec)
+    assertEqual
+        "y scale untouched"
+        Nothing
+        (jpath ["encoding", "y", "scale"] spec)
+
+includeZeroMergesWithLog :: Test
+includeZeroMergesWithLog = TestCase $ do
+    let spec =
+            C.toVegaSpec
+                ( C.chart numFrame
+                    & C.enc C.Y (col @Double "a")
+                    & C.logScale C.Y
+                    & C.includeZero C.Y False
+                )
+    assertEqual
+        "log scale survives alongside the zero flag"
+        (Just (String "log"))
+        (jpath ["encoding", "y", "scale", "type"] spec)
+    assertEqual
+        "zero flag lands on the same scale object"
+        (Just (toJSON False))
+        (jpath ["encoding", "y", "scale", "zero"] spec)
+
+scatterFitsAxesByDefault :: Test
+scatterFitsAxesByDefault = TestCase $ do
+    html <- P.scatter (P.mkScatter "a" "b") numFrame
+    assertBool
+        "scatter axes fit the data by default"
+        ("\"zero\":false" `L.isInfixOf` html)
+    anchored <- P.scatter ((P.mkScatter "a" "b"){P.includeZero = True}) numFrame
+    assertBool
+        "includeZero = True anchors the axes at zero explicitly"
+        ("\"zero\":true" `L.isInfixOf` anchored)
+
+lineFitsAxesByDefault :: Test
+lineFitsAxesByDefault = TestCase $ do
+    html <- P.line (P.mkLine "a" ["b"]) numFrame
+    assertBool
+        "line axes fit the data by default"
+        ("\"zero\":false" `L.isInfixOf` html)
+
 typedParity :: Test
 typedParity = TestCase $ do
     let tdf =
@@ -165,5 +221,9 @@ tests =
     , TestLabel "Plotting.nanBecomesNull" nanBecomesNull
     , TestLabel "Plotting.escapingSafe" escapingSafe
     , TestLabel "Plotting.computedExpr" computedExpr
+    , TestLabel "Plotting.includeZeroChart" includeZeroChart
+    , TestLabel "Plotting.includeZeroMergesWithLog" includeZeroMergesWithLog
+    , TestLabel "Plotting.scatterFitsAxesByDefault" scatterFitsAxesByDefault
+    , TestLabel "Plotting.lineFitsAxesByDefault" lineFitsAxesByDefault
     , TestLabel "Plotting.typedParity" typedParity
     ]

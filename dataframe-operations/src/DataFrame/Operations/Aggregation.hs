@@ -1,7 +1,7 @@
+{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE ExplicitNamespaces #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
-{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE Strict #-}
@@ -17,19 +17,14 @@ module DataFrame.Operations.Aggregation (
 import qualified Data.Text as T
 import qualified Data.Vector as V
 import qualified Data.Vector.Unboxed as VU
-import qualified Data.Vector.Unboxed.Mutable as VUM
 
 import Control.Exception (throw)
-import Control.Monad
-import Control.Monad.ST (ST, runST)
-import Data.Type.Equality (TestEquality (..), type (:~:) (Refl))
 import DataFrame.Errors
+import DataFrame.Internal.AggPlan (MomentPlan, planAgg, planMoments)
 import DataFrame.Internal.Column (
-    Bitmap,
     Column (..),
     TypedColumn (..),
     atIndicesStable,
-    bitmapTestBit,
  )
 import DataFrame.Internal.DataFrame (
     DataFrame (..),
@@ -39,123 +34,67 @@ import DataFrame.Internal.DataFrame (
  )
 import DataFrame.Internal.Expression
 import DataFrame.Internal.Grouping (buildRowToGroup, changingPoints, groupBy)
-import DataFrame.Internal.Hash (
-    fnvOffset,
-    mixDouble,
-    mixInt,
-    mixShow,
-    mixText,
-    nullSalt,
- )
 import DataFrame.Internal.Interpreter
-import DataFrame.Internal.Types
+import DataFrame.Internal.RowHash (computeRowHashesIO)
+import DataFrame.Operations.AggregateScatter (runMomentPlan, runPlan)
 import DataFrame.Operations.Core
 import DataFrame.Operations.Subset
-import Type.Reflection (typeRep)
+import System.IO.Unsafe (unsafePerformIO)
 
-computeRowHashes :: [Int] -> DataFrame -> VU.Vector Int
-computeRowHashes indices df = runST $ do
-    let n = fst (dimensions df)
-    mv <- VUM.replicate n fnvOffset
-
-    let selectedCols = map (columns df V.!) indices
-
-    forM_ selectedCols $ \case
-        UnboxedColumn ubm (v :: VU.Vector a) ->
-            case testEquality (typeRep @a) (typeRep @Int) of
-                Just Refl -> hashKeyUnboxed mv ubm mixInt v
-                Nothing ->
-                    case testEquality (typeRep @a) (typeRep @Double) of
-                        Just Refl ->
-                            hashKeyUnboxed mv ubm mixDouble v
-                        Nothing ->
-                            case sIntegral @a of
-                                STrue ->
-                                    hashKeyUnboxed mv ubm (\h d -> mixInt h (fromIntegral @a @Int d)) v
-                                SFalse ->
-                                    case sFloating @a of
-                                        STrue ->
-                                            hashKeyUnboxed mv ubm (\h d -> mixDouble h (realToFrac d :: Double)) v
-                                        SFalse ->
-                                            hashKeyUnboxed mv ubm mixShow v
-        BoxedColumn bm (v :: V.Vector a) ->
-            case testEquality (typeRep @a) (typeRep @T.Text) of
-                Just Refl ->
-                    V.imapM_
-                        ( \i (t :: T.Text) -> do
-                            h <- VUM.unsafeRead mv i
-                            let h' = case bm of
-                                    Just bm' | not (bitmapTestBit bm' i) -> mixInt h nullSalt
-                                    _ -> mixText h t
-                            VUM.unsafeWrite mv i h'
-                        )
-                        v
-                Nothing ->
-                    V.imapM_
-                        ( \i d -> do
-                            h <- VUM.unsafeRead mv i
-                            let h' = case bm of
-                                    Just bm' | not (bitmapTestBit bm' i) -> mixInt h nullSalt
-                                    _ -> mixShow h d
-                            VUM.unsafeWrite mv i h'
-                        )
-                        v
-
-    VU.unsafeFreeze mv
-
-{- | Fold a value-mix over an unboxed key column into the running hash vector,
-respecting the null bitmap (a null slot mixes 'nullSalt' instead of its
-uninitialised stored value, so @Nothing@ never matches a present @Just x@).
-The non-nullable case is the original tight loop. @INLINE@d to specialise per call.
+{- | Per-row key hash over the selected key columns. Delegates to the shared
+'computeRowHashesIO' kernel, which forks over contiguous row ranges for large
+frames (the hashing of a wide 1e7-row text/factor join key dominates that join)
+and is bit-for-bit identical to a single sequential pass at any capability count.
 -}
-hashKeyUnboxed ::
-    (VU.Unbox a) =>
-    VUM.MVector s Int ->
-    Maybe Bitmap ->
-    (Int -> a -> Int) ->
-    VU.Vector a ->
-    ST s ()
-hashKeyUnboxed mv ubm mix v = case ubm of
-    Nothing ->
-        VU.imapM_
-            ( \i x -> do
-                h <- VUM.unsafeRead mv i
-                VUM.unsafeWrite mv i (mix h x)
-            )
-            v
-    Just bm ->
-        VU.imapM_
-            ( \i x -> do
-                h <- VUM.unsafeRead mv i
-                VUM.unsafeWrite
-                    mv
-                    i
-                    (if bitmapTestBit bm i then mix h x else mixInt h nullSalt)
-            )
-            v
-{-# INLINE hashKeyUnboxed #-}
+computeRowHashes :: [Int] -> DataFrame -> VU.Vector Int
+computeRowHashes indices df =
+    let n = fst (dimensions df)
+        selectedCols = map (columns df V.!) indices
+     in unsafePerformIO (computeRowHashesIO n selectedCols)
+{-# NOINLINE computeRowHashes #-}
 
 {- | Aggregate a grouped dataframe using the expressions given.
 All ungrouped columns will be dropped.
 -}
 aggregate :: [NamedExpr] -> GroupedDataFrame -> DataFrame
-aggregate aggs gdf@(Grouped df groupingColumns valIndices offs _rowToGroup) =
+aggregate aggs gdf@(Grouped df groupingColumns valIndices offs rowToGroupV) =
     let
         df' =
             selectIndices
                 (VU.map (valIndices VU.!) (VU.init offs))
                 (select groupingColumns df)
 
-        f (name, UExpr (expr :: Expr a)) d =
-            let
-                value = case interpretAggregation @a gdf expr of
-                    Left e -> throw e
-                    Right (UnAggregated _) -> throw $ UnaggregatedException (T.pack $ show expr)
-                    Right (Aggregated (TColumn col)) -> col
-             in
-                insertColumn name value d
+        !nGroups = VU.length offs - 1
+
+        -- Fast path: a recognised reduction scatters in one unboxed pass.
+        -- Anything 'planAgg' rejects keeps the existing interpreter, so the
+        -- general typed + DSL aggregate API stays correct for arbitrary
+        -- expressions.
+        f ne@(name, uexpr) d =
+            let value = case planAgg gdf uexpr of
+                    Just plan -> runPlan gdf rowToGroupV nGroups plan
+                    Nothing -> interpretNamed gdf ne
+             in insertColumn name value d
+
+        -- Fused fast path: the Q9 regression family (count + five moment sums
+        -- of two base columns) becomes one scatter over the base columns,
+        -- dropping the derived product columns and the six separate folds.
+        -- 'planMoments' returns 'Nothing' on any other set, falling back below.
+        fusedMoments = do
+            mp <- planMoments gdf aggs :: Maybe MomentPlan
+            runMomentPlan gdf nGroups mp
      in
-        fold f aggs df'
+        case fusedMoments of
+            Just cols -> fold (uncurry insertColumn) cols df'
+            Nothing -> fold f aggs df'
+
+-- | The fall-back path: evaluate one named aggregation via the interpreter.
+interpretNamed :: GroupedDataFrame -> NamedExpr -> Column
+interpretNamed gdf (_, UExpr (expr :: Expr a)) =
+    case interpretAggregation @a gdf expr of
+        Left e -> throw e
+        Right (UnAggregated _) -> throw $ UnaggregatedException (T.pack $ show expr)
+        Right (Aggregated (TColumn col)) -> col
 
 selectIndices :: VU.Vector Int -> DataFrame -> DataFrame
 selectIndices xs df =

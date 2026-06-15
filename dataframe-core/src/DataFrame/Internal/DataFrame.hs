@@ -28,6 +28,7 @@ import DataFrame.Display.Terminal.PrettyPrint
 import DataFrame.Errors
 import DataFrame.Internal.Column
 import DataFrame.Internal.Expression
+import DataFrame.Internal.PackedText (packedIndexText)
 import Text.Printf
 import Type.Reflection (Typeable, eqTypeRep, typeRep, pattern App)
 import Prelude hiding (null)
@@ -181,6 +182,8 @@ asTextWith fmt mTrunc d =
         getType (BoxedColumn (Just _) (_ :: V.Vector a)) = T.pack $ showMaybeType @a
         getType (UnboxedColumn Nothing (_ :: VU.Vector a)) = T.pack $ show (typeRep @a)
         getType (UnboxedColumn (Just _) (_ :: VU.Vector a)) = T.pack $ showMaybeType @a
+        getType (PackedText Nothing _) = T.pack $ show (typeRep @T.Text)
+        getType (PackedText (Just _) _) = T.pack $ showMaybeType @T.Text
 
         -- Separate out cases dynamically so we don't end up making round trip
         -- string copies.
@@ -203,6 +206,7 @@ asTextWith fmt mTrunc d =
                     else "Nothing"
         get (Just (UnboxedColumn Nothing column)) =
             V.generate (VU.length column) (T.pack . show . VU.unsafeIndex column)
+        get (Just c@(PackedText _ _)) = get (Just (materializePacked c))
         get Nothing = V.empty
      in showTable
             fmt
@@ -366,6 +370,9 @@ showElement (BoxedColumn _ (c :: V.Vector a)) i = case c V.!? i of
 showElement (UnboxedColumn _ c) i = case c VU.!? i of
     Nothing -> error $ "Column index out of bounds at row " ++ show i
     Just e -> T.pack (show e)
+showElement (PackedText bm p) i = case bm of
+    Just b | not (bitmapTestBit b i) -> "null"
+    _ -> packedIndexText p i
 
 stripJust :: T.Text -> T.Text
 stripJust = fromMaybe "null" . T.stripPrefix "Just "

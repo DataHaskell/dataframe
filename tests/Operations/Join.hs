@@ -486,6 +486,49 @@ testManyToManyLeftJoin =
             (D.nRows (leftJoin ["key"] manyLeft manyRight))
         )
 
+-- Stress the open-addressing hash index with many distinct integer keys.
+-- Left keys 0..9999, right keys 5000..14999 (overlap 5000..9999).
+bigLeft :: D.DataFrame
+bigLeft =
+    D.fromNamedColumns
+        [ ("key", D.fromList [0 .. 9999 :: Int])
+        , ("la", D.fromList [i * 2 | i <- [0 .. 9999 :: Int]])
+        ]
+
+bigRight :: D.DataFrame
+bigRight =
+    D.fromNamedColumns
+        [ ("key", D.fromList [5000 .. 14999 :: Int])
+        , ("rb", D.fromList [i * 3 | i <- [5000 .. 14999 :: Int]])
+        ]
+
+testBigInnerJoinRowCount :: Test
+testBigInnerJoinRowCount =
+    TestCase
+        ( assertEqual
+            "Inner join over 10k distinct keys matches overlap size"
+            5000
+            (D.nRows (innerJoin ["key"] bigLeft bigRight))
+        )
+
+testBigLeftJoinRowCount :: Test
+testBigLeftJoinRowCount =
+    TestCase
+        ( assertEqual
+            "Left join over 10k distinct keys keeps all left rows"
+            10000
+            (D.nRows (leftJoin ["key"] bigLeft bigRight))
+        )
+
+testBigFullOuterRowCount :: Test
+testBigFullOuterRowCount =
+    TestCase
+        ( assertEqual
+            "Full outer join over 10k distinct keys = union size"
+            15000
+            (D.nRows (fullOuterJoin ["key"] bigLeft bigRight))
+        )
+
 tests :: [Test]
 tests =
     [ TestLabel "innerJoin" testInnerJoin
@@ -513,4 +556,7 @@ tests =
     , TestLabel "leftJoinRightEmpty" testLeftJoinRightEmpty
     , TestLabel "manyToManyInnerJoin" testManyToManyInnerJoin
     , TestLabel "manyToManyLeftJoin" testManyToManyLeftJoin
+    , TestLabel "bigInnerJoinRowCount" testBigInnerJoinRowCount
+    , TestLabel "bigLeftJoinRowCount" testBigLeftJoinRowCount
+    , TestLabel "bigFullOuterRowCount" testBigFullOuterRowCount
     ]

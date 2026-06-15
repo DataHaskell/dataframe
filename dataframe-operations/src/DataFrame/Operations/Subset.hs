@@ -45,6 +45,7 @@ import DataFrame.Internal.DataFrame (
  )
 import DataFrame.Internal.Expression
 import DataFrame.Internal.Interpreter
+import DataFrame.Internal.PackedText (packedIndexText, packedLength)
 import DataFrame.Operations.Core ()
 import DataFrame.Operations.Merge ()
 import DataFrame.Operations.Transformations (apply)
@@ -130,10 +131,12 @@ filter ::
     -- | Dataframe to filter
     DataFrame ->
     DataFrame
-filter (Col filterColumnName) condition df = case getColumn filterColumnName df of
+filter e@(Col filterColumnName) condition df = case getColumn filterColumnName df of
     Nothing ->
         throw $
             ColumnsNotFoundException [filterColumnName] "filter" (M.keys $ columnIndices df)
+    Just c@(PackedText _ _) ->
+        filter e condition (insertColumn filterColumnName (materializePacked c) df)
     Just _col@(BoxedColumn bm (column :: V.Vector b)) ->
         -- Check direct type match first, then try Maybe b match for nullable columns
         case testEquality (typeRep @a) (typeRep @b) of
@@ -240,6 +243,8 @@ filterJust colName df = case getColumn colName df of
             filter (Col @(Maybe a) colName) isJust df & apply @(Maybe a) fromJust colName
         UnboxedColumn (Just _) (_col :: VU.Vector a) ->
             filter (Col @(Maybe a) colName) isJust df & apply @(Maybe a) fromJust colName
+        c@(PackedText (Just _) _) ->
+            filterJust colName (insertColumn colName (materializePacked c) df)
         _ -> df
     Just _ -> df
 
@@ -255,6 +260,8 @@ filterNothing colName df = case getColumn colName df of
     Just column | hasMissing column -> case column of
         BoxedColumn (Just _) (_col :: V.Vector a) -> filter (Col @(Maybe a) colName) isNothing df
         UnboxedColumn (Just _) (_col :: VU.Vector a) -> filter (Col @(Maybe a) colName) isNothing df
+        c@(PackedText (Just _) _) ->
+            filterNothing colName (insertColumn colName (materializePacked c) df)
         _ -> df
     _ -> df
 
@@ -484,6 +491,10 @@ columnToTextVec (UnboxedColumn bm col') =
         Just bitmap ->
             V.generate (VU.length col') $ \i ->
                 if bitmapTestBit bitmap i then T.pack (show (col' VU.! i)) else "null"
+columnToTextVec (PackedText bm p) =
+    V.generate (packedLength p) $ \i -> case bm of
+        Just bitmap | not (bitmapTestBit bitmap i) -> "null"
+        _ -> packedIndexText p i
 
 -- | Build a map from stringified label to row indices.
 groupByIndices :: Column -> M.Map T.Text (VU.Vector Int)

@@ -1,5 +1,19 @@
 # Revision history for dataframe
 
+## 2.2.0.0
+
+A large performance and ML release.
+
+### Highlights
+* **Much faster I/O and analytics.** CSV reading, group-by, joins and sorting were rebuilt on compact unboxed / `PackedText` columns, parallel open-addressing hash tables, and vectorized aggregation; the default reader drops `cassava` for a single-pass scanner and `dataframe-fastcsv` adds multicore chunking. The end-to-end join + group-by pipeline runs several times faster with much lower memory and scales with `-threaded` / `+RTS -N`; results are byte-identical (golden-tested).
+* **Lazy engine on par with eager** — bounded-source queries route through the same fast paths (streaming preserved for unbounded); lazy `sortBy` now also orders non-`Text` columns correctly.
+* **New ML library (`dataframe-learn`).** scikit-learn-style estimators behind a uniform `fit` / `predict`: linear / ridge / lasso / logistic regression, SVM, trees, boosting, k-means, GMM, DBSCAN, PCA and kernel PCA, symbolic regression and feature synthesis, with metrics and cross-validation. Pure and deterministic; every model also compiles to a dataframe `Expr`.
+* **Typed joins are checked at compile time** — keys must exist in both schemas with matching types (previously a runtime failure or silent empty result).
+
+### Breaking changes
+* The `Column` GADT gains a `PackedText` constructor — exhaustive matches need a new arm (`materializePacked` decodes it back to boxed `Text`). CSV reads are now strict / fully forced; schema columns parse as their declared type; ragged rows pad with null instead of silently misaligning columns; overflowing integers parse as `Double`. `dataframe-learn`'s old beam-search synthesis and per-model `fit*` helpers are replaced by `fit` / `predict`.
+* Coordinated major bumps (`dataframe-core`, `dataframe-learn` → `1.1.0.0`; umbrella `dataframe` → `2.2.0.0`) with inter-package lower bounds tightened so a newer package cannot resolve against an incompatible sibling. Drops `cassava` and `unordered-containers`; requires `text >= 2.1`.
+
 ## 2.1.0.3
 ### Packaging
 * Fix dependency resolution for the `dataframe` meta-package and its satellites

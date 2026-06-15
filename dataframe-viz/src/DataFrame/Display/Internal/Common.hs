@@ -47,7 +47,12 @@ import Data.Word (Word8)
 import GHC.Stack (HasCallStack)
 import Type.Reflection (TypeRep, typeRep)
 
-import DataFrame.Internal.Column (Column (..), Columnable, isNumeric)
+import DataFrame.Internal.Column (
+    Column (..),
+    Columnable,
+    isNumeric,
+    materializePacked,
+ )
 import DataFrame.Internal.DataFrame (DataFrame (..), getColumn)
 import DataFrame.Internal.Types
 
@@ -164,12 +169,14 @@ columnToStrings col = case col of
             Nothing -> V.toList $ V.map (T.pack . show) vec
     UnboxedColumn _ vec ->
         V.toList $ VG.map (T.pack . show) (VG.convert vec)
+    PackedText _ _ -> columnToStrings (materializePacked col)
 
 -- | Coerce a numeric column to @[Double]@; errors if the element type is not numeric.
 columnToDoubles :: (HasCallStack) => Column -> [Double]
 columnToDoubles col = case col of
     BoxedColumn _ vec -> vectorToDoubles vec
     UnboxedColumn _ vec -> unboxedVectorToDoubles vec
+    PackedText _ _ -> columnToDoubles (materializePacked col)
 
 vectorToDoubles :: forall a. (Columnable a, Show a) => V.Vector a -> [Double]
 vectorToDoubles vec =
@@ -206,6 +213,9 @@ getCategoricalCounts colName df =
                         Just (countBoxed (typeRep @a) vec)
                     UnboxedColumn _ (vec :: VU.Vector a) ->
                         Just (countUnboxed (typeRep @a) vec)
+                    PackedText _ _ -> case materializePacked col of
+                        BoxedColumn _ (vec :: V.Vector a) -> Just (countBoxed (typeRep @a) vec)
+                        _ -> Nothing
   where
     countBoxed ::
         forall a. (Show a) => TypeRep a -> V.Vector a -> [(T.Text, Double)]

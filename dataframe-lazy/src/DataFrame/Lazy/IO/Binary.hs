@@ -58,6 +58,7 @@ import DataFrame.Internal.Column (
     Column (..),
     bitmapTestBit,
     buildBitmapFromValid,
+    materializePacked,
  )
 import DataFrame.Internal.DataFrame (DataFrame (..))
 import Foreign (ForeignPtr, castForeignPtr, plusForeignPtr, sizeOf)
@@ -127,6 +128,8 @@ columnTypeTag (UnboxedColumn (Just _) (_ :: VU.Vector a)) =
             Nothing -> error "spillToDisk: unsupported nullable UnboxedColumn element type"
 columnTypeTag (BoxedColumn Nothing _) = tagText
 columnTypeTag (BoxedColumn (Just _) _) = tagMaybeText
+columnTypeTag (PackedText Nothing _) = tagText
+columnTypeTag (PackedText (Just _) _) = tagMaybeText
 
 buildColumnData :: Int -> Column -> BSB.Builder
 buildColumnData _ (UnboxedColumn Nothing (v :: VU.Vector a)) =
@@ -158,6 +161,7 @@ buildColumnData _ (BoxedColumn (Just bm) (v :: V.Vector a)) =
             Nothing -> T.pack (show x)
         texts = V.imap (\i x -> if bitmapTestBit bm i then showText x else T.empty) v
      in buildNullBitmap isValidVec <> buildTextVector texts
+buildColumnData n c@(PackedText _ _) = buildColumnData n (materializePacked c)
 
 {- | Bulk-encode an Int vector as 8-byte LE values (native layout on LE platforms).
 hPutBuilder flushes synchronously so the underlying ForeignPtr outlives the Builder.

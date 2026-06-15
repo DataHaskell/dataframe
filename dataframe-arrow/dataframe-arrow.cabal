@@ -1,7 +1,6 @@
 cabal-version:      3.0
 name:               dataframe-arrow
-version:            1.0.1.0
-
+version:            1.0.1.1
 synopsis: Arrow C Data Interface foreign library for the dataframe Python bindings.
 
 description: Native-shared library exposing the dataframe lazy executor to
@@ -57,10 +56,10 @@ foreign-library dataframe-arrow
     other-modules:    DataFrame.FFI
     build-depends:
         base                  >= 4   && < 5,
-        dataframe-core        ^>= 1.0,
-        dataframe-learn       ^>= 1.0,
+        dataframe-core        ^>= 1.1,
+        dataframe-learn       ^>= 1.1,
         dataframe:arrow-bridge >= 1   && < 3,
-        dataframe-fastcsv     ^>= 1.1,
+        dataframe-fastcsv     ^>= 1.1.1,
         text                  >= 2.0 && < 3,
         aeson                 >= 0.11 && < 3,
         bytestring            >= 0.11 && < 0.13,

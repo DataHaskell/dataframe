@@ -1,12 +1,14 @@
 cabal-version:      2.4
 name:               dataframe-learn
-version:            1.0.2.0
-
-synopsis:           Decision trees and feature synthesis for the dataframe ecosystem.
+version:            1.1.0.0
+synopsis:           Interpretable, expression-returning machine learning for the dataframe ecosystem.
 description:
-    @DataFrame.DecisionTree@ — decision-tree training on DataFrames.
-    @DataFrame.Synthesis@ — feature synthesis. Built on top of
-    @dataframe-operations@.
+    A small scikit-learn-style ML library where every model returns both an
+    inspectable record and dataframe @Expr@ value(s): linear/ridge/lasso/
+    elastic-net and logistic regression, linear and RFF-kernel SVMs, decision
+    trees, gradient boosting and AdaBoost, PCA and Nyström kernel PCA, k-means,
+    Gaussian mixtures, DBSCAN, and symbolic regression — plus cross-validation
+    and grid search. Pure Haskell, built on @dataframe-operations@.
 
 bug-reports:        https://github.com/mchav/dataframe/issues
 license:            MIT
@@ -16,6 +18,7 @@ maintainer:         mschavinda@gmail.com
 copyright:          (c) 2024-2026 Michael Chavinda
 category:           Data
 tested-with:        GHC ==9.4.8 || ==9.6.7 || ==9.8.4 || ==9.10.3 || ==9.12.2
+extra-doc-files:    README.md
 
 common warnings
     ghc-options:
@@ -41,12 +44,44 @@ library
                         DataFrame.DecisionTree.Tao
                         DataFrame.DecisionTree.Fit
                         DataFrame.LinearSolver
+                        DataFrame.LinearSolver.Loss
+                        DataFrame.LinearAlgebra
+                        DataFrame.LinearAlgebra.Solve
+                        DataFrame.LinearAlgebra.Eigen
+                        DataFrame.Random
+                        DataFrame.Featurize.Internal
+                        DataFrame.Model
+                        DataFrame.LinearModel
+                        DataFrame.LinearModel.Regression
+                        DataFrame.LinearModel.Logistic
+                        DataFrame.SVM
+                        DataFrame.DecisionTree.Regression
+                        DataFrame.DecisionTree.Model
+                        DataFrame.PCA
+                        DataFrame.PCA.Kernel
+                        DataFrame.SVM.RFF
+                        DataFrame.KMeans
+                        DataFrame.Transform
+                        DataFrame.Boosting
+                        DataFrame.Boosting.GBM
+                        DataFrame.Boosting.AdaBoost
+                        DataFrame.GMM
+                        DataFrame.DBSCAN
+                        DataFrame.Metrics
+                        DataFrame.Metrics.Report
+                        DataFrame.ModelSelection
+                        DataFrame.SymbolicRegression
+                        DataFrame.SymbolicRegression.Expr
+                        DataFrame.SymbolicRegression.Simplify
+                        DataFrame.SymbolicRegression.Optimize
+                        DataFrame.SymbolicRegression.GP
                         DataFrame.Synthesis
     build-depends:      base >= 4 && < 5,
                         containers >= 0.6.7 && < 0.9,
                         parallel ^>= 3.2,
-                        dataframe-core ^>= 1.0,
-                        dataframe-operations ^>= 1.1,
+                        random >= 1.2 && < 2,
+                        dataframe-core ^>= 1.1,
+                        dataframe-operations ^>= 1.1.1,
                         text >= 2.0 && < 3,
                         vector ^>= 0.13,
                         vector-algorithms ^>= 0.9

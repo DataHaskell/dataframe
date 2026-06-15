@@ -19,12 +19,14 @@ module DataFrame.Internal.Hash (
     mixBool,
     mixChar,
     mixText,
+    mixBytes,
     mixShow,
 ) where
 
 import Data.Bits (rotateL, unsafeShiftL, unsafeShiftR, xor)
 import Data.Char (ord)
 import qualified Data.Text as T
+import qualified Data.Text.Array as A
 #if MIN_VERSION_text(2,1,0)
 import Data.Array.Byte (ByteArray (ByteArray))
 #else
@@ -90,8 +92,17 @@ same value and distinct ones almost never collide. The trailing @len `mod` 8@
 bytes are folded in individually.
 -}
 mixText :: Int -> T.Text -> Int
-mixText !acc (Text (ByteArray ba) off len) = goBytes (goWords acc off) wordsEnd
+mixText !acc (Text arr off len) = mixBytes acc arr off len
+{-# INLINE mixText #-}
+
+{- | Mix a raw UTF-8 byte slice @[off, off+len)@ of a 'Data.Text.Array.Array'
+into the accumulator, eight bytes at a time. The shared kernel behind
+'mixText' and the packed-text hash path, so the two never drift.
+-}
+mixBytes :: Int -> A.Array -> Int -> Int -> Int
+mixBytes !acc arr off len = goBytes (goWords acc off) wordsEnd
   where
+    !(ByteArray ba) = arr
     !nWords = len `unsafeShiftR` 3
     !wordsEnd = off + (nWords `unsafeShiftL` 3)
     !end = off + len
@@ -107,7 +118,7 @@ mixText !acc (Text (ByteArray ba) off len) = goBytes (goWords acc off) wordsEnd
             let !(I# i#) = i
                 !b = fromIntegral (W8# (indexWord8Array# ba i#)) :: Int
              in goBytes (mixInt h b) (i + 1)
-{-# INLINE mixText #-}
+{-# INLINE mixBytes #-}
 
 {- | Fallback for arbitrary 'Show'-able values. Slower but covers types
 without a dedicated combinator (e.g. 'Day', 'UTCTime').

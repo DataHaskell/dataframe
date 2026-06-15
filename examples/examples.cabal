@@ -14,7 +14,7 @@ maintainer:         mschavinda@gmail.com
 copyright: (c) 2024-2024 Michael Chavinda
 category: Data
 tested-with: GHC ==9.8.3 || ==9.6.6 || ==9.10.1
-extra-doc-files: CHANGELOG.md README.md
+extra-doc-files: README.md
 
 source-repository head
   type:     git
@@ -144,6 +144,7 @@ executable examples
                       hasktorch,
                       http-conduit,
                       parallel ^>= 3.2,
+                      primitive >= 0.7 && < 0.10,
                       process ^>= 1.6,
                       snappy-hs ^>= 0.1,
                       random >= 1.2 && < 2,

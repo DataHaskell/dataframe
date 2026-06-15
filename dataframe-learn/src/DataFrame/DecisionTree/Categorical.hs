@@ -157,7 +157,7 @@ sortByRate :: (Ord a) => M.Map a (Int, Int) -> [a] -> [a]
 sortByRate counts = sortBy (compare `on` (\v -> (laplaceRate counts v, v)))
 
 nonTrivialPrefixes :: [a] -> [[a]]
-nonTrivialPrefixes = tail . init . inits
+nonTrivialPrefixes = drop 1 . init . inits
 
 {- | Value-lists a categorical column contributes; shared by the expression and
 truth-vector paths so both enumerate identical candidates in the same order.
@@ -244,6 +244,10 @@ columnConds ctx df colName = case unsafeGetColumn colName df of
     BoxedColumn Nothing (column :: V.Vector a) -> nonNullColConds ctx colName column
     BoxedColumn (Just bm) (column :: V.Vector a) -> nullableColConds ctx colName bm column
     UnboxedColumn _ (_ :: VU.Vector a) -> []
+    pt@(PackedText _ _) -> case materializePacked pt of
+        BoxedColumn Nothing (column :: V.Vector a) -> nonNullColConds ctx colName column
+        BoxedColumn (Just bm) (column :: V.Vector a) -> nullableColConds ctx colName bm column
+        _ -> []
 
 nonNullColConds ::
     forall a target.
@@ -299,7 +303,9 @@ isDisallowedPair cfg l r =
         (disallowedCombinations (synthConfig cfg))
 
 pairConds :: ColumnOrdering -> DataFrame -> (T.Text, T.Text) -> [Expr Bool]
-pairConds ords df (l, r) = case (unsafeGetColumn l df, unsafeGetColumn r df) of
+pairConds ords df (l, r) = case ( materializePacked (unsafeGetColumn l df)
+                                , materializePacked (unsafeGetColumn r df)
+                                ) of
     (BoxedColumn Nothing (_ :: V.Vector a), BoxedColumn Nothing (_ :: V.Vector b)) -> strictPairConds @a @b l r
     (BoxedColumn (Just _) (_ :: V.Vector a), BoxedColumn (Just _) (_ :: V.Vector b)) -> nullablePairConds @a @b ords l r
     _ -> []
@@ -354,6 +360,10 @@ columnCondVecs ctx df colName = case unsafeGetColumn colName df of
     BoxedColumn Nothing (column :: V.Vector a) -> nonNullColCondVecs ctx colName column
     BoxedColumn (Just bm) (column :: V.Vector a) -> mapMaybe (materializeCondVec df) (nullableColConds ctx colName bm column)
     UnboxedColumn _ (_ :: VU.Vector a) -> []
+    pt@(PackedText _ _) -> case materializePacked pt of
+        BoxedColumn Nothing (column :: V.Vector a) -> nonNullColCondVecs ctx colName column
+        BoxedColumn (Just bm) (column :: V.Vector a) -> mapMaybe (materializeCondVec df) (nullableColConds ctx colName bm column)
+        _ -> []
 
 nonNullColCondVecs ::
     forall a target.

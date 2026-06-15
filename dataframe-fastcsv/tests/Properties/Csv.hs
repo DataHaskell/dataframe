@@ -19,13 +19,16 @@ import Control.Exception (try)
 import qualified Data.List as L
 import qualified Data.Map as M
 import qualified Data.Text as T
+import qualified Data.Text.Encoding as TE
 import qualified Data.Text.IO as TIO
 import qualified Data.Vector as V
+
+import DataFrame.IO.CSV (defaultReadOptions)
 
 import Data.Type.Equality (testEquality, (:~:) (Refl))
 import DataFrame.IO.CSV.Fast (CsvParseError (..))
 import qualified DataFrame.IO.CSV.Fast as D
-import DataFrame.Internal.Column (Column (..))
+import DataFrame.Internal.Column (Column (..), materializePacked)
 import DataFrame.Internal.DataFrame (
     DataFrame (..),
     columnIndices,
@@ -114,12 +117,13 @@ columnAsText :: T.Text -> DataFrame -> Maybe [T.Text]
 columnAsText name df = do
     idx <- M.lookup name (columnIndices df)
     col <- columns df V.!? idx
-    case col of
+    case materializePacked col of
         BoxedColumn _ (vec :: V.Vector a) ->
             case testEquality (typeRep @a) (typeRep @T.Text) of
                 Just Refl -> Just (V.toList vec)
                 Nothing -> Nothing
         UnboxedColumn{} -> Nothing
+        PackedText{} -> Nothing
 
 {- | Run a property in @IO@ against a generated CSV text, cleaning up
 the temp file afterwards no matter what.
@@ -238,6 +242,31 @@ prop_boundary_sizes =
                 assert (cs == 1)
                 assert (rs >= 0)
 
+{- | WS-E2 determinism: a chunk-parallel read returns exactly the same
+DataFrame as the sequential read, for any chunk count.  The generated grid
+mixes Text cells (quotes, embedded separators and newlines) with a
+nullable numeric column so chunk-level type promotion is exercised too.
+-}
+prop_parallel_equals_sequential :: ColumnNames -> [[Cell]] -> Property
+prop_parallel_equals_sequential (ColumnNames header) rows =
+    forAll (chooseInt (2, 7)) $ \nChunks ->
+        forAll (vectorOf (length rows) numCell) $ \numCol -> monadicIO $ do
+            let cellRows =
+                    zipWith (\r n -> map unCell r <> [n]) rows numCol
+                csv = encodeCsv ',' (header <> ["num"]) cellRows
+                bytes = TE.encodeUtf8 csv
+            seqDf <- run (D.readSeparatedFromBytes 0x2C defaultReadOptions bytes)
+            parDf <-
+                run (D.readSeparatedFromBytesChunks nChunks 0x2C defaultReadOptions bytes)
+            assert (seqDf == parDf)
+  where
+    numCell =
+        frequency
+            [ (4, T.pack . show <$> chooseInt (-1000, 1000))
+            , (2, T.pack . show <$> (choose (-10, 10) :: Gen Double))
+            , (1, pure "")
+            ]
+
 tests :: [Property]
 tests =
     [ property prop_bom_invariant
@@ -245,4 +274,5 @@ tests =
     , property prop_roundtrip_ascii
     , property prop_unclosed_quote_throws
     , property prop_boundary_sizes
+    , property prop_parallel_equals_sequential
     ]

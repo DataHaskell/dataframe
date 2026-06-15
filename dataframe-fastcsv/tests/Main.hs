@@ -7,11 +7,18 @@ import qualified System.Exit as Exit
 import Test.HUnit
 import Test.QuickCheck
 
+import qualified Operations.ChunkParallel
 import qualified Operations.ReadCsv
+import qualified Operations.TypedExtraction
 import qualified Properties.Csv
 
 tests :: Test
-tests = TestList Operations.ReadCsv.tests
+tests =
+    TestList
+        ( Operations.ReadCsv.tests
+            <> Operations.TypedExtraction.tests
+            <> Operations.ChunkParallel.tests
+        )
 
 isSuccessful :: Result -> Bool
 isSuccessful (Success{}) = True

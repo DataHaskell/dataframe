@@ -258,6 +258,7 @@ mkSortOrder isAsc name col = dispatchType (columnTypeRep col)
     columnTypeRep :: Column -> SomeTypeRep
     columnTypeRep (UnboxedColumn _ (_ :: VU.Vector a)) = SomeTypeRep (typeRep @a)
     columnTypeRep (BoxedColumn _ (_ :: V.Vector a)) = SomeTypeRep (typeRep @a)
+    columnTypeRep (PackedText _ _) = SomeTypeRep (typeRep @T.Text)
     mk :: (Columnable a, Ord a) => Expr a -> SortOrder
     mk = if isAsc then Asc else Desc
     dispatchType (SomeTypeRep tr)
@@ -335,6 +336,7 @@ runFrequencies colName df = dispatchType (columnTypeRep (unsafeGetColumn colName
     columnTypeRep :: Column -> SomeTypeRep
     columnTypeRep (UnboxedColumn _ (_ :: VU.Vector a)) = SomeTypeRep (typeRep @a)
     columnTypeRep (BoxedColumn _ (_ :: V.Vector a)) = SomeTypeRep (typeRep @a)
+    columnTypeRep (PackedText _ _) = SomeTypeRep (typeRep @T.Text)
 
     fr :: forall a. (Columnable a, Ord a) => IO DataFrame
     fr = return $ Stats.frequencies (Col @a colName) df
@@ -369,6 +371,8 @@ countExpr name colName (UnboxedColumn Nothing (_ :: VU.Vector a)) = return $ nam
 countExpr name colName (UnboxedColumn (Just _) (_ :: VU.Vector a)) = return $ name .= count (Col @(Maybe a) colName)
 countExpr name colName (BoxedColumn Nothing (_ :: V.Vector a)) = return $ name .= count (Col @a colName)
 countExpr name colName (BoxedColumn (Just _) (_ :: V.Vector a)) = return $ name .= count (Col @(Maybe a) colName)
+countExpr name colName (PackedText Nothing _) = return $ name .= count (Col @T.Text colName)
+countExpr name colName (PackedText (Just _) _) = return $ name .= count (Col @(Maybe T.Text) colName)
 
 sumExpr :: T.Text -> T.Text -> Column -> IO NamedExpr
 sumExpr name colName (UnboxedColumn Nothing (_ :: VU.Vector a))

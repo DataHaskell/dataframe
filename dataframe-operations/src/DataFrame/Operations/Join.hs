@@ -12,12 +12,9 @@ module DataFrame.Operations.Join where
 
 import Control.Applicative ((<|>))
 import Control.Exception (throw)
-import Control.Monad (forM_, when)
+import Control.Monad (when)
 import Control.Monad.ST (ST, runST)
-import qualified Data.HashMap.Strict as HM
-#if !MIN_VERSION_base(4,20,0)
-import Data.List (foldl')
-#endif
+import Data.Bits ((.&.))
 import qualified Data.Map.Strict as M
 import Data.Maybe (fromMaybe)
 import Data.STRef (newSTRef, readSTRef, writeSTRef)
@@ -33,8 +30,16 @@ import DataFrame.Errors (
  )
 import DataFrame.Internal.Column as D
 import DataFrame.Internal.DataFrame as D
+import DataFrame.Internal.ParRadixSort (parSortByHash)
 import DataFrame.Operations.Aggregation as D
 import DataFrame.Operations.Core as D
+import DataFrame.Operations.JoinPar (
+    parInnerProbe,
+    parLeftProbe,
+    shouldParallelizeJoin,
+    shouldParallelizeSmallBuildProbe,
+ )
+import System.IO.Unsafe (unsafePerformIO)
 import Type.Reflection
 
 -- | Equivalent to SQL join types.
@@ -58,44 +63,103 @@ join RIGHT xs right = rightJoin xs right
 join FULL_OUTER xs right = fullOuterJoin xs right
 
 {- | Row-count threshold for the build side.
-When the build side exceeds this, sort-merge join is used
-instead of hash join to avoid L3 cache thrashing.
+When the build side exceeds this, sort-merge join is used instead of the
+single-threaded hash join. The parallel chunked-probe hash join
+('parInnerKernel' \/ 'parLeftKernel') is preferred above this size when more
+than one capability is available (see 'shouldParallelizeJoin'): partitioning
+the probe over cores beats sort-merge for the large build sides measured here
+(e.g. the 2M-row build in the join pipeline). Sort-merge remains the
+single-threaded fallback.
 -}
 joinStrategyThreshold :: Int
 joinStrategyThreshold = 500_000
 
 {- | A compact index mapping hash values to contiguous slices of
-original row indices. All indices live in a single unboxed vector;
-the HashMap stores @(offset, length)@ into that vector.
+original row indices. All indices live in a single unboxed vector
+(@ciSortedIndices@, sorted by hash). The lookup table is an open-addressing
+linear-probe hash table held in three parallel unboxed vectors keyed by hash:
+@ciKeys@ holds the hash at each slot, @ciStarts@ the run offset into
+@ciSortedIndices@ (@-1@ marks an empty slot, since real offsets are @>= 0@),
+and @ciLens@ the run length. @ciMask@ is @tableSize - 1@ (table size is a
+power of two), used to map a hash to its home slot.
 -}
 data CompactIndex = CompactIndex
     { ciSortedIndices :: {-# UNPACK #-} !(VU.Vector Int)
-    , ciOffsets :: !(HM.HashMap Int (Int, Int))
+    , ciKeys :: {-# UNPACK #-} !(VU.Vector Int)
+    , ciStarts :: {-# UNPACK #-} !(VU.Vector Int)
+    , ciLens :: {-# UNPACK #-} !(VU.Vector Int)
+    , ciMask :: {-# UNPACK #-} !Int
     }
 
+{- | Look up a hash in the open-addressing table.
+Returns @(start, len)@ of the matching run, or @(-1, 0)@ on a miss.
+-}
+ciLookup :: CompactIndex -> Int -> (Int, Int)
+ciLookup ci !h = go (h .&. mask)
+  where
+    !mask = ciMask ci
+    !keys = ciKeys ci
+    !starts = ciStarts ci
+    !lens = ciLens ci
+    go !slot =
+        let !s = starts `VU.unsafeIndex` slot
+         in if s < 0
+                then (-1, 0)
+                else
+                    if keys `VU.unsafeIndex` slot == h
+                        then (s, lens `VU.unsafeIndex` slot)
+                        else go ((slot + 1) .&. mask)
+{-# INLINE ciLookup #-}
+
+{- | Smallest power of two strictly greater than @n@, at least 2.
+Used to size the open-addressing table so the load factor stays below ~0.5.
+-}
+nextPow2Above :: Int -> Int
+nextPow2Above n = go 2
+  where
+    go !p
+        | p > n = p
+        | otherwise = go (p * 2)
+
 {- | Build a compact index from a vector of row hashes.
-Sorts @(hash, originalIndex)@ pairs by hash, then scans for
-contiguous runs to populate the offset map.
+Sorts @(hash, originalIndex)@ pairs by hash, scans for contiguous runs, then
+inserts each run into an open-addressing linear-probe table sized to keep the
+load factor under ~0.5.
 -}
 buildCompactIndex :: VU.Vector Int -> CompactIndex
 buildCompactIndex hashes =
     let n = VU.length hashes
-        (sortedHashes, sortedIndices) = sortWithIndices hashes
-        !offs = buildOffsets sortedHashes n 0 HM.empty
-     in CompactIndex sortedIndices offs
-  where
-    buildOffsets ::
-        VU.Vector Int ->
-        Int ->
-        Int ->
-        HM.HashMap Int (Int, Int) ->
-        HM.HashMap Int (Int, Int)
-    buildOffsets !sh !n !i !acc
-        | i >= n = acc
-        | otherwise =
-            let !h = sh `VU.unsafeIndex` i
-                !end = findGroupEnd sh h (i + 1) n
-             in buildOffsets sh n end (HM.insert h (i, end - i) acc)
+        (sortedHashes, sortedIndices) = parSortByHash n hashes
+        -- Worst case every row is a distinct group; 2*n+1 keeps the table
+        -- sparse even then. Capacity is independent of the actual group count
+        -- so building stays a single pass with no resize.
+        !cap = nextPow2Above (2 * n)
+        !mask = cap - 1
+        (keys, starts, lens) = runST $ do
+            mKeys <- VUM.unsafeNew cap
+            mStarts <- VUM.replicate cap (-1)
+            mLens <- VUM.unsafeNew cap
+            let insert !i
+                    | i >= n = return ()
+                    | otherwise = do
+                        let !h = sortedHashes `VU.unsafeIndex` i
+                            !end = findGroupEnd sortedHashes h (i + 1) n
+                        probe h (h .&. mask) i (end - i)
+                        insert end
+                probe !h !slot !start !len = do
+                    s <- VUM.unsafeRead mStarts slot
+                    if s < 0
+                        then do
+                            VUM.unsafeWrite mKeys slot h
+                            VUM.unsafeWrite mStarts slot start
+                            VUM.unsafeWrite mLens slot len
+                        else probe h ((slot + 1) .&. mask) start len
+            insert 0
+            (,,)
+                <$> VU.unsafeFreeze mKeys
+                <*> VU.unsafeFreeze mStarts
+                <*> VU.unsafeFreeze mLens
+     in CompactIndex sortedIndices keys starts lens mask
 
 -- | Find the end of a contiguous run of equal values starting at @j@.
 findGroupEnd :: VU.Vector Int -> Int -> Int -> Int -> Int
@@ -203,18 +267,56 @@ innerJoinNonEmpty cs left right =
         rightHashes = D.computeRowHashes rightKeyIdxs right
 
         buildRows = min leftRows rightRows
+        -- Probe with the larger side, build on the smaller. The probe side
+        -- drives parallelism (it is partitioned across cores), so probing the
+        -- larger side maximises the win.
+        probeRows = max leftRows rightRows
+        -- Parallelize the probe either when the build is large enough to spill
+        -- cache (the original sort-merge regime) or when the build is small
+        -- (cache-resident, read-only) but the probe is huge: partitioning a
+        -- ~1e7-row probe over cores wins even against a tiny hot build (the
+        -- medium-factor lever). Both routes use the same bit-identical
+        -- 'parInnerKernel'.
+        useParallel =
+            shouldParallelizeJoin probeRows buildRows
+                || shouldParallelizeSmallBuildProbe probeRows
         (leftIxs, rightIxs)
-            | buildRows > joinStrategyThreshold =
+            | buildRows > joinStrategyThreshold && not useParallel =
                 sortMergeInnerKernel leftHashes rightHashes
             | rightRows <= leftRows =
                 -- Build on right (smaller or equal), probe with left
-                hashInnerKernel leftHashes rightHashes
+                innerKernel useParallel leftHashes rightHashes
             | otherwise =
                 -- Build on left (smaller), probe with right, swap result
-                let (!rIxs, !lIxs) = hashInnerKernel rightHashes leftHashes
+                let (!rIxs, !lIxs) = innerKernel useParallel rightHashes leftHashes
                  in (lIxs, rIxs)
      in
         assembleInner csSet left right leftIxs rightIxs
+
+{- | Select the inner-join kernel: parallel chunked-probe hash join when the
+caller decided the probe side is large enough and multi-core, otherwise the
+sequential single-threaded hash kernel.
+-}
+innerKernel ::
+    Bool -> VU.Vector Int -> VU.Vector Int -> (VU.Vector Int, VU.Vector Int)
+innerKernel True = parInnerKernel
+innerKernel False = hashInnerKernel
+{-# INLINE innerKernel #-}
+
+{- | Parallel inner-join kernel: build the 'CompactIndex' on @buildHashes@ once,
+then probe @probeHashes@ in parallel. Bit-for-bit identical output to
+'hashInnerKernel' (probe-row order preserved). Runs the IO probe via
+'unsafePerformIO'; the computation is pure (no observable effects, fixed result
+for fixed inputs).
+-}
+parInnerKernel ::
+    VU.Vector Int -> VU.Vector Int -> (VU.Vector Int, VU.Vector Int)
+parInnerKernel probeHashes buildHashes =
+    let !ci = buildCompactIndex buildHashes
+        (pf, bf) =
+            unsafePerformIO (parInnerProbe (ciSortedIndices ci) (ciLookup ci) probeHashes)
+     in (pf, bf)
+{-# NOINLINE parInnerKernel #-}
 
 -- | Compute hashes for the given key column names in a DataFrame.
 buildHashColumn :: [T.Text] -> DataFrame -> VU.Vector Int
@@ -236,7 +338,6 @@ hashProbeKernel ::
     (VU.Vector Int, VU.Vector Int)
 hashProbeKernel ci probeHashes =
     let ciIxs = ciSortedIndices ci
-        ciOff = ciOffsets ci
         (pFrozen, bFrozen) = runST $ do
             let !probeN = VU.length probeHashes
                 initCap = max 1 (min probeN 1_000_000)
@@ -265,9 +366,10 @@ hashProbeKernel ci probeHashes =
                     | i >= probeN = return ()
                     | otherwise = do
                         let !h = probeHashes `VU.unsafeIndex` i
-                        case HM.lookup h ciOff of
-                            Nothing -> go (i + 1)
-                            Just (!start, !len) -> do
+                            (!start, !len) = ciLookup ci h
+                        if start < 0
+                            then go (i + 1)
+                            else do
                                 !p <- readSTRef posRef
                                 ensureCapacity (p + len)
                                 pv <- readSTRef pvRef
@@ -311,7 +413,6 @@ hashInnerKernel probeHashes buildHashes =
     let (pFrozen, bFrozen) = runST $ do
             let ci = buildCompactIndex buildHashes
                 ciIxs = ciSortedIndices ci
-                ciOff = ciOffsets ci
                 !probeN = VU.length probeHashes
                 !buildN = VU.length buildHashes
                 initCap = max 1 (min (probeN + buildN) 1_000_000)
@@ -340,9 +441,10 @@ hashInnerKernel probeHashes buildHashes =
                     | i >= probeN = return ()
                     | otherwise = do
                         let !h = probeHashes `VU.unsafeIndex` i
-                        case HM.lookup h ciOff of
-                            Nothing -> go (i + 1)
-                            Just (!start, !len) -> do
+                            (!start, !len) = ciLookup ci h
+                        if start < 0
+                            then go (i + 1)
+                            else do
                                 !p <- readSTRef posRef
                                 when (p + len > maxJoinOutputRows) $
                                     error $
@@ -566,15 +668,35 @@ leftJoinNonEmpty callPoint cs left right =
         leftHashes = D.computeRowHashes leftKeyIdxs left
         rightHashes = D.computeRowHashes rightKeyIdxs right
 
-        -- Right is always the build side for left join
+        leftRows = fst (D.dimensions left)
+        -- Right is always the build side for left join; left is the probe side
+        -- (and drives parallelism). Parallelize either in the large-build regime
+        -- or when the build is small but the probe (left) is huge: the
+        -- read-only shared index is probed across cores with no synchronization.
+        useParallel =
+            shouldParallelizeJoin leftRows rightRows
+                || shouldParallelizeSmallBuildProbe leftRows
         (leftIxs, rightIxs)
-            | rightRows > joinStrategyThreshold =
+            | rightRows > joinStrategyThreshold && not useParallel =
                 sortMergeLeftKernel leftHashes rightHashes
+            | useParallel =
+                parLeftKernel leftHashes rightHashes
             | otherwise =
                 hashLeftKernel leftHashes rightHashes
      in
         -- rightIxs uses -1 as sentinel for "no match"
         assembleLeft csSet left right leftIxs rightIxs
+
+{- | Parallel left-join kernel: build the 'CompactIndex' on @rightHashes@ once,
+then probe @leftHashes@ in parallel. Bit-for-bit identical output to
+'hashLeftKernel' (left-row order preserved, @-1@ sentinel for misses).
+-}
+parLeftKernel ::
+    VU.Vector Int -> VU.Vector Int -> (VU.Vector Int, VU.Vector Int)
+parLeftKernel leftHashes rightHashes =
+    let !ci = buildCompactIndex rightHashes
+     in unsafePerformIO (parLeftProbe (ciSortedIndices ci) (ciLookup ci) leftHashes)
+{-# NOINLINE parLeftKernel #-}
 
 {- | Hash-based left join kernel.
 Returns @(leftExpandedIndices, rightExpandedIndices)@ where
@@ -587,7 +709,6 @@ hashLeftKernel ::
 hashLeftKernel leftHashes rightHashes = runST $ do
     let ci = buildCompactIndex rightHashes
         ciIxs = ciSortedIndices ci
-        ciOff = ciOffsets ci
         !leftN = VU.length leftHashes
         !rightN = VU.length rightHashes
         initCap = max 1 (min (leftN + rightN) 1_000_000)
@@ -616,16 +737,17 @@ hashLeftKernel leftHashes rightHashes = runST $ do
             | i >= leftN = return ()
             | otherwise = do
                 let !h = leftHashes `VU.unsafeIndex` i
+                    (!start, !len) = ciLookup ci h
                 !p <- readSTRef posRef
-                case HM.lookup h ciOff of
-                    Nothing -> do
+                if start < 0
+                    then do
                         ensureCapacity (p + 1)
                         lv <- readSTRef lvRef
                         rv <- readSTRef rvRef
                         VUM.unsafeWrite lv p i
                         VUM.unsafeWrite rv p (-1)
                         writeSTRef posRef (p + 1)
-                    Just (!start, !len) -> do
+                    else do
                         ensureCapacity (p + len)
                         lv <- readSTRef lvRef
                         rv <- readSTRef rvRef
@@ -864,89 +986,111 @@ hashFullOuterKernel ::
 hashFullOuterKernel leftHashes rightHashes = runST $ do
     let leftCI = buildCompactIndex leftHashes
         rightCI = buildCompactIndex rightHashes
-        leftOff = ciOffsets leftCI
-        rightOff = ciOffsets rightCI
         leftSI = ciSortedIndices leftCI
         rightSI = ciSortedIndices rightCI
+        leftKeys = ciKeys leftCI
+        leftStarts = ciStarts leftCI
+        leftLens = ciLens leftCI
+        rightKeys = ciKeys rightCI
+        rightStarts = ciStarts rightCI
+        rightLens = ciLens rightCI
+        !leftCap = VU.length leftStarts
+        !rightCap = VU.length rightStarts
 
-    -- Count: matched + left-only + right-only
-    let leftEntries = HM.toList leftOff
-        rightEntries = HM.toList rightOff
-
-        !matchedCount =
-            foldl'
-                ( \acc (h, (_, ll)) ->
-                    case HM.lookup h rightOff of
-                        Nothing -> acc
-                        Just (_, rl) -> acc + ll * rl
-                )
-                0
-                leftEntries
-
-        !leftOnlyCount =
-            foldl'
-                ( \acc (h, (_, ll)) ->
-                    if HM.member h rightOff then acc else acc + ll
-                )
-                0
-                leftEntries
-
-        !rightOnlyCount =
-            foldl'
-                ( \acc (h, (_, rl)) ->
-                    if HM.member h leftOff then acc else acc + rl
-                )
-                0
-                rightEntries
-
-        !totalCount = matchedCount + leftOnlyCount + rightOnlyCount
+    -- Count: matched + left-only + right-only. Iterate over occupied slots
+    -- (ciStarts /= -1) in each table, cross-referencing the other via ciLookup.
+    let countLeft !slot !acc
+            | slot >= leftCap = acc
+            | otherwise =
+                let !lStart = leftStarts `VU.unsafeIndex` slot
+                 in if lStart < 0
+                        then countLeft (slot + 1) acc
+                        else
+                            let !h = leftKeys `VU.unsafeIndex` slot
+                                !ll = leftLens `VU.unsafeIndex` slot
+                                (!rs, !rl) = ciLookup rightCI h
+                             in countLeft (slot + 1) (acc + if rs < 0 then ll else ll * rl)
+        countRightOnly !slot !acc
+            | slot >= rightCap = acc
+            | otherwise =
+                let !rStart = rightStarts `VU.unsafeIndex` slot
+                 in if rStart < 0
+                        then countRightOnly (slot + 1) acc
+                        else
+                            let !h = rightKeys `VU.unsafeIndex` slot
+                                !rl = rightLens `VU.unsafeIndex` slot
+                                (!ls, _) = ciLookup leftCI h
+                             in countRightOnly (slot + 1) (acc + if ls < 0 then rl else 0)
+        !leftPlusMatched = countLeft 0 0
+        !rightOnlyCount = countRightOnly 0 0
+        !totalCount = leftPlusMatched + rightOnlyCount
 
     lv <- VUM.unsafeNew totalCount
     rv <- VUM.unsafeNew totalCount
     posRef <- newSTRef (0 :: Int)
 
-    -- Fill matched + left-only (iterate left keys)
-    forM_ leftEntries $ \(h, (lStart, lLen)) -> do
-        !p <- readSTRef posRef
-        case HM.lookup h rightOff of
-            Nothing -> do
-                -- Left-only rows
-                let goL !j !q
-                        | j >= lLen = return ()
-                        | otherwise = do
-                            VUM.unsafeWrite lv q (leftSI `VU.unsafeIndex` (lStart + j))
-                            VUM.unsafeWrite rv q (-1)
-                            goL (j + 1) (q + 1)
-                goL 0 p
-                writeSTRef posRef (p + lLen)
-            Just (!rStart, !rLen) -> do
-                -- Cross product
-                fillCrossProduct
-                    leftSI
-                    rightSI
-                    lStart
-                    (lStart + lLen)
-                    rStart
-                    (rStart + rLen)
-                    lv
-                    rv
-                    p
-                writeSTRef posRef (p + lLen * rLen)
+    -- Fill matched + left-only (iterate left slots)
+    let fillLeft !slot
+            | slot >= leftCap = return ()
+            | otherwise = do
+                let !lStart = leftStarts `VU.unsafeIndex` slot
+                if lStart < 0
+                    then fillLeft (slot + 1)
+                    else do
+                        let !h = leftKeys `VU.unsafeIndex` slot
+                            !lLen = leftLens `VU.unsafeIndex` slot
+                            (!rStart, !rLen) = ciLookup rightCI h
+                        !p <- readSTRef posRef
+                        if rStart < 0
+                            then do
+                                let goL !j !q
+                                        | j >= lLen = return ()
+                                        | otherwise = do
+                                            VUM.unsafeWrite lv q (leftSI `VU.unsafeIndex` (lStart + j))
+                                            VUM.unsafeWrite rv q (-1)
+                                            goL (j + 1) (q + 1)
+                                goL 0 p
+                                writeSTRef posRef (p + lLen)
+                            else do
+                                fillCrossProduct
+                                    leftSI
+                                    rightSI
+                                    lStart
+                                    (lStart + lLen)
+                                    rStart
+                                    (rStart + rLen)
+                                    lv
+                                    rv
+                                    p
+                                writeSTRef posRef (p + lLen * rLen)
+                        fillLeft (slot + 1)
+    fillLeft 0
 
-    -- Fill right-only (iterate right keys not in left)
-    forM_ rightEntries $ \(h, (rStart, rLen)) ->
-        case HM.lookup h leftOff of
-            Just _ -> return ()
-            Nothing -> do
-                !p <- readSTRef posRef
-                let goR !j !q
-                        | j >= rLen = return ()
-                        | otherwise = do
-                            VUM.unsafeWrite lv q (-1)
-                            VUM.unsafeWrite rv q (rightSI `VU.unsafeIndex` (rStart + j))
-                            goR (j + 1) (q + 1)
-                goR 0 p
-                writeSTRef posRef (p + rLen)
+    -- Fill right-only (iterate right slots not in left)
+    let fillRightOnly !slot
+            | slot >= rightCap = return ()
+            | otherwise = do
+                let !rStart = rightStarts `VU.unsafeIndex` slot
+                if rStart < 0
+                    then fillRightOnly (slot + 1)
+                    else do
+                        let !h = rightKeys `VU.unsafeIndex` slot
+                            !rLen = rightLens `VU.unsafeIndex` slot
+                            (!ls, _) = ciLookup leftCI h
+                        if ls >= 0
+                            then fillRightOnly (slot + 1)
+                            else do
+                                !p <- readSTRef posRef
+                                let goR !j !q
+                                        | j >= rLen = return ()
+                                        | otherwise = do
+                                            VUM.unsafeWrite lv q (-1)
+                                            VUM.unsafeWrite rv q (rightSI `VU.unsafeIndex` (rStart + j))
+                                            goR (j + 1) (q + 1)
+                                goR 0 p
+                                writeSTRef posRef (p + rLen)
+                                fillRightOnly (slot + 1)
+    fillRightOnly 0
 
     (,) <$> VU.unsafeFreeze lv <*> VU.unsafeFreeze rv
 
@@ -1060,6 +1204,9 @@ assembleFullOuter csSet left right leftIxs rightIxs =
         -- Coalesce two nullable columns: take first non-Nothing per row,
         -- producing a non-optional column.
         coalesceKeyColumn :: Column -> Column -> Column
+        coalesceKeyColumn l r
+            | D.isPackedText l || D.isPackedText r =
+                coalesceKeyColumn (D.materializePacked l) (D.materializePacked r)
         coalesceKeyColumn
             (BoxedColumn lBm (lCol :: VB.Vector a))
             (BoxedColumn rBm (rCol :: VB.Vector b)) =

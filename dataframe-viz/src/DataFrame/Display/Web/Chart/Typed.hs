@@ -55,6 +55,7 @@ module DataFrame.Display.Web.Chart.Typed (
     regression,
     density,
     logScale,
+    includeZero,
     title,
     size,
 
@@ -119,6 +120,10 @@ binY (Chart c) = Chart (C.binY c)
 -- | Put a channel on a log scale.
 logScale :: Channel -> Chart cols -> Chart cols
 logScale ch (Chart c) = Chart (C.logScale ch c)
+
+-- | Anchor (@True@) or release (@False@) a channel's scale at zero.
+includeZero :: Channel -> Bool -> Chart cols -> Chart cols
+includeZero ch b (Chart c) = Chart (C.includeZero ch b c)
 
 -- | Facet into small multiples by a column (alias for 'column').
 facet :: (Columnable a) => TExpr cols a -> Chart cols -> Chart cols

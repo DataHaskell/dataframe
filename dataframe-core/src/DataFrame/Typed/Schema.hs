@@ -31,6 +31,7 @@ module DataFrame.Typed.Schema (
     AssertAbsent,
     AssertPresent,
     AssertAllPresent,
+    AssertKeyTypesMatch,
     IsElem,
 
     -- * Maybe-stripping families
@@ -222,6 +223,40 @@ type family
     AssertAllPresentHelper 'False name rest cols =
         TypeError
             ('Text "Column '" ':<>: 'Text name ':<>: 'Text "' not found in schema")
+
+{- | Assert that each join key has the same element type in both schemas,
+modulo 'Maybe'-wrapping on either side (the runtime join matches a nullable
+key column against a plain one). Use together with 'AssertAllPresent', which
+reports keys missing from either schema; absent keys are skipped here so the
+error fires exactly once.
+-}
+type family
+    AssertKeyTypesMatch (keys :: [Symbol]) (left :: [Type]) (right :: [Type]) ::
+        Constraint
+    where
+    AssertKeyTypesMatch '[] left right = ()
+    AssertKeyTypesMatch (k ': ks) left right =
+        ( KeyTypeMatchHelper k (SafeLookup k left) (SafeLookup k right)
+        , AssertKeyTypesMatch ks left right
+        )
+
+type family
+    KeyTypeMatchHelper (k :: Symbol) (l :: Type) (r :: Type) ::
+        Constraint
+    where
+    KeyTypeMatchHelper k a a = ()
+    KeyTypeMatchHelper k (Maybe a) a = ()
+    KeyTypeMatchHelper k a (Maybe a) = ()
+    KeyTypeMatchHelper k l r =
+        TypeError
+            ( 'Text "Join key '"
+                ':<>: 'Text k
+                ':<>: 'Text "' has type "
+                ':<>: 'ShowType l
+                ':<>: 'Text " in the left table but "
+                ':<>: 'ShowType r
+                ':<>: 'Text " in the right table"
+            )
 
 {- | Strip 'Maybe' from all columns. Used by 'filterAllJust'.
 

@@ -1,6 +1,6 @@
 cabal-version:      2.4
 name:               dataframe-csv-th
-version:            1.0.1.0
+version:            1.0.1.1
 
 synopsis:           CSV-file-based Template Haskell splices for the dataframe ecosystem.
 description:
@@ -31,7 +31,7 @@ library
                         DataFrame.TH.CSV
                         DataFrame.Typed.TH.CSV
     build-depends:      base >= 4 && < 5,
-                        dataframe-csv ^>= 1.0,
+                        dataframe-csv ^>= 1.0.2,
                         dataframe-th ^>= 1.0,
                         template-haskell >= 2.0 && < 3
     hs-source-dirs:     src
