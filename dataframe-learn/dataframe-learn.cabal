@@ -82,7 +82,7 @@ library
                         random >= 1.2 && < 2,
                         dataframe-core ^>= 1.1,
                         dataframe-operations ^>= 1.1.1,
-                        text >= 2.0 && < 3,
+                        text >= 2.1 && < 3,
                         vector ^>= 0.13,
                         vector-algorithms ^>= 0.9
     hs-source-dirs:     src

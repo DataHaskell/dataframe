@@ -58,7 +58,7 @@ library
                         dataframe-parsing ^>= 1.0.2,
                         random >= 1.2 && < 2,
                         regex-tdfa >= 1.3.0 && < 2,
-                        text >= 2.0 && < 3,
+                        text >= 2.1 && < 3,
                         time >= 1.12 && < 2,
                         vector ^>= 0.13,
                         vector-algorithms ^>= 0.9

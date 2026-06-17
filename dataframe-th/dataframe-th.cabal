@@ -37,7 +37,7 @@ library
                         dataframe-operations ^>= 1.1.1,
                         dataframe-parsing ^>= 1.0.2,
                         template-haskell >= 2.0 && < 3,
-                        text >= 2.0 && < 3,
+                        text >= 2.1 && < 3,
                         vector ^>= 0.13
     hs-source-dirs:     src
     default-language:   Haskell2010
