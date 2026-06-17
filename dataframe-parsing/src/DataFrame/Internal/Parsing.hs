@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
@@ -68,10 +69,28 @@ readInt s = case signed decimal (T.strip s) of
 {-# INLINE readInt #-}
 
 readByteStringInt :: (HasCallStack) => C.ByteString -> Maybe Int
+#if MIN_VERSION_bytestring(0,12,0)
+-- bytestring >= 0.12: 'C.readInt' returns 'Nothing' on overflow.
 readByteStringInt s = case C.readInt (C.strip s) of
-    Nothing -> Nothing
     Just (value, "") -> Just value
-    Just (_value, _) -> Nothing
+    _ -> Nothing
+#else
+-- bytestring < 0.12: 'C.readInt' silently wraps on overflow. Fields of
+-- <= 18 characters fit in an 'Int' and keep the fast path; longer ones fall
+-- back to arbitrary-precision 'C.readInteger' with a range check.
+readByteStringInt s
+    | C.length t <= 18 = case C.readInt t of
+        Just (value, "") -> Just value
+        _ -> Nothing
+    | otherwise = case C.readInteger t of
+        Just (value, "")
+            | value >= toInteger (minBound :: Int)
+            , value <= toInteger (maxBound :: Int) ->
+                Just (fromInteger value)
+        _ -> Nothing
+  where
+    t = C.strip s
+#endif
 {-# INLINE readByteStringInt #-}
 
 readByteStringDouble :: (HasCallStack) => C.ByteString -> Maybe Double
