@@ -1,4 +1,5 @@
 {-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 {- |
 Stable rank of a set of group representatives by the ascending unsigned order of
@@ -36,7 +37,7 @@ sortKey h = fromIntegral (fromIntegral h + 0x8000000000000000 :: Word64)
 
 -- | See the module header. @readHash@ supplies the hash of local group @gid@.
 rankByHash ::
-    (PrimMonad m) => (Int -> m Int) -> Int -> m (VU.Vector Int)
+    forall m. (PrimMonad m) => (Int -> m Int) -> Int -> m (VU.Vector Int)
 rankByHash readHash ng = do
     rankM <- VUM.new (max 1 ng)
     if ng <= 1
@@ -55,7 +56,14 @@ rankByHash readHash ng = do
             keysB <- VUM.new ng
             orderB <- VUM.new ng
             counts <- VUM.new 256
-            let pass !shiftBits !srcK !srcO !dstK !dstO = do
+            let pass ::
+                    Int ->
+                    VUM.MVector (VUM.PrimState m) Int ->
+                    VUM.MVector (VUM.PrimState m) Int ->
+                    VUM.MVector (VUM.PrimState m) Int ->
+                    VUM.MVector (VUM.PrimState m) Int ->
+                    m ()
+                pass !shiftBits !srcK !srcO !dstK !dstO = do
                     VUM.set counts 0
                     let count !i
                             | i >= ng = pure ()
