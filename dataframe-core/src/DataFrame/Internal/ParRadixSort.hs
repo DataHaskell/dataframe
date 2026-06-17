@@ -120,7 +120,14 @@ radixPasses ::
     IO ()
 radixPasses n keysA orderA keysB orderB = do
     counts <- VUM.new 256
-    let pass !shiftBits !srcK !srcO !dstK !dstO = do
+    let pass ::
+            Int ->
+            VUM.IOVector Int ->
+            VUM.IOVector Int ->
+            VUM.IOVector Int ->
+            VUM.IOVector Int ->
+            IO ()
+        pass !shiftBits !srcK !srcO !dstK !dstO = do
             VUM.set counts 0
             let count !i
                     | i >= n = pure ()
