@@ -30,6 +30,10 @@ import qualified DataFrame.Display.Web.Chart as C
 import qualified DataFrame.Display.Web.Chart.Typed as CT
 import qualified DataFrame.Display.Web.Plot as P
 
+-- Unqualified so the record update below has a single 'includeZero' field
+-- label in scope; GHC < 9.8 can't disambiguate the qualified duplicate field.
+import DataFrame.Display.Web.Plot (Scatter (includeZero))
+
 -- ---------------------------------------------------------------------------
 -- Fixtures + JSON helpers
 -- ---------------------------------------------------------------------------
@@ -180,7 +184,7 @@ scatterFitsAxesByDefault = TestCase $ do
     assertBool
         "scatter axes fit the data by default"
         ("\"zero\":false" `L.isInfixOf` html)
-    anchored <- P.scatter ((P.mkScatter "a" "b"){P.includeZero = True}) numFrame
+    anchored <- P.scatter ((P.mkScatter "a" "b"){includeZero = True}) numFrame
     assertBool
         "includeZero = True anchors the axes at zero explicitly"
         ("\"zero\":true" `L.isInfixOf` anchored)
