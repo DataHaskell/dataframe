@@ -63,12 +63,19 @@ showTable ::
     T.Text
 showTable fmt header types columns =
     let isMarkdown = fmt == Markdown
+        -- In a GitHub pipe table a literal '|' ends the cell and a newline ends
+        -- the row, so a value like the operator name <|> would split the row into
+        -- the wrong columns. Escape both for the Markdown format only.
+        esc = if isMarkdown then escapeMarkdownCell else id
+        hdr = map esc header
+        tys = map esc types
+        cols = map (V.map esc) columns
         consolidatedHeader =
             if isMarkdown
-                then zipWith (\h t -> h <> "<br>" <> t) header types
-                else header
+                then zipWith (\h t -> h <> "<br>" <> t) hdr tys
+                else hdr
         cs = map (\h -> ColDesc center h left) consolidatedHeader
-        nRows = case columns of
+        nRows = case cols of
             (c : _) -> V.length c
             [] -> 0
         columnMaxWidth col
@@ -78,14 +85,14 @@ showTable fmt header types columns =
             zipWith3
                 (\h t col -> T.length h `max` T.length t `max` columnMaxWidth col)
                 consolidatedHeader
-                types
-                columns
+                tys
+                cols
         dashesOf w = T.replicate w "-"
         border = T.intercalate "---" (map dashesOf widths)
         separator = T.intercalate "-|-" (map dashesOf widths)
         fillCells fill cells =
             T.intercalate " | " (zipWith3 fill cs widths cells)
-        rowCells i = map (V.! i) columns
+        rowCells i = map (V.! i) cols
         rowLines = [fillCells colValueFill (rowCells i) | i <- [0 .. nRows - 1]]
         wrapMd t = T.concat ["| ", t, " |"]
         outputLines =
@@ -98,7 +105,14 @@ showTable fmt header types columns =
                     border
                         : fillCells colTitleFill consolidatedHeader
                         : separator
-                        : fillCells colTitleFill types
+                        : fillCells colTitleFill tys
                         : separator
                         : rowLines
      in T.unlines outputLines
+
+{- | Escape a value for a GitHub-flavoured Markdown table cell: a bare @|@ would
+end the cell and a newline would end the row, so both are neutralised (the pipe
+backslash-escaped, the newline turned into a @\<br\>@).
+-}
+escapeMarkdownCell :: T.Text -> T.Text
+escapeMarkdownCell = T.replace "\n" "<br>" . T.replace "|" "\\|"
