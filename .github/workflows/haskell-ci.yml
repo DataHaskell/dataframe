@@ -45,7 +45,7 @@ jobs:
       - name: Run HLint
         uses: haskell-actions/hlint-run@v2
         with:
-          path: '["src/", "app/", "benchmark/", "examples/", "ffi/", "dataframe-arrow/", "dataframe-core/", "dataframe-csv/", "dataframe-csv-th/", "dataframe-fastcsv/", "dataframe-fusion/", "dataframe-hasktorch/", "dataframe-json/", "dataframe-lazy/", "dataframe-learn/", "dataframe-operations/", "dataframe-parquet/", "dataframe-parquet-th/", "dataframe-parsing/", "dataframe-persistent/", "dataframe-th/", "dataframe-viz/"]'
+          path: '["src/", "app/", "benchmark/", "examples/", "ffi/", "dataframe-arrow/", "dataframe-core/", "dataframe-csv/", "dataframe-csv-th/", "dataframe-fastcsv/", "dataframe-fusion/", "dataframe-hasktorch/", "dataframe-huggingface/", "dataframe-json/", "dataframe-lazy/", "dataframe-learn/", "dataframe-operations/", "dataframe-parquet/", "dataframe-parquet-th/", "dataframe-parsing/", "dataframe-persistent/", "dataframe-th/", "dataframe-viz/"]'
           fail-on: warning
   linux:
     name: Haskell-CI - Linux - ${{ matrix.compiler }}
@@ -193,6 +193,7 @@ jobs:
           echo "packages: $GITHUB_WORKSPACE/source/dataframe-learn" >> cabal.project
           echo "packages: $GITHUB_WORKSPACE/source/dataframe-lazy" >> cabal.project
           echo "packages: $GITHUB_WORKSPACE/source/dataframe-fastcsv" >> cabal.project
+          echo "packages: $GITHUB_WORKSPACE/source/dataframe-huggingface" >> cabal.project
           cat cabal.project
       - name: sdist
         run: |
@@ -232,6 +233,8 @@ jobs:
           echo "PKGDIR_lazy=${PKGDIR_lazy}" >> "$GITHUB_ENV"
           PKGDIR_fastcsv="$(find "$GITHUB_WORKSPACE/unpacked" -maxdepth 1 -type d -regex '.*/dataframe-fastcsv-[0-9.]*')"
           echo "PKGDIR_fastcsv=${PKGDIR_fastcsv}" >> "$GITHUB_ENV"
+          PKGDIR_huggingface="$(find "$GITHUB_WORKSPACE/unpacked" -maxdepth 1 -type d -regex '.*/dataframe-huggingface-[0-9.]*')"
+          echo "PKGDIR_huggingface=${PKGDIR_huggingface}" >> "$GITHUB_ENV"
           rm -f cabal.project cabal.project.local
           touch cabal.project
           touch cabal.project.local
@@ -249,6 +252,7 @@ jobs:
           echo "packages: ${PKGDIR_learn}" >> cabal.project
           echo "packages: ${PKGDIR_lazy}" >> cabal.project
           echo "packages: ${PKGDIR_fastcsv}" >> cabal.project
+          echo "packages: ${PKGDIR_huggingface}" >> cabal.project
           echo "package dataframe" >> cabal.project
           echo "    ghc-options: -Werror=missing-methods -Werror=missing-fields" >> cabal.project
           echo "package dataframe" >> cabal.project

@@ -16,6 +16,7 @@ import qualified IO.CsvGolden
 import qualified IO.JSON
 import qualified Internal.ColumnBuilder
 import qualified Internal.DictEncode
+import qualified Internal.Markdown
 import qualified Internal.PackedText
 import qualified Internal.Parsing
 import qualified LazyParity
@@ -76,6 +77,7 @@ tests =
         DecisionTree.tests
             ++ Internal.ColumnBuilder.tests
             ++ Internal.DictEncode.tests
+            ++ Internal.Markdown.tests
             ++ Internal.PackedText.tests
             ++ Internal.Parsing.tests
             ++ Learn.Numerics.tests

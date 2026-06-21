@@ -1,15 +1,16 @@
 cabal-version:      2.4
 name:               dataframe-parquet
-version:            1.0.1.2
+version:            1.1.0.0
 
 synopsis:           Parquet reader and writer for the dataframe ecosystem.
 description:
     @DataFrame.IO.Parquet@ — pure-Haskell Parquet 2.0 reader and writer
     (with snappy, zstd, gzip codecs, dictionary decoding, nested
-    list/repeated columns, predicate pushdown, and HTTP range reads).
-    Heavy package — pulls in @pinch@, @streamly@, compression codecs,
-    and @http-conduit@. Most users want @dataframe-csv@ instead unless
-    they specifically need Parquet.
+    list/repeated columns, and predicate pushdown).
+    Heavy package — pulls in @pinch@, @streamly@, and compression codecs.
+    Reading directly from HuggingFace (@hf://@) datasets lives in the
+    separate @dataframe-huggingface@ package. Most users want
+    @dataframe-csv@ instead unless they specifically need Parquet.
 
 bug-reports:        https://github.com/mchav/dataframe/issues
 license:            MIT
@@ -45,7 +46,6 @@ library
                         DataFrame.IO.Parquet.Utils
                         DataFrame.IO.Utils.RandomAccess
     build-depends:      base >= 4 && < 5,
-                        aeson >= 0.11.0.0 && < 3,
                         bytestring >= 0.11 && < 0.13,
                         containers >= 0.6.7 && < 0.9,
                         dataframe-core ^>= 1.1,
@@ -54,7 +54,6 @@ library
                         directory >= 1.3.0.0 && < 2,
                         filepath >= 1.4 && < 2,
                         Glob >= 0.10 && < 1,
-                        http-conduit >= 2.3 && < 3,
                         pinch >= 0.5 && < 1,
                         snappy-hs ^>= 0.1,
                         streamly-bytestring >= 0.2.0 && < 0.4,

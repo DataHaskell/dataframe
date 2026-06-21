@@ -1,5 +1,19 @@
 # Revision history for dataframe
 
+## 2.3.0.0
+
+### Breaking changes
+* HuggingFace (`hf://`) Parquet reading moved out of `dataframe-parquet` and
+  `dataframe-lazy` into a new dedicated `dataframe-huggingface` package, so the
+  heavy `aeson` and `http-conduit` dependencies are no longer pulled in by the
+  Parquet/lazy stack (or by this meta-package). `D.readParquet "hf://..."` no
+  longer fetches; depend on `dataframe-huggingface` and use
+  `DataFrame.IO.HuggingFace.readParquet` (eager) or `scanParquet` (lazy,
+  download-then-scan) instead.
+* Coordinated major bumps: `dataframe-parquet` and `dataframe-lazy` →
+  `1.1.0.0`, with inter-package lower bounds raised to `^>= 1.1`; umbrella
+  `dataframe` → `2.3.0.0`.
+
 ## 2.2.0.0
 
 A large performance and ML release.

@@ -6,6 +6,7 @@ packages:
     dataframe-csv
     dataframe-json
     dataframe-parquet
+    dataframe-huggingface
     dataframe-th
     dataframe-csv-th
     dataframe-parquet-th

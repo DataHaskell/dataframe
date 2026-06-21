@@ -122,8 +122,9 @@ Reading from files works the same way:
 fileDf <- D.readCsv "./data/housing.csv"
 fileDf <- D.readParquet "./data/mtcars.parquet"
 
--- Hugging Face datasets (needs network access):
--- fileDf <- D.readParquet "hf://datasets/scikit-learn/iris/default/train/0000.parquet"
+-- Hugging Face datasets (needs network access, via the dataframe-huggingface package):
+-- import qualified DataFrame.IO.HuggingFace as HF
+-- fileDf <- HF.readParquet "hf://datasets/scikit-learn/iris/default/train/0000.parquet"
 
 D.dimensions fileDf
 ```
@@ -498,7 +499,7 @@ DT.thaw (DT.filterAllJust stdf |> DT.derive @"scaled" (DT.col @"score" * DT.lit 
 
 ## Features
 
-**I/O**: CSV, TSV, Parquet (Snappy, ZSTD, Gzip), JSON. Read Parquet from HTTP URLs and Hugging Face datasets (`hf://` URIs). Column projection and predicate pushdown for Parquet reads.
+**I/O**: CSV, TSV, Parquet (Snappy, ZSTD, Gzip), JSON. Read Parquet from Hugging Face datasets (`hf://` URIs) via the `dataframe-huggingface` package. Column projection and predicate pushdown for Parquet reads.
 
 **Operations**: filter, select, derive, groupBy, aggregate, joins (inner, left, right, full outer), sort, sample, stratified sample, distinct, k-fold splits.
 

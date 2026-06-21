@@ -1,6 +1,6 @@
 cabal-version:      3.0
 name:               dataframe
-version:            2.2.0.1
+version:            2.3.0.0
 synopsis: A fast, safe, and intuitive DataFrame library.
 
 description: A fast, safe, and intuitive DataFrame library for exploratory data analysis.
@@ -54,8 +54,10 @@ flag no-parquet
     default:     False
     manual:      True
     description: Exclude the Parquet reader/writer (@dataframe-parquet@
-                 plus pinch, zstd, snappy, streamly, http-conduit).
-                 Enable with @-f +no-parquet@.
+                 plus pinch, zstd, snappy, streamly). Enable with
+                 @-f +no-parquet@. (Reading Parquet from HuggingFace lives
+                 in the separate @dataframe-huggingface@ package, which is
+                 not a dependency of this meta-package.)
 
 flag no-th
     default:     False
@@ -147,7 +149,7 @@ library
                             DataFrame.IO.Parquet.Seeking,
                             DataFrame.IO.Parquet.Time,
                             DataFrame.IO.Utils.RandomAccess
-        build-depends:   dataframe-parquet ^>= 1.0.1.1
+        build-depends:   dataframe-parquet ^>= 1.1
         cpp-options:     -DWITH_PARQUET
 
     -- The lazy executor calls both CSV and Parquet readers directly, so
@@ -162,7 +164,7 @@ library
                             DataFrame.Lazy.Internal.Optimizer,
                             DataFrame.Lazy.Internal.Executor,
                             DataFrame.Typed.Lazy
-        build-depends:   dataframe-lazy ^>= 1.0.2
+        build-depends:   dataframe-lazy ^>= 1.1
         cpp-options:     -DWITH_LAZY
 
     if !flag(no-th)
@@ -198,9 +200,9 @@ library arrow-bridge
         dataframe-core ^>= 1.1,
         dataframe-csv ^>= 1.0.2,
         dataframe-json ^>= 1.0,
-        dataframe-lazy ^>= 1.0.2,
+        dataframe-lazy ^>= 1.1,
         dataframe-operations >= 1.1.1 && < 1.2,
-        dataframe-parquet ^>= 1.0.1.1,
+        dataframe-parquet ^>= 1.1,
         dataframe-parsing ^>= 1.0.2,
         text        >= 2.1 && < 3,
         aeson       >= 0.11 && < 3,
@@ -263,7 +265,7 @@ executable lazy-bench
                       containers >= 0.6.7 && < 0.9,
                       dataframe >= 1 && < 3,
                       dataframe-core ^>= 1.1,
-                      dataframe-lazy ^>= 1.0.2,
+                      dataframe-lazy ^>= 1.1,
                       dataframe-parsing ^>= 1.0.2,
                       directory >= 1.3.0.0 && < 2,
                       random >= 1 && < 2,
@@ -308,6 +310,7 @@ test-suite tests
                    GenDataFrame,
                    Internal.ColumnBuilder,
                    Internal.DictEncode,
+                   Internal.Markdown,
                    Internal.PackedText,
                    Internal.Parsing,
                    PackedTextMigration,
@@ -372,10 +375,10 @@ test-suite tests
                     dataframe-core ^>= 1.1,
                     dataframe-csv ^>= 1.0.2,
                     dataframe-json ^>= 1.0,
-                    dataframe-lazy ^>= 1.0.2,
+                    dataframe-lazy ^>= 1.1,
                     dataframe-learn ^>= 1.1,
                     dataframe-operations >= 1.1.1 && < 1.2,
-                    dataframe-parquet ^>= 1.0,
+                    dataframe-parquet ^>= 1.1,
                     dataframe-parsing ^>= 1.0.2,
                     HUnit ^>= 1.6,
                     QuickCheck >= 2 && < 3,
