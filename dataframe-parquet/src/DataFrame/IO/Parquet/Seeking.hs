@@ -1,6 +1,4 @@
-{- | This module contains low-level utilities around file seeking
-
-potentially also contains all Streamly related low-level utilities.
+{- | This module contains low-level utilities around file seeking.
 
 later this module can be renamed / moved to an internal module.
 -}
@@ -9,28 +7,19 @@ module DataFrame.IO.Parquet.Seeking (
     SeekMode (..),
     FileBufferedOrSeekable (..),
     ForceNonSeekable,
-    advanceBytes,
     mkFileBufferedOrSeekable,
     mkSeekableHandle,
     readLastBytes,
-    seekAndReadBytes,
-    seekAndStreamBytes,
     withFileBufferedOrSeekable,
     fSeek,
     fGet,
 ) where
 
 import Control.Monad
-import Control.Monad.IO.Class
 import qualified Data.ByteString as BS
 import Data.ByteString.Unsafe (unsafeDrop, unsafeTake)
 import Data.IORef
 import Data.Int
-import Data.Word
-import Streamly.Data.Stream (Stream)
-import qualified Streamly.Data.Stream as S
-import qualified Streamly.External.ByteString as SBS
-import qualified Streamly.FileSystem.Handle as SHandle
 import System.IO
 
 {- | This handle carries a proof that it must be seekable.
@@ -94,40 +83,19 @@ withFileBufferedOrSeekable forceNonSeek path ioMode action = withFile path ioMod
     fbos <- mkFileBufferedOrSeekable forceNonSeek h
     action fbos
 
--- | Read from the end, useful for reading metadata without loading entire file
+{- | Read the last @n@ bytes, useful for reading metadata without loading the
+entire file. Uses 'BS.hGet' (not @hGetContents@) so the handle stays open for
+the subsequent column-chunk reads.
+-}
 readLastBytes :: Integer -> FileBufferedOrSeekable -> IO BS.ByteString
 readLastBytes n (FileSeekable sh) = do
     let h = getSeekableHandle sh
     hSeek h SeekFromEnd (negate n)
-    S.fold SBS.write (SHandle.read h)
+    BS.hGet h (fromIntegral n)
 readLastBytes n (FileBuffered i bs) = do
     writeIORef i (fromIntegral $ BS.length bs)
     when (n > fromIntegral (BS.length bs)) $ error "lastBytes: n > length bs"
     pure $ BS.drop (BS.length bs - fromIntegral n) bs
-
--- | Note: this does not guarantee n bytes (if it ends early)
-advanceBytes :: Int -> FileBufferedOrSeekable -> IO BS.ByteString
-advanceBytes = seekAndReadBytes Nothing
-
--- | Note: this does not guarantee n bytes (if it ends early)
-seekAndReadBytes ::
-    Maybe (SeekMode, Integer) -> Int -> FileBufferedOrSeekable -> IO BS.ByteString
-seekAndReadBytes mSeek len f = seekAndStreamBytes mSeek len f >>= S.fold SBS.write
-
-{- | Warning: the stream produced from this function accesses to the mutable handler.
-if multiple streams are pulled from the same handler at the same time, chaos happen.
-Make sure there is only one stream running at one time for each SeekableHandle,
-and streams are not read again when they are not used anymore.
--}
-seekAndStreamBytes ::
-    (MonadIO m) =>
-    Maybe (SeekMode, Integer) -> Int -> FileBufferedOrSeekable -> m (Stream m Word8)
-seekAndStreamBytes mSeek len f = do
-    liftIO $
-        case mSeek of
-            Nothing -> pure ()
-            Just (seekMode, seekTo) -> fSeek f seekMode seekTo
-    pure $ S.take len $ fRead f
 
 fSeek :: FileBufferedOrSeekable -> SeekMode -> Integer -> IO ()
 fSeek (FileSeekable (SeekableHandle h)) seekMode seekTo = hSeek h seekMode seekTo
@@ -145,15 +113,3 @@ fGet (FileBuffered iRef bs) n
             then if i <= BS.length bs then pure $ unsafeDrop i bs else pure BS.empty
             else pure . unsafeTake n . unsafeDrop i $ bs
     | otherwise = error "Can't read a negative number of bytes"
-
-fRead :: (MonadIO m) => FileBufferedOrSeekable -> Stream m Word8
-fRead (FileSeekable (SeekableHandle h)) = SHandle.read h
-fRead (FileBuffered i bs) = S.concatEffect $ do
-    pos <- liftIO $ readIORef i
-    pure $
-        S.mapM
-            ( \x -> do
-                liftIO (modifyIORef' i (+ 1))
-                pure x
-            )
-            (S.unfold SBS.reader (BS.drop (fromIntegral pos) bs))

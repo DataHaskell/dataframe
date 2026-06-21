@@ -1,3 +1,4 @@
+{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
@@ -15,7 +16,7 @@ module DataFrame.IO.Parquet.Page (
     byteArrayDecoder,
     fixedLenByteArrayDecoder,
     -- Page iteration
-    readPages,
+    foldColumnPagesM,
 ) where
 
 import Control.Monad.IO.Class (MonadIO (liftIO))
@@ -60,7 +61,6 @@ import DataFrame.Internal.Binary (
 import GHC.Float (castWord32ToFloat, castWord64ToDouble)
 import Pinch (decodeWithLeftovers)
 import qualified Pinch
-import Streamly.Internal.Data.Unfold (Step (..), Unfold, mkUnfoldM)
 
 -- ---------------------------------------------------------------------------
 -- Types
@@ -208,49 +208,51 @@ readChunkBytes columnChunk = do
     rawBytes <- readBytes (Range offset compLen)
     return (codec, pType, rawBytes)
 
-{- | An 'Unfold' from a 'ColumnChunk' to per-page value triples.
+{- | Left-fold a monadic step over every DATA page (V1 or V2) of every column
+chunk, in order, threading the running dictionary internally.
 
-The seed is a 'ColumnChunk'.  The inject step reads the chunk's compressed
-bytes and discovers the codec and physical type from the column metadata.
-Codec and type are then threaded through the unfold state along with the
-running dictionary and remaining bytes, so no intermediate list or
-concatenation step is needed.  Use with 'Stream.unfoldEach' to produce a
-flat stream of per-page results directly from a stream of column chunks.
+Replaces the old Streamly @readPages@ 'Unfold' + @unfoldEach@/@fold@ pipeline
+with a direct monadic fold: pages are decoded and handed to @step@ one at a
+time, so only a single page's decoded values are live at once (the
+@unsafeFreeze@-into-preallocated-buffer consumers rely on this — a materialised
+page list would roughly double peak memory per column).
 
-Dictionary pages are consumed silently and update the running dictionary
-that is threaded through the unfold state.
-
-The internal state is
-@(Maybe DictVals, BS.ByteString, CompressionCodec, ThriftType)@.
+Dictionary pages are consumed silently and update the running dictionary that
+is threaded through the recursion. @INDEX_PAGE@s are skipped.
 
 -- TODO: when a page index is available, use it here to compute which page
 -- byte ranges to request from the RandomAccess layer instead of reading the
 -- entire column chunk in one contiguous read.
 
 -- TODO: accept an optional row-range and use the column/offset page index
--- (when present in file metadata) to Skip pages whose row range does not
+-- (when present in file metadata) to skip pages whose row range does not
 -- overlap the requested range, avoiding decompression of irrelevant pages
 -- entirely.
 -}
-readPages ::
+foldColumnPagesM ::
+    forall m v a acc.
     (RandomAccess m, MonadIO m, VG.Vector v a) =>
     ColumnDescription ->
     (Maybe DictVals -> Encoding -> Int -> BS.ByteString -> v a) ->
-    Unfold m ColumnChunk (v a, VU.Vector Int, VU.Vector Int)
-readPages description decoder = mkUnfoldM step inject
+    [ColumnChunk] ->
+    (acc -> (v a, VU.Vector Int, VU.Vector Int) -> m acc) ->
+    acc ->
+    m acc
+foldColumnPagesM description decoder chunks step = goChunks chunks
   where
     maxDef = fromIntegral description.maxDefinitionLevel :: Int
     maxRep = fromIntegral description.maxRepetitionLevel :: Int
 
-    -- Inject: read chunk bytes; put codec and pType into state.
-    inject cc = do
+    goChunks [] !acc = return acc
+    goChunks (cc : ccs) !acc = do
         (codec, pType, rawBytes) <- readChunkBytes cc
-        return (Nothing, rawBytes, codec, pType)
+        acc' <- goPages Nothing codec pType rawBytes acc
+        goChunks ccs acc'
 
-    step (dict, bs, codec, pType)
-        | BS.null bs = return Stop
+    goPages dict codec pType bs !acc
+        | BS.null bs = return acc
         | otherwise = case parsePageHeader bs of
-            Left e -> error ("readPages: failed to parse page header: " ++ e)
+            Left e -> error ("foldColumnPagesM: failed to parse page header: " ++ e)
             Right (rest, hdr) -> do
                 let compSz = fromIntegral . unField $ hdr.ph_compressed_page_size
                     uncmpSz = fromIntegral . unField $ hdr.ph_uncompressed_page_size
@@ -264,7 +266,7 @@ readPages description decoder = mkUnfoldM step inject
                             numVals = unField dictHdr.diph_num_values
                         decompressed <- liftIO $ decompressData uncmpSz codec pageData
                         let d = readDictVals pType decompressed numVals description.typeLength
-                        return $ Skip (Just d, rest', codec, pType)
+                        goPages (Just d) codec pType rest' acc
                     DATA_PAGE _ -> do
                         let dph =
                                 fromMaybe
@@ -276,7 +278,8 @@ readPages description decoder = mkUnfoldM step inject
                         let (defLvls, repLvls, nPresent, valBytes) =
                                 readLevelsV1 n maxDef maxRep decompressed
                             triple = (decoder dict enc nPresent valBytes, defLvls, repLvls)
-                        return $ Yield triple (dict, rest', codec, pType)
+                        acc' <- step acc triple
+                        goPages dict codec pType rest' acc'
                     DATA_PAGE_V2 _ -> do
                         let dph2 =
                                 fromMaybe
@@ -296,8 +299,9 @@ readPages description decoder = mkUnfoldM step inject
                                 then liftIO $ decompressData uncmpSz codec compValBytes
                                 else pure compValBytes
                         let triple = (decoder dict enc nPresent valBytes, defLvls, repLvls)
-                        return $ Yield triple (dict, rest', codec, pType)
-                    INDEX_PAGE _ -> return $ Skip (dict, rest', codec, pType)
+                        acc' <- step acc triple
+                        goPages dict codec pType rest' acc'
+                    INDEX_PAGE _ -> goPages dict codec pType rest' acc
 
 -- ---------------------------------------------------------------------------
 -- Page header parsing

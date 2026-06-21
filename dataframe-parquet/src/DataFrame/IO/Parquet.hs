@@ -41,7 +41,7 @@ import DataFrame.IO.Parquet.Page (
     int32Decoder,
     int64Decoder,
     int96Decoder,
-    readPages,
+    foldColumnPagesM,
  )
 import DataFrame.IO.Parquet.Seeking (
     FileBufferedOrSeekable,
@@ -81,7 +81,6 @@ import DataFrame.Internal.Expression (Expr, getColumns)
 import DataFrame.Operations.Merge ()
 import qualified DataFrame.Operations.Subset as DS
 import qualified Pinch
-import qualified Streamly.Data.Stream as Stream
 import System.Directory (doesDirectoryExist)
 import System.FilePath ((</>))
 import System.FilePath.Glob (glob)
@@ -231,11 +230,6 @@ parseParquetWithOpts opts = do
             Nothing -> Nothing
             Just selected -> Just (L.nub (selected ++ predicateColumns))
 
-    -- TODO: When selectedColumnsForRead is Just, pass the set of required
-    -- column indices into the chunk parsers so that RandomAccess reads are
-    -- skipped for columns not in the selection, rather than decoding all
-    -- columns and projecting afterward.
-
     -- TODO: When rowRange is set, compute cumulative row offsets from
     -- rg_num_rows in each RowGroup and skip any group whose row interval does
     -- not overlap the requested range, avoiding all decoding for those groups.
@@ -278,10 +272,22 @@ parseParquetWithOpts opts = do
                 Int
         vectorLength = if topLevelRows > 0 then topLevelRows else rgRows
 
-    rawCols <- zipWithM (parseColumnChunks vectorLength) chunks descriptions
+    -- Column-projection pushdown: decode only the columns needed for the
+    -- requested output plus any predicate, instead of decoding every column
+    -- and dropping the unwanted ones afterward. A 'Nothing' selection keeps
+    -- all columns, so full reads are unchanged.
+    let keep name = case selectedColumnsForRead of
+            Nothing -> True
+            Just req -> last (T.splitOn "." name) `elem` req
+        kept = filter (\(n, _, _) -> keep n) (zip3 allNames chunks descriptions)
+        keptNames = [n | (n, _, _) <- kept]
+        keptChunks = [c | (_, c, _) <- kept]
+        keptDescs = [d | (_, _, d) <- kept]
 
-    let finalCols = zipWith applyDescLogicalType descriptions rawCols
-        indices = Map.fromList $ zip allNames [0 ..]
+    rawCols <- zipWithM (parseColumnChunks vectorLength) keptChunks keptDescs
+
+    let finalCols = zipWith applyDescLogicalType keptDescs rawCols
+        indices = Map.fromList $ zip keptNames [0 ..]
         dimensions = (vectorLength, length finalCols)
 
     let df =
@@ -374,9 +380,7 @@ getNonNullableColumn totalRows description chunks =
         PageDecoder a ->
         m Column
     go decoder =
-        foldNonNullable totalRows $
-            (\(vs, _, _) -> vs)
-                <$> Stream.unfoldEach (readPages description decoder) (Stream.fromList chunks)
+        foldNonNullable totalRows (foldColumnPagesM description decoder chunks)
 
     unboxedGo ::
         forall a.
@@ -384,11 +388,7 @@ getNonNullableColumn totalRows description chunks =
         UnboxedPageDecoder a ->
         m Column
     unboxedGo decoder =
-        foldNonNullableUnboxed totalRows $
-            (\(vs, _, _) -> vs)
-                <$> Stream.unfoldEach
-                    (readPages description decoder)
-                    (Stream.fromList chunks)
+        foldNonNullableUnboxed totalRows (foldColumnPagesM description decoder chunks)
 
 -- | Decode an optional (nullable) column.
 getNullableColumn ::
@@ -421,20 +421,14 @@ getNullableColumn totalRows description chunks =
         PageDecoder a ->
         m Column
     go decoder =
-        foldNullable maxDef totalRows $
-            (\(vs, ds, _) -> (vs, ds))
-                <$> Stream.unfoldEach (readPages description decoder) (Stream.fromList chunks)
+        foldNullable maxDef totalRows (foldColumnPagesM description decoder chunks)
     unboxedGo ::
         forall a.
         (Columnable a, VU.Unbox a) =>
         UnboxedPageDecoder a ->
         m Column
     unboxedGo decoder =
-        foldNullableUnboxed maxDef totalRows $
-            (\(vs, ds, _) -> (vs, ds))
-                <$> Stream.unfoldEach
-                    (readPages description decoder)
-                    (Stream.fromList chunks)
+        foldNullableUnboxed maxDef totalRows (foldColumnPagesM description decoder chunks)
 
 -- | Decode a repeated (list/nested) column.
 getRepeatedColumn ::
@@ -472,8 +466,7 @@ getRepeatedColumn description chunks =
         PageDecoder a ->
         m Column
     go decoder =
-        foldRepeated maxRep maxDef $
-            Stream.unfoldEach (readPages description decoder) (Stream.fromList chunks)
+        foldRepeated maxRep maxDef (foldColumnPagesM description decoder chunks)
 
     unboxedGo ::
         forall a.
@@ -486,10 +479,7 @@ getRepeatedColumn description chunks =
         UnboxedPageDecoder a ->
         m Column
     unboxedGo decoder =
-        foldRepeatedUnboxed maxRep maxDef $
-            Stream.unfoldEach
-                (readPages description decoder)
-                (Stream.fromList chunks)
+        foldRepeatedUnboxed maxRep maxDef (foldColumnPagesM description decoder chunks)
 
 -- Options application -----------------------------------------------------
 

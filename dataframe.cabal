@@ -54,7 +54,7 @@ flag no-parquet
     default:     False
     manual:      True
     description: Exclude the Parquet reader/writer (@dataframe-parquet@
-                 plus pinch, zstd, snappy, streamly). Enable with
+                 plus pinch, zstd, snappy). Enable with
                  @-f +no-parquet@. (Reading Parquet from HuggingFace lives
                  in the separate @dataframe-huggingface@ package, which is
                  not a dependency of this meta-package.)

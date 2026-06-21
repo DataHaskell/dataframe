@@ -3,6 +3,7 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
 module DataFrame.IO.Parquet.Utils (
@@ -40,16 +41,21 @@ import DataFrame.IO.Parquet.Thrift (
     ThriftType,
     unField,
  )
-import DataFrame.IO.Utils.RandomAccess (RandomAccess)
 import DataFrame.Internal.Column (
     Column (..),
     Columnable,
     buildBitmapFromValid,
     fromList,
  )
-import qualified Streamly.Data.Fold as Fold
-import Streamly.Data.Stream (Stream)
-import qualified Streamly.Data.Stream as Stream
+
+{- | A left-fold driver over a column's per-page triples
+@(values, def-levels, rep-levels)@, as produced by
+'DataFrame.IO.Parquet.Page.foldColumnPagesM'. Generic in the accumulator so a
+single driver serves every fold strategy below.
+-}
+type PageFold m v a =
+    forall acc.
+    (acc -> (v a, VU.Vector Int, VU.Vector Int) -> m acc) -> acc -> m acc
 
 data ColumnDescription = ColumnDescription
     { colElementType :: !(Maybe ThriftType)
@@ -155,88 +161,74 @@ getColumnNames schemaElements =
                     childLeaves = go children subPath False
                  in childLeaves ++ go rest path skipThis
 
-{- | Fold a stream of value chunks into a non-nullable 'Column'.
+{- | Fold a column's value pages into a non-nullable 'Column'.
 
-Pre-allocates a mutable vector of @totalRows@ and fills it chunk-by-chunk
-using a single 'Fold.foldlM\'' pass, avoiding any intermediate list or
-concatenation allocation.
-
-For unboxable element types the chunks (which are always boxed) are
-unboxed element-by-element directly into the pre-allocated unboxed
-buffer, eliminating the boxing round-trip that a 'fromVector' call on a
-boxed concat would otherwise require.
+Pre-allocates a mutable vector of @totalRows@ and fills it page-by-page via a
+single streaming left fold ('PageFold'), avoiding any intermediate list or
+concatenation allocation. Only one page's values are live at a time.
 -}
 foldNonNullable ::
     forall m a.
-    (RandomAccess m, MonadIO m, Columnable a) =>
+    (MonadIO m, Columnable a) =>
     Int ->
-    Stream m (VB.Vector a) ->
+    PageFold m VB.Vector a ->
     m Column
-foldNonNullable totalRows stream = do
+foldNonNullable totalRows runPages = do
     mv <- liftIO $ VBM.unsafeNew totalRows
     _ <-
-        Stream.fold
-            ( Fold.foldlM'
-                ( \off chunk -> liftIO $ do
-                    let n = VB.length chunk
-                    VB.copy (VBM.unsafeSlice off n mv) chunk
-                    return (off + n)
-                )
-                (return 0)
+        runPages
+            ( \off (chunk, _, _) -> liftIO $ do
+                let n = VB.length chunk
+                VB.copy (VBM.unsafeSlice off n mv) chunk
+                return (off + n)
             )
-            stream
+            (0 :: Int)
     v <- liftIO $ VB.unsafeFreeze mv
     return (BoxedColumn Nothing v)
 
 foldNonNullableUnboxed ::
     forall m a.
-    (RandomAccess m, MonadIO m, Columnable a, VU.Unbox a) =>
+    (MonadIO m, Columnable a, VU.Unbox a) =>
     Int ->
-    Stream m (VU.Vector a) ->
+    PageFold m VU.Vector a ->
     m Column
-foldNonNullableUnboxed totalRows stream = do
+foldNonNullableUnboxed totalRows runPages = do
     mv <- liftIO $ VUM.unsafeNew totalRows
     _ <-
-        Stream.fold
-            ( Fold.foldlM'
-                ( \off chunk -> liftIO $ do
-                    let n = VU.length chunk
-                        go i
-                            | i >= n = return ()
-                            | otherwise = do
-                                VUM.unsafeWrite
-                                    mv
-                                    (off + i)
-                                    (VU.unsafeIndex chunk i)
-                                go (i + 1)
-                    go 0
-                    return (off + n)
-                )
-                (return 0)
+        runPages
+            ( \off (chunk, _, _) -> liftIO $ do
+                let n = VU.length chunk
+                    go i
+                        | i >= n = return ()
+                        | otherwise = do
+                            VUM.unsafeWrite
+                                mv
+                                (off + i)
+                                (VU.unsafeIndex chunk i)
+                            go (i + 1)
+                go 0
+                return (off + n)
             )
-            stream
+            (0 :: Int)
     dat <- liftIO $ VU.unsafeFreeze mv
     return (UnboxedColumn Nothing dat)
 
-{- | Fold a stream of (values, def-levels) pairs into a nullable 'Column'.
+{- | Fold a column's (values, def-levels) pages into a nullable 'Column'.
 
-Pre-allocates the output buffer and a valid-mask vector of @totalRows@,
-then scatters values inline during a single 'Fold.foldlM\'' pass.
-This eliminates the @allVals@ intermediate vector that the old
-'Stream.toList' + concat approach required.
+Pre-allocates the output buffer and a valid-mask vector of @totalRows@, then
+scatters values inline during a single streaming left fold ('PageFold').
 
 A 'hasNull' flag is accumulated during the scatter so the
-'buildBitmapFromValid' call (and the second 'VU.all' scan) is skipped
-entirely when all values are present.
+'buildBitmapFromValid' call is skipped entirely when all values are present.
 -}
 foldNullable ::
     forall m a.
-    (RandomAccess m, MonadIO m, Columnable a) =>
+    (MonadIO m, Columnable a) =>
     Int ->
     Int ->
-    Stream m (VB.Vector a, VU.Vector Int) ->
+    PageFold m VB.Vector a ->
     m Column
-foldNullable maxDef totalRows stream = do
+foldNullable maxDef totalRows runPages = do
     -- null slots hold an error thunk, guarded by bitmap.
     --
     -- IMPORTANT: 'VBM.unsafeWrite' for boxed vectors stores a *pointer* to
@@ -248,24 +240,21 @@ foldNullable maxDef totalRows stream = do
         liftIO $ VBM.replicate totalRows (error "parquet: null slot accessed")
     mvValid <- liftIO (VUM.new totalRows :: IO (VUM.IOVector Word8))
     (_, hasNull) <-
-        Stream.fold
-            ( Fold.foldlM'
-                ( \(rowOff, anyNull) (vals, defs) -> liftIO $ do
-                    let nDefs = VU.length defs
-                        go i j acc
-                            | i >= nDefs = return acc
-                            | VU.unsafeIndex defs i == maxDef = do
-                                let !v = VB.unsafeIndex vals j
-                                VBM.unsafeWrite mvDat (rowOff + i) v
-                                VUM.unsafeWrite mvValid (rowOff + i) 1
-                                go (i + 1) (j + 1) acc
-                            | otherwise = go (i + 1) j True
-                    newNull <- go 0 0 False
-                    return (rowOff + nDefs, anyNull || newNull)
-                )
-                (return (0, False))
+        runPages
+            ( \(rowOff, anyNull) (vals, defs, _) -> liftIO $ do
+                let nDefs = VU.length defs
+                    go i j acc
+                        | i >= nDefs = return acc
+                        | VU.unsafeIndex defs i == maxDef = do
+                            let !v = VB.unsafeIndex vals j
+                            VBM.unsafeWrite mvDat (rowOff + i) v
+                            VUM.unsafeWrite mvValid (rowOff + i) 1
+                            go (i + 1) (j + 1) acc
+                        | otherwise = go (i + 1) j True
+                newNull <- go 0 0 False
+                return (rowOff + nDefs, anyNull || newNull)
             )
-            stream
+            (0 :: Int, False)
     dat <- liftIO $ VB.unsafeFreeze mvDat
     maybeBm <-
         if hasNull
@@ -277,20 +266,30 @@ foldNullable maxDef totalRows stream = do
 
 foldNullableUnboxed ::
     forall m a.
-    (RandomAccess m, MonadIO m, Columnable a, VU.Unbox a) =>
+    (MonadIO m, Columnable a, VU.Unbox a) =>
     Int ->
     Int ->
-    Stream m (VU.Vector a, VU.Vector Int) ->
+    PageFold m VU.Vector a ->
     m Column
-foldNullableUnboxed maxDef totalRows stream = do
+foldNullableUnboxed maxDef totalRows runPages = do
     -- zero-init means null slots silently hold 0, guarded by bitmap.
     mvDat <- liftIO $ VUM.new totalRows
     mvValid <- liftIO (VUM.new totalRows :: IO (VUM.IOVector Word8))
-    -- Drain the stream into a list once, then run a tight IO loop. This
-    -- avoids per-page Streamly polymorphic-monad dispatch in the inner
-    -- scatter loop.
-    chunks <- Stream.toList stream
-    hasNull <- liftIO $ scatterChunks mvDat mvValid maxDef chunks
+    (_, hasNull) <-
+        runPages
+            ( \(rowOff, anyNull) (vals, defs, _) -> liftIO $ do
+                let !nDefs = VU.length defs
+                    go !i !j !acc
+                        | i >= nDefs = pure acc
+                        | VU.unsafeIndex defs i == maxDef = do
+                            VUM.unsafeWrite mvDat (rowOff + i) (VU.unsafeIndex vals j)
+                            VUM.unsafeWrite mvValid (rowOff + i) 1
+                            go (i + 1) (j + 1) acc
+                        | otherwise = go (i + 1) j True
+                !newNull <- go 0 0 False
+                return (rowOff + nDefs, anyNull || newNull)
+            )
+            (0 :: Int, False)
     dat <- liftIO $ VU.unsafeFreeze mvDat
     maybeBm <-
         if hasNull
@@ -299,28 +298,6 @@ foldNullableUnboxed maxDef totalRows stream = do
                 return (Just (buildBitmapFromValid validV))
             else return Nothing
     return (UnboxedColumn maybeBm dat)
-  where
-    scatterChunks ::
-        VUM.IOVector a ->
-        VUM.IOVector Word8 ->
-        Int ->
-        [(VU.Vector a, VU.Vector Int)] ->
-        IO Bool
-    scatterChunks mvDat mvValid !md = goChunks 0 False
-      where
-        goChunks !_ !anyNull [] = pure anyNull
-        goChunks !rowOff !anyNull ((vals, defs) : rest) = do
-            let !nDefs = VU.length defs
-                go !i !j !acc
-                    | i >= nDefs = pure acc
-                    | VU.unsafeIndex defs i == md = do
-                        VUM.unsafeWrite mvDat (rowOff + i) (VU.unsafeIndex vals j)
-                        VUM.unsafeWrite mvValid (rowOff + i) 1
-                        go (i + 1) (j + 1) acc
-                    | otherwise = go (i + 1) j True
-            !newNull <- go 0 0 False
-            goChunks (rowOff + nDefs) (anyNull || newNull) rest
-{-# INLINE foldNullableUnboxed #-}
 
 {- | Fold a stream of (values, def-levels, rep-levels) triples into a
 repeated (list) 'Column' using Dremel-style level stitching.
@@ -335,8 +312,7 @@ Threshold formula: @defT_r = maxDef - 2 * (maxRep - r)@.
 -}
 foldRepeated ::
     forall m a.
-    ( RandomAccess m
-    , MonadIO m
+    ( MonadIO m
     , Columnable a
     , Columnable (Maybe [Maybe a])
     , Columnable (Maybe [Maybe [Maybe a]])
@@ -344,10 +320,10 @@ foldRepeated ::
     ) =>
     Int ->
     Int ->
-    Stream m (VB.Vector a, VU.Vector Int, VU.Vector Int) ->
+    PageFold m VB.Vector a ->
     m Column
-foldRepeated maxRep maxDef stream = do
-    chunks <- Stream.toList stream
+foldRepeated maxRep maxDef runPages = do
+    chunks <- collectPages runPages
     let allVals = VB.concat [vs | (vs, _, _) <- chunks]
         allDefs = VU.concat [ds | (_, ds, _) <- chunks]
         allReps = VU.concat [rs | (_, _, rs) <- chunks]
@@ -359,8 +335,7 @@ foldRepeated maxRep maxDef stream = do
 
 foldRepeatedUnboxed ::
     forall m a.
-    ( RandomAccess m
-    , MonadIO m
+    ( MonadIO m
     , Columnable a
     , VU.Unbox a
     , Columnable (Maybe [Maybe a])
@@ -369,10 +344,10 @@ foldRepeatedUnboxed ::
     ) =>
     Int ->
     Int ->
-    Stream m (VU.Vector a, VU.Vector Int, VU.Vector Int) ->
+    PageFold m VU.Vector a ->
     m Column
-foldRepeatedUnboxed maxRep maxDef stream = do
-    chunks <- Stream.toList stream
+foldRepeatedUnboxed maxRep maxDef runPages = do
+    chunks <- collectPages runPages
     let allVals = VB.convert $ VU.concat [vs | (vs, _, _) <- chunks]
         allDefs = VU.concat [ds | (_, ds, _) <- chunks]
         allReps = VU.concat [rs | (_, _, rs) <- chunks]
@@ -381,3 +356,13 @@ foldRepeatedUnboxed maxRep maxDef stream = do
         3 ->
             fromList (stitchList3 (maxDef - 4) (maxDef - 2) maxDef allReps allDefs allVals)
         _ -> fromList (stitchList maxDef allReps allDefs allVals)
+
+{- | Collect all of a column's page triples into a list, in page order. Used by
+the repeated/list folds, where Dremel level-stitching needs the full
+concatenated rep/def/value arrays at once (so streaming gives no benefit here).
+-}
+collectPages ::
+    (Monad m) =>
+    PageFold m v a ->
+    m [(v a, VU.Vector Int, VU.Vector Int)]
+collectPages runPages = reverse <$> runPages (\acc triple -> return (triple : acc)) []
