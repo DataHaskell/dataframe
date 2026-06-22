@@ -17,6 +17,7 @@ import Data.Int (Int32, Int64)
 import Data.Maybe (fromMaybe)
 import qualified Data.Set as S
 import qualified Data.Text as T
+import Data.Time (UTCTime (UTCTime), fromGregorian, picosecondsToDiffTime)
 import Data.Word
 import DataFrame.IO.Parquet.Thrift (
     cc_meta_data,
@@ -1307,9 +1308,33 @@ singleShardNoNulls =
             "score should NOT be nullable"
             (not (hasMissing (unsafeGetColumn "score" df)))
 
+{- | Nanosecond-precision timestamps (@TIMESTAMP(NANOS)@) must decode to the
+correct 'UTCTime'. Regression test for the unit-scaling bug where the NANOS
+multiplier @1_000_000 \`div\` 1_000_000_000@ truncated to 0, collapsing every
+value to the epoch.
+-}
+timestampNanos :: Test
+timestampNanos = testBothReadParquetPaths $ \readParquet ->
+    TestCase $
+        assertEqual
+            "TIMESTAMP(NANOS) decodes to correct UTCTime"
+            ( D.fromNamedColumns
+                [
+                    ( "ts"
+                    , D.fromList
+                        [ UTCTime (fromGregorian 2020 1 1) 0
+                        , UTCTime (fromGregorian 2021 6 15) (picosecondsToDiffTime 45045123456789000)
+                        , UTCTime (fromGregorian 1999 12 31) (picosecondsToDiffTime 86399999999999000)
+                        ]
+                    )
+                ]
+            )
+            (unsafePerformIO (readParquet "./tests/data/timestamp_nanos.parquet"))
+
 tests :: [Test]
 tests =
-    [ allTypesPlain
+    [ timestampNanos
+    , allTypesPlain
     , allTypesPlainSnappy
     , allTypesDictionary
     , selectedColumnsWithOpts

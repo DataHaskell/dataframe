@@ -17,10 +17,19 @@ module DataFrame.IO.Parquet.Page (
     fixedLenByteArrayDecoder,
     -- Page iteration
     foldColumnPagesM,
+    foldColumnDataPagesM,
+    RawPage,
+    appendStringPageIO,
+    appendNullableStringPageIO,
 ) where
 
 import Control.Monad.IO.Class (MonadIO (liftIO))
-import Data.Bits (shiftR, (.&.))
+import Control.Monad.ST (RealWorld, stToIO)
+import Data.Bits (shiftL, shiftR, (.&.), (.|.))
+import qualified Data.ByteString.Unsafe as BSU
+import Foreign.Ptr (Ptr, castPtr, plusPtr)
+import Foreign.Storable (peekByteOff)
+import Data.Word (Word8)
 import qualified Data.ByteString as BS
 import Data.Int (Int32, Int64)
 import Data.Maybe (fromJust, fromMaybe)
@@ -52,6 +61,7 @@ import DataFrame.IO.Parquet.Thrift (
  )
 import DataFrame.IO.Parquet.Time (int96ToUTCTime)
 import DataFrame.IO.Parquet.Utils (ColumnDescription (..))
+import DataFrame.Internal.ColumnBuilder (TextBuilder, appendNull, appendText, appendTextSliceFromPtr)
 import DataFrame.IO.Utils.RandomAccess (RandomAccess (..), Range (Range))
 import DataFrame.Internal.Binary (
     littleEndianInt32,
@@ -82,7 +92,12 @@ type UnboxedPageDecoder a =
 
 boolDecoder :: UnboxedPageDecoder Bool
 boolDecoder mDict enc nPresent bs = case enc of
-    PLAIN _ -> VU.fromList (readNBool nPresent bs)
+    -- PLAIN bools are bit-packed (1 bit/value, LSB-first). Generate the
+    -- unboxed vector directly by indexing the bit for each row, avoiding an
+    -- intermediate @[Bool]@ list.
+    PLAIN _ ->
+        VU.generate nPresent $ \i ->
+            (BSU.unsafeIndex bs (i `shiftR` 3) `shiftR` (i .&. 7)) .&. 1 == 1
     RLE_DICTIONARY _ -> unboxedLookupDict mDict nPresent bs getBool
     PLAIN_DICTIONARY _ -> unboxedLookupDict mDict nPresent bs getBool
     _ -> error ("boolDecoder: unsupported encoding " ++ show enc)
@@ -208,17 +223,20 @@ readChunkBytes columnChunk = do
     rawBytes <- readBytes (Range offset compLen)
     return (codec, pType, rawBytes)
 
+{- | A decoded DATA page handed to a fold step: the running dictionary, the
+page encoding, the present-value count, the (decompressed) value bytes, and the
+definition/repetition level vectors.
+-}
+type RawPage =
+    (Maybe DictVals, Encoding, Int, BS.ByteString, VU.Vector Int, VU.Vector Int)
+
 {- | Left-fold a monadic step over every DATA page (V1 or V2) of every column
-chunk, in order, threading the running dictionary internally.
+chunk, in order, threading the running dictionary internally and handing each
+page to @step@ as a 'RawPage' (no value decoding — the step decides how to
+materialize, e.g. into a typed vector or straight into a text buffer).
 
-Replaces the old Streamly @readPages@ 'Unfold' + @unfoldEach@/@fold@ pipeline
-with a direct monadic fold: pages are decoded and handed to @step@ one at a
-time, so only a single page's decoded values are live at once (the
-@unsafeFreeze@-into-preallocated-buffer consumers rely on this — a materialised
-page list would roughly double peak memory per column).
-
-Dictionary pages are consumed silently and update the running dictionary that
-is threaded through the recursion. @INDEX_PAGE@s are skipped.
+Dictionary pages update the running dictionary; @INDEX_PAGE@s are skipped. Only
+one page's bytes are live at a time.
 
 -- TODO: when a page index is available, use it here to compute which page
 -- byte ranges to request from the RandomAccess layer instead of reading the
@@ -229,16 +247,16 @@ is threaded through the recursion. @INDEX_PAGE@s are skipped.
 -- overlap the requested range, avoiding decompression of irrelevant pages
 -- entirely.
 -}
-foldColumnPagesM ::
-    forall m v a acc.
-    (RandomAccess m, MonadIO m, VG.Vector v a) =>
+{-# INLINABLE foldColumnDataPagesM #-}
+foldColumnDataPagesM ::
+    forall m acc.
+    (RandomAccess m, MonadIO m) =>
     ColumnDescription ->
-    (Maybe DictVals -> Encoding -> Int -> BS.ByteString -> v a) ->
     [ColumnChunk] ->
-    (acc -> (v a, VU.Vector Int, VU.Vector Int) -> m acc) ->
+    (acc -> RawPage -> m acc) ->
     acc ->
     m acc
-foldColumnPagesM description decoder chunks step = goChunks chunks
+foldColumnDataPagesM description chunks step = goChunks chunks
   where
     maxDef = fromIntegral description.maxDefinitionLevel :: Int
     maxRep = fromIntegral description.maxRepetitionLevel :: Int
@@ -252,7 +270,7 @@ foldColumnPagesM description decoder chunks step = goChunks chunks
     goPages dict codec pType bs !acc
         | BS.null bs = return acc
         | otherwise = case parsePageHeader bs of
-            Left e -> error ("foldColumnPagesM: failed to parse page header: " ++ e)
+            Left e -> error ("foldColumnDataPagesM: failed to parse page header: " ++ e)
             Right (rest, hdr) -> do
                 let compSz = fromIntegral . unField $ hdr.ph_compressed_page_size
                     uncmpSz = fromIntegral . unField $ hdr.ph_uncompressed_page_size
@@ -277,8 +295,7 @@ foldColumnPagesM description decoder chunks step = goChunks chunks
                         decompressed <- liftIO $ decompressData uncmpSz codec pageData
                         let (defLvls, repLvls, nPresent, valBytes) =
                                 readLevelsV1 n maxDef maxRep decompressed
-                            triple = (decoder dict enc nPresent valBytes, defLvls, repLvls)
-                        acc' <- step acc triple
+                        acc' <- step acc (dict, enc, nPresent, valBytes, defLvls, repLvls)
                         goPages dict codec pType rest' acc'
                     DATA_PAGE_V2 _ -> do
                         let dph2 =
@@ -298,10 +315,123 @@ foldColumnPagesM description decoder chunks step = goChunks chunks
                             if isCompressed
                                 then liftIO $ decompressData uncmpSz codec compValBytes
                                 else pure compValBytes
-                        let triple = (decoder dict enc nPresent valBytes, defLvls, repLvls)
-                        acc' <- step acc triple
+                        acc' <- step acc (dict, enc, nPresent, valBytes, defLvls, repLvls)
                         goPages dict codec pType rest' acc'
                     INDEX_PAGE _ -> goPages dict codec pType rest' acc
+
+{- | Left-fold over per-page value triples, decoding each page with @decoder@.
+A thin wrapper over 'foldColumnDataPagesM' for the typed (numeric/boxed) column
+paths.
+-}
+{-# INLINABLE foldColumnPagesM #-}
+foldColumnPagesM ::
+    forall m v a acc.
+    (RandomAccess m, MonadIO m, VG.Vector v a) =>
+    ColumnDescription ->
+    (Maybe DictVals -> Encoding -> Int -> BS.ByteString -> v a) ->
+    [ColumnChunk] ->
+    (acc -> (v a, VU.Vector Int, VU.Vector Int) -> m acc) ->
+    acc ->
+    m acc
+foldColumnPagesM description decoder chunks step =
+    foldColumnDataPagesM description chunks $
+        \acc (dict, enc, nPresent, valBytes, defLvls, repLvls) ->
+            step acc (decoder dict enc nPresent valBytes, defLvls, repLvls)
+
+{- | Append a non-nullable BYTE_ARRAY page's strings straight into a
+'TextBuilder', no intermediate boxed 'Text' vector.
+
+PLAIN pages copy each value's UTF-8 bytes directly from the page buffer pointer
+('appendTextSliceFromPtr'), skipping the per-value 'decodeUtf8Lenient' +
+'ByteString' slicing + 'Text' allocation that @readNTexts@ would do.
+Dictionary pages append the shared dictionary 'Text's by reference.
+-}
+appendStringPageIO ::
+    TextBuilder RealWorld ->
+    Maybe DictVals ->
+    Encoding ->
+    Int ->
+    BS.ByteString ->
+    IO ()
+appendStringPageIO builder mDict enc nPresent bs = case enc of
+    PLAIN _ -> BSU.unsafeUseAsCStringLen bs $ \(cptr, _len) -> do
+        let p = castPtr cptr :: Ptr Word8
+            go !_ !i | i >= nPresent = pure ()
+            go !off !i = do
+                len <- readLenLE p off
+                stToIO (appendTextSliceFromPtr builder (p `plusPtr` (off + 4)) len)
+                go (off + 4 + len) (i + 1)
+        go 0 0
+    RLE_DICTIONARY _ -> dictAppend
+    PLAIN_DICTIONARY _ -> dictAppend
+    _ -> error ("appendStringPageIO: unsupported encoding " ++ show enc)
+  where
+    dictAppend = case mDict of
+        Just (DText ds) ->
+            let (idxs, _) = decodeDictIndices nPresent bs
+             in stToIO (VU.mapM_ (\i -> appendText builder (ds VB.! i)) idxs)
+        Just d -> error ("appendStringPageIO: wrong dict type, got " ++ show d)
+        Nothing -> error "appendStringPageIO: dictionary-encoded page but no dictionary seen"
+
+{- | Read a little-endian 4-byte length prefix at byte @off@ from a raw page
+pointer. -}
+readLenLE :: Ptr Word8 -> Int -> IO Int
+readLenLE p off = do
+    b0 <- peekByteOff p off :: IO Word8
+    b1 <- peekByteOff p (off + 1) :: IO Word8
+    b2 <- peekByteOff p (off + 2) :: IO Word8
+    b3 <- peekByteOff p (off + 3) :: IO Word8
+    pure $
+        fromIntegral b0
+            .|. (fromIntegral b1 `shiftL` 8)
+            .|. (fromIntegral b2 `shiftL` 16)
+            .|. (fromIntegral b3 `shiftL` 24)
+{-# INLINE readLenLE #-}
+
+{- | Append a NULLABLE BYTE_ARRAY page into a 'TextBuilder', interleaving nulls
+by walking the definition levels: a present row (@def == maxDef@) consumes the
+next stored value (dictionary entry by reference, or the next length-prefixed
+PLAIN slice by memcpy); a null row ('appendNull') writes an offset and clears a
+validity bit. Builds 'PackedText' + validity bitmap with no per-row 'Text' or
+@[Maybe a]@ allocation. Only present values are stored in the page payload.
+-}
+appendNullableStringPageIO ::
+    TextBuilder RealWorld ->
+    Int ->
+    Maybe DictVals ->
+    Encoding ->
+    Int ->
+    BS.ByteString ->
+    VU.Vector Int ->
+    IO ()
+appendNullableStringPageIO builder maxDef mDict enc nPresent bs defs = case enc of
+    PLAIN _ -> BSU.unsafeUseAsCStringLen bs $ \(cptr, _len) -> do
+        let p = castPtr cptr :: Ptr Word8
+            go !_ !i | i >= nDefs = pure ()
+            go !off !i
+                | VU.unsafeIndex defs i == maxDef = do
+                    len <- readLenLE p off
+                    stToIO (appendTextSliceFromPtr builder (p `plusPtr` (off + 4)) len)
+                    go (off + 4 + len) (i + 1)
+                | otherwise = stToIO (appendNull builder) >> go off (i + 1)
+        go 0 0
+    RLE_DICTIONARY _ -> dictAppend
+    PLAIN_DICTIONARY _ -> dictAppend
+    _ -> error ("appendNullableStringPageIO: unsupported encoding " ++ show enc)
+  where
+    nDefs = VU.length defs
+    dictAppend = case mDict of
+        Just (DText ds) -> do
+            let (idxs, _) = decodeDictIndices nPresent bs
+                go !_ !i | i >= nDefs = pure ()
+                go !j !i
+                    | VU.unsafeIndex defs i == maxDef =
+                        stToIO (appendText builder (ds VB.! VU.unsafeIndex idxs j))
+                            >> go (j + 1) (i + 1)
+                    | otherwise = stToIO (appendNull builder) >> go j (i + 1)
+            go 0 0
+        Just d -> error ("appendNullableStringPageIO: wrong dict type, got " ++ show d)
+        Nothing -> error "appendNullableStringPageIO: dictionary-encoded page but no dictionary seen"
 
 -- ---------------------------------------------------------------------------
 -- Page header parsing
@@ -314,14 +444,6 @@ parsePageHeader = decodeWithLeftovers Pinch.compactProtocol
 -- Batch value readers
 -- ---------------------------------------------------------------------------
 
-readNBool :: Int -> BS.ByteString -> [Bool]
-readNBool count bs =
-    let totalBytes = (count + 7) `div` 8
-        bits =
-            concatMap
-                (\b -> map (\i -> (b `shiftR` i) .&. 1 == 1) [0 .. 7])
-                (BS.unpack (BS.take totalBytes bs))
-     in take count bits
 
 readNInt32 :: Int -> BS.ByteString -> VU.Vector Int32
 readNInt32 n bs = VU.generate n $ \i -> littleEndianInt32 (BS.drop (4 * i) bs)

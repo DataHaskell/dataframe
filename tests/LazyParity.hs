@@ -105,11 +105,15 @@ joinPipelineParity =
                 -- Eager: the exact ops the lazy executor delegates to.
                 ordersDf <- Csv.readCsvWithSchema ordersSchema ordersPath
                 customersDf <- Csv.readCsvWithSchema customersSchema customersPath
+                -- orders first => the orders side is retained, so the ~10%
+                -- orphan orders survive as a Nothing region/plan group. This
+                -- matches the lazy `L.join LEFT orders customers` below, which
+                -- also retains its left (orders) sub-query.
                 let eager =
                         Perm.sortBy [Perm.Desc (E.Col @Double "revenue")] $
                             Agg.aggregate aggs $
                                 Agg.groupBy ["region", "plan"] $
-                                    Join.join LEFT ["customer_id"] customersDf ordersDf
+                                    Join.join LEFT ["customer_id"] ordersDf customersDf
                 -- Lazy: same query through the bounded-source fast path.
                 let customersQ = L.scanCsv customersSchema (T.pack customersPath)
                 lazy <-

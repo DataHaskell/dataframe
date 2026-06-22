@@ -12,6 +12,7 @@ module DataFrame.IO.Parquet where
 import Control.Exception (throw)
 import Control.Monad
 import Control.Monad.IO.Class (MonadIO (..))
+import Control.Monad.ST (stToIO)
 import Data.Bits (Bits (shiftL), (.|.))
 import qualified Data.ByteString as BS
 import Data.Either (fromRight)
@@ -25,8 +26,8 @@ import Data.List (transpose)
 import qualified Data.List as L
 import qualified Data.Map as Map
 import qualified Data.Text as T
-import Data.Time (UTCTime)
-import Data.Time.Clock.POSIX (posixSecondsToUTCTime)
+import Data.Time.Calendar (Day (ModifiedJulianDay))
+import Data.Time.Clock (UTCTime (UTCTime), picosecondsToDiffTime)
 import qualified Data.Vector as Vector
 import qualified Data.Vector.Unboxed as VU
 import DataFrame.Errors (DataFrameException (ColumnsNotFoundException))
@@ -42,6 +43,9 @@ import DataFrame.IO.Parquet.Page (
     int64Decoder,
     int96Decoder,
     foldColumnPagesM,
+    foldColumnDataPagesM,
+    appendStringPageIO,
+    appendNullableStringPageIO,
  )
 import DataFrame.IO.Parquet.Seeking (
     FileBufferedOrSeekable,
@@ -76,6 +80,11 @@ import DataFrame.IO.Utils.RandomAccess (
  )
 import DataFrame.Internal.Column (Column, Columnable)
 import qualified DataFrame.Internal.Column as DI
+import DataFrame.Internal.ColumnBuilder (
+    freezeTextChunk,
+    mergeTextChunks,
+    newTextBuilder,
+ )
 import DataFrame.Internal.DataFrame (DataFrame (..))
 import DataFrame.Internal.Expression (Expr, getColumns)
 import DataFrame.Operations.Merge ()
@@ -219,6 +228,10 @@ parseParquetWithOpts ::
     (RandomAccess m, MonadIO m) =>
     ParquetReadOptions ->
     m DataFrame
+{-# SPECIALIZE parseParquetWithOpts ::
+    ParquetReadOptions -> ReaderIO FileBufferedOrSeekable DataFrame
+    #-}
+{-# INLINABLE parseParquetWithOpts #-}
 parseParquetWithOpts opts = do
     metadata <- parseFileMetadata
 
@@ -344,6 +357,13 @@ parseColumnChunks ::
     [ColumnChunk] ->
     ColumnDescription ->
     m Column
+{-# SPECIALIZE parseColumnChunks ::
+    Int ->
+    [ColumnChunk] ->
+    ColumnDescription ->
+    ReaderIO FileBufferedOrSeekable Column
+    #-}
+{-# INLINABLE parseColumnChunks #-}
 parseColumnChunks totalRows chunks description
     | description.maxRepetitionLevel == 0 && description.maxDefinitionLevel == 0 =
         getNonNullableColumn totalRows description chunks
@@ -353,6 +373,7 @@ parseColumnChunks totalRows chunks description
         getRepeatedColumn description chunks
 
 -- | Decode a required (non-nullable, non-repeated) column.
+{-# INLINABLE getNonNullableColumn #-}
 getNonNullableColumn ::
     forall m.
     (RandomAccess m, MonadIO m) =>
@@ -368,7 +389,7 @@ getNonNullableColumn totalRows description chunks =
         Just (INT96 _) -> go int96Decoder
         Just (FLOAT _) -> unboxedGo floatDecoder
         Just (DOUBLE _) -> unboxedGo doubleDecoder
-        Just (BYTE_ARRAY _) -> go byteArrayDecoder
+        Just (BYTE_ARRAY _) -> goPackedText
         Just (FIXED_LEN_BYTE_ARRAY _) -> case description.typeLength of
             Nothing -> error "FIXED_LEN_BYTE_ARRAY requires type_length to be set"
             Just tl -> go (fixedLenByteArrayDecoder (fromIntegral tl))
@@ -382,6 +403,25 @@ getNonNullableColumn totalRows description chunks =
     go decoder =
         foldNonNullable totalRows (foldColumnPagesM description decoder chunks)
 
+    -- Decode a non-nullable BYTE_ARRAY (UTF-8) column straight into a single
+    -- shared byte buffer + offsets ('PackedText'), instead of a boxed vector
+    -- of per-row 'Text'. Each page's decoded 'Text' values (which share the
+    -- chunk dictionary for dictionary-encoded pages) are appended by memcpy
+    -- into one builder across all pages/chunks, then frozen once. This is the
+    -- same representation the fast CSV reader uses and matches Arrow's string
+    -- layout: no retained per-row 'Text' headers, no eager UTF-8 validation.
+    goPackedText :: m Column
+    goPackedText = do
+        builder <- liftIO $ stToIO (newTextBuilder totalRows (totalRows * 8))
+        _ <-
+            foldColumnDataPagesM description chunks
+                ( \() (dict, enc, nPresent, valBytes, _, _) ->
+                    liftIO (appendStringPageIO builder dict enc nPresent valBytes)
+                )
+                ()
+        chunk <- liftIO $ stToIO (freezeTextChunk builder)
+        pure (mergeTextChunks [chunk])
+
     unboxedGo ::
         forall a.
         (Columnable a, VU.Unbox a) =>
@@ -391,6 +431,7 @@ getNonNullableColumn totalRows description chunks =
         foldNonNullableUnboxed totalRows (foldColumnPagesM description decoder chunks)
 
 -- | Decode an optional (nullable) column.
+{-# INLINABLE getNullableColumn #-}
 getNullableColumn ::
     forall m.
     (RandomAccess m, MonadIO m) =>
@@ -406,7 +447,7 @@ getNullableColumn totalRows description chunks =
         Just (INT96 _) -> go int96Decoder
         Just (FLOAT _) -> unboxedGo floatDecoder
         Just (DOUBLE _) -> unboxedGo doubleDecoder
-        Just (BYTE_ARRAY _) -> go byteArrayDecoder
+        Just (BYTE_ARRAY _) -> goPackedTextNullable
         Just (FIXED_LEN_BYTE_ARRAY _) -> case description.typeLength of
             Nothing -> error "FIXED_LEN_BYTE_ARRAY requires type_length to be set"
             Just tl -> go (fixedLenByteArrayDecoder (fromIntegral tl))
@@ -422,6 +463,22 @@ getNullableColumn totalRows description chunks =
         m Column
     go decoder =
         foldNullable maxDef totalRows (foldColumnPagesM description decoder chunks)
+
+    -- Nullable BYTE_ARRAY (UTF-8): decode straight into a 'PackedText' (shared
+    -- byte buffer + offsets + validity bitmap) via the text builder, walking
+    -- def-levels to interleave nulls. Avoids the boxed @Vector Text@ the
+    -- generic 'foldNullable' path would build.
+    goPackedTextNullable :: m Column
+    goPackedTextNullable = do
+        builder <- liftIO $ stToIO (newTextBuilder totalRows (totalRows * 8))
+        _ <-
+            foldColumnDataPagesM description chunks
+                ( \() (dict, enc, nPresent, valBytes, defs, _) ->
+                    liftIO (appendNullableStringPageIO builder maxDef dict enc nPresent valBytes defs)
+                )
+                ()
+        chunk <- liftIO $ stToIO (freezeTextChunk builder)
+        pure (mergeTextChunks [chunk])
     unboxedGo ::
         forall a.
         (Columnable a, VU.Unbox a) =>
@@ -431,6 +488,7 @@ getNullableColumn totalRows description chunks =
         foldNullableUnboxed maxDef totalRows (foldColumnPagesM description decoder chunks)
 
 -- | Decode a repeated (list/nested) column.
+{-# INLINABLE getRepeatedColumn #-}
 getRepeatedColumn ::
     forall m.
     (RandomAccess m, MonadIO m) =>
@@ -519,14 +577,15 @@ applyLogicalType :: Maybe LogicalType -> DI.Column -> DI.Column
 applyLogicalType (Just (LT_TIMESTAMP f)) col =
     let ts = unField f
         unit = unField ts.timestamp_unit
-        divisor = case unit of
-            MILLIS _ -> 1_000
-            MICROS _ -> 1_000_000
-            NANOS _ -> 1_000_000_000
-     in fromRight col $
-            DI.mapColumn
-                (microsecondsToUTCTime . (* (1_000_000 `div` divisor)))
-                col
+        -- (ticks per second, picoseconds per tick) for each unit. Convert at
+        -- native precision: a millisecond grid keeps ms, a nanosecond grid
+        -- keeps ns. (The old code multiplied by @1_000_000 `div` divisor@,
+        -- which truncated NANOS to 0 and collapsed every value to the epoch.)
+        conv = case unit of
+            MILLIS _ -> epochToUTCTime 1_000 1_000_000_000
+            MICROS _ -> epochToUTCTime 1_000_000 1_000_000
+            NANOS _ -> epochToUTCTime 1_000_000_000 1_000
+     in fromRight col $ DI.mapColumn conv col
 applyLogicalType (Just (LT_DECIMAL f)) col =
     let dt = unField f
         scale = unField dt.decimal_scale
@@ -547,6 +606,20 @@ applyLogicalType (Just (LT_DECIMAL f)) col =
                     else col
 applyLogicalType _ col = col
 
-microsecondsToUTCTime :: Int64 -> UTCTime
-microsecondsToUTCTime us =
-    posixSecondsToUTCTime (fromIntegral us / 1_000_000)
+{- | Convert an epoch timestamp expressed as @ticksPerSecond@ ticks/second
+(each tick = @psPerTick@ picoseconds) to 'UTCTime', at full precision.
+
+Splits into days + within-day picoseconds with integer 'divMod' (which floors,
+so the split is correct for pre-epoch negative values too), and never forms
+picoseconds-since-epoch — that would overflow 'Int64' for modern dates — only
+the bounded within-day picosecond count. 40587 is the Modified Julian Day of
+the Unix epoch (1970-01-01).
+-}
+epochToUTCTime :: Int64 -> Integer -> Int64 -> UTCTime
+epochToUTCTime ticksPerSecond psPerTick v =
+    let (s, subTicks) = v `divMod` ticksPerSecond
+        (days, sInDay) = s `divMod` 86_400
+        ps = fromIntegral sInDay * 1_000_000_000_000 + fromIntegral subTicks * psPerTick
+     in UTCTime
+            (ModifiedJulianDay (40587 + fromIntegral days))
+            (picosecondsToDiffTime ps)
