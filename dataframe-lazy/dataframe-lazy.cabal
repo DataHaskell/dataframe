@@ -1,6 +1,6 @@
 cabal-version:      2.4
 name:               dataframe-lazy
-version:            1.1.0.0
+version:            1.1.0.1
 synopsis:           Lazy query engine for the dataframe ecosystem.
 description:
     The lazy/streaming query engine: relational-algebra plans, optimizer,

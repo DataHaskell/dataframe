@@ -58,7 +58,10 @@ module DataFrame.Typed.Lazy (
     aggregate,
 
     -- * Joins
-    join,
+    innerJoin,
+    leftJoin,
+    rightJoin,
+    fullOuterJoin,
 
     -- * Sort
     sortBy,
@@ -84,7 +87,7 @@ import DataFrame.Internal.Schema (Schema)
 import DataFrame.Lazy.Internal.DataFrame (LazyDataFrame)
 import qualified DataFrame.Lazy.Internal.DataFrame as L
 import DataFrame.Lazy.Internal.LogicalPlan (SortOrder (..))
-import DataFrame.Operations.Join (JoinType)
+import DataFrame.Operations.Join (JoinType (..))
 import DataFrame.Typed.Expr
 import DataFrame.Typed.Freeze (unsafeFreeze)
 import DataFrame.Typed.Schema
@@ -174,16 +177,72 @@ aggregate ::
 aggregate tagg (TLG (keys, ldf)) =
     TLD (L.groupBy keys (aggToNamedExprs tagg) ldf)
 
--- | Join two lazy queries on a shared key column.
-join ::
-    JoinType ->
-    T.Text ->
-    T.Text ->
+-- | Typed inner join on a single key column present in both schemas.
+innerJoin ::
+    forall (key :: Symbol) left right.
+    ( KnownSymbol key
+    , AssertAllPresent '[key] left
+    , AssertAllPresent '[key] right
+    , AssertKeyTypesMatch '[key] left right
+    ) =>
     TypedLazyDataFrame left ->
     TypedLazyDataFrame right ->
-    TypedLazyDataFrame left -- TODO: compute join result schema
-join jt leftKey rightKey (TLD left) (TLD right) =
-    TLD (L.join jt leftKey rightKey left right)
+    TypedLazyDataFrame (InnerJoinSchema '[key] left right)
+innerJoin = joinOn @key INNER
+
+-- | Typed left join. The right table's non-key columns become @Maybe@.
+leftJoin ::
+    forall (key :: Symbol) left right.
+    ( KnownSymbol key
+    , AssertAllPresent '[key] left
+    , AssertAllPresent '[key] right
+    , AssertKeyTypesMatch '[key] left right
+    ) =>
+    TypedLazyDataFrame left ->
+    TypedLazyDataFrame right ->
+    TypedLazyDataFrame (LeftJoinSchema '[key] left right)
+leftJoin = joinOn @key LEFT
+
+-- | Typed right join. The left table's non-key columns become @Maybe@.
+rightJoin ::
+    forall (key :: Symbol) left right.
+    ( KnownSymbol key
+    , AssertAllPresent '[key] left
+    , AssertAllPresent '[key] right
+    , AssertKeyTypesMatch '[key] left right
+    ) =>
+    TypedLazyDataFrame left ->
+    TypedLazyDataFrame right ->
+    TypedLazyDataFrame (RightJoinSchema '[key] left right)
+rightJoin = joinOn @key RIGHT
+
+-- | Typed full outer join. Non-key columns from both tables become @Maybe@.
+fullOuterJoin ::
+    forall (key :: Symbol) left right.
+    ( KnownSymbol key
+    , AssertAllPresent '[key] left
+    , AssertAllPresent '[key] right
+    , AssertKeyTypesMatch '[key] left right
+    ) =>
+    TypedLazyDataFrame left ->
+    TypedLazyDataFrame right ->
+    TypedLazyDataFrame (FullOuterJoinSchema '[key] left right)
+fullOuterJoin = joinOn @key FULL_OUTER
+
+-- | Runtime delegation shared by the typed joins. The lazy backend joins on a
+-- single key whose name is the same in both schemas; the result schema is
+-- computed by the caller's join-specific type family.
+joinOn ::
+    forall (key :: Symbol) left right out.
+    (KnownSymbol key) =>
+    JoinType ->
+    TypedLazyDataFrame left ->
+    TypedLazyDataFrame right ->
+    TypedLazyDataFrame out
+joinOn jt (TLD left) (TLD right) =
+    TLD (L.join jt keyName keyName left right)
+  where
+    keyName = T.pack (symbolVal (Proxy @key))
 
 -- | Sort the result by column name and direction.
 sortBy ::

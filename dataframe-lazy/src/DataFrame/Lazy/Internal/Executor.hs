@@ -656,15 +656,26 @@ splitCsvAtNewlines n path = do
 
 {- | Route join to the existing Operations.Join implementation.
 When the left and right key names differ, rename the right key before joining.
+
+'Join.join' retains its first 'DataFrame' argument and makes the second one
+optional, so the lazy left sub-query ('leftDf') must be passed first for LEFT
+and RIGHT joins to retain the side the caller means. INNER and FULL_OUTER are
+symmetric in which rows survive, and 'Operations.Join' orders their output
+columns with the renamed right frame first, so they keep the @rightDf leftDf@
+order. (Passing @rightDf@ first for LEFT/RIGHT was the source of a silent
+left/right inversion: a left join dropped the left side's unmatched rows.)
 -}
 performJoin ::
     Join.JoinType -> T.Text -> T.Text -> D.DataFrame -> D.DataFrame -> D.DataFrame
 performJoin jt leftKey rightKey leftDf rightDf =
-    if leftKey == rightKey
-        then Join.join jt [leftKey] rightDf leftDf
-        else
-            let rightRenamed = Core.rename rightKey leftKey rightDf
-             in Join.join jt [leftKey] rightRenamed leftDf
+    case jt of
+        Join.LEFT -> Join.join jt [leftKey] leftDf rightRenamed
+        Join.RIGHT -> Join.join jt [leftKey] leftDf rightRenamed
+        _ -> Join.join jt [leftKey] rightRenamed leftDf
+  where
+    rightRenamed
+        | leftKey == rightKey = rightDf
+        | otherwise = Core.rename rightKey leftKey rightDf
 
 -- ---------------------------------------------------------------------------
 -- Sort order conversion
