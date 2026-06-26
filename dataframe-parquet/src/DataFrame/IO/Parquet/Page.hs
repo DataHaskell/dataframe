@@ -26,11 +26,8 @@ module DataFrame.IO.Parquet.Page (
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import Control.Monad.ST (RealWorld, stToIO)
 import Data.Bits (shiftL, shiftR, (.&.), (.|.))
-import qualified Data.ByteString.Unsafe as BSU
-import Foreign.Ptr (Ptr, castPtr, plusPtr)
-import Foreign.Storable (peekByteOff)
-import Data.Word (Word8)
 import qualified Data.ByteString as BS
+import qualified Data.ByteString.Unsafe as BSU
 import Data.Int (Int32, Int64)
 import Data.Maybe (fromJust, fromMaybe)
 import qualified Data.Text as T
@@ -39,6 +36,7 @@ import Data.Time (UTCTime)
 import qualified Data.Vector as VB
 import qualified Data.Vector.Generic as VG
 import qualified Data.Vector.Unboxed as VU
+import Data.Word (Word8)
 import DataFrame.IO.Parquet.Decompress (decompressData)
 import DataFrame.IO.Parquet.Dictionary (
     DictVals (..),
@@ -61,13 +59,20 @@ import DataFrame.IO.Parquet.Thrift (
  )
 import DataFrame.IO.Parquet.Time (int96ToUTCTime)
 import DataFrame.IO.Parquet.Utils (ColumnDescription (..))
-import DataFrame.Internal.ColumnBuilder (TextBuilder, appendNull, appendText, appendTextSliceFromPtr)
 import DataFrame.IO.Utils.RandomAccess (RandomAccess (..), Range (Range))
 import DataFrame.Internal.Binary (
     littleEndianInt32,
     littleEndianWord32,
     littleEndianWord64,
  )
+import DataFrame.Internal.ColumnBuilder (
+    TextBuilder,
+    appendNull,
+    appendText,
+    appendTextSliceFromPtr,
+ )
+import Foreign.Ptr (Ptr, castPtr, plusPtr)
+import Foreign.Storable (peekByteOff)
 import GHC.Float (castWord32ToFloat, castWord64ToDouble)
 import Pinch (decodeWithLeftovers)
 import qualified Pinch
@@ -247,7 +252,7 @@ one page's bytes are live at a time.
 -- overlap the requested range, avoiding decompression of irrelevant pages
 -- entirely.
 -}
-{-# INLINABLE foldColumnDataPagesM #-}
+{-# INLINEABLE foldColumnDataPagesM #-}
 foldColumnDataPagesM ::
     forall m acc.
     (RandomAccess m, MonadIO m) =>
@@ -323,7 +328,7 @@ foldColumnDataPagesM description chunks step = goChunks chunks
 A thin wrapper over 'foldColumnDataPagesM' for the typed (numeric/boxed) column
 paths.
 -}
-{-# INLINABLE foldColumnPagesM #-}
+{-# INLINEABLE foldColumnPagesM #-}
 foldColumnPagesM ::
     forall m v a acc.
     (RandomAccess m, MonadIO m, VG.Vector v a) =>
@@ -374,7 +379,8 @@ appendStringPageIO builder mDict enc nPresent bs = case enc of
         Nothing -> error "appendStringPageIO: dictionary-encoded page but no dictionary seen"
 
 {- | Read a little-endian 4-byte length prefix at byte @off@ from a raw page
-pointer. -}
+pointer.
+-}
 readLenLE :: Ptr Word8 -> Int -> IO Int
 readLenLE p off = do
     b0 <- peekByteOff p off :: IO Word8
@@ -431,7 +437,9 @@ appendNullableStringPageIO builder maxDef mDict enc nPresent bs defs = case enc 
                     | otherwise = stToIO (appendNull builder) >> go j (i + 1)
             go 0 0
         Just d -> error ("appendNullableStringPageIO: wrong dict type, got " ++ show d)
-        Nothing -> error "appendNullableStringPageIO: dictionary-encoded page but no dictionary seen"
+        Nothing ->
+            error
+                "appendNullableStringPageIO: dictionary-encoded page but no dictionary seen"
 
 -- ---------------------------------------------------------------------------
 -- Page header parsing
@@ -443,7 +451,6 @@ parsePageHeader = decodeWithLeftovers Pinch.compactProtocol
 -- ---------------------------------------------------------------------------
 -- Batch value readers
 -- ---------------------------------------------------------------------------
-
 
 readNInt32 :: Int -> BS.ByteString -> VU.Vector Int32
 readNInt32 n bs = VU.generate n $ \i -> littleEndianInt32 (BS.drop (4 * i) bs)

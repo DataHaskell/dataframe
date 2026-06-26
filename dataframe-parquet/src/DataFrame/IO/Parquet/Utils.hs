@@ -167,7 +167,7 @@ Pre-allocates a mutable vector of @totalRows@ and fills it page-by-page via a
 single streaming left fold ('PageFold'), avoiding any intermediate list or
 concatenation allocation. Only one page's values are live at a time.
 -}
-{-# INLINABLE foldNonNullable #-}
+{-# INLINEABLE foldNonNullable #-}
 foldNonNullable ::
     forall m a.
     (MonadIO m, Columnable a) =>
@@ -187,7 +187,7 @@ foldNonNullable totalRows runPages = do
     v <- liftIO $ VB.unsafeFreeze mv
     return (BoxedColumn Nothing v)
 
-{-# INLINABLE foldNonNullableUnboxed #-}
+{-# INLINEABLE foldNonNullableUnboxed #-}
 foldNonNullableUnboxed ::
     forall m a.
     (MonadIO m, Columnable a, VU.Unbox a) =>
@@ -223,7 +223,7 @@ scatters values inline during a single streaming left fold ('PageFold').
 A 'hasNull' flag is accumulated during the scatter so the
 'buildBitmapFromValid' call is skipped entirely when all values are present.
 -}
-{-# INLINABLE foldNullable #-}
+{-# INLINEABLE foldNullable #-}
 foldNullable ::
     forall m a.
     (MonadIO m, Columnable a) =>
@@ -267,7 +267,7 @@ foldNullable maxDef totalRows runPages = do
             else return Nothing
     return (BoxedColumn maybeBm dat)
 
-{-# INLINABLE foldNullableUnboxed #-}
+{-# INLINEABLE foldNullableUnboxed #-}
 foldNullableUnboxed ::
     forall m a.
     (MonadIO m, Columnable a, VU.Unbox a) =>
@@ -314,7 +314,7 @@ The stitching function is selected by @maxRep@:
 
 Threshold formula: @defT_r = maxDef - 2 * (maxRep - r)@.
 -}
-{-# INLINABLE foldRepeated #-}
+{-# INLINEABLE foldRepeated #-}
 foldRepeated ::
     forall m a.
     ( MonadIO m
@@ -338,7 +338,7 @@ foldRepeated maxRep maxDef runPages = do
             fromList (stitchList3 (maxDef - 4) (maxDef - 2) maxDef allReps allDefs allVals)
         _ -> fromList (stitchList maxDef allReps allDefs allVals)
 
-{-# INLINABLE foldRepeatedUnboxed #-}
+{-# INLINEABLE foldRepeatedUnboxed #-}
 foldRepeatedUnboxed ::
     forall m a.
     ( MonadIO m

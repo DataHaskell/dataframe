@@ -1,14 +1,15 @@
 {-# LANGUAGE OverloadedStrings #-}
 
--- | Markdown rendering must escape pipe-table metacharacters in cell values,
--- or an operator name like @<|>@ splits the row into the wrong columns.
+{- | Markdown rendering must escape pipe-table metacharacters in cell values,
+or an operator name like @<|>@ splits the row into the wrong columns.
+-}
 module Internal.Markdown (tests) where
 
 import qualified Data.Text as T
 
+import DataFrame.Display.Terminal.PrettyPrint (escapeMarkdownCell)
 import DataFrame.Internal.Column (fromList)
 import qualified DataFrame.Internal.DataFrame as D
-import DataFrame.Display.Terminal.PrettyPrint (escapeMarkdownCell)
 import Test.HUnit
 
 -- Count the column-delimiter pipes in a rendered row: a bare '|' delimits a

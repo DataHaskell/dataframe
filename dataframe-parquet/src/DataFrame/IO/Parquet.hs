@@ -34,18 +34,18 @@ import DataFrame.Errors (DataFrameException (ColumnsNotFoundException))
 import DataFrame.IO.Parquet.Page (
     PageDecoder,
     UnboxedPageDecoder,
+    appendNullableStringPageIO,
+    appendStringPageIO,
     boolDecoder,
     byteArrayDecoder,
     doubleDecoder,
     fixedLenByteArrayDecoder,
     floatDecoder,
+    foldColumnDataPagesM,
+    foldColumnPagesM,
     int32Decoder,
     int64Decoder,
     int96Decoder,
-    foldColumnPagesM,
-    foldColumnDataPagesM,
-    appendStringPageIO,
-    appendNullableStringPageIO,
  )
 import DataFrame.IO.Parquet.Seeking (
     FileBufferedOrSeekable,
@@ -231,7 +231,7 @@ parseParquetWithOpts ::
 {-# SPECIALIZE parseParquetWithOpts ::
     ParquetReadOptions -> ReaderIO FileBufferedOrSeekable DataFrame
     #-}
-{-# INLINABLE parseParquetWithOpts #-}
+{-# INLINEABLE parseParquetWithOpts #-}
 parseParquetWithOpts opts = do
     metadata <- parseFileMetadata
 
@@ -363,7 +363,7 @@ parseColumnChunks ::
     ColumnDescription ->
     ReaderIO FileBufferedOrSeekable Column
     #-}
-{-# INLINABLE parseColumnChunks #-}
+{-# INLINEABLE parseColumnChunks #-}
 parseColumnChunks totalRows chunks description
     | description.maxRepetitionLevel == 0 && description.maxDefinitionLevel == 0 =
         getNonNullableColumn totalRows description chunks
@@ -373,7 +373,7 @@ parseColumnChunks totalRows chunks description
         getRepeatedColumn description chunks
 
 -- | Decode a required (non-nullable, non-repeated) column.
-{-# INLINABLE getNonNullableColumn #-}
+{-# INLINEABLE getNonNullableColumn #-}
 getNonNullableColumn ::
     forall m.
     (RandomAccess m, MonadIO m) =>
@@ -414,7 +414,9 @@ getNonNullableColumn totalRows description chunks =
     goPackedText = do
         builder <- liftIO $ stToIO (newTextBuilder totalRows (totalRows * 8))
         _ <-
-            foldColumnDataPagesM description chunks
+            foldColumnDataPagesM
+                description
+                chunks
                 ( \() (dict, enc, nPresent, valBytes, _, _) ->
                     liftIO (appendStringPageIO builder dict enc nPresent valBytes)
                 )
@@ -431,7 +433,7 @@ getNonNullableColumn totalRows description chunks =
         foldNonNullableUnboxed totalRows (foldColumnPagesM description decoder chunks)
 
 -- | Decode an optional (nullable) column.
-{-# INLINABLE getNullableColumn #-}
+{-# INLINEABLE getNullableColumn #-}
 getNullableColumn ::
     forall m.
     (RandomAccess m, MonadIO m) =>
@@ -472,9 +474,12 @@ getNullableColumn totalRows description chunks =
     goPackedTextNullable = do
         builder <- liftIO $ stToIO (newTextBuilder totalRows (totalRows * 8))
         _ <-
-            foldColumnDataPagesM description chunks
+            foldColumnDataPagesM
+                description
+                chunks
                 ( \() (dict, enc, nPresent, valBytes, defs, _) ->
-                    liftIO (appendNullableStringPageIO builder maxDef dict enc nPresent valBytes defs)
+                    liftIO
+                        (appendNullableStringPageIO builder maxDef dict enc nPresent valBytes defs)
                 )
                 ()
         chunk <- liftIO $ stToIO (freezeTextChunk builder)
@@ -485,10 +490,13 @@ getNullableColumn totalRows description chunks =
         UnboxedPageDecoder a ->
         m Column
     unboxedGo decoder =
-        foldNullableUnboxed maxDef totalRows (foldColumnPagesM description decoder chunks)
+        foldNullableUnboxed
+            maxDef
+            totalRows
+            (foldColumnPagesM description decoder chunks)
 
 -- | Decode a repeated (list/nested) column.
-{-# INLINABLE getRepeatedColumn #-}
+{-# INLINEABLE getRepeatedColumn #-}
 getRepeatedColumn ::
     forall m.
     (RandomAccess m, MonadIO m) =>
