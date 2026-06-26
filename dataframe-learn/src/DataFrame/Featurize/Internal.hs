@@ -31,6 +31,7 @@ import qualified Data.Text as T
 import qualified Data.Vector as V
 import qualified Data.Vector.Unboxed as VU
 
+import DataFrame.Errors (DataFrameException (..), TypeErrorContext (..))
 import qualified DataFrame.Functions as F
 import DataFrame.Internal.Column (Columnable)
 import DataFrame.Internal.DataFrame (DataFrame, columnNames)
@@ -53,7 +54,18 @@ numericMatrix names df = (V.fromList names, transposeM colMajor)
     colMajor = V.fromList (map column names)
     column name = case columnAsDoubleVector (F.col @Double name) df of
         Right v -> v
-        Left e -> throw e
+        Left e -> throw (asFeatureError name e)
+
+asFeatureError :: T.Text -> DataFrameException -> DataFrameException
+asFeatureError name (TypeMismatchException ctx) =
+    TypeMismatchException
+        ctx
+            { errorColumnName = Just (T.unpack name)
+            , callingFunctionName =
+                Just
+                    "model fit (feature columns must be numeric Double; drop or encode non-numeric columns)"
+            }
+asFeatureError _ e = e
 
 -- | The target column as a vector of doubles.
 targetDoubles :: Expr Double -> DataFrame -> VU.Vector Double
@@ -85,7 +97,9 @@ extractFeatures features df = Features names cols rows n d
   where
     names = map columnExprName features
     cols = map (materializeColumn df) features
-    n = if null cols then 0 else VU.length (head cols)
+    n = case cols of
+        (x: _) -> VU.length x
+        _      -> 0
     d = length cols
     rows = V.generate n (\i -> VU.generate d (\j -> (cols !! j) VU.! i))
 
