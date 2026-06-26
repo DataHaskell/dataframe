@@ -18,6 +18,7 @@ import DataFrame.Operations.Transformations (ImputeOp)
 import qualified DataFrame.Operations.Transformations as D
 
 import qualified Data.Text as T
+import Data.Tuple (swap)
 import System.Random
 
 -- A re-implementation of the state monad.
@@ -52,15 +53,20 @@ modifyM f = FrameM $ \df -> (f df, ())
 inspectM :: (DataFrame -> b) -> FrameM b
 inspectM f = FrameM $ \df -> (df, f df)
 
-deriveM :: (Columnable a) => T.Text -> Expr a -> FrameM (Expr a)
-deriveM name expr = FrameM $ \df ->
-    let df' = D.derive name expr df
+execWithExpr ::
+    (Columnable a) => T.Text -> (DataFrame -> DataFrame) -> FrameM (Expr a)
+execWithExpr name f = FrameM $ \df ->
+    let df' = f df
      in (df', Col name)
 
+deriveM :: (Columnable a) => T.Text -> Expr a -> FrameM (Expr a)
+deriveM name expr = execWithExpr name (D.derive name expr)
+
+insertM :: (Columnable a) => T.Text -> [a] -> FrameM (Expr a)
+insertM name values = execWithExpr name (D.insert name values)
+
 renameM :: (Columnable a) => Expr a -> T.Text -> FrameM (Expr a)
-renameM (Col oldName) newName = FrameM $ \df ->
-    let df' = D.rename oldName newName df
-     in (df', Col newName)
+renameM (Col oldName) newName = execWithExpr newName (D.rename oldName newName)
 renameM expr newName = deriveM newName expr
 
 filterWhereM :: Expr Bool -> FrameM ()
@@ -72,10 +78,14 @@ sampleM pureGen p = modifyM (D.sample pureGen p)
 takeM :: Int -> FrameM ()
 takeM n = modifyM (D.take n)
 
+dropM :: Int -> FrameM ()
+dropM n = modifyM (D.drop n)
+
+columnAsListM :: (Columnable a) => Expr a -> FrameM [a]
+columnAsListM c = inspectM (D.columnAsList c)
+
 filterJustM :: (Columnable a) => Expr (Maybe a) -> FrameM (Expr a)
-filterJustM (Col name) = FrameM $ \df ->
-    let df' = D.filterJust name df
-     in (df', Col name)
+filterJustM (Col name) = execWithExpr name (D.filterJust name)
 filterJustM expr =
     error $ "Cannot filter on compound expression: " ++ show expr
 
@@ -84,15 +94,11 @@ imputeM ::
     Expr a ->
     BaseType a ->
     FrameM (Expr (BaseType a))
-imputeM expr@(Col name) value = FrameM $ \df ->
-    let df' = D.impute expr value df
-     in (df', Col name)
+imputeM expr@(Col name) value = execWithExpr name (D.impute expr value)
 imputeM expr _ = error $ "Cannot impute on compound expression: " ++ show expr
 
 runFrameM :: DataFrame -> FrameM a -> (a, DataFrame)
-runFrameM df (FrameM action) =
-    let (df', a) = action df
-     in (a, df')
+runFrameM df (FrameM action) = swap (action df)
 
 evalFrameM :: DataFrame -> FrameM a -> a
 evalFrameM df m = fst (runFrameM df m)
