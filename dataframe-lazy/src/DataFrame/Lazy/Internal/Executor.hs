@@ -43,7 +43,7 @@ import Control.Concurrent.Async (mapConcurrently)
 import Control.Concurrent.STM (atomically)
 import Control.Concurrent.STM.TBQueue (newTBQueueIO, readTBQueue, writeTBQueue)
 import Control.Exception (evaluate)
-import Control.Monad (filterM, forM, forM_, when, unless)
+import Control.Monad (filterM, forM, forM_, unless, when)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as C8
 import Data.IORef

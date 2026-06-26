@@ -17,6 +17,7 @@ module DataFrame.Typed.Operations (
     filterAllJust,
     filterJust,
     filterNothing,
+    filterAllNothing,
     sortBy,
     take,
     takeLast,
@@ -41,6 +42,10 @@ module DataFrame.Typed.Operations (
     cloneColumn,
     dropColumn,
     replaceColumn,
+
+    -- * Frequencies
+    valueCounts,
+    valueProportions,
 
     -- * Metadata
     dimensions,
@@ -144,6 +149,12 @@ filterNothing ::
 filterNothing (TDF df) = TDF (D.filterNothing colName df)
   where
     colName = T.pack (symbolVal (Proxy @name))
+
+{- | Keep only rows where every nullable column has Nothing.
+Schema is preserved.
+-}
+filterAllNothing :: TypedDataFrame cols -> TypedDataFrame cols
+filterAllNothing (TDF df) = TDF (D.filterAllNothing df)
 
 {- | Sort by the given typed sort orders.
 Sort orders reference columns that are validated against the schema.
@@ -374,10 +385,6 @@ symmetricDifference ::
     TypedDataFrame cols -> TypedDataFrame cols -> TypedDataFrame cols
 symmetricDifference (TDF a) (TDF b) = TDF (DS.symmetricDifference a b)
 
--------------------------------------------------------------------------------
--- Metadata (pass-through)
--------------------------------------------------------------------------------
-
 dimensions :: TypedDataFrame cols -> (Int, Int)
 dimensions (TDF df) = D.dimensions df
 
@@ -390,9 +397,15 @@ nColumns (TDF df) = D.nColumns df
 columnNames :: TypedDataFrame cols -> [T.Text]
 columnNames (TDF df) = D.columnNames df
 
--------------------------------------------------------------------------------
--- Internal helpers
--------------------------------------------------------------------------------
+-- | Count occurrences of each distinct value in a column.
+valueCounts ::
+    (Ord a, Columnable a) => TExpr cols a -> TypedDataFrame cols -> [(a, Int)]
+valueCounts (TExpr e) (TDF df) = D.valueCounts e df
+
+-- | Proportion of each distinct value in a column.
+valueProportions ::
+    (Ord a, Columnable a) => TExpr cols a -> TypedDataFrame cols -> [(a, Double)]
+valueProportions (TExpr e) (TDF df) = D.valueProportions e df
 
 -- | Helper class for extracting [(Text, Text)] from type-level pairs.
 class AllKnownPairs (pairs :: [(Symbol, Symbol)]) where

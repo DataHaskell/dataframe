@@ -1,6 +1,6 @@
 cabal-version:      3.0
 name:               dataframe
-version:            2.3.0.0
+version:            2.4.0.0
 synopsis: A fast, safe, and intuitive DataFrame library.
 
 description: A fast, safe, and intuitive DataFrame library for exploratory data analysis.
@@ -123,16 +123,17 @@ library
                         DataFrame.Typed.Record,
                         DataFrame.Typed.Generic
     build-depends:    base >= 4 && <5,
-                      dataframe-core ^>= 1.1,
+                      dataframe-core ^>= 1.1.1,
                       dataframe-json ^>= 1.0,
-                      dataframe-operations >= 1.1.1 && < 1.2,
+                      dataframe-operations >= 1.1.2 && < 1.2,
                       dataframe-parsing ^>= 1.0.2,
                       dataframe-viz ^>= 1.0.3,
                       dataframe-learn ^>= 1.1
 
     if !flag(no-csv)
-        reexported-modules: DataFrame.IO.CSV
-        build-depends:   dataframe-csv ^>= 1.0.2
+        reexported-modules: DataFrame.IO.CSV,
+                            DataFrame.Typed.IO.CSV
+        build-depends:   dataframe-csv ^>= 1.0.3
         cpp-options:     -DWITH_CSV
 
     if !flag(no-parquet)
@@ -148,8 +149,9 @@ library
                             DataFrame.IO.Parquet.Utils,
                             DataFrame.IO.Parquet.Seeking,
                             DataFrame.IO.Parquet.Time,
-                            DataFrame.IO.Utils.RandomAccess
-        build-depends:   dataframe-parquet ^>= 1.1
+                            DataFrame.IO.Utils.RandomAccess,
+                            DataFrame.Typed.IO.Parquet
+        build-depends:   dataframe-parquet ^>= 1.1.1
         cpp-options:     -DWITH_PARQUET
 
     -- The lazy executor calls both CSV and Parquet readers directly, so
@@ -366,6 +368,8 @@ test-suite tests
                    Properties.Simplify,
                    Simplify,
                    TreePruning,
+                   Typed.Parity,
+                   Typed.IOReaders,
                    Worklist,
                    Monad
     build-depends:  base >= 4 && < 5,

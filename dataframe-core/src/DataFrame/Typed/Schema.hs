@@ -20,6 +20,7 @@ module DataFrame.Typed.Schema (
     HasName,
     RemoveColumn,
     Impute,
+    SetColumnType,
     SubsetSchema,
     ExcludeSchema,
     RenameInSchema,
@@ -32,6 +33,11 @@ module DataFrame.Typed.Schema (
     AssertPresent,
     AssertAllPresent,
     AssertKeyTypesMatch,
+    AssertDisjoint,
+    AssertAllColumnsHaveType,
+    AssertRealColumn,
+    AllColumnsReal,
+    IsRealType,
     IsElem,
 
     -- * Maybe-stripping families
@@ -60,9 +66,12 @@ module DataFrame.Typed.Schema (
     AllKnownSymbol (..),
 ) where
 
+import Data.Int (Int16, Int32, Int64, Int8)
 import Data.Kind (Constraint, Type)
 import Data.Proxy (Proxy (..))
 import qualified Data.Text as T
+import qualified Data.Vector.Unboxed as VU
+import Data.Word (Word16, Word32, Word64, Word8)
 import GHC.TypeLits
 import Type.Reflection (SomeTypeRep, Typeable, someTypeRep)
 
@@ -95,6 +104,13 @@ type family Impute (name :: Symbol) (cols :: [Type]) :: [Type] where
             ('Text "Column '" ':<>: 'Text name ':<>: 'Text "' is not of kind Maybe *")
     Impute name (col ': rest) = col ': Impute name rest
     Impute name '[] = '[]
+
+type family SetColumnType (name :: Symbol) (b :: Type) (cols :: [Type]) :: [Type] where
+    SetColumnType name b (Column name _ ': rest) = Column name b ': rest
+    SetColumnType name b (col ': rest) = col ': SetColumnType name b rest
+    SetColumnType name b '[] =
+        TypeError
+            ('Text "Column '" ':<>: 'Text name ':<>: 'Text "' not found in schema")
 
 -- | Add type to the end of a list.
 type family Snoc (xs :: [k]) (x :: k) :: [k] where
@@ -257,6 +273,81 @@ type family
                 ':<>: 'ShowType r
                 ':<>: 'Text " in the right table"
             )
+
+type family AssertDisjoint (left :: [Type]) (right :: [Type]) :: Constraint where
+    AssertDisjoint left right =
+        AssertDisjointHelper (SharedNames left right) left right
+
+type family
+    AssertDisjointHelper (shared :: [Symbol]) (left :: [Type]) (right :: [Type]) ::
+        Constraint
+    where
+    AssertDisjointHelper '[] left right = ()
+    AssertDisjointHelper (n ': ns) left right =
+        TypeError
+            ( 'Text "Cannot horizontally merge: column '"
+                ':<>: 'Text n
+                ':<>: 'Text "' appears in both schemas"
+            )
+
+type family
+    AssertAllColumnsHaveType (names :: [Symbol]) (a :: Type) (cols :: [Type]) ::
+        Constraint
+    where
+    AssertAllColumnsHaveType '[] a cols = ()
+    AssertAllColumnsHaveType (n ': ns) a cols =
+        ( SafeLookup n cols ~ a
+        , AssertPresent n cols
+        , AssertAllColumnsHaveType ns a cols
+        )
+
+-- | Is @a@ a real, unboxed numeric type — i.e. a valid numeric-column element?
+type family IsRealType (a :: Type) :: Bool where
+    IsRealType Int = 'True
+    IsRealType Int8 = 'True
+    IsRealType Int16 = 'True
+    IsRealType Int32 = 'True
+    IsRealType Int64 = 'True
+    IsRealType Word = 'True
+    IsRealType Word8 = 'True
+    IsRealType Word16 = 'True
+    IsRealType Word32 = 'True
+    IsRealType Word64 = 'True
+    IsRealType Double = 'True
+    IsRealType Float = 'True
+    IsRealType _ = 'False
+
+{- | Emit a readable compile error when the column named @name@ is not a
+real-number type, naming the calling function @fn@, the column, and the type it
+actually has. Used by the numeric extractors so a wrong column type reads as a
+repairable message rather than a bare @No instance for Real …@.
+-}
+type family AssertRealColumn (fn :: Symbol) (name :: Symbol) (a :: Type) :: Constraint where
+    AssertRealColumn fn name a = AssertRealColumnGo fn name a (IsRealType a)
+
+type family
+    AssertRealColumnGo (fn :: Symbol) (name :: Symbol) (a :: Type) (isReal :: Bool) ::
+        Constraint
+    where
+    AssertRealColumnGo fn name a 'True = ()
+    AssertRealColumnGo fn name a 'False =
+        TypeError
+            ( 'Text fn
+                ':<>: 'Text ": expected a real number column for '"
+                ':<>: 'Text name
+                ':<>: 'Text "' but instead you gave "
+                ':<>: 'ShowType a
+            )
+
+{- | Constraint that every column in the schema is a real (numeric), unboxed
+type. Lets the whole-frame matrix extractors ('toDoubleMatrix' and friends) be
+total — a non-numeric or nullable column is a compile error (with the offending
+column named, via 'AssertRealColumn'), not a runtime 'Left'.
+-}
+type family AllColumnsReal (fn :: Symbol) (cols :: [Type]) :: Constraint where
+    AllColumnsReal fn '[] = ()
+    AllColumnsReal fn (Column n a ': rest) =
+        (AssertRealColumn fn n a, Real a, VU.Unbox a, AllColumnsReal fn rest)
 
 {- | Strip 'Maybe' from all columns. Used by 'filterAllJust'.
 

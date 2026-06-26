@@ -111,6 +111,42 @@ module DataFrame.Typed (
     collect,
     over,
 
+    -- * Expression combinators (full DataFrame.Functions parity)
+    DataFrame.Typed.Expr.div,
+    DataFrame.Typed.Expr.mod,
+    mode,
+    sumMaybe,
+    DataFrame.Typed.Expr.meanMaybe,
+    DataFrame.Typed.Expr.variance,
+    DataFrame.Typed.Expr.medianMaybe,
+    DataFrame.Typed.Expr.percentile,
+    stddev,
+    stddevMaybe,
+    zScore,
+    pow,
+    relu,
+    DataFrame.Typed.Expr.min,
+    DataFrame.Typed.Expr.max,
+    reduce,
+    toMaybe,
+    fromMaybe,
+    isJust,
+    isNothing,
+    fromJust,
+    whenPresent,
+    whenBothPresent,
+    recode,
+    recodeWithCondition,
+    recodeWithDefault,
+    firstOrNothing,
+    lastOrNothing,
+    splitOn,
+    match,
+    matchAll,
+    parseDate,
+    daysBetween,
+    bind,
+
     -- * Cast / coercion expressions
     castExpr,
     castExprWithDefault,
@@ -132,6 +168,13 @@ module DataFrame.Typed (
     -- * Typed column access
     columnAsVector,
     columnAsList,
+    columnAsIntVector,
+    columnAsDoubleVector,
+    columnAsFloatVector,
+    columnAsUnboxedVector,
+    toDoubleMatrix,
+    toFloatMatrix,
+    toIntMatrix,
 
     -- * Schema-preserving operations
     filterWhere,
@@ -140,6 +183,7 @@ module DataFrame.Typed (
     filterAllJust,
     filterJust,
     filterNothing,
+    filterAllNothing,
     sortBy,
     take,
     takeLast,
@@ -192,12 +236,38 @@ module DataFrame.Typed (
     aggregate,
     aggregateUntyped,
 
+    -- * Column transformations
+    applyColumn,
+    applyMany,
+    applyWhere,
+    applyAtIndex,
+    safeApply,
+    deriveWithExpr,
+    insertWithDefault,
+    insertVectorWithDefault,
+    insertUnboxedVector,
+    (|||),
+
+    -- * Sampling and splitting
+    randomSplit,
+    kFolds,
+    selectRows,
+    stratifiedSample,
+    stratifiedSplit,
+
+    -- * Frequencies
+    valueCounts,
+    valueProportions,
+
 #ifdef WITH_TH
     -- * Template Haskell
     deriveSchema,
 #ifdef WITH_CSV_TH
     deriveSchemaFromCsvFile,
     deriveSchemaFromCsvFileWith,
+#endif
+#ifdef WITH_PARQUET_TH
+    deriveSchemaFromParquetFile,
 #endif
     deriveSchemaFromType,
     deriveSchemaFromTypeWith,
@@ -227,6 +297,7 @@ module DataFrame.Typed (
     RenameManyInSchema,
     RemoveColumn,
     Impute,
+    SetColumnType,
     Append,
     Reverse,
     StripAllMaybe,
@@ -239,6 +310,10 @@ module DataFrame.Typed (
     AssertAbsent,
     AssertAllPresent,
     AssertPresent,
+    AssertDisjoint,
+    AssertRealColumn,
+    AllColumnsReal,
+    IsRealType,
 
     -- * Constraints
     KnownSchema (..),
@@ -247,12 +322,41 @@ module DataFrame.Typed (
 
 import Prelude hiding (drop, filter, take)
 
-import DataFrame.Typed.Access (columnAsList, columnAsVector)
+import DataFrame.Typed.Access (
+    columnAsDoubleVector,
+    columnAsFloatVector,
+    columnAsIntVector,
+    columnAsList,
+    columnAsUnboxedVector,
+    columnAsVector,
+    toDoubleMatrix,
+    toFloatMatrix,
+    toIntMatrix,
+ )
 import DataFrame.Typed.Aggregate (
     aggregate,
     aggregateUntyped,
     as,
     groupBy,
+ )
+import DataFrame.Typed.Apply (
+    applyAtIndex,
+    applyColumn,
+    applyMany,
+    applyWhere,
+    deriveWithExpr,
+    insertUnboxedVector,
+    insertVectorWithDefault,
+    insertWithDefault,
+    safeApply,
+    (|||),
+ )
+import DataFrame.Typed.Sampling (
+    kFolds,
+    randomSplit,
+    selectRows,
+    stratifiedSample,
+    stratifiedSplit,
  )
 import DataFrame.Typed.Expr
 import DataFrame.Typed.Freeze (freeze, freezeWithError, thaw, unsafeFreeze)
@@ -279,6 +383,9 @@ import DataFrame.Typed.TH (
 #ifdef WITH_CSV_TH
     deriveSchemaFromCsvFile,
     deriveSchemaFromCsvFileWith,
+#endif
+#ifdef WITH_PARQUET_TH
+    deriveSchemaFromParquetFile,
 #endif
     deriveSchemaFromType,
     deriveSchemaFromTypeWith,

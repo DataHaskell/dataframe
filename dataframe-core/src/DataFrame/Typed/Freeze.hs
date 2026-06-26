@@ -9,16 +9,19 @@ module DataFrame.Typed.Freeze (
     -- * Safe boundary
     freeze,
     freezeWithError,
+    freezeOrThrow,
 
     -- * Escape hatches
     thaw,
     unsafeFreeze,
 ) where
 
+import Control.Exception (throwIO)
 import qualified Data.Text as T
 import Type.Reflection (SomeTypeRep)
 
 import Data.List (stripPrefix)
+import DataFrame.Errors (DataFrameException (InternalException))
 import qualified DataFrame.Internal.Column as C
 import DataFrame.Internal.DataFrame (columnNames)
 import qualified DataFrame.Internal.DataFrame as D
@@ -42,6 +45,14 @@ freezeWithError ::
 freezeWithError df = case validateSchema @cols df of
     Left err -> Left err
     Right _ -> Right (TDF df)
+
+{- | Validate and wrap like 'freezeWithError', but throw a 'DataFrameException'
+in 'IO' on mismatch. The throwing boundary used by the typed readers
+(@readCsv@ \/ @readParquet@).
+-}
+freezeOrThrow ::
+    forall cols. (KnownSchema cols) => D.DataFrame -> IO (TypedDataFrame cols)
+freezeOrThrow = either (throwIO . InternalException) pure . freezeWithError @cols
 
 {- | Unwrap a typed DataFrame back to the untyped representation.
 Always safe; discards type information.

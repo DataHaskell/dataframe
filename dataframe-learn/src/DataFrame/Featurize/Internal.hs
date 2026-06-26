@@ -98,8 +98,8 @@ extractFeatures features df = Features names cols rows n d
     names = map columnExprName features
     cols = map (materializeColumn df) features
     n = case cols of
-        (x: _) -> VU.length x
-        _      -> 0
+        (x : _) -> VU.length x
+        _ -> 0
     d = length cols
     rows = V.generate n (\i -> VU.generate d (\j -> (cols !! j) VU.! i))
 

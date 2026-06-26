@@ -123,6 +123,9 @@ module DataFrame.Typed.Expr (
     -- * Sort helpers
     asc,
     desc,
+
+    -- * Additional expression functions
+    module DataFrame.Typed.Expr.Extra,
 ) where
 
 import Data.Either (fromRight)
@@ -158,6 +161,7 @@ import DataFrame.Internal.Nullable (
 import DataFrame.Internal.Types (Promote, PromoteDiv)
 
 import qualified Data.Vector.Unboxed as VU
+import DataFrame.Typed.Expr.Extra
 import DataFrame.Typed.Schema (
     AllKnownSymbol,
     AssertAllPresent,

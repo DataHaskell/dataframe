@@ -442,6 +442,7 @@ import DataFrame.Operations.Subset as Subset (
     sample,
     select,
     selectBy,
+    selectRows,
     stratifiedSample,
     stratifiedSplit,
     take,

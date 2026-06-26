@@ -69,6 +69,8 @@ import qualified Properties.Categorical
 import qualified Properties.Simplify
 import qualified Simplify
 import qualified TreePruning
+import qualified Typed.IOReaders
+import qualified Typed.Parity
 import qualified Worklist
 
 tests :: Test
@@ -132,6 +134,8 @@ tests =
             ++ Worklist.tests
             ++ Cart.tests
             ++ PackedTextMigration.tests
+            ++ Typed.Parity.tests
+            ++ Typed.IOReaders.tests
 
 isSuccessful :: Result -> Bool
 isSuccessful (Success{}) = True
