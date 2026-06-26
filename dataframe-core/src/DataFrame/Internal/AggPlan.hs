@@ -1,3 +1,4 @@
+{-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE ExplicitNamespaces #-}
 {-# LANGUAGE GADTs #-}
@@ -50,7 +51,7 @@ import DataFrame.Internal.Expression (
     Expr (..),
     UExpr (..),
  )
-import Type.Reflection (typeRep)
+import Type.Reflection (Typeable, typeRep)
 
 {- | The plan 'planAgg' produces for a recognised output expression. The median
 plan carries only the column name (the holistic grouped sort lives in the
@@ -70,7 +71,7 @@ non-Int/Double value columns are rejected here so the scatter only ever sees a
 clean unboxed vector.
 -}
 planAgg :: GroupedDataFrame -> UExpr -> Maybe AggPlan
-planAgg gdf (UExpr expr) = case expr of
+planAgg gdf (UExpr (expr :: Expr a)) = case expr of
     Agg (FoldAgg tag _ _) (Col name) -> foldPlan tag name
     Agg (MergeAgg tag _ _ _ _) (Col name) -> mergePlan tag name
     Agg (CollectAgg tag _) (Col name) -> collectPlan tag name
@@ -89,9 +90,13 @@ planAgg gdf (UExpr expr) = case expr of
         "maximum" -> require name (PlanScatter RMax name)
         _ -> Nothing
     mergePlan tag name = case tag of
-        "mean" -> require name (PlanScatter RMean name)
-        "count" -> require name (PlanScatter RCount name)
+        "mean" -> outputType @Double >> require name (PlanScatter RMean name)
+        "count" -> outputType @Int >> require name (PlanScatter RCount name)
         _ -> Nothing
+    outputType :: forall t. (Typeable t) => Maybe ()
+    outputType = case testEquality (typeRep @a) (typeRep @t) of
+        Just Refl -> Just ()
+        Nothing -> Nothing
     collectPlan tag name = case tag of
         "stddev" -> require name (PlanScatter RStd name)
         "variance" -> require name (PlanScatter RVar name)
