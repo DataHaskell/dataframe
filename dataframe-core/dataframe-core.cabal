@@ -1,6 +1,6 @@
 cabal-version:      2.4
 name:               dataframe-core
-version:            1.1.0.3
+version:            1.1.0.4
 synopsis:           Core data structures for the dataframe library.
 description:
     Minimal interchange-format types for the @dataframe@ ecosystem:
