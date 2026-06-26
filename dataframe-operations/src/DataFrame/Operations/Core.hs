@@ -796,6 +796,16 @@ toIntMatrix df = case V.foldl'
                 (fst (dataframeDimensions df))
                 (\i -> VU.generate (V.length m) (\j -> (m VG.! j) VG.! i))
 
+withColumnName ::
+    T.Text -> Either DataFrameException a -> Either DataFrameException a
+withColumnName name (Left (TypeMismatchException ctx)) =
+    Left
+        (TypeMismatchException ctx{errorColumnName = orFallback (errorColumnName ctx)})
+  where
+    orFallback (Just n) = Just n
+    orFallback Nothing = Just (T.unpack name)
+withColumnName _ result = result
+
 {- | Get a specific column as a vector.
 
 You must specify the type via type applications.
@@ -815,7 +825,7 @@ columnAsVector expr df
     | null df = throw (EmptyDataSetException "columnAsVector")
     | otherwise = case expr of
         (Col name) -> case getColumn name df of
-            Just col -> toVector col
+            Just col -> withColumnName name (toVector col)
             Nothing ->
                 Left $
                     ColumnsNotFoundException [name] "columnAsVector" (M.keys $ columnIndices df)
@@ -832,7 +842,7 @@ columnAsIntVector ::
     (Columnable a, Num a) =>
     Expr a -> DataFrame -> Either DataFrameException (VU.Vector Int)
 columnAsIntVector (Col name) df = case getColumn name df of
-    Just col -> toIntVector col
+    Just col -> withColumnName name (toIntVector col)
     Nothing ->
         Left $
             ColumnsNotFoundException [name] "columnAsIntVector" (M.keys $ columnIndices df)
@@ -849,7 +859,7 @@ columnAsDoubleVector ::
     (Columnable a, Num a) =>
     Expr a -> DataFrame -> Either DataFrameException (VU.Vector Double)
 columnAsDoubleVector (Col name) df = case getColumn name df of
-    Just col -> toDoubleVector col
+    Just col -> withColumnName name (toDoubleVector col)
     Nothing ->
         Left $
             ColumnsNotFoundException
@@ -869,7 +879,7 @@ columnAsFloatVector ::
     (Columnable a, Num a) =>
     Expr a -> DataFrame -> Either DataFrameException (VU.Vector Float)
 columnAsFloatVector (Col name) df = case getColumn name df of
-    Just col -> toFloatVector col
+    Just col -> withColumnName name (toFloatVector col)
     Nothing ->
         Left $
             ColumnsNotFoundException
@@ -885,7 +895,7 @@ columnAsUnboxedVector ::
     (Columnable a, VU.Unbox a) =>
     Expr a -> DataFrame -> Either DataFrameException (VU.Vector a)
 columnAsUnboxedVector (Col name) df = case getColumn name df of
-    Just col -> toUnboxedVector col
+    Just col -> withColumnName name (toUnboxedVector col)
     Nothing ->
         Left $
             ColumnsNotFoundException
