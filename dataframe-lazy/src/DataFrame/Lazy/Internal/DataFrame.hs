@@ -73,6 +73,13 @@ scanCsvWith reader schema path =
         , batchSize = 1_000_000
         }
 
+scanCsvStreamingWith :: CsvReader -> Schema -> T.Text -> LazyDataFrame
+scanCsvStreamingWith reader schema path =
+    LazyDataFrame
+        { plan = Scan (CsvSourceStreaming (T.unpack path) ',' reader) schema
+        , batchSize = 1_000_000
+        }
+
 -- | Scan a character-separated file with the default attoparsec reader.
 scanSeparated :: Char -> Schema -> T.Text -> LazyDataFrame
 scanSeparated = scanSeparatedWith readCsvWithSchema

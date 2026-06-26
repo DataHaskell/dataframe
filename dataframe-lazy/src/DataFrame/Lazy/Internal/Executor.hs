@@ -43,8 +43,9 @@ import Control.Concurrent.Async (mapConcurrently)
 import Control.Concurrent.STM (atomically)
 import Control.Concurrent.STM.TBQueue (newTBQueueIO, readTBQueue, writeTBQueue)
 import Control.Exception (evaluate)
-import Control.Monad (filterM, forM, forM_, when)
+import Control.Monad (filterM, forM, forM_, when, unless)
 import qualified Data.ByteString as BS
+import qualified Data.ByteString.Char8 as C8
 import Data.IORef
 import Data.Int (Int16, Int32, Int64, Int8)
 import qualified Data.Map as M
@@ -75,6 +76,7 @@ import qualified DataFrame.Operations.Transformations as Trans
 import System.Directory (doesDirectoryExist, removeFile)
 import System.FilePath ((</>))
 import System.FilePath.Glob (glob)
+import System.IO (IOMode (ReadMode), hIsEOF, withFile)
 import System.IO.Temp (emptySystemTempFile)
 import Type.Reflection (typeRep)
 
@@ -141,6 +143,7 @@ so this always holds; the routing is retained for future streaming sources.
 -}
 isBounded :: PhysicalPlan -> Bool
 isBounded (PhysicalScan (CsvSource{}) _) = True
+isBounded (PhysicalScan (CsvSourceStreaming{}) _) = False
 isBounded (PhysicalScan (ParquetSource _) _) = True
 isBounded (PhysicalProject _ c) = isBounded c
 isBounded (PhysicalFilter _ c) = isBounded c
@@ -187,6 +190,8 @@ buildStream :: PhysicalPlan -> IO Stream
 -- Scan -----------------------------------------------------------------------
 buildStream (PhysicalScan (CsvSource path sep reader) cfg) =
     executeCsvScan path sep reader cfg
+buildStream (PhysicalScan (CsvSourceStreaming path _sep reader) cfg) =
+    executeCsvScanStreaming path reader cfg
 buildStream (PhysicalScan (ParquetSource path) cfg) =
     executeParquetScan path cfg
 buildStream (PhysicalSpill child path) = do
@@ -609,6 +614,47 @@ executeCsvScan path _sep reader cfg = do
                             Just p -> Sub.filterWhere p df
                      in return (Just df')
         )
+
+executeCsvScanStreaming :: FilePath -> CsvReader -> ScanConfig -> IO Stream
+executeCsvScanStreaming path reader cfg = do
+    let schema = scanSchema cfg
+        batchSz = scanBatchSize cfg
+        windowBytes = 64 * 1024 * 1024 :: Int
+    queue <- newTBQueueIO 8
+    _ <- forkIO $
+        withFile path ReadMode $ \h -> do
+            header <- C8.hGetLine h
+            let feed bytes =
+                    unless (BS.null bytes) $ do
+                        p <- emptySystemTempFile "lazy_csv_win_.csv"
+                        BS.writeFile p (header <> BS.singleton nl <> bytes)
+                        df <- reader schema p
+                        removeFile p
+                        forM_ (sliceIntoBatches batchSz df) $ \b ->
+                            atomically (writeTBQueue queue (Just b))
+                loop leftover = do
+                    eof <- hIsEOF h
+                    if eof
+                        then feed leftover >> atomically (writeTBQueue queue Nothing)
+                        else do
+                            chunk <- BS.hGetSome h windowBytes
+                            let buf = leftover <> chunk
+                            case BS.elemIndexEnd nl buf of
+                                Nothing -> loop buf
+                                Just i -> feed (BS.take i buf) >> loop (BS.drop (i + 1) buf)
+            loop BS.empty
+    return . Stream $ do
+        mb <- atomically (readTBQueue queue)
+        case mb of
+            Nothing -> atomically (writeTBQueue queue Nothing) >> return Nothing
+            Just df ->
+                let df' = case scanPushdownPredicate cfg of
+                        Nothing -> df
+                        Just p -> Sub.filterWhere p df
+                 in return (Just df')
+  where
+    nl :: Word8
+    nl = 0x0A
 
 -- | Slice a 'DataFrame' into row-bounded batches of at most @n@ rows.
 sliceIntoBatches :: Int -> D.DataFrame -> [D.DataFrame]

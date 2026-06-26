@@ -180,6 +180,14 @@ toPhysical batchSz (Scan (CsvSource path sep reader) schema) =
     PhysicalScan
         (CsvSource path sep reader)
         (ScanConfig batchSz sep schema Nothing)
+toPhysical batchSz (Filter p (Scan (CsvSourceStreaming path sep reader) schema)) =
+    PhysicalScan
+        (CsvSourceStreaming path sep reader)
+        (ScanConfig batchSz sep schema (Just p))
+toPhysical batchSz (Scan (CsvSourceStreaming path sep reader) schema) =
+    PhysicalScan
+        (CsvSourceStreaming path sep reader)
+        (ScanConfig batchSz sep schema Nothing)
 toPhysical batchSz (Filter p (Scan (ParquetSource path) schema)) =
     PhysicalScan
         (ParquetSource path)

@@ -229,9 +229,10 @@ fullOuterJoin ::
     TypedLazyDataFrame (FullOuterJoinSchema '[key] left right)
 fullOuterJoin = joinOn @key FULL_OUTER
 
--- | Runtime delegation shared by the typed joins. The lazy backend joins on a
--- single key whose name is the same in both schemas; the result schema is
--- computed by the caller's join-specific type family.
+{- | Runtime delegation shared by the typed joins. The lazy backend joins on a
+single key whose name is the same in both schemas; the result schema is
+computed by the caller's join-specific type family.
+-}
 joinOn ::
     forall (key :: Symbol) left right out.
     (KnownSymbol key) =>

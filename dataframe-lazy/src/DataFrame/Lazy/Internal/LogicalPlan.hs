@@ -13,11 +13,14 @@ import DataFrame.Operations.Join (JoinType)
 data DataSource
     = -- | path, separator, CSV reader (e.g. attoparsec or SIMD)
       CsvSource FilePath Char CsvReader
+    | CsvSourceStreaming FilePath Char CsvReader
     | ParquetSource FilePath
 
 instance Show DataSource where
     show (CsvSource path sep _) =
         "CsvSource " ++ show path ++ " " ++ show sep ++ " <reader>"
+    show (CsvSourceStreaming path sep _) =
+        "CsvSourceStreaming " ++ show path ++ " " ++ show sep ++ " <reader>"
     show (ParquetSource path) = "ParquetSource " ++ show path
 
 -- | Sort direction used in Sort nodes and the public API.
