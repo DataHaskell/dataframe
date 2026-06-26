@@ -106,7 +106,8 @@ readParquetFilesWithOpts opts path
     | otherwise = Parquet.readParquetFilesWithOpts opts path
 
 {- | Read a list of downloaded local files, concatenate them, and apply the
-global row range once over the result. -}
+global row range once over the result.
+-}
 readDownloaded :: ParquetReadOptions -> [FilePath] -> IO DataFrame
 readDownloaded opts files = do
     let optsNoRange = opts{rowRange = Nothing}
@@ -242,7 +243,8 @@ downloadHFFiles mToken files = do
     downloadHFFilesTo tmpDir mToken files
 
 -- | Download files into @destDir@, returning the local paths.
-downloadHFFilesTo :: FilePath -> Maybe BS.ByteString -> [HFParquetFile] -> IO [FilePath]
+downloadHFFilesTo ::
+    FilePath -> Maybe BS.ByteString -> [HFParquetFile] -> IO [FilePath]
 downloadHFFilesTo destDir mToken files =
     forM files $ \f -> do
         -- Derive a collision-resistant name from the URL path components
@@ -280,7 +282,8 @@ directHFUrl ref =
         <> hfGlob ref
 
 {- | Resolve a @hf://@ URI to the token and the list of files to fetch, without
-downloading. -}
+downloading.
+-}
 resolveFiles :: FilePath -> IO (Maybe BS.ByteString, [HFParquetFile])
 resolveFiles uri = do
     ref <- case parseHFUri uri of
@@ -292,7 +295,9 @@ resolveFiles uri = do
             then do
                 hfFiles <- resolveHFUrls mToken ref
                 when (null hfFiles) $
-                    ioError $ userError $ "No parquet files found for " ++ uri
+                    ioError $
+                        userError $
+                            "No parquet files found for " ++ uri
                 pure hfFiles
             else do
                 let url = directHFUrl ref
