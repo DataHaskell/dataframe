@@ -629,5 +629,5 @@ epochToUTCTime ticksPerSecond psPerTick v =
         (days, sInDay) = s `divMod` 86_400
         ps = fromIntegral sInDay * 1_000_000_000_000 + fromIntegral subTicks * psPerTick
      in UTCTime
-            (ModifiedJulianDay (40587 + fromIntegral days))
+            (ModifiedJulianDay (40_587 + fromIntegral days))
             (picosecondsToDiffTime ps)
