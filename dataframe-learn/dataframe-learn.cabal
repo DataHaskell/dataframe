@@ -78,7 +78,7 @@ library
                         DataFrame.Synthesis
     build-depends:      base >= 4 && < 5,
                         containers >= 0.6.7 && < 0.9,
-                        parallel ^>= 3.2,
+                        parallel >= 3.3 && < 4,
                         random >= 1.2 && < 2,
                         dataframe-core ^>= 1.1,
                         dataframe-operations ^>= 1.1.1,

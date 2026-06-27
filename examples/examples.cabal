@@ -143,7 +143,7 @@ executable examples
                       hashable >= 1.2 && < 2,
                       hasktorch,
                       http-conduit,
-                      parallel ^>= 3.2,
+                      parallel >= 3.2 && < 4,
                       primitive >= 0.7 && < 0.10,
                       process ^>= 1.6,
                       snappy-hs ^>= 0.1,
