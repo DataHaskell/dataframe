@@ -9,6 +9,7 @@ arg-min cluster assignment. Per-cluster distance features are available via
 'kmeansDistanceExprs' / 'kmeansTransform'.
 -}
 module DataFrame.KMeans (
+    module DataFrame.Model,
     KMeansConfig (..),
     defaultKMeansConfig,
     KMeansModel (..),
@@ -27,7 +28,7 @@ import qualified DataFrame.Functions as F
 import DataFrame.Internal.DataFrame (DataFrame)
 import DataFrame.Internal.Expression (Expr (..), UExpr (..))
 import DataFrame.LinearAlgebra (Matrix, nearestCenter, sqDist)
-import DataFrame.Model (Fit (..), Predict (..))
+import DataFrame.Model
 import DataFrame.Operators ((.*.), (.+.), (.-.))
 import DataFrame.Random (Gen, mkGen, nextDouble, nextIntR, splitGen)
 import DataFrame.Transform (Transform (..))

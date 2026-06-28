@@ -9,6 +9,7 @@ one-vs-rest 'LinearSVCModel'; 'predict' is the arg-max class margin. There is no
 @predict_proba@, matching sklearn's LinearSVC.
 -}
 module DataFrame.SVM (
+    module DataFrame.Model,
     LinearSVCModel (..),
     SVCConfig (..),
     defaultSVCConfig,
@@ -32,7 +33,7 @@ import DataFrame.Internal.DataFrame (DataFrame)
 import DataFrame.Internal.Expression (Expr)
 import DataFrame.LinearSolver (LinearModel (..), SolverConfig (..), fitProx)
 import DataFrame.LinearSolver.Loss (sqHingeLoss)
-import DataFrame.Model (Fit (..), Predict (..))
+import DataFrame.Model
 
 -- | Hyper-parameters. @svcC@ is the inverse regularization strength (sklearn @C@).
 data SVCConfig = SVCConfig

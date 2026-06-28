@@ -104,6 +104,7 @@ module DataFrame.Typed (
     -- * Aggregation expression combinators
     DataFrame.Typed.Expr.sum,
     mean,
+    median,
     count,
     countAll,
     DataFrame.Typed.Expr.minimum,

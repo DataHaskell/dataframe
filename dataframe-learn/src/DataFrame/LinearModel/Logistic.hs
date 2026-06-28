@@ -9,6 +9,7 @@ Per-class margins and (normalized) probabilities stay available as named
 auxiliary expressions.
 -}
 module DataFrame.LinearModel.Logistic (
+    module DataFrame.Model,
     LogisticConfig (..),
     defaultLogisticConfig,
     LogisticModel (..),
@@ -38,7 +39,7 @@ import DataFrame.LinearSolver (
     defaultSolverConfig,
     fitL1Logistic,
  )
-import DataFrame.Model (Fit (..), Predict (..))
+import DataFrame.Model
 
 -- | Hyperparameters for logistic regression (the FISTA solver config).
 newtype LogisticConfig = LogisticConfig {lgSolver :: SolverConfig}

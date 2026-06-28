@@ -11,6 +11,7 @@ is transductive: it has a 'Fit' instance but deliberately no 'Predict' instance
 interpretable decision-tree surrogate on the cluster labels instead.
 -}
 module DataFrame.DBSCAN (
+    module DataFrame.Model,
     DBSCANConfig (..),
     defaultDBSCANConfig,
     DBSCANModel (..),
@@ -35,7 +36,7 @@ import qualified DataFrame.Internal.Column as DI
 import DataFrame.Internal.DataFrame (DataFrame, fromNamedColumns)
 import DataFrame.Internal.Expression (Expr)
 import DataFrame.LinearAlgebra (epsNeighbors)
-import DataFrame.Model (Fit (..))
+import DataFrame.Model
 
 data DBSCANConfig = DBSCANConfig
     { dbEps :: !Double

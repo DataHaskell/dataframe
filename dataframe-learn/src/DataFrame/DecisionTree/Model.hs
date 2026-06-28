@@ -11,6 +11,7 @@ tree expression, and the record exposes the raw 'Tree' too. The bare
 the classifier @Expr@.
 -}
 module DataFrame.DecisionTree.Model (
+    module DataFrame.Model,
     DecisionTreeClassifier (..),
     DecisionTreeRegressor (..),
 ) where
@@ -27,7 +28,7 @@ import DataFrame.DecisionTree.Types (Tree (..), TreeConfig)
 import DataFrame.Featurize.Internal (targetDoubles)
 import DataFrame.Internal.Column (Columnable)
 import DataFrame.Internal.Expression (Expr (..), getColumns)
-import DataFrame.Model (Fit (..), Predict (..))
+import DataFrame.Model
 
 -- | A fitted classification tree with structural diagnostics.
 data DecisionTreeClassifier a = DecisionTreeClassifier

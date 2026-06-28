@@ -12,6 +12,7 @@ classification. 'predict' is the additive score; 'gbProbaExpr' /
 'gbDecisionExpr' give the classification probability / decision.
 -}
 module DataFrame.Boosting.GBM (
+    module DataFrame.Model,
     GBLoss (..),
     GBConfig (..),
     defaultGBConfig,
@@ -37,7 +38,7 @@ import DataFrame.Internal.Column (TypedColumn (..), toVector)
 import DataFrame.Internal.DataFrame (DataFrame)
 import DataFrame.Internal.Expression (Expr (..), getColumns)
 import DataFrame.Internal.Interpreter (interpret)
-import DataFrame.Model (Fit (..), Predict (..))
+import DataFrame.Model
 import DataFrame.Operators ((.*.), (.+.), (.>.))
 
 -- | The boosting loss.

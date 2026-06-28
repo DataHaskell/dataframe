@@ -9,6 +9,7 @@ covariance of the (optionally standardized) feature columns. 'fit' trains a
 'pcaExprs' / 'pcaTransform' (PCA is a transformer, so it has no 'Predict').
 -}
 module DataFrame.PCA (
+    module DataFrame.Model,
     NComponents (..),
     PCAConfig (..),
     defaultPCAConfig,
@@ -27,7 +28,7 @@ import DataFrame.Internal.DataFrame (DataFrame)
 import DataFrame.Internal.Expression (Expr (..), UExpr (..))
 import DataFrame.LinearAlgebra (gram)
 import DataFrame.LinearAlgebra.Eigen (jacobiEigenSym)
-import DataFrame.Model (Fit (..))
+import DataFrame.Model
 import DataFrame.Operators ((.*.), (.+.), (.-.))
 import DataFrame.Transform (Transform (..))
 

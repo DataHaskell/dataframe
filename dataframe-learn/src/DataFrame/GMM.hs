@@ -11,6 +11,7 @@ stability. 'predict' is the hard (arg-max) component assignment; per-component
 log-densities are available via 'gmmLogDensityExprs'.
 -}
 module DataFrame.GMM (
+    module DataFrame.Model,
     CovType (..),
     GMMConfig (..),
     defaultGMMConfig,
@@ -33,7 +34,7 @@ import DataFrame.Internal.DataFrame (DataFrame)
 import DataFrame.Internal.Expression (Expr (..))
 import DataFrame.LinearAlgebra (Matrix, logSumExp)
 import DataFrame.LinearAlgebra.Solve (backSubst, cholesky, forwardSubst)
-import DataFrame.Model (Fit (..), Predict (..))
+import DataFrame.Model
 import DataFrame.Operators ((.*.), (.+.), (.-.))
 import DataFrame.Random (mkGen, sampleIndices)
 

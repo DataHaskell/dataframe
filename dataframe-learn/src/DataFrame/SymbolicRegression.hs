@@ -8,6 +8,7 @@
 accuracy-vs-complexity Pareto front. Deterministic given the seed.
 -}
 module DataFrame.SymbolicRegression (
+    module DataFrame.Model,
     UnOp (..),
     SRConfig (..),
     defaultSRConfig,
@@ -21,7 +22,7 @@ import qualified Data.Vector.Unboxed as VU
 import DataFrame.Featurize.Internal (featureNames, targetDoubles)
 import DataFrame.Internal.DataFrame (DataFrame)
 import DataFrame.Internal.Expression (Expr (..))
-import DataFrame.Model (Fit (..), Predict (..))
+import DataFrame.Model
 import DataFrame.Operations.Core (columnAsDoubleVector)
 import DataFrame.Random (mkGen)
 import DataFrame.SymbolicRegression.Expr (

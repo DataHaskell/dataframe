@@ -8,6 +8,7 @@ approximation otherwise. 'fit' trains the model; the projection is exposed as
 'kernelPCAExprs' / 'kernelPcaTransform' (a transformer, so no 'Predict').
 -}
 module DataFrame.PCA.Kernel (
+    module DataFrame.Model,
     KernelPCAConfig (..),
     defaultKernelPCAConfig,
     KernelPCAModel (..),
@@ -25,7 +26,7 @@ import DataFrame.Internal.DataFrame (DataFrame)
 import DataFrame.Internal.Expression (Expr (..), UExpr (..))
 import DataFrame.LinearAlgebra (sqDist)
 import DataFrame.LinearAlgebra.Eigen (jacobiEigenSym)
-import DataFrame.Model (Fit (..))
+import DataFrame.Model
 import DataFrame.Operators ((.*.), (.+.), (.-.))
 import DataFrame.Random (mkGen, sampleIndices)
 import DataFrame.Transform (Transform (..))

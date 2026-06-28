@@ -12,6 +12,7 @@ encoding but not the unweighted CART recursion), so the existing decision-tree
 path is untouched. 'predict' is the arg-max of weighted votes.
 -}
 module DataFrame.Boosting.AdaBoost (
+    module DataFrame.Model,
     AdaBoostConfig (..),
     defaultAdaBoostConfig,
     AdaBoostModel (..),
@@ -35,7 +36,7 @@ import DataFrame.Internal.Column (Columnable, TypedColumn (..), toVector)
 import DataFrame.Internal.DataFrame (DataFrame)
 import DataFrame.Internal.Expression (Expr (..))
 import DataFrame.Internal.Interpreter (interpret)
-import DataFrame.Model (Fit (..), Predict (..))
+import DataFrame.Model
 import DataFrame.Operators ((.*.), (.+.), (.==.))
 
 data AdaBoostConfig = AdaBoostConfig

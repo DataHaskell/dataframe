@@ -11,6 +11,7 @@ fit a linear SVC in the random-feature space. 'predict' compiles to a closed
 @Σ_r β_r·cos(…)@ expression of size @O(D·d)@, independent of the row count.
 -}
 module DataFrame.SVM.RFF (
+    module DataFrame.Model,
     RFFConfig (..),
     defaultRFFConfig,
     RFFSVMModel (..),
@@ -29,7 +30,7 @@ import DataFrame.Internal.Expression (Expr (..))
 import DataFrame.LinearAlgebra (dot)
 import DataFrame.LinearSolver (LinearModel (..), SolverConfig (..), fitProx)
 import DataFrame.LinearSolver.Loss (sqHingeLoss)
-import DataFrame.Model (Fit (..), Predict (..))
+import DataFrame.Model
 import DataFrame.Operators ((.*.), (.+.), (.>.))
 import DataFrame.Random (Gen, gaussianVector, mkGen, nextDouble)
 

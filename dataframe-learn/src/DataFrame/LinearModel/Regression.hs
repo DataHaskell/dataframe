@@ -7,6 +7,7 @@ lasso / elastic net (FISTA). 'fit' produces a 'LinearRegressor' record;
 'predict' compiles it to an @Expr Double@ over the raw feature columns.
 -}
 module DataFrame.LinearModel.Regression (
+    module DataFrame.Model,
     Penalty (..),
     LinearConfig (..),
     defaultLinearConfig,
@@ -34,7 +35,7 @@ import DataFrame.LinearSolver (
     fitProx,
  )
 import DataFrame.LinearSolver.Loss (squaredLoss)
-import DataFrame.Model (Fit (..), Predict (..))
+import DataFrame.Model
 
 -- | Regularization choice. @alpha@ is the penalty strength; @l1Ratio@ mixes L1/L2.
 data Penalty

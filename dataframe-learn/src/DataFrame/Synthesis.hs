@@ -39,6 +39,7 @@ closed-form least-squares coefficient fitting, hard-row counterexample sampling
 for very large frames, and piecewise (condition-abduction) features.
 -}
 module DataFrame.Synthesis (
+    module DataFrame.Model,
     LossFunction (..),
     SynthesisConfig (..),
     defaultSynthesisConfig,
@@ -67,7 +68,7 @@ import DataFrame.Internal.Statistics (
     percentile',
     variance',
  )
-import DataFrame.Model (Fit (..), Predict (..))
+import DataFrame.Model
 import DataFrame.Operations.Core (columnAsDoubleVector)
 
 -- | How a candidate's output column is scored against the target (higher is better).
