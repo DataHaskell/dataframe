@@ -337,7 +337,7 @@ import DataFrame.Internal.DataFrame as Dataframe (
     toMarkdown',
     toSeparated,
  )
-import DataFrame.Internal.Expression as Expression (Expr, prettyPrint)
+import DataFrame.Internal.Expression as Expression (Expr, prettyPrint, prettyPrintWidth)
 import DataFrame.Internal.Row as Row (
     Any,
     Row,

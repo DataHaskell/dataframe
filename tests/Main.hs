@@ -64,6 +64,7 @@ import qualified Operations.WriteCsv
 import qualified PackedTextMigration
 import qualified Parquet
 import qualified Plotting
+import qualified PrettyPrint
 import qualified Properties
 import qualified Properties.Categorical
 import qualified Properties.Simplify
@@ -134,6 +135,7 @@ tests =
             ++ Worklist.tests
             ++ Cart.tests
             ++ PackedTextMigration.tests
+            ++ PrettyPrint.tests
             ++ Typed.Parity.tests
             ++ Typed.IOReaders.tests
 

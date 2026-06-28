@@ -16,11 +16,13 @@
 module DataFrame.Internal.Expression where
 
 import qualified Data.Map.Strict as M
+import Data.Maybe (fromMaybe)
 import Data.String
 import qualified Data.Text as T
 import Data.Type.Equality (TestEquality (testEquality), type (:~:) (Refl))
 import qualified Data.Vector.Generic as VG
 import DataFrame.Internal.Column
+import qualified DataFrame.Internal.Pretty as P
 import Type.Reflection (Typeable, typeOf, typeRep)
 
 {- | Operators are an open typeclass: built-ins get their own 'Typeable' type so
@@ -431,42 +433,102 @@ getColumns (Binary _op l r) = getColumns l <> getColumns r
 getColumns (Agg _strategy expr) = getColumns expr
 getColumns (Over keys inner) = keys <> getColumns inner
 
+{- | Render an expression as readable, width-aware pseudo-code at the default
+width ('P.defaultWidth'). See 'prettyPrintWidth' to control wrapping.
+-}
 prettyPrint :: Expr a -> String
-prettyPrint = go 0 0
-  where
-    indent :: Int -> String
-    indent n = replicate (n * 2) ' '
+prettyPrint = prettyPrintWidth P.defaultWidth
 
-    go :: Int -> Int -> Expr a -> String
-    go depth prec expr = case expr of
-        Col name -> T.unpack name
-        CastWith name _ _ -> T.unpack name
-        CastExprWith tag _ inner -> T.unpack tag ++ "(" ++ go depth 0 inner ++ ")"
-        Lit value -> show value
-        If cond t e ->
-            let inner =
-                    "if "
-                        ++ go (depth + 1) 0 cond
-                        ++ "\n"
-                        ++ indent (depth + 1)
-                        ++ "then "
-                        ++ go (depth + 1) 0 t
-                        ++ "\n"
-                        ++ indent (depth + 1)
-                        ++ "else "
-                        ++ go (depth + 1) 0 e
-             in if prec > 0 then "(" ++ inner ++ ")" else inner
-        Unary op arg -> case unarySymbol op of
-            Nothing -> T.unpack (unaryName op) ++ "(" ++ go depth 0 arg ++ ")"
-            Just sym -> T.unpack sym ++ "(" ++ go depth 0 arg ++ ")"
-        Binary op l r ->
-            let p = binaryPrecedence op
-                inner = case binarySymbol op of
-                    Just name -> go depth p l ++ " " ++ T.unpack name ++ " " ++ go depth p r
-                    Nothing ->
-                        T.unpack (binaryName op) ++ "(" ++ go depth p l ++ ", " ++ go depth p r ++ ")"
-             in if prec > p then "(" ++ inner ++ ")" else inner
-        Agg (CollectAgg op _) arg -> T.unpack op ++ "(" ++ go depth 0 arg ++ ")"
-        Agg (FoldAgg op _ _) arg -> T.unpack op ++ "(" ++ go depth 0 arg ++ ")"
-        Agg (MergeAgg op _ _ _ _) arg -> T.unpack op ++ "(" ++ go depth 0 arg ++ ")"
-        Over keys inner -> go depth 0 inner ++ ".over(" ++ show (map T.unpack keys) ++ ")"
+{- | Render an expression as readable pseudo-code, wrapping long binary chains
+onto aligned continuation lines once they exceed @width@ columns. @if@/@then@/
+@else@ always break onto their own lines and nested @else if@ form a flat
+ladder (no staircase indentation). Sub-expressions are parenthesized by operator
+precedence so grouping is unambiguous.
+-}
+prettyPrintWidth :: Int -> Expr a -> String
+prettyPrintWidth width = P.render width . toDoc 0
+  where
+    -- \| @toDoc prec e@ renders @e@, parenthesizing when the enclosing operator
+    -- precedence @prec@ exceeds @e@'s own.
+    toDoc :: Int -> Expr x -> P.Doc
+    toDoc prec expr = case expr of
+        Col name -> P.text (T.unpack name)
+        CastWith name _ _ -> P.text (T.unpack name)
+        CastExprWith tag _ inner -> P.text (T.unpack tag) <> P.parens (toDoc 0 inner)
+        Lit value -> P.text (show value)
+        If{} -> renderIf prec expr
+        Unary op arg ->
+            let fn = fromMaybe (unaryName op) (unarySymbol op)
+             in P.text (T.unpack fn) <> P.parens (toDoc 0 arg)
+        Binary op l r -> case binarySymbol op of
+            Just sym -> renderBinary prec op (T.unpack sym) l r
+            Nothing ->
+                P.text (T.unpack (binaryName op))
+                    <> P.parens (toDoc 0 l <> P.text ", " <> toDoc 0 r)
+        Agg (CollectAgg op _) arg -> P.text (T.unpack op) <> P.parens (toDoc 0 arg)
+        Agg (FoldAgg op _ _) arg -> P.text (T.unpack op) <> P.parens (toDoc 0 arg)
+        Agg (MergeAgg op _ _ _ _) arg -> P.text (T.unpack op) <> P.parens (toDoc 0 arg)
+        Over keys inner ->
+            toDoc 0 inner <> P.text (".over(" ++ show (map T.unpack keys) ++ ")")
+
+    -- \| Commutative (hence associative here) operators flatten into a single
+    -- operator-led, wrappable chain; others render as a binary pair.
+    renderBinary ::
+        (BinaryOp op) => Int -> op c b a -> String -> Expr c -> Expr b -> P.Doc
+    renderBinary prec op sym l r =
+        let p = binaryPrecedence op
+            body
+                | binaryCommutative op =
+                    let operands =
+                            flattenChain (binaryName op) p l
+                                ++ flattenChain (binaryName op) p r
+                     in case operands of
+                            (o0 : os@(_ : _)) ->
+                                P.group
+                                    ( o0
+                                        <> P.nest
+                                            2
+                                            (P.hcat [P.line <> P.text sym P.<+> o | o <- os])
+                                    )
+                            _ -> toDoc p l P.<+> P.text sym P.<+> toDoc p r
+                | otherwise =
+                    P.group (toDoc p l <> P.nest 2 (P.line <> P.text sym P.<+> toDoc p r))
+         in -- @prec > p@: precedence forces parens even on one line. @prec < p@
+            -- (and we are nested in some binary, @prec >= 1@): precedence alone
+            -- does not require parens, but a wrapped operand is ambiguous, so
+            -- parenthesize only when it breaks across lines.
+            if prec > p
+                then P.parens body
+                else if prec >= 1 && prec < p then P.parensWhenBroken body else body
+
+    -- \| Collect operands of a same-name, same-precedence commutative operator
+    -- chain in left-to-right order.
+    flattenChain :: T.Text -> Int -> Expr x -> [P.Doc]
+    flattenChain name p e = case e of
+        Binary op' l' r'
+            | binaryName op' == name
+            , binaryPrecedence op' == p
+            , binaryCommutative op' ->
+                flattenChain name p l' ++ flattenChain name p r'
+        _ -> [toDoc p e]
+
+    renderIf :: Int -> Expr x -> P.Doc
+    renderIf prec (If c t e) =
+        let blk =
+                P.text "if" P.<+> P.nest 3 (P.group (toDoc 0 c))
+                    <> P.hardline
+                    <> P.text "then" P.<+> toDoc 0 t
+                    <> P.hardline
+                    <> renderElse e
+         in if prec > 0 then P.parens (P.nest 2 blk) else blk
+    renderIf _ _ = mempty
+
+    -- \| Flatten an @else if@ chain so each level stays at the same indent.
+    renderElse :: Expr x -> P.Doc
+    renderElse (If c t e) =
+        P.text "else if" P.<+> P.nest 8 (P.group (toDoc 0 c))
+            <> P.hardline
+            <> P.text "then" P.<+> toDoc 0 t
+            <> P.hardline
+            <> renderElse e
+    renderElse other = P.text "else" P.<+> toDoc 0 other

@@ -54,6 +54,7 @@ library
                         DataFrame.Internal.Nullable
                         DataFrame.Internal.PackedText
                         DataFrame.Internal.ParRadixSort
+                        DataFrame.Internal.Pretty
                         DataFrame.Internal.RadixRank
                         DataFrame.Internal.RowHash
                         DataFrame.Internal.Row

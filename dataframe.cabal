@@ -316,6 +316,7 @@ test-suite tests
                    Internal.PackedText,
                    Internal.Parsing,
                    PackedTextMigration,
+                   PrettyPrint,
                    Learn.Numerics,
                    Learn.Denotation,
                    Learn.Models,
