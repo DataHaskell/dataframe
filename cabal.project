@@ -12,6 +12,7 @@ packages:
     dataframe-parquet-th
     dataframe-viz
     dataframe-learn
+    dataframe-expr-serializer
     dataframe-lazy
     examples
     dataframe-fastcsv

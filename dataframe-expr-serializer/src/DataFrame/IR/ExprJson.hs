@@ -43,6 +43,7 @@ module DataFrame.IR.ExprJson (
     withNumTypeTag,
     withFracTypeTag,
     withRealTypeTag,
+    withRealUnboxTypeTag,
 ) where
 
 import Data.Aeson (object, (.:), (.=))
@@ -54,6 +55,7 @@ import Data.Int (Int16, Int32, Int64, Int8)
 import Data.Proxy (Proxy (..))
 import qualified Data.Text as T
 import Data.Type.Equality (TestEquality (testEquality), type (:~:) (Refl))
+import qualified Data.Vector.Unboxed as VU
 import Data.Word (Word16, Word32, Word64, Word8)
 import Type.Reflection (TypeRep, Typeable, typeRep)
 
@@ -226,6 +228,31 @@ withFloatingTypeTag t k = case t of
     "float" -> k (Proxy @Float)
     _ ->
         fail $ "DataFrame.IR.ExprJson: type does not support Floating: " <> T.unpack t
+
+{- | Subset that supports both 'Real' and 'VU.Unbox' (used by variance/median).
+'Integer' is deliberately omitted — it is 'Real' but not 'Unbox'.
+-}
+withRealUnboxTypeTag ::
+    T.Text ->
+    (forall a. (Columnable a, Real a, VU.Unbox a) => Proxy a -> Aeson.Parser r) ->
+    Aeson.Parser r
+withRealUnboxTypeTag t k = case t of
+    "int" -> k (Proxy @Int)
+    "int8" -> k (Proxy @Int8)
+    "int16" -> k (Proxy @Int16)
+    "int32" -> k (Proxy @Int32)
+    "int64" -> k (Proxy @Int64)
+    "word" -> k (Proxy @Word)
+    "word8" -> k (Proxy @Word8)
+    "word16" -> k (Proxy @Word16)
+    "word32" -> k (Proxy @Word32)
+    "word64" -> k (Proxy @Word64)
+    "double" -> k (Proxy @Double)
+    "float" -> k (Proxy @Float)
+    _ ->
+        fail $
+            "DataFrame.IR.ExprJson: type does not support Real+Unbox (variance/median): "
+                <> T.unpack t
 
 {- | Encode an 'Expr' to a JSON value. Returns 'Left' on unsupported
 constructors (Agg, Over, CastWith, CastExprWith) or unsupported operator
@@ -492,6 +519,17 @@ parseSomeExpr = Aeson.withObject "Expr" $ \o -> do
             rawLhs <- o .: "lhs"
             rawRhs <- o .: "rhs"
             parseBinary op outType argType rawLhs rawRhs
+        "agg" -> do
+            aggName <- o .: "agg" :: Aeson.Parser T.Text
+            argType <- o .: "arg_type" :: Aeson.Parser T.Text
+            rawArg <- o .: "arg"
+            parseAgg aggName outType argType rawArg
+        "over" -> do
+            names <- o .: "partition_by" :: Aeson.Parser [T.Text]
+            rawArg <- o .: "arg"
+            withTypeTag outType $ \(_ :: Proxy a) -> do
+                inner <- parseExprAt @a rawArg
+                return $ SomeExpr (typeRep @a) (F.over names inner)
         other -> fail $ "DataFrame.IR.ExprJson: unknown node kind: " <> T.unpack other
 
 parseExprAt :: forall a. (Columnable a) => Aeson.Value -> Aeson.Parser (Expr a)
@@ -699,3 +737,50 @@ parseBinary op outType argType rawLhs rawRhs = case op of
     "nulland" -> parseBinary "and" outType argType rawLhs rawRhs
     "nullor" -> parseBinary "or" outType argType rawLhs rawRhs
     other -> fail $ "DataFrame.IR.ExprJson: unsupported binary op: " <> T.unpack other
+
+{- | Decode an aggregation node. Dispatches on the stored aggregation name to the
+matching 'DataFrame.Functions' builder, picking the type-tag dispatcher demanded
+by that builder's constraints.
+-}
+parseAgg :: T.Text -> T.Text -> T.Text -> Aeson.Value -> Aeson.Parser SomeExpr
+parseAgg aggName outType argType rawArg = case aggName of
+    "count" -> do
+        requireTag outType "int"
+        withTypeTag argType $ \(_ :: Proxy a) -> do
+            arg <- parseExprAt @a rawArg
+            return $ SomeExpr (typeRep @Int) (F.count arg)
+    "sum" -> withNumTypeTag outType $ \(_ :: Proxy a) -> do
+        requireSame outType argType
+        arg <- parseExprAt @a rawArg
+        return $ SomeExpr (typeRep @a) (F.sum arg)
+    "minimum" -> ordAgg F.minimum
+    "maximum" -> ordAgg F.maximum
+    "mode" -> ordAgg F.mode
+    "mean" -> do
+        requireTag outType "double"
+        withRealTypeTag argType $ \(_ :: Proxy a) -> do
+            arg <- parseExprAt @a rawArg
+            return $ SomeExpr (typeRep @Double) (F.mean arg)
+    "variance" -> realUnboxAgg F.variance
+    "median" -> realUnboxAgg F.median
+    "collect" ->
+        fail
+            "DataFrame.IR.ExprJson: 'collect' is not supported in the wire format \
+            \(its list-typed output has no type tag)"
+    other -> fail $ "DataFrame.IR.ExprJson: unsupported aggregation: " <> T.unpack other
+  where
+    ordAgg ::
+        (forall a. (Columnable a, Ord a) => Expr a -> Expr a) ->
+        Aeson.Parser SomeExpr
+    ordAgg op = withOrdTypeTag outType $ \(_ :: Proxy a) -> do
+        requireSame outType argType
+        arg <- parseExprAt @a rawArg
+        return $ SomeExpr (typeRep @a) (op arg)
+    realUnboxAgg ::
+        (forall a. (Columnable a, Real a, VU.Unbox a) => Expr a -> Expr Double) ->
+        Aeson.Parser SomeExpr
+    realUnboxAgg op = do
+        requireTag outType "double"
+        withRealUnboxTypeTag argType $ \(_ :: Proxy a) -> do
+            arg <- parseExprAt @a rawArg
+            return $ SomeExpr (typeRep @Double) (op arg)

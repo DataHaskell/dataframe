@@ -1,0 +1,48 @@
+cabal-version:      2.4
+name:               dataframe-expr-serializer
+version:            1.0.0.0
+
+synopsis:           Serialize and deserialize dataframe expressions and pipelines.
+description:
+    Save fitted @Expr@ values and whole pipelines (ordered @[NamedExpr]@) to a
+    portable JSON form and reload them for inference — in another Haskell
+    process or from Python, sharing one wire format.
+
+    @DataFrame.Expr.Serialize@ is the format-agnostic public API (expression and
+    pipeline encode/decode plus file/bytes save-load helpers).
+    @DataFrame.IR.ExprJson@ is the low-level JSON wire codec — the cross-language
+    contract the Python bindings decode against.
+
+    Depends only on @dataframe-core@ and @dataframe-operations@ (both pure), so a
+    saved model can be loaded without the CSV/Parquet/Arrow stack.
+
+bug-reports:        https://github.com/mchav/dataframe/issues
+license:            MIT
+license-file:       LICENSE
+author:             Michael Chavinda
+maintainer:         mschavinda@gmail.com
+copyright:          (c) 2024-2026 Michael Chavinda
+category:           Data
+tested-with:        GHC ==9.4.8 || ==9.6.7 || ==9.8.4 || ==9.10.3 || ==9.12.2
+
+common warnings
+    ghc-options:
+        -Wincomplete-patterns
+        -Wincomplete-uni-patterns
+        -Wunused-imports
+        -Wunused-local-binds
+        -Wunused-packages
+
+library
+    import:             warnings
+    exposed-modules:    DataFrame.Expr.Serialize
+                        DataFrame.IR.ExprJson
+    build-depends:      base >= 4 && < 5,
+                        aeson >= 0.11.0.0 && < 3,
+                        bytestring >= 0.11 && < 0.13,
+                        dataframe-core >= 1.1.1 && < 1.2,
+                        dataframe-operations >= 1.1.2 && < 1.2,
+                        text >= 2.1 && < 3,
+                        vector ^>= 0.13
+    hs-source-dirs:     src
+    default-language:   Haskell2010

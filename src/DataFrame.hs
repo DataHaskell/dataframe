@@ -299,6 +299,9 @@ import DataFrame.IO.JSON as JSON (
     readJSON,
     readJSONEither,
  )
+-- Marks the dataframe-expr-serializer dependency as used (the codec modules are
+-- surfaced to consumers via this library's @reexported-modules@).
+import DataFrame.Expr.Serialize ()
 #ifdef WITH_PARQUET
 import DataFrame.IO.Parquet as Parquet (
     ParquetReadOptions (..),

@@ -14,6 +14,7 @@ import qualified Functions
 import qualified IO.CSV
 import qualified IO.CsvGolden
 import qualified IO.JSON
+import qualified IR.ExprJsonRoundtrip
 import qualified Internal.ColumnBuilder
 import qualified Internal.DictEncode
 import qualified Internal.Markdown
@@ -125,6 +126,7 @@ tests =
             ++ IO.CSV.tests
             ++ IO.CsvGolden.tests
             ++ IO.JSON.tests
+            ++ IR.ExprJsonRoundtrip.tests
             ++ Parquet.tests
             ++ LazyParquet.tests
             ++ LazyParity.tests
