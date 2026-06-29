@@ -1814,8 +1814,8 @@ toUnboxedVector column =
                 Left $
                     TypeMismatchException
                         ( MkTypeErrorContext
-                            { userType = Right (typeRep @Int)
-                            , expectedType = Right (typeRep @a)
+                            { userType = Right (typeRep @a)
+                            , expectedType = Right (typeRep @b)
                             , callingFunctionName = Just "toUnboxedVector"
                             , errorColumnName = Nothing
                             }
