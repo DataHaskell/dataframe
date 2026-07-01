@@ -1,6 +1,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
 
 {- | sklearn-style standalone tree estimators returning inspectable records
@@ -49,7 +50,8 @@ data DecisionTreeRegressor = DecisionTreeRegressor
     }
     deriving (Show)
 
-instance (Columnable a, Ord a) => Fit TreeConfig (Expr a) (DecisionTreeClassifier a) where
+instance (Columnable a, Ord a) => Fit TreeConfig (Expr a) where
+    type ModelOf TreeConfig (Expr a) = (DecisionTreeClassifier a)
     fit cfg target df =
         DecisionTreeClassifier
             e
@@ -59,10 +61,12 @@ instance (Columnable a, Ord a) => Fit TreeConfig (Expr a) (DecisionTreeClassifie
       where
         e = fitDecisionTree cfg target df
 
-instance Predict (DecisionTreeClassifier a) a where
+instance Predict (DecisionTreeClassifier a) where
+    type Prediction (DecisionTreeClassifier a) = Expr a
     predict = dtcExpr
 
-instance Fit RegTreeConfig (Expr Double) DecisionTreeRegressor where
+instance Fit RegTreeConfig (Expr Double) where
+    type ModelOf RegTreeConfig (Expr Double) = DecisionTreeRegressor
     fit cfg target df =
         DecisionTreeRegressor
             t
@@ -83,7 +87,8 @@ instance Fit RegTreeConfig (Expr Double) DecisionTreeRegressor where
                     ("fit @DecisionTreeRegressor: target must be a column, got " ++ show target)
         e = treeToExpr t
 
-instance Predict DecisionTreeRegressor Double where
+instance Predict DecisionTreeRegressor where
+    type Prediction DecisionTreeRegressor = Expr Double
     predict = dtrExpr
 
 usageCounts :: [T.Text] -> M.Map T.Text Int

@@ -2,6 +2,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TypeFamilies #-}
 
 {- | Principal component analysis via the symmetric Jacobi eigensolver on the
 covariance of the (optionally standardized) feature columns. 'fit' trains a
@@ -59,7 +60,8 @@ data PCAModel = PCAModel
     }
     deriving (Eq, Show)
 
-instance Fit PCAConfig [Expr Double] PCAModel where
+instance Fit PCAConfig [Expr Double] where
+    type ModelOf PCAConfig [Expr Double] = PCAModel
     fit = fitPCA
 
 -- | Fit PCA on the given feature columns (each must be a @Col@).

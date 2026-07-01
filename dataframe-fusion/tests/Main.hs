@@ -4,10 +4,8 @@
 
 module Main (main) where
 
-import Data.Function ((&))
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
-import qualified Data.Vector as V
 import System.Directory (createDirectoryIfMissing, getTemporaryDirectory)
 import qualified System.Exit as Exit
 import System.FilePath ((</>))
@@ -22,8 +20,6 @@ import Test.HUnit (
 
 import DataFrame.Fusion.Typed (Column)
 import qualified DataFrame.Fusion.Typed as Fusion
-import qualified DataFrame.Internal.Column as IC
-import qualified DataFrame.Internal.DataFrame as DF
 import qualified DataFrame.Operations.Core as Core
 import DataFrame.Typed.Freeze (thaw)
 

@@ -27,17 +27,25 @@ module DataFrame.Featurize.Internal (
 ) where
 
 import Control.Exception (throw)
+import Data.Maybe (isJust)
 import qualified Data.Text as T
 import qualified Data.Vector as V
 import qualified Data.Vector.Unboxed as VU
+import Type.Reflection (TypeRep, typeRep)
 
+import Data.Either (fromRight)
 import DataFrame.Errors (DataFrameException (..), TypeErrorContext (..))
 import qualified DataFrame.Functions as F
-import DataFrame.Internal.Column (Columnable)
-import DataFrame.Internal.DataFrame (DataFrame, columnNames)
+import DataFrame.Internal.Column (Columnable, columnBitmap, columnTypeString)
+import qualified DataFrame.Internal.Column as D
+import DataFrame.Internal.DataFrame (DataFrame, columnNames, getColumn)
 import DataFrame.Internal.Expression (Expr (..))
 import DataFrame.LinearAlgebra (Matrix, transposeM)
-import DataFrame.Operations.Core (columnAsDoubleVector, columnAsVector)
+import DataFrame.Operations.Core (
+    columnAsDoubleVector,
+    columnAsUnboxedVector,
+    columnAsVector,
+ )
 import DataFrame.Operators ((.&&.), (.*.), (.+.), (.<=.), (.>=.))
 
 -- | Every column name except the supervised target's.
@@ -45,33 +53,86 @@ featureNames :: Expr a -> DataFrame -> [T.Text]
 featureNames (Col target) df = filter (/= target) (columnNames df)
 featureNames _ df = columnNames df
 
-{- | The named columns as a row-major @n×d@ matrix of doubles (non-numeric
-columns are coerced through 'columnAsDoubleVector'), paired with the names.
+{- | The named columns as a row-major @n×d@ matrix, paired with the names. Every
+column must already be stored as non-null 'Double'; a nullable ('Maybe Double')
+or non-'Double' column is a fit-time error rather than a silent coercion.
 -}
 numericMatrix :: [T.Text] -> DataFrame -> (V.Vector T.Text, Matrix)
 numericMatrix names df = (V.fromList names, transposeM colMajor)
   where
-    colMajor = V.fromList (map column names)
-    column name = case columnAsDoubleVector (F.col @Double name) df of
-        Right v -> v
-        Left e -> throw (asFeatureError name e)
+    colMajor = V.fromList (map (`requireDoubleColumn` df) names)
 
-asFeatureError :: T.Text -> DataFrameException -> DataFrameException
-asFeatureError name (TypeMismatchException ctx) =
+{- | Read a feature\/target column strictly as a non-null 'Double' vector. A
+nullable ('Maybe Double') column, or a column of any other type, is a fit-time
+error naming the column and pointing at the fix.
+-}
+requireDoubleColumn :: T.Text -> DataFrame -> VU.Vector Double
+requireDoubleColumn name df = case getColumn name df of
+    Nothing ->
+        throw
+            ( TypeMismatchException
+                ( MkTypeErrorContext
+                    (Right (typeRep @Double))
+                    (Left "missing" :: Either String (TypeRep Double))
+                    (Just (T.unpack name))
+                    Nothing
+                )
+            )
+    Just c ->
+        if isJust (columnBitmap c)
+            then throw (nullableInputError name (columnTypeString c))
+            else
+                if D.hasElemType @Double c
+                    then fromRight undefined (columnAsUnboxedVector (F.col @Double name) df)
+                    else
+                        throw
+                            ( asDoubleInputError
+                                name
+                                ( TypeMismatchException
+                                    ( MkTypeErrorContext
+                                        (Right (typeRep @Double))
+                                        (Left (columnTypeString c) :: Either String (TypeRep Double))
+                                        (Just (T.unpack name))
+                                        Nothing
+                                    )
+                                )
+                            )
+
+-- | Actionable error for a non-'Double' input column (wraps the type mismatch).
+asDoubleInputError :: T.Text -> DataFrameException -> DataFrameException
+asDoubleInputError name (TypeMismatchException ctx) =
     TypeMismatchException
         ctx
             { errorColumnName = Just (T.unpack name)
             , callingFunctionName =
                 Just
-                    "model fit (feature columns must be numeric Double; drop or encode non-numeric columns)"
+                    "model fit (input columns must be Double; convert with toDouble or build the column as Double)"
             }
-asFeatureError _ e = e
+asDoubleInputError _ e = e
 
--- | The target column as a vector of doubles.
+-- | Actionable error for a nullable ('Maybe Double') input column.
+nullableInputError :: T.Text -> String -> DataFrameException
+nullableInputError name found =
+    TypeMismatchException
+        ( MkTypeErrorContext
+            { userType = Right (typeRep @Double)
+            , expectedType = Left found
+            , errorColumnName = Just (T.unpack name)
+            , callingFunctionName =
+                Just
+                    "model fit (input columns must be non-null Double; drop or impute missing values before fitting)"
+            } ::
+            TypeErrorContext Double ()
+        )
+
+{- | The target column as a non-null 'Double' vector. A nullable or non-'Double'
+target is a fit-time error, not a coercion.
+-}
 targetDoubles :: Expr Double -> DataFrame -> VU.Vector Double
-targetDoubles expr df = case columnAsDoubleVector expr df of
+targetDoubles (Col name) df = requireDoubleColumn name df
+targetDoubles expr df = case columnAsUnboxedVector expr df of
     Right v -> v
-    Left e -> throw e
+    Left e -> throw (asDoubleInputError (T.pack "<target>") e)
 
 -- | The target column as a vector of its own type (for classifiers).
 targetValues :: (Columnable a) => Expr a -> DataFrame -> V.Vector a

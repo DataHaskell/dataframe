@@ -4,6 +4,7 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
 
 {- | AdaBoost (SAMME) over short, sample-weighted classification trees. The
@@ -56,10 +57,12 @@ data AdaBoostModel a = AdaBoostModel
     }
     deriving (Show)
 
-instance (Columnable a, Ord a) => Fit AdaBoostConfig (Expr a) (AdaBoostModel a) where
+instance (Columnable a, Ord a) => Fit AdaBoostConfig (Expr a) where
+    type ModelOf AdaBoostConfig (Expr a) = (AdaBoostModel a)
     fit = fitAdaBoost
 
-instance (Columnable a, Ord a) => Predict (AdaBoostModel a) a where
+instance (Columnable a, Ord a) => Predict (AdaBoostModel a) where
+    type Prediction (AdaBoostModel a) = Expr a
     predict = adaBoostExpr
 
 -- | Fit an AdaBoost-SAMME classifier.

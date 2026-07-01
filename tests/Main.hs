@@ -30,9 +30,11 @@ import qualified Learn.MetricsTests
 import qualified Learn.Models
 import qualified Learn.NumericalRigor
 import qualified Learn.Numerics
+import qualified Learn.Segmented
 import qualified Learn.SklearnParity
 import qualified Learn.Symbolic
 import qualified Learn.Synthesis
+import qualified Learn.TypedModel
 import qualified LinearSolver
 import qualified Monad
 import qualified Operations.Aggregations
@@ -87,6 +89,7 @@ tests =
             ++ Learn.Numerics.tests
             ++ Learn.Denotation.tests
             ++ Learn.Models.tests
+            ++ Learn.TypedModel.tests
             ++ Learn.Ensembles.tests
             ++ Learn.Symbolic.tests
             ++ Learn.SklearnParity.tests
@@ -95,6 +98,7 @@ tests =
             ++ Learn.Metamorphic.tests
             ++ Learn.EdgeCases.tests
             ++ Learn.NumericalRigor.tests
+            ++ Learn.Segmented.tests
             ++ Operations.Aggregations.tests
             ++ Operations.Apply.tests
             ++ Operations.Core.tests

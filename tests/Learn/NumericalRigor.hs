@@ -23,11 +23,11 @@ import DataFrame.LinearSolver.Loss (
     squaredLoss,
  )
 import DataFrame.Model (fit)
-import DataFrame.ModelSelection (trainTestSplit)
 import DataFrame.Random
 import DataFrame.SVM.RFF
 
 import qualified Data.Vector.Unboxed as VU
+import System.Random (mkStdGen)
 import Test.HUnit
 
 -- ---------------------------------------------------------------------------
@@ -209,7 +209,7 @@ testGaussianMoments = TestCase $ do
         ("gaussian |x|>2 frequency ~0.0455, got " ++ show tail2)
         (abs (tail2 - 0.0455) <= 0.01)
 
-{- | @trainTestSplit frac@ over many seeds: the realized train fraction matches
+{- | @randomSplit frac@ over many seeds: the realized train fraction matches
 @frac@ within a binomial CI, and train+test always sums to the input row count
 (cat 2 invariant). A split that loses/dupes rows, or ignores @frac@, fails.
 -}
@@ -223,7 +223,7 @@ testSplitProportions = TestCase $ do
         seFrac = sqrt (frac * (1 - frac) / fromIntegral nRows)
     mapM_
         ( \s -> do
-            let (tr, te) = trainTestSplit frac s df
+            let (tr, te) = D.randomSplit (mkStdGen s) frac df
                 nTr = fst (D.dimensions tr)
                 nTe = fst (D.dimensions te)
                 realized = fromIntegral nTr / fromIntegral nRows
@@ -381,28 +381,28 @@ testRFFReproducible = TestCase $ do
     assertBool "RFF: a different seed changes the projection" anyDiffer
 
 -- ---------------------------------------------------------------------------
--- randomSplit / trainTestSplit determinism + row-count invariant (cat 16 + 2).
+-- randomSplit determinism + row-count invariant (cat 16 + 2).
 -- ---------------------------------------------------------------------------
 
-{- | @trainTestSplit@ with the same seed is bit-identical (compared via the
+{- | @randomSplit@ with the same seed is bit-identical (compared via the
 prettyPrinted frames), preserves total rows, and a different seed CAN change the
 partition.
 -}
 testSplitReproducible :: Test
 testSplitReproducible = TestCase $ do
     let df = D.fromNamedColumns [("x", DI.fromList [1 .. 200 :: Int])]
-        (tr1, te1) = trainTestSplit 0.6 42 df
-        (tr2, te2) = trainTestSplit 0.6 42 df
-    assertBool "trainTestSplit same seed: same train" (tr1 == tr2)
-    assertBool "trainTestSplit same seed: same test" (te1 == te2)
+        (tr1, te1) = D.randomSplit (mkStdGen 42) 0.6 df
+        (tr2, te2) = D.randomSplit (mkStdGen 42) 0.6 df
+    assertBool "randomSplit same seed: same train" (tr1 == tr2)
+    assertBool "randomSplit same seed: same test" (te1 == te2)
     assertEqual
-        "trainTestSplit preserves row count"
+        "randomSplit preserves row count"
         200
         (fst (D.dimensions tr1) + fst (D.dimensions te1))
-    let trainFor s = fst (trainTestSplit 0.6 s df)
+    let trainFor s = fst (D.randomSplit (mkStdGen s) 0.6 df)
         base = trainFor 42
         anyDiffer = any (\s -> trainFor s /= base) [1, 2, 3, 7, 99]
-    assertBool "trainTestSplit: a different seed changes the partition" anyDiffer
+    assertBool "randomSplit: a different seed changes the partition" anyDiffer
 
 -- ---------------------------------------------------------------------------
 -- A self-consistency sanity for the helpers above so a broken reference value

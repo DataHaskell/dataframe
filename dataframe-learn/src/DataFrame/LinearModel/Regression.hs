@@ -1,5 +1,7 @@
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE TypeFamilies #-}
 
 {- | Linear regression with the standard penalties: ordinary least squares
 (Householder QR), ridge (Cholesky on the regularized normal equations), and
@@ -66,7 +68,9 @@ data LinearRegressor = LinearRegressor
     }
     deriving (Eq, Show)
 
-instance Fit LinearConfig (Expr Double) LinearRegressor where
+instance Fit LinearConfig (Expr Double) where
+    type ModelOf LinearConfig (Expr Double) = LinearRegressor
+    type FrameReq LinearConfig (Expr Double) = 'AllDoubleFrame
     fit (LinearConfig penalty cfg) target df =
         case penalty of
             OLS -> closedForm (olsSolve mat y)
@@ -85,7 +89,8 @@ instance Fit LinearConfig (Expr Double) LinearRegressor where
                 m = fitProx squaredLoss proxCfg mat y nameVec
              in LinearRegressor (lmWeights m) (lmIntercept m) nameVec penalty
 
-instance Predict LinearRegressor Double where
+instance Predict LinearRegressor where
+    type Prediction LinearRegressor = Expr Double
     predict m =
         affineExpr
             (regIntercept m)

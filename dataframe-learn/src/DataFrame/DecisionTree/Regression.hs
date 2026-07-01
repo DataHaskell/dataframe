@@ -12,13 +12,12 @@ module DataFrame.DecisionTree.Regression (
     fitRegTreeOn,
 ) where
 
-import Data.Function (on)
+import Control.Parallel (par, pseq)
 import Data.Maybe (maybeToList)
 import qualified Data.Vector as V
-import qualified Data.Vector.Algorithms.Merge as VA
 import qualified Data.Vector.Unboxed as VU
 
-import DataFrame.DecisionTree.Cart (CartFeature (..))
+import DataFrame.DecisionTree.Cart (CartFeature (..), sortIndicesByValue)
 import DataFrame.DecisionTree.Types (Tree (..))
 
 -- | Stopping criteria for the regression tree.
@@ -48,97 +47,99 @@ fitRegTreeOn ::
     VU.Vector Double ->
     Maybe (VU.Vector Double) ->
     Tree Double
-fitRegTreeOn cfg feats y mw = go 0 (VU.enumFromN 0 n)
+fitRegTreeOn cfg feats y mw = buildNode 0 (VU.enumFromN 0 n) featSorted
   where
     n = VU.length y
-    wt i = maybe 1 (VU.! i) mw
-    go depth idxs
-        | VU.length idxs < rtMinSamplesSplit cfg
-            || depth >= rtMaxDepth cfg =
-            Leaf (nodeMean idxs)
-        | otherwise = case bestSplit idxs of
-            Nothing -> Leaf (nodeMean idxs)
-            Just (fj, thr) ->
-                let vals = cfValues (feats V.! fj)
-                    (lefts, rights) = VU.partition (\i -> vals VU.! i <= thr) idxs
-                 in if VU.null lefts || VU.null rights
-                        then Leaf (nodeMean idxs)
-                        else
-                            Branch
-                                (cfPred (feats V.! fj) thr)
-                                (go (depth + 1) lefts)
-                                (go (depth + 1) rights)
-    nodeMean idxs =
-        let (sw, sy) = VU.foldl' (\(!a, !b) i -> (a + wt i, b + wt i * (y VU.! i))) (0, 0) idxs
-         in if sw == 0 then 0 else sy / sw
-    bestSplit idxs =
-        let (totW, totSY, totSY2) = moments idxs
-            nodeSSE = totSY2 - safeDiv (totSY * totSY) totW
-            candidates =
-                [ (red, fj, thr)
-                | fj <- [0 .. V.length feats - 1]
-                , (thr, red) <- featureSplits idxs fj totW totSY totSY2 nodeSSE
-                ]
-         in case candidates of
-                [] -> Nothing
-                _ ->
-                    let (red, fj, thr) = maximumByFst candidates
-                     in if red >= rtMinImpurityDecrease cfg && red > 0
-                            then Just (fj, thr)
-                            else Nothing
-    featureSplits idxs fj totW totSY totSY2 nodeSSE =
-        let vals = cfValues (feats V.! fj)
-            sorted = sortByVal vals idxs
-         in sweep sorted vals totW totSY totSY2 nodeSSE
-    sweep sorted vals totW totSY totSY2 nodeSSE = go0 0 0 0 0 Nothing
+    weightAt i = maybe 1 (VU.! i) mw
+    -- Sort every feature's rows once; each node inherits its subset by an
+    -- order-preserving filter, so no node re-sorts (cf. CART's 'buildCartNode').
+    featSorted = V.map (sortIndicesByValue . cfValues) feats
+
+    buildNode depth idxs sortedByFeat
+        | depth >= rtMaxDepth cfg || VU.length idxs < rtMinSamplesSplit cfg = leaf
+        | otherwise =
+            maybe leaf (splitNode depth idxs sortedByFeat) (bestSplit idxs sortedByFeat)
       where
+        leaf = Leaf (weightedMean idxs)
+
+    -- A degenerate (all-to-one-side) partition collapses back to a leaf.
+    splitNode depth idxs sortedByFeat (fj, thr)
+        | VU.null lefts || VU.null rights = Leaf (weightedMean idxs)
+        | otherwise =
+            forceTree l `par` (forceTree r `pseq` Branch (cfPred (feats V.! fj) thr) l r)
+      where
+        vals = cfValues (feats V.! fj)
+        goesLeft i = vals VU.! i <= thr
+        lefts = VU.filter goesLeft idxs
+        rights = VU.filter (not . goesLeft) idxs
+        l = buildNode (depth + 1) lefts (V.map (VU.filter goesLeft) sortedByFeat)
+        r =
+            buildNode (depth + 1) rights (V.map (VU.filter (not . goesLeft)) sortedByFeat)
+
+    weightedMean idxs =
+        let (w, sy) = VU.foldl' step (0, 0) idxs
+            step (!a, !b) i = (a + weightAt i, b + weightAt i * (y VU.! i))
+         in if w == 0 then 0 else sy / w
+
+    bestSplit idxs sortedByFeat
+        | null candidates = Nothing
+        | red > 0 && red >= rtMinImpurityDecrease cfg = Just (fj, thr)
+        | otherwise = Nothing
+      where
+        (totW, totSY, totSY2) = moments idxs
+        nodeSSE = sse totSY totSY2 totW
+        candidates =
+            [ (red', fj', thr')
+            | fj' <- [0 .. V.length feats - 1]
+            , (thr', red') <-
+                bestThreshold fj' (sortedByFeat V.! fj') totW totSY totSY2 nodeSSE
+            ]
+        (red, fj, thr) = maximumByFst candidates
+
+    -- Prefix-scan the sorted rows, carrying the left side's weight and Σy / Σy².
+    bestThreshold fj sorted totW totSY totSY2 nodeSSE = maybeToList (go 0 0 0 0 Nothing)
+      where
+        vals = cfValues (feats V.! fj)
         m = VU.length sorted
-        go0 !k !wl !syl !syl2 best
-            | k >= m - 1 = maybeToList best
-            | otherwise =
-                let i = sorted VU.! k
-                    wi = wt i
-                    yi = y VU.! i
-                    wl' = wl + wi
-                    syl' = syl + wi * yi
-                    syl2' = syl2 + wi * yi * yi
-                    vCur = vals VU.! i
-                    vNext = vals VU.! (sorted VU.! (k + 1))
-                    nl = k + 1
-                    nr = m - nl
-                    wr = totW - wl'
-                    valid =
-                        vCur /= vNext
-                            && nl >= rtMinLeafSize cfg
-                            && nr >= rtMinLeafSize cfg
-                            && wl' > 0
-                            && wr > 0
-                    red =
-                        nodeSSE
-                            - ( (syl2' - safeDiv (syl' * syl') wl')
-                                    + ( (totSY2 - syl2')
-                                            - safeDiv ((totSY - syl') * (totSY - syl')) wr
-                                      )
-                              )
-                    thr = (vCur + vNext) / 2
-                    best' =
-                        if valid && maybe True (\(_, b) -> red > b) best
-                            then Just (thr, red)
-                            else best
-                 in go0 (k + 1) wl' syl' syl2' best'
-    moments =
-        VU.foldl'
-            ( \(!w, !sy, !sy2) i ->
-                let wi = wt i; yi = y VU.! i
-                 in (w + wi, sy + wi * yi, sy2 + wi * yi * yi)
-            )
-            (0, 0, 0)
+        go !k !wl !syl !syl2 best
+            | k >= m - 1 = best
+            | otherwise = go (k + 1) wl' syl' syl2' best'
+          where
+            i = sorted VU.! k
+            next = sorted VU.! (k + 1)
+            wi = weightAt i
+            yi = y VU.! i
+            wl' = wl + wi
+            syl' = syl + wi * yi
+            syl2' = syl2 + wi * yi * yi
+            wr = totW - wl'
+            leafSizesOk = k + 1 >= rtMinLeafSize cfg && m - (k + 1) >= rtMinLeafSize cfg
+            splittable = vals VU.! i /= vals VU.! next && leafSizesOk && wl' > 0 && wr > 0
+            reduction = nodeSSE - (sse syl' syl2' wl' + sse (totSY - syl') (totSY2 - syl2') wr)
+            best'
+                | splittable && maybe True ((reduction >) . snd) best =
+                    Just ((vals VU.! i + vals VU.! next) / 2, reduction)
+                | otherwise = best
+
+    moments = VU.foldl' step (0, 0, 0)
+      where
+        step (!w, !sy, !sy2) i =
+            let wi = weightAt i; yi = y VU.! i
+             in (w + wi, sy + wi * yi, sy2 + wi * yi * yi)
 
 safeDiv :: Double -> Double -> Double
 safeDiv a b = if b == 0 then 0 else a / b
 
-sortByVal :: VU.Vector Double -> VU.Vector Int -> VU.Vector Int
-sortByVal vals = VU.modify (VA.sortBy (compare `on` (vals VU.!)))
+-- | Weighted SSE of a node from its Σy, Σy², and total weight: @Σy² − (Σy)²/w@.
+sse :: Double -> Double -> Double -> Double
+sse sumY sumSq w = sumSq - safeDiv (sumY * sumY) w
+
+{- | Force a subtree to WHNF throughout so the spark scoring the sibling has
+substantial work to evaluate; pure and value-preserving (cf. 'Tao').
+-}
+forceTree :: Tree Double -> ()
+forceTree (Leaf v) = v `seq` ()
+forceTree (Branch _ l r) = forceTree l `seq` forceTree r
 
 maximumByFst :: (Ord a) => [(a, b, c)] -> (a, b, c)
 maximumByFst = foldr1 (\x@(a, _, _) y@(b, _, _) -> if a >= b then x else y)

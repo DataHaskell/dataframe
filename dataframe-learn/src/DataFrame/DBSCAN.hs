@@ -3,6 +3,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE TypeFamilies #-}
 
 {- | Density-based clustering (DBSCAN). Brute-force @O(n²)@ region queries, no
 spatial index — suitable for the in-memory scales this library targets. DBSCAN
@@ -57,7 +58,8 @@ data DBSCANModel = DBSCANModel
     }
     deriving (Eq, Show)
 
-instance Fit DBSCANConfig [Expr Double] DBSCANModel where
+instance Fit DBSCANConfig [Expr Double] where
+    type ModelOf DBSCANConfig [Expr Double] = DBSCANModel
     fit = fitDBSCAN
 
 -- | Cluster the feature columns with DBSCAN.

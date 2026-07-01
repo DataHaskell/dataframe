@@ -2,10 +2,9 @@
 fitters have heterogeneous types, so these helpers are parameterized by a
 user-supplied @train -> test -> score@ closure; the search maximizes the mean
 cross-validated score (use a negated error metric to minimize). Splitting reuses
-the deterministic 'kFolds' / 'randomSplit' from @dataframe-operations@.
+the deterministic 'kFolds' from @dataframe-operations@.
 -}
 module DataFrame.ModelSelection (
-    trainTestSplit,
     crossValScore,
     crossValidate,
     GridSearchResult (..),
@@ -20,13 +19,7 @@ import DataFrame.Internal.DataFrame (DataFrame)
 import DataFrame.Internal.Expression (Expr)
 import DataFrame.Metrics (Metric, evaluate)
 import DataFrame.Operations.Merge ()
-import DataFrame.Operations.Subset (kFolds, randomSplit)
-
-{- | Split into @(train, test)@ with the given training fraction and seed
-(deterministic).
--}
-trainTestSplit :: Double -> Int -> DataFrame -> (DataFrame, DataFrame)
-trainTestSplit trainFrac seed = randomSplit (mkStdGen seed) trainFrac
+import DataFrame.Operations.Subset (kFolds)
 
 {- | Per-fold scores from k-fold cross-validation. @scoreFn train test@ fits on
 the training rows and returns a score on the held-out fold.

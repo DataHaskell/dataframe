@@ -1,6 +1,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeFamilies #-}
 
 {- | Symbolic regression by genetic programming (modelled on the
 @symbolic-regression@ library, ported dependency-light: no e-graphs, no NLOPT).
@@ -72,10 +73,12 @@ data SRModel = SRModel
     , srGenerationsRun :: !Int
     }
 
-instance Fit SRConfig (Expr Double) SRModel where
+instance Fit SRConfig (Expr Double) where
+    type ModelOf SRConfig (Expr Double) = SRModel
     fit = fitSymbolicRegression
 
-instance Predict SRModel Double where
+instance Predict SRModel where
+    type Prediction SRModel = Expr Double
     predict = srBest
 
 -- | Search for an expression predicting @target@ from the other columns.

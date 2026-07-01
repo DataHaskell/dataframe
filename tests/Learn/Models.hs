@@ -19,10 +19,13 @@ import DataFrame.PCA
 import DataFrame.SVM
 import DataFrame.Transform
 
+import Control.Exception (evaluate, try)
+import Data.List (isInfixOf)
 import qualified Data.Map.Strict as M
 import qualified Data.Text as T
 import qualified Data.Vector as V
 import qualified Data.Vector.Unboxed as VU
+import DataFrame.Errors (DataFrameException)
 import DataFrame.Model (fit, predict)
 import Test.HUnit
 
@@ -50,6 +53,19 @@ regDF =
     xs1 = [1, 2, 3, 4, 5, 6, 7, 8] :: [Double]
     xs2 = [2, 1, 4, 3, 6, 5, 8, 7] :: [Double]
 
+-- | A custom enum label type — logistic regression must classify into it.
+data Flower = Rose | Tulip | Daisy deriving (Show, Eq, Ord)
+
+flowerDF :: D.DataFrame
+flowerDF =
+    D.fromNamedColumns
+        [ ("x", DI.fromList ([-5, -4, -3, 0, 0.3, 0.6, 5, 6, 7] :: [Double]))
+        ,
+            ( "flower"
+            , DI.fromList [Rose, Rose, Rose, Tulip, Tulip, Tulip, Daisy, Daisy, Daisy]
+            )
+        ]
+
 clsDF :: D.DataFrame
 clsDF =
     D.fromNamedColumns
@@ -68,6 +84,58 @@ testOLS = TestCase $ do
         truth = interpD regDF (F.col @Double "y")
     assertBool "OLS expr matches y" (and (zipWith (close 1e-6) preds truth))
 
+{- | A regression frame whose feature column @x@ is stored as @Int@; the target
+@y@ is @Double@. Fitting must reject the Int feature at the boundary.
+-}
+intFeatureDF :: D.DataFrame
+intFeatureDF =
+    D.fromNamedColumns
+        [ ("x", DI.fromList @Int [1 .. 8])
+        , ("y", DI.fromList @Double [2, 4, 6, 8, 10, 12, 14, 16])
+        ]
+
+{- | The fit boundary mandates Double: a non-Double feature column is a fit-time
+error (naming the column and pointing at the fix), not a silent coercion.
+-}
+testFitRequiresDouble :: Test
+testFitRequiresDouble = TestCase $ do
+    let m = fit defaultLinearConfig (F.col @Double "y") intFeatureDF
+    result <-
+        try (evaluate (VU.sum (regCoef m))) :: IO (Either DataFrameException Double)
+    case result of
+        Left e -> do
+            let msg = show e
+            assertBool "error mentions the Double requirement" ("Double" `isInfixOf` msg)
+            assertBool "error names the offending column x" ("x" `isInfixOf` msg)
+        Right _ -> assertFailure "expected a Double-input error for the Int feature column"
+
+{- | A regression frame whose feature @x@ is nullable (@Maybe Double@). Fitting
+must reject it rather than letting nulls poison the solve into NaN.
+-}
+nullableFeatureDF :: D.DataFrame
+nullableFeatureDF =
+    D.fromNamedColumns
+        [ ("x", DI.fromList @(Maybe Double) (Nothing : map Just [2, 3, 4, 5, 6, 7, 8]))
+        , ("y", DI.fromList @Double [2, 4, 6, 8, 10, 12, 14, 16])
+        ]
+
+{- | The fit boundary rejects a nullable (Maybe Double) input column with an
+actionable error, instead of silently producing NaN coefficients.
+-}
+testFitRejectsNullable :: Test
+testFitRejectsNullable = TestCase $ do
+    let m = fit defaultLinearConfig (F.col @Double "y") nullableFeatureDF
+    result <-
+        try (evaluate (VU.sum (regCoef m))) :: IO (Either DataFrameException Double)
+    case result of
+        Left e -> do
+            let msg = show e
+            assertBool
+                "error flags the non-null requirement"
+                ("non-null Double" `isInfixOf` msg)
+            assertBool "error names the nullable column x" ("x" `isInfixOf` msg)
+        Right _ -> assertFailure "expected a nullable-input error for the Maybe Double feature"
+
 testRidgeShrinks :: Test
 testRidgeShrinks = TestCase $ do
     let r0 =
@@ -85,6 +153,18 @@ testLogistic = TestCase $ do
     assertEqual "logistic separates" truth preds
     let probs = logisticProbExprs m
     assertBool "prob exprs present for both classes" (M.size probs == 2)
+
+{- | Logistic regression must work with any enum label type, not just Int —
+multiclass classification into a user-defined sum type.
+-}
+testLogisticEnumLabel :: Test
+testLogisticEnumLabel = TestCase $ do
+    let m = fit defaultLogisticConfig (F.col @Flower "flower") flowerDF
+        preds = case interpret @Flower flowerDF (predict m) of
+            Right (TColumn c) -> either (const []) V.toList (toVector @Flower @V.Vector c)
+            Left e -> error (show e)
+        truth = [Rose, Rose, Rose, Tulip, Tulip, Tulip, Daisy, Daisy, Daisy]
+    assertEqual "logistic recovers enum-typed labels" truth preds
 
 testSVC :: Test
 testSVC = TestCase $ do
@@ -158,8 +238,11 @@ testTransformCompose = TestCase $ do
 tests :: [Test]
 tests =
     [ testOLS
+    , testFitRequiresDouble
+    , testFitRejectsNullable
     , testRidgeShrinks
     , testLogistic
+    , testLogisticEnumLabel
     , testSVC
     , testRegressionTree
     , testClassifierStats

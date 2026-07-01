@@ -2,6 +2,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TypeFamilies #-}
 
 {- | k-means clustering (Lloyd's algorithm with k-means++ seeding and multiple
 restarts). 'fit' trains a 'KMeansModel' (inspectable centres); 'predict' is the
@@ -18,6 +19,7 @@ module DataFrame.KMeans (
 ) where
 
 import Data.List (minimumBy)
+import Data.Maybe (fromMaybe, listToMaybe)
 import Data.Ord (comparing)
 import qualified Data.Text as T
 import qualified Data.Vector as V
@@ -56,10 +58,12 @@ data KMeansModel = KMeansModel
     }
     deriving (Eq, Show)
 
-instance Fit KMeansConfig [Expr Double] KMeansModel where
+instance Fit KMeansConfig [Expr Double] where
+    type ModelOf KMeansConfig [Expr Double] = KMeansModel
     fit = fitKMeans
 
-instance Predict KMeansModel Int where
+instance Predict KMeansModel where
+    type Prediction KMeansModel = Expr Int
     predict m = argMinExpr (zip [0 :: Int ..] (map snd (kmeansDistanceExprs m)))
 
 -- | Fit k-means over the given feature columns.
@@ -111,7 +115,7 @@ lloyd cfg k rows g0
 
 meanOf :: [VU.Vector Double] -> VU.Vector Double
 meanOf vs =
-    let d = VU.length (head vs)
+    let d = VU.length (VU.empty `fromMaybe` listToMaybe vs)
         s = foldr (VU.zipWith (+)) (VU.replicate d 0) vs
      in VU.map (/ fromIntegral (length vs)) s
 

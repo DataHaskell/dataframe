@@ -18,7 +18,7 @@ import DataFrame.LinearSolver (defaultSolverConfig)
 import DataFrame.Metrics (r2)
 import DataFrame.ModelSelection
 
-import Data.Maybe (isJust, isNothing)
+import Data.Maybe (isJust, isNothing, listToMaybe)
 import qualified Data.Vector.Unboxed as VU
 import DataFrame.Model (fit, predict)
 import Test.HUnit
@@ -97,7 +97,9 @@ testGMM = TestCase $ do
                 blobs
         assigns = interpI blobs (predict m)
     assertBool "GMM converged" (gmmConverged m)
-    assertBool "GMM splits the blobs" (head assigns /= last assigns)
+    assertBool
+        "GMM splits the blobs"
+        (listToMaybe assigns /= listToMaybe (reverse assigns))
     let m2 =
             fit
                 defaultGMMConfig{gmmK = 2, gmmSeed = 1}
@@ -138,12 +140,15 @@ testGridSearch = TestCase $ do
                     , DI.fromList ([2 * fromIntegral i + 5 | i <- [1 .. 40 :: Int]] :: [Double])
                     )
                 ]
-        score alpha train test =
+        score alpha train test' =
             let mdl =
-                    fit (LinearConfig (Ridge alpha) defaultSolverConfig) (F.col @Double "y") train
+                    fit
+                        (LinearConfig (Ridge alpha) defaultSolverConfig)
+                        (F.col @Double "y")
+                        (train :: D.DataFrame)
              in r2
-                    (VU.fromList (interpD test (predict mdl)))
-                    (VU.fromList (interpD test (F.col @Double "y")))
+                    (VU.fromList (interpD test' (predict mdl)))
+                    (VU.fromList (interpD test' (F.col @Double "y")))
         res = gridSearch 4 7 [0.0, 1.0, 100.0] score df
     assertBool "best score high" (gsBestScore res > 0.99)
     assertEqual "all configs scored" 3 (length (gsAll res))

@@ -1,6 +1,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TypeFamilies #-}
 
 {- | Kernel PCA with an RBF kernel, solved on a set of landmark points (Nyström).
 Exact kernel PCA when the landmark count covers every row, a principled
@@ -61,7 +62,8 @@ data KernelPCAModel = KernelPCAModel
     }
     deriving (Eq, Show)
 
-instance Fit KernelPCAConfig [Expr Double] KernelPCAModel where
+instance Fit KernelPCAConfig [Expr Double] where
+    type ModelOf KernelPCAConfig [Expr Double] = KernelPCAModel
     fit = fitKernelPCA
 
 -- | Fit kernel PCA over the given feature columns.

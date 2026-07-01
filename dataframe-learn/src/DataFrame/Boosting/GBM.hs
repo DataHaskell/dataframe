@@ -4,6 +4,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE TypeFamilies #-}
 
 {- | Gradient boosting of regression trees (Friedman). Trees are fitted to the
 negative gradient of the loss each round and accumulated with a shrinkage
@@ -78,10 +79,12 @@ data GBModel = GBModel
     }
     deriving (Show)
 
-instance Fit GBConfig (Expr Double) GBModel where
+instance Fit GBConfig (Expr Double) where
+    type ModelOf GBConfig (Expr Double) = GBModel
     fit = fitGBM
 
-instance Predict GBModel Double where
+instance Predict GBModel where
+    type Prediction GBModel = Expr Double
     predict = gbExpr
 
 -- | Fit a gradient-boosting ensemble predicting @target@ from the other columns.

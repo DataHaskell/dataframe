@@ -1,6 +1,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
 
 {- | Linear support vector classification: L2-regularized squared hinge fitted
@@ -53,10 +54,12 @@ data LinearSVCModel a = LinearSVCModel
     }
     deriving (Eq, Show)
 
-instance (Columnable a, Ord a) => Fit SVCConfig (Expr a) (LinearSVCModel a) where
+instance (Columnable a, Ord a) => Fit SVCConfig (Expr a) where
+    type ModelOf SVCConfig (Expr a) = (LinearSVCModel a)
     fit = fitLinearSVC
 
-instance (Columnable a, Ord a) => Predict (LinearSVCModel a) a where
+instance (Columnable a, Ord a) => Predict (LinearSVCModel a) where
+    type Prediction (LinearSVCModel a) = Expr a
     predict m = argMaxExpr (labelledMargins m)
 
 -- | Fit a one-vs-rest linear SVC.

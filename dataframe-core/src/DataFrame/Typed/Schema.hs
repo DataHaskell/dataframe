@@ -37,6 +37,7 @@ module DataFrame.Typed.Schema (
     AssertAllColumnsHaveType,
     AssertRealColumn,
     AllColumnsReal,
+    AllDouble,
     IsRealType,
     IsElem,
 
@@ -348,6 +349,19 @@ type family AllColumnsReal (fn :: Symbol) (cols :: [Type]) :: Constraint where
     AllColumnsReal fn '[] = ()
     AllColumnsReal fn (Column n a ': rest) =
         (AssertRealColumn fn n a, Real a, VU.Unbox a, AllColumnsReal fn rest)
+
+-- TODO: mchavinda - we can generalist to AllX
+type family AllDouble (cols :: [Type]) :: Constraint where
+    AllDouble '[] = ()
+    AllDouble (Column n Double ': rest) = AllDouble rest
+    AllDouble (Column n a ': rest) =
+        TypeError
+            ( 'Text "Column '"
+                ':<>: 'Text n
+                ':<>: 'Text "' must be Double for this model, but is "
+                ':<>: 'ShowType a
+                ':$$: 'Text "Convert it (toDouble) or drop it before fitting."
+            )
 
 {- | Strip 'Maybe' from all columns. Used by 'filterAllJust'.
 

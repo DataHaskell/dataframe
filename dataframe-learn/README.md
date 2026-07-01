@@ -1,3 +1,5 @@
+<!-- scripths: 0.5.2.0 -->
+
 <!--
   This README is a runnable scripths (https://github.com/DataHaskell/scripths)
   notebook. Every ```haskell block runs top-to-bottom in one shared session and
@@ -26,9 +28,9 @@ For a linear regression `fit` returns a record (with `regCoef`/`regIntercept` fo
 and `predict` compiles it to an `Expr Double`.
 
 ```haskell
--- cabal: packages: .., ., ../dataframe-core, ../dataframe-operations, ../dataframe-parsing
--- cabal: build-depends: dataframe, dataframe-learn, text
--- cabal: default-extensions: OverloadedStrings, TypeApplications
+-- cabal: packages: .., ., ../dataframe-core, ../dataframe-parsing, ../dataframe-operations, ../dataframe-csv, ../dataframe-json, ../dataframe-parquet, ../dataframe-lazy, ../dataframe-viz, ../dataframe-expr-serializer, ../dataframe-th, ../dataframe-csv-th, ../dataframe-parquet-th, ../dataframe-huggingface
+-- cabal: build-depends: dataframe, dataframe-learn, text, random
+-- cabal: default-extensions: OverloadedStrings, TypeApplications, DataKinds, TypeOperators, FlexibleContexts
 -- cabal: ghc-options: -w
 import qualified DataFrame as D
 import DataFrame.LinearModel
@@ -44,6 +46,29 @@ putStrLn (D.prettyPrint (predict model))
 
 > <!-- scripths:mime text/plain -->
 > 2.0 * x + 0.9999999999999989
+
+## Type-safe linear regression
+
+`fit` and `predict` work on both typed and untyped dataframes. You can
+have the compiler enforce that you don't hand the fit function a frame
+with nullable fields or a non-Double:
+
+```haskell
+import qualified DataFrame.Typed as T
+import Data.Maybe (fromJust)
+
+salesT     = T.unsafeFreeze @'[T.Column "x" Double, T.Column "y" Double] sales
+typedModel = fit defaultLinearConfig (T.col @"y") salesT
+scored     = T.derive @"prediction" (predict typedModel) salesT
+
+putStr (unlines
+    [ "typed model:  " ++ D.prettyPrint (T.unTExpr (predict typedModel))
+    , "schema after: " ++ show (T.columnNames scored) ])
+```
+
+> <!-- scripths:mime text/plain -->
+> typed model:  2.0 * x + 0.9999999999999989
+> schema after: ["x","y","prediction"]
 
 ## Decision trees
 
@@ -65,10 +90,10 @@ putStrLn (D.prettyPrint (predict tree))
 
 > <!-- scripths:mime text/plain -->
 > if petal_length .<=. 2.95
->   then 0.0
->   else if petal_length .<=. 5.1
->     then 1.0
->     else 2.0
+> then 0.0
+> else if petal_length .<=. 5.1
+> then 1.0
+> else 2.0
 
 ## Symbolic regression discovers a formula
 
@@ -142,6 +167,41 @@ evaluate rmse deployed (D.col @Double "y") sales
 > 3.6259732146947156e-16
 
 ## Splitting the data, and evaluation
+
+```haskell
+import qualified DataFrame as D
+
+realistic = D.fromNamedColumns
+    [ ("id", D.fromList [fromIntegral ((i * 7919) `mod` 97) | i <- [1 .. 40 :: Int]])
+    , ("x",  D.fromList xs)
+    , ("y",  D.fromList [2 * x + 1 + noise i | (i, x) <- zip [0 :: Int ..] xs])
+    ]
+  where
+    xs      = map fromIntegral [1 .. 40 :: Int] :: [Double]
+    noise i = fromIntegral ((i * 2654435761 + 12345) `mod` 1000) / 100 - 5
+
+clean = D.select ["x", "y"] realistic
+```
+
+> <!-- scripths:mime text/plain -->
+
+**Hold-out evaluation.** `randomSplit` (seeded, deterministic) keeps the
+score honest — evaluate on rows the model never saw, and the metrics are
+realistic, not the `1e-15` of an in-sample toy:
+
+```haskell
+import System.Random (mkStdGen)
+
+(train, test) = D.randomSplit (mkStdGen 7) 0.75 clean
+heldModel     = fit defaultLinearConfig (D.col @Double "y") train
+putStr (unlines
+    [ "held-out R^2:  " ++ show (evaluate r2   (predict heldModel) (D.col @Double "y") test)
+    , "held-out RMSE: " ++ show (evaluate rmse (predict heldModel) (D.col @Double "y") test) ])
+```
+
+> <!-- scripths:mime text/plain -->
+> held-out R^2:  0.9671190074242891
+> held-out RMSE: 3.56674709632647
 
 **Cross-validation.** `crossValidate` is scikit-learn's `cross_val_score`: it
 fits on each training fold and scores the prediction expression on the held-out
@@ -229,7 +289,7 @@ feature  = fit defaultSynthesisConfig (D.col @Double "y") interactions
 withFeat = D.derive "synth" (predict feature) interactions
 fitModel =
     fit defaultLinearConfig (D.col @Double "y")
-        (selectFeatures ["synth"] (D.col @Double "y") withFeat)
+        (D.select ["synth", "y"] withFeat)
 
 putStr (unlines
     [ "discovered feature: " ++ D.prettyPrint (predict feature)

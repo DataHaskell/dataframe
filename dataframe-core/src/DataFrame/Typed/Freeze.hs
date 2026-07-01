@@ -14,6 +14,9 @@ module DataFrame.Typed.Freeze (
     -- * Escape hatches
     thaw,
     unsafeFreeze,
+
+    -- * Frame coercion
+    ToDataFrame (..),
 ) where
 
 import Control.Exception (throwIO)
@@ -59,6 +62,15 @@ Always safe; discards type information.
 -}
 thaw :: TypedDataFrame cols -> D.DataFrame
 thaw (TDF df) = df
+
+class ToDataFrame f where
+    toDataFrame :: f -> D.DataFrame
+
+instance ToDataFrame D.DataFrame where
+    toDataFrame = id
+
+instance ToDataFrame (TypedDataFrame cols) where
+    toDataFrame = thaw
 
 {- | Wrap an untyped DataFrame without any validation.
 Used internally after delegation where the library guarantees schema correctness.

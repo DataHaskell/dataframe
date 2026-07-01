@@ -111,7 +111,9 @@ executable examples
                    DataFrame.Display.Internal.VegaLite,
                    DataFrame.LinearSolver,
                    DataFrame.Operations.SetOps,
-                   DataFrame.Internal.Simplify
+                   DataFrame.Internal.Simplify,
+                   DataFrame.Expr.Serialize,
+                   DataFrame.IR.ExprJson
     hs-source-dirs:   .,
                       ../src,
                       ../dataframe-core/src,
@@ -124,6 +126,7 @@ executable examples
                       ../dataframe-th/src,
                       ../dataframe-lazy/src,
                       ../dataframe-learn/src,
+                      ../dataframe-expr-serializer/src,
                       ../dataframe-viz/src,
                       ../dataframe-parsing/src,
                       ../dataframe-hasktorch/src

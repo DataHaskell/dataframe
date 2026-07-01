@@ -1,6 +1,6 @@
 cabal-version:      3.0
 name:               dataframe
-version:            2.4.1.0
+version:            2.3.1.0
 synopsis: A fast, safe, and intuitive DataFrame library.
 
 description: A fast, safe, and intuitive DataFrame library for exploratory data analysis.
@@ -111,6 +111,21 @@ library
                         DataFrame.Display.Terminal.Plot,
                         DataFrame.Monad,
                         DataFrame.DecisionTree,
+                        DataFrame.Model,
+                        DataFrame.ModelSelection,
+                        DataFrame.LinearModel,
+                        DataFrame.LinearModel.Regression,
+                        DataFrame.LinearModel.Logistic,
+                        DataFrame.Segmented,
+                        DataFrame.SVM,
+                        DataFrame.KMeans,
+                        DataFrame.PCA,
+                        DataFrame.DBSCAN,
+                        DataFrame.GMM,
+                        DataFrame.Boosting,
+                        DataFrame.Boosting.GBM,
+                        DataFrame.Boosting.AdaBoost,
+                        DataFrame.Metrics,
                         DataFrame.IO.JSON,
                         DataFrame.Expr.Serialize,
                         DataFrame.IR.ExprJson,
@@ -327,6 +342,8 @@ test-suite tests
                    Learn.Numerics,
                    Learn.Denotation,
                    Learn.Models,
+                   Learn.TypedModel,
+                   Learn.Segmented,
                    Learn.Ensembles,
                    Learn.Symbolic,
                    Learn.SklearnParity,

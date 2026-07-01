@@ -107,9 +107,7 @@ fitL1Logistic ::
     V.Vector T.Text ->
     LinearModel
 {-# INLINEABLE fitL1Logistic #-}
-fitL1Logistic = runFista logisticLoss logisticLipschitz
-  where
-    logisticLipschitz _ keepN = fromIntegral (keepN + 1) / 4
+fitL1Logistic = runFista logisticLoss (specNormLipschitz logisticLoss)
 
 {- | Fit any 'SmoothLoss' with the elastic-net proximal-gradient engine. The
 Lipschitz constant uses the spectral norm of the standardized Gram matrix
@@ -123,13 +121,20 @@ fitProx ::
     VU.Vector Double ->
     V.Vector T.Text ->
     LinearModel
-fitProx loss = runFista loss specNormLipschitz
-  where
-    specNormLipschitz xKept _ =
-        let n = V.length xKept
-            gramN = V.map (scaleV (1 / fromIntegral n)) (gram xKept)
-            (specNorm, _) = powerIterTop 50 gramN
-         in slCurvBound loss * (specNorm + 1)
+fitProx loss = runFista loss (specNormLipschitz loss)
+
+{- | FISTA smooth-part Lipschitz bound: the loss curvature bound times the
+spectral norm of the standardized Gram (+1 for the intercept), via power
+iteration. Tight for every smooth loss — it replaces the logistic trace bound
+@(keepN+1)/4@, a valid but far-too-loose overestimate that shrank the FISTA step
+as @d@ grew and pinned the solver at its iteration cap.
+-}
+specNormLipschitz :: SmoothLoss -> Matrix -> Int -> Double
+specNormLipschitz loss xKept _ =
+    let n = V.length xKept
+        gramN = V.map (scaleV (1 / fromIntegral n)) (gram xKept)
+        (specNorm, _) = powerIterTop 50 gramN
+     in slCurvBound loss * (specNorm + 1)
 
 {- | Shared FISTA scaffolding: standardize, drop near-constant columns, run the
 inner loop, de-standardize. @lipschitzOf@ receives the standardized kept-feature

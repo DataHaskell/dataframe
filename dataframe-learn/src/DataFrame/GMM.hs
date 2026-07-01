@@ -3,6 +3,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeFamilies #-}
 
 {- | Gaussian mixture models fitted by EM. Full covariance by default (with a
 diagonal option and an automatic fall-back when a covariance is not positive
@@ -75,10 +76,12 @@ data GMMModel = GMMModel
     }
     deriving (Eq, Show)
 
-instance Fit GMMConfig [Expr Double] GMMModel where
+instance Fit GMMConfig [Expr Double] where
+    type ModelOf GMMConfig [Expr Double] = GMMModel
     fit = fitGMM
 
-instance Predict GMMModel Int where
+instance Predict GMMModel where
+    type Prediction GMMModel = Expr Int
     predict = gmmAssignExpr
 
 -- | Fit a Gaussian mixture over the given feature columns.

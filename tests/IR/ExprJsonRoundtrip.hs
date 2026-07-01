@@ -3,15 +3,17 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeApplications #-}
 
--- | Round-trip, pipeline, end-to-end, and wire-shape contract tests for the
--- expression/pipeline serializer.
+{- | Round-trip, pipeline, end-to-end, and wire-shape contract tests for the
+expression/pipeline serializer.
+-}
 module IR.ExprJsonRoundtrip (tests) where
 
 import qualified Data.Aeson as Aeson
 import qualified Data.ByteString.Char8 as BS8
-import Data.Either (isLeft)
+import Data.Either (fromRight, isLeft)
 import Test.HUnit
 
+import qualified Data.Vector.Unboxed as VU
 import qualified DataFrame as D
 import qualified DataFrame.Functions as F
 import DataFrame.Internal.Column (Columnable, TypedColumn (..), toVector)
@@ -19,12 +21,14 @@ import qualified DataFrame.Internal.Column as DI
 import DataFrame.Internal.Expression (Expr, UExpr (..))
 import DataFrame.Internal.Interpreter (interpret)
 import DataFrame.Operators (ifThenElse, (.>.))
-import qualified Data.Vector.Unboxed as VU
 
 import DataFrame.LinearModel (defaultLinearConfig)
 import DataFrame.Model (fit, predict)
 import DataFrame.Transform (Transform (..), applyTransform)
-import DataFrame.Transform.Serialize (loadTransformFromFile, saveTransformToFile)
+import DataFrame.Transform.Serialize (
+    loadTransformFromFile,
+    saveTransformToFile,
+ )
 
 import DataFrame.Expr.Serialize (
     SomeExpr (..),
@@ -65,7 +69,7 @@ regDF =
 JSON. Avoids needing an 'Eq' instance on the GADT.
 -}
 roundtrips :: (Columnable a) => Expr a -> Bool
-roundtrips e = either (const False) id $ do
+roundtrips e = fromRight False $ do
     v1 <- encodeExpr e
     SomeExpr _ e' <- decodeExprAny v1
     v2 <- encodeExpr e'
@@ -85,7 +89,11 @@ exprRoundtripTests =
     , testCase "unary sqrt" (roundtrips (sqrt (F.col @Double "x")))
     , testCase
         "if/then/else"
-        (roundtrips (ifThenElse (F.col @Double "x" .>. F.lit 0) (F.lit 1.0) (F.lit (-1.0)) :: Expr Double))
+        ( roundtrips
+            ( ifThenElse (F.col @Double "x" .>. F.lit 0) (F.lit 1.0) (F.lit (-1.0)) ::
+                Expr Double
+            )
+        )
     ]
 
 -- Aggregation and window node kinds (the decoder cases added for full parity).
@@ -115,7 +123,8 @@ contractTests :: [Test]
 contractTests =
     [ TestCase $ case Aeson.eitherDecodeStrict (BS8.pack contractJson) >>= decodeExprAt @Double of
         Left err -> assertFailure ("contract decode failed: " <> err)
-        Right e -> assertBool "contract interprets to [3,5,7]" (close (interpD df3 e) [3, 5, 7])
+        Right e ->
+            assertBool "contract interprets to [3,5,7]" (close (interpD df3 e) [3, 5, 7])
     , testCase
         "collect agg node fails to decode"
         (isLeft (decodeExprFromBytes (BS8.pack collectJson)))
@@ -145,10 +154,16 @@ ioTests =
         loaded <- loadExprAtFromFile @Double fp
         case loaded of
             Left err -> assertFailure ("load expr failed: " <> err)
-            Right e' -> assertBool "loaded expr interprets equal" (close (interpD df3 e') (interpD df3 e))
+            Right e' ->
+                assertBool
+                    "loaded expr interprets equal"
+                    (close (interpD df3 e') (interpD df3 e))
     , TestCase $ withSystemTempDirectory "expr-ser" $ \dir -> do
         let fp = dir ++ "/pipeline.json"
-            nes = [("z", UExpr (F.col @Double "x" * F.lit 2)), ("w", UExpr (F.col @Double "x" + F.lit 10))]
+            nes =
+                [ ("z", UExpr (F.col @Double "x" * F.lit 2))
+                , ("w", UExpr (F.col @Double "x" + F.lit 10))
+                ]
         sr <- savePipelineToFile fp nes
         assertEqual "save pipeline ok" (Right ()) sr
         loaded <- loadPipelineFromFile fp
@@ -167,7 +182,9 @@ ioTests =
         case loaded of
             Left err -> assertFailure ("load transform failed: " <> err)
             Right t' ->
-                assertBool "transform z = 2x" (close (interpD (applyTransform t' df3) (F.col @Double "z")) [2, 4, 6])
+                assertBool
+                    "transform z = 2x"
+                    (close (interpD (applyTransform t' df3) (F.col @Double "z")) [2, 4, 6])
     , TestCase $ withSystemTempDirectory "expr-ser" $ \dir -> do
         -- End-to-end: fit OLS, persist its prediction, reload, compare outputs.
         let fp = dir ++ "/model.json"

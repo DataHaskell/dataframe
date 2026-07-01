@@ -2,6 +2,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeFamilies #-}
 
 {- | Feature synthesis by bottom-up enumerative search with observational
 equivalence — the canonical enumerative method from Solar-Lezama's
@@ -111,10 +112,12 @@ data SynthesizedFeature = SynthesizedFeature
     , sfFeatures :: ![(Expr Double, Double)]
     }
 
-instance Fit SynthesisConfig (Expr Double) SynthesizedFeature where
+instance Fit SynthesisConfig (Expr Double) where
+    type ModelOf SynthesisConfig (Expr Double) = SynthesizedFeature
     fit = synthesizeFeatures
 
-instance Predict SynthesizedFeature Double where
+instance Predict SynthesizedFeature where
+    type Prediction SynthesizedFeature = Expr Double
     predict = sfExpr
 
 -- | A candidate's evaluated column over the example rows.

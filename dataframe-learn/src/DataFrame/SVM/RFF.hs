@@ -3,6 +3,7 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
 
 {- | Approximate RBF-kernel SVM via Random Fourier Features (Rahimi & Recht): map
@@ -70,10 +71,12 @@ data RFFSVMModel a = RFFSVMModel
     }
     deriving (Show)
 
-instance (Columnable a, Ord a) => Fit RFFConfig (Expr a) (RFFSVMModel a) where
+instance (Columnable a, Ord a) => Fit RFFConfig (Expr a) where
+    type ModelOf RFFConfig (Expr a) = (RFFSVMModel a)
     fit = fitRFFSVM
 
-instance (Columnable a) => Predict (RFFSVMModel a) a where
+instance (Columnable a) => Predict (RFFSVMModel a) where
+    type Prediction (RFFSVMModel a) = Expr a
     predict m =
         If (margin .>. F.lit 0) (Lit (rffPosClass m)) (Lit (rffNegClass m))
       where

@@ -2,10 +2,12 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GADTs #-}
-{-# LANGUAGE KindSignatures #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
 
 module DataFrame.Typed.Types (
@@ -17,6 +19,10 @@ module DataFrame.Typed.Types (
 
     -- * Typed expressions (schema-validated)
     TExpr (..),
+
+    -- * Lifting untyped expressions into the typed world
+    AsTExpr,
+    ToTExpr (..),
 
     -- * Typed sort orders
     TSortOrder (..),
@@ -70,6 +76,24 @@ column references exist in the schema with the correct type.
 Use 'unTExpr' to extract the underlying 'Expr' for delegation to the untyped API.
 -}
 newtype TExpr (cols :: [Type]) a = TExpr {unTExpr :: Expr a}
+
+-- | Shows the underlying expression; the schema phantom is type-level only.
+instance (Show a) => Show (TExpr cols a) where
+    showsPrec d (TExpr e) = showsPrec d e
+
+{- | The typed counterpart of an untyped expression type for schema @cols@:
+@AsTExpr cols (Expr r) = TExpr cols r@. Lets a result type follow the frame —
+an @Expr@ over a plain frame becomes a @TExpr@ over a typed one.
+-}
+type family AsTExpr (cols :: [Type]) (e :: Type) :: Type where
+    AsTExpr cols (Expr r) = TExpr cols r
+
+-- | Lift an untyped expression into its 'TExpr' for schema @cols@.
+class ToTExpr (cols :: [Type]) e where
+    toTExpr :: e -> AsTExpr cols e
+
+instance ToTExpr cols (Expr r) where
+    toTExpr = TExpr
 
 -- | A typed sort order validated against schema @cols@.
 data TSortOrder (cols :: [Type]) where

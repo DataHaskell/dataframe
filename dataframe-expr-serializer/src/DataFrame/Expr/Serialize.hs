@@ -46,6 +46,7 @@ module DataFrame.Expr.Serialize (
 ) where
 
 import Control.Exception (IOException, try)
+import Control.Monad (when)
 import Data.Aeson (object, (.:), (.=))
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Types as Aeson
@@ -88,9 +89,9 @@ decodeNamedExprs = Aeson.parseEither parsePipeline
   where
     parsePipeline = Aeson.withObject "Pipeline" $ \o -> do
         ver <- o .: "version" :: Aeson.Parser Int
-        if ver /= 1
-            then fail $ "DataFrame.Expr.Serialize: unsupported pipeline version " <> show ver
-            else pure ()
+        when (ver /= 1) $
+            fail $
+                "DataFrame.Expr.Serialize: unsupported pipeline version " <> show ver
         outs <- o .: "outputs"
         traverse parseOne outs
     parseOne :: Aeson.Value -> Aeson.Parser NamedExpr
