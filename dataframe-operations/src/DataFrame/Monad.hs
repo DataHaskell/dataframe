@@ -1,5 +1,6 @@
 {-# LANGUAGE ExplicitNamespaces #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE InstanceSigs #-}
 {-# LANGUAGE RankNTypes #-}
@@ -8,9 +9,10 @@
 
 module DataFrame.Monad where
 
+import Control.Monad (void)
 import DataFrame.Internal.Column (Columnable)
 import DataFrame.Internal.DataFrame (DataFrame)
-import DataFrame.Internal.Expression (Expr (..))
+import DataFrame.Internal.Expression (Expr (..), UExpr (..), prettyPrint)
 import DataFrame.Internal.Nullable (BaseType)
 import qualified DataFrame.Operations.Core as D
 import qualified DataFrame.Operations.Subset as D
@@ -105,3 +107,51 @@ evalFrameM df m = fst (runFrameM df m)
 
 execFrameM :: DataFrame -> FrameM a -> DataFrame
 execFrameM df m = snd (runFrameM df m)
+
+newtype Pipeline a = Pipeline {unPipeline :: Int -> (Int, [(T.Text, UExpr)], a)}
+
+instance Functor Pipeline where
+    fmap f (Pipeline g) = Pipeline $ \n -> let (n', w, a) = g n in (n', w, f a)
+
+instance Applicative Pipeline where
+    pure x = Pipeline (, [], x)
+    Pipeline gf <*> Pipeline gx = Pipeline $ \n ->
+        let (n1, w1, f) = gf n
+            (n2, w2, x) = gx n1
+         in (n2, w1 ++ w2, f x)
+
+instance Monad Pipeline where
+    Pipeline g >>= f = Pipeline $ \n ->
+        let (n1, w1, a) = g n
+            (n2, w2, b) = unPipeline (f a) n1
+         in (n2, w1 ++ w2, b)
+
+-- | Derive a column under an explicit name, returning a reference to it.
+letAs :: (Columnable a) => T.Text -> Expr a -> Pipeline (Expr a)
+letAs nm e = Pipeline (, [(nm, UExpr e)], Col nm)
+
+-- | Derive a column under a fresh generated name.
+letExpr :: (Columnable a) => Expr a -> Pipeline (Expr a)
+letExpr e = Pipeline $ \n ->
+    let nm = T.pack ('_' : 'v' : show n) in (n + 1, [(nm, UExpr e)], Col nm)
+
+instance Show (Pipeline (Expr a)) where
+    show p =
+        let (_, steps, res) = unPipeline p 0
+         in concatMap (\(nm, UExpr e) -> T.unpack nm ++ " = " ++ prettyPrint e ++ "\n") steps
+                ++ "return " ++ prettyPrint res
+
+-- | Number of column derivations the pipeline performs.
+pipelineSteps :: Pipeline a -> Int
+pipelineSteps p = let (_, w, _) = unPipeline p 0 in length w
+
+-- | Interpret a pipeline into 'FrameM', deriving each logged column in order.
+toFrameM :: Pipeline (Expr a) -> FrameM (Expr a)
+toFrameM p =
+    let (_, steps, res) = unPipeline p 0
+     in mapM_ (\(nm, UExpr e) -> void (deriveM nm e)) steps >> pure res
+
+-- | Run a pipeline over a frame: derive its columns and return the result
+-- expression (a reference to the final column) and the resulting frame.
+runPipeline :: DataFrame -> Pipeline (Expr a) -> (Expr a, DataFrame)
+runPipeline df = runFrameM df . toFrameM
