@@ -153,6 +153,7 @@ jobs:
           touch cabal.project
           echo "packages: $GITHUB_WORKSPACE/source/." >> cabal.project
           echo "packages: $GITHUB_WORKSPACE/source/dataframe-core" >> cabal.project
+          echo "packages: $GITHUB_WORKSPACE/source/dataframe-expr-serializer" >> cabal.project
           echo "packages: $GITHUB_WORKSPACE/source/dataframe-parsing" >> cabal.project
           echo "packages: $GITHUB_WORKSPACE/source/dataframe-operations" >> cabal.project
           echo "packages: $GITHUB_WORKSPACE/source/dataframe-csv" >> cabal.project
@@ -180,6 +181,8 @@ jobs:
           echo "PKGDIR_dataframe=${PKGDIR_dataframe}" >> "$GITHUB_ENV"
           PKGDIR_dataframe_core="$(find "$GITHUB_WORKSPACE/unpacked" -maxdepth 1 -type d -regex '.*/dataframe-core-[0-9.]*')"
           echo "PKGDIR_dataframe_core=${PKGDIR_dataframe_core}" >> "$GITHUB_ENV"
+          PKGDIR_dataframe_expr_serializer="$(find "$GITHUB_WORKSPACE/unpacked" -maxdepth 1 -type d -regex '.*/dataframe-expr-serializer-[0-9.]*')"
+          echo "PKGDIR_dataframe_expr_serializer=${PKGDIR_dataframe_expr_serializer}" >> "$GITHUB_ENV"
           PKGDIR_dataframe_parsing="$(find "$GITHUB_WORKSPACE/unpacked" -maxdepth 1 -type d -regex '.*/dataframe-parsing-[0-9.]*')"
           echo "PKGDIR_dataframe_parsing=${PKGDIR_dataframe_parsing}" >> "$GITHUB_ENV"
           PKGDIR_dataframe_operations="$(find "$GITHUB_WORKSPACE/unpacked" -maxdepth 1 -type d -regex '.*/dataframe-operations-[0-9.]*')"
@@ -209,6 +212,7 @@ jobs:
           touch cabal.project.local
           echo "packages: ${PKGDIR_dataframe}" >> cabal.project
           echo "packages: ${PKGDIR_dataframe_core}" >> cabal.project
+          echo "packages: ${PKGDIR_dataframe_expr_serializer}" >> cabal.project
           echo "packages: ${PKGDIR_dataframe_parsing}" >> cabal.project
           echo "packages: ${PKGDIR_dataframe_operations}" >> cabal.project
           echo "packages: ${PKGDIR_dataframe_csv}" >> cabal.project
@@ -224,6 +228,8 @@ jobs:
           echo "package dataframe" >> cabal.project
           echo "    ghc-options: -Werror=missing-methods -Werror=missing-fields" >> cabal.project
           echo "package dataframe-core" >> cabal.project
+          echo "    ghc-options: -Werror=missing-methods -Werror=missing-fields" >> cabal.project
+          echo "package dataframe-expr-serializer" >> cabal.project
           echo "    ghc-options: -Werror=missing-methods -Werror=missing-fields" >> cabal.project
           echo "package dataframe-parsing" >> cabal.project
           echo "    ghc-options: -Werror=missing-methods -Werror=missing-fields" >> cabal.project
@@ -252,6 +258,8 @@ jobs:
           echo "package dataframe" >> cabal.project
           echo "    ghc-options: -Werror=unused-packages" >> cabal.project
           echo "package dataframe-core" >> cabal.project
+          echo "    ghc-options: -Werror=unused-packages" >> cabal.project
+          echo "package dataframe-expr-serializer" >> cabal.project
           echo "    ghc-options: -Werror=unused-packages" >> cabal.project
           echo "package dataframe-parsing" >> cabal.project
           echo "    ghc-options: -Werror=unused-packages" >> cabal.project
@@ -280,6 +288,8 @@ jobs:
           echo "package dataframe" >> cabal.project
           echo "    ghc-options: -Werror=incomplete-patterns -Werror=incomplete-uni-patterns" >> cabal.project
           echo "package dataframe-core" >> cabal.project
+          echo "    ghc-options: -Werror=incomplete-patterns -Werror=incomplete-uni-patterns" >> cabal.project
+          echo "package dataframe-expr-serializer" >> cabal.project
           echo "    ghc-options: -Werror=incomplete-patterns -Werror=incomplete-uni-patterns" >> cabal.project
           echo "package dataframe-parsing" >> cabal.project
           echo "    ghc-options: -Werror=incomplete-patterns -Werror=incomplete-uni-patterns" >> cabal.project
@@ -307,7 +317,7 @@ jobs:
           echo "    ghc-options: -Werror=incomplete-patterns -Werror=incomplete-uni-patterns" >> cabal.project
           cat >> cabal.project <<EOF
           EOF
-          $HCPKG list --simple-output --names-only | perl -ne 'for (split /\s+/) { print "constraints: any.$_ installed\n" unless /^(dataframe|dataframe-core|dataframe-csv|dataframe-csv-th|dataframe-fastcsv|dataframe-json|dataframe-lazy|dataframe-learn|dataframe-operations|dataframe-parquet|dataframe-parquet-th|dataframe-parsing|dataframe-th|dataframe-viz)$/; }' >> cabal.project.local
+          $HCPKG list --simple-output --names-only | perl -ne 'for (split /\s+/) { print "constraints: any.$_ installed\n" unless /^(dataframe|dataframe-core|dataframe-csv|dataframe-csv-th|dataframe-expr-serializer|dataframe-fastcsv|dataframe-json|dataframe-lazy|dataframe-learn|dataframe-operations|dataframe-parquet|dataframe-parquet-th|dataframe-parsing|dataframe-th|dataframe-viz)$/; }' >> cabal.project.local
           cat cabal.project
           cat cabal.project.local
       - name: dump install plan
@@ -338,6 +348,8 @@ jobs:
           cd ${PKGDIR_dataframe} || false
           ${CABAL} -vnormal check
           cd ${PKGDIR_dataframe_core} || false
+          ${CABAL} -vnormal check
+          cd ${PKGDIR_dataframe_expr_serializer} || false
           ${CABAL} -vnormal check
           cd ${PKGDIR_dataframe_parsing} || false
           ${CABAL} -vnormal check
