@@ -16,6 +16,9 @@
       url = "github:mchav/granite";
       flake = false;
     };
+    haskell-ci-flake = {
+      url = ./nix/haskell-ci-flake;
+    };
   };
 
   outputs =
@@ -32,6 +35,7 @@
 
         hsPkgs = pkgs.haskellPackages.extend (
           self: super: {
+            haskell-ci = inputs.haskell-ci-flake.packages.${system}.default;
             network-run = self.callCabal2nix "network-run" inputs.network-run { };
             dataframe-arrow = self.callCabal2nix "dataframe-arrow" ./dataframe-arrow { };
             dataframe-core = self.callCabal2nix "dataframe-core" ./dataframe-core { };
@@ -114,6 +118,7 @@
             ghc
             cabal-install
             haskell-language-server
+            haskell-ci
           ];
           withHoogle = true;
         };
