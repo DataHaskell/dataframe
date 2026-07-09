@@ -317,7 +317,13 @@ jobs:
           echo "    ghc-options: -Werror=incomplete-patterns -Werror=incomplete-uni-patterns" >> cabal.project
           cat >> cabal.project <<EOF
           EOF
-          $HCPKG list --simple-output --names-only | perl -ne 'for (split /\s+/) { print "constraints: any.$_ installed\n" unless /^(dataframe|dataframe-core|dataframe-csv|dataframe-csv-th|dataframe-expr-serializer|dataframe-fastcsv|dataframe-json|dataframe-lazy|dataframe-learn|dataframe-operations|dataframe-parquet|dataframe-parquet-th|dataframe-parsing|dataframe-th|dataframe-viz)$/; }' >> cabal.project.local
+          # MANUAL PATCH (re-apply after `haskell-ci regenerate`): `text` and
+          # `parsec` are excluded from the installed-pin. GHCs bundling text < 2.1
+          # (9.4.8, 9.6.7) must build text-2.1 from Hackage (dataframe-core needs
+          # it); the bundled `parsec` was built against text-2.0.2, so it must be
+          # rebuilt against text-2.1 too or the solver dead-ends on the
+          # aeson -> network-uri -> parsec chain.
+          $HCPKG list --simple-output --names-only | perl -ne 'for (split /\s+/) { print "constraints: any.$_ installed\n" unless /^(text|parsec|dataframe|dataframe-(core|parsing|operations|csv|csv-th|json|parquet|parquet-th|th|viz|learn|lazy|fastcsv))$/; }' >> cabal.project.local
           cat cabal.project
           cat cabal.project.local
       - name: dump install plan
