@@ -17,6 +17,7 @@ import DataFrame.Operations.Statistics (imputeWith)
 import DataFrame.Operations.Transformations (impute)
 
 import Assertions
+import Data.Maybe (listToMaybe)
 import Test.HUnit
 import Type.Reflection (typeRep)
 
@@ -79,6 +80,18 @@ applyUnknownColumn =
             (DE.columnNotFound "test9" "apply" (D.columnNames testData))
             (print $ D.apply @[Char] (const (1 :: Int)) "test9" testData)
         )
+
+applyIntroducesNulls :: Test
+applyIntroducesNulls =
+    TestCase
+        ( assertEqual
+            "apply with a -> Maybe b yields a nullable column, not a boxed Maybe vector"
+            (Just "NullableUnboxed")
+            (DI.columnVersionString <$> DI.getColumn "test" (D.apply @String listToMaybe "test" nullableApplyData))
+        )
+  where
+    nullableApplyData =
+        D.fromNamedColumns [("test", DI.fromList ["", "b" :: String])]
 
 applyManyOnlyGivenFields :: Test
 applyManyOnlyGivenFields =
@@ -270,6 +283,7 @@ tests =
     , TestLabel "applyWrongType" applyWrongType
     , TestLabel "applyUnknownColumn" applyUnknownColumn
     , TestLabel "applyBoxedToBoxed" applyBoxedToBoxed
+    , TestLabel "applyIntroducesNulls" applyIntroducesNulls
     , TestLabel "applyManyBoxedToBoxed" applyManyBoxedToBoxed
     , TestLabel "applyManyOnlyGivenFields" applyManyOnlyGivenFields
     , TestLabel "applyManyBoxedToUnboxed" applyManyBoxedToUnboxed

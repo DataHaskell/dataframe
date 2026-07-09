@@ -602,7 +602,9 @@ mapColumn f = \case
                 -- user maps over inner type a; preserve bitmap
                 Right $ case sUnbox @c of
                     STrue -> UnboxedColumn bm (VU.generate (VB.length col) (f . VB.unsafeIndex col))
-                    SFalse -> BoxedColumn bm (VB.map f col)
+                    SFalse -> case bm of
+                        Nothing -> fromVector @c (VB.map f col)
+                        Just _ -> BoxedColumn bm (VB.map f col)
             Nothing -> throwTypeMismatch @a @b
 
     runUnboxed ::
@@ -630,7 +632,9 @@ mapColumn f = \case
         Nothing -> case testEquality (typeRep @a) (typeRep @b) of
             Just Refl -> Right $ case sUnbox @c of
                 STrue -> UnboxedColumn bm (VU.map f col)
-                SFalse -> BoxedColumn bm (VB.generate (VU.length col) (f . VU.unsafeIndex col))
+                SFalse -> case bm of
+                    Nothing -> fromVector @c (VB.generate (VU.length col) (f . VU.unsafeIndex col))
+                    Just _ -> BoxedColumn bm (VB.generate (VU.length col) (f . VU.unsafeIndex col))
             Nothing -> throwTypeMismatch @a @b
 {-# INLINEABLE mapColumn #-}
 
