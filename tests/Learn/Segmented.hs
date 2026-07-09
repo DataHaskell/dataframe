@@ -92,8 +92,8 @@ routingTests =
                     , ("y", DI.fromList ([0.0] :: [Double]))
                     ]
             p = case interpD unseen (predict m) of
-                    [p'] -> p'
-                    _ -> error "Expecting only a single segment"
+                [p'] -> p'
+                _ -> error "Expecting only a single segment"
             expected = regIntercept fb + regCoef fb VU.! 0 * 2.0
         assertBool "unseen -> fallback affine" (close 1e-9 p expected)
     ]

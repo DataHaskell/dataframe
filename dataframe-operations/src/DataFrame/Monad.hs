@@ -114,7 +114,7 @@ instance Functor Pipeline where
     fmap f (Pipeline g) = Pipeline $ \n -> let (n', w, a) = g n in (n', w, f a)
 
 instance Applicative Pipeline where
-    pure x = Pipeline (, [], x)
+    pure x = Pipeline (,[],x)
     Pipeline gf <*> Pipeline gx = Pipeline $ \n ->
         let (n1, w1, f) = gf n
             (n2, w2, x) = gx n1
@@ -128,7 +128,7 @@ instance Monad Pipeline where
 
 -- | Derive a column under an explicit name, returning a reference to it.
 letAs :: (Columnable a) => T.Text -> Expr a -> Pipeline (Expr a)
-letAs nm e = Pipeline (, [(nm, UExpr e)], Col nm)
+letAs nm e = Pipeline (,[(nm, UExpr e)],Col nm)
 
 -- | Derive a column under a fresh generated name.
 letExpr :: (Columnable a) => Expr a -> Pipeline (Expr a)
@@ -138,8 +138,11 @@ letExpr e = Pipeline $ \n ->
 instance Show (Pipeline (Expr a)) where
     show p =
         let (_, steps, res) = unPipeline p 0
-         in concatMap (\(nm, UExpr e) -> T.unpack nm ++ " = " ++ prettyPrint e ++ "\n") steps
-                ++ "return " ++ prettyPrint res
+         in concatMap
+                (\(nm, UExpr e) -> T.unpack nm ++ " = " ++ prettyPrint e ++ "\n")
+                steps
+                ++ "return "
+                ++ prettyPrint res
 
 -- | Number of column derivations the pipeline performs.
 pipelineSteps :: Pipeline a -> Int
@@ -151,7 +154,8 @@ toFrameM p =
     let (_, steps, res) = unPipeline p 0
      in mapM_ (\(nm, UExpr e) -> void (deriveM nm e)) steps >> pure res
 
--- | Run a pipeline over a frame: derive its columns and return the result
--- expression (a reference to the final column) and the resulting frame.
+{- | Run a pipeline over a frame: derive its columns and return the result
+expression (a reference to the final column) and the resulting frame.
+-}
 runPipeline :: DataFrame -> Pipeline (Expr a) -> (Expr a, DataFrame)
 runPipeline df = runFrameM df . toFrameM

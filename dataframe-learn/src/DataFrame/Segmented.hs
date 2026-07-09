@@ -36,7 +36,7 @@ module DataFrame.Segmented (
     SegmentFit (..),
 ) where
 
-import Data.List ((\\), foldl')
+import Data.List (foldl', (\\))
 import qualified Data.Map.Strict as M
 import Data.Maybe (isJust)
 import qualified Data.Set as Set
