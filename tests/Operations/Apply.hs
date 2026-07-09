@@ -87,7 +87,9 @@ applyIntroducesNulls =
         ( assertEqual
             "apply with a -> Maybe b yields a nullable column, not a boxed Maybe vector"
             (Just "NullableUnboxed")
-            (DI.columnVersionString <$> DI.getColumn "test" (D.apply @String listToMaybe "test" nullableApplyData))
+            ( DI.columnVersionString
+                <$> DI.getColumn "test" (D.apply @String listToMaybe "test" nullableApplyData)
+            )
         )
   where
     nullableApplyData =
