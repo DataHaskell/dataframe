@@ -28,7 +28,6 @@ dataframe_benchmark/
 bin/
 coverage-html
 .DS_Store
-flake.lock
 tags
 __pycache__
 venv

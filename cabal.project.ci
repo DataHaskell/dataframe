@@ -1,6 +1,7 @@
 packages:
     .
     dataframe-core
+    dataframe-expr-serializer
     dataframe-parsing
     dataframe-operations
     dataframe-csv
