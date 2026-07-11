@@ -117,18 +117,23 @@ executable examples
     hs-source-dirs:   .,
                       ../src,
                       ../dataframe-core/src,
+                      ../dataframe-core/src-internal,
                       ../dataframe-csv/src,
+                      ../dataframe-csv/src-internal,
                       ../dataframe-csv-th/src,
                       ../dataframe-json/src,
                       ../dataframe-operations/src,
+                      ../dataframe-operations/src-internal,
                       ../dataframe-parquet/src,
                       ../dataframe-parquet-th/src,
                       ../dataframe-th/src,
                       ../dataframe-lazy/src,
                       ../dataframe-learn/src,
+                      ../dataframe-learn/src-internal,
                       ../dataframe-expr-serializer/src,
                       ../dataframe-viz/src,
                       ../dataframe-parsing/src,
+                      ../dataframe-parsing/src-internal,
                       ../dataframe-hasktorch/src
     -- examples inlines the meta `dataframe` source, so it needs the same
     -- cabal-flag-driven CPP defines that the library uses.

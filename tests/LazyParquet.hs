@@ -9,9 +9,9 @@ import qualified Data.Text as T
 import Data.Time (UTCTime)
 import qualified DataFrame as D
 import qualified DataFrame.Functions as F
-import DataFrame.Internal.Schema (Schema (..), schemaType)
+import DataFrame.Lazy (SortOrder (..))
 import qualified DataFrame.Lazy as L
-import DataFrame.Lazy.Internal.LogicalPlan (SortOrder (..))
+import DataFrame.Schema (Schema (..), schemaType)
 import Test.HUnit
 
 -- | Schema matching all columns in alltypes_plain.parquet.

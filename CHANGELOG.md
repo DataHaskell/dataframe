@@ -1,5 +1,18 @@
 # Revision history for dataframe
 
+## 3.0.0.0
+
+A breaking release that removes internal functions from the public API.
+
+### Highlights
+* Internalish modules now have public APIs/contracts. `DataFrame.Core`, `DataFrame.Schema`, and `DataFrame.Learn`.
+* `import DataFrame` now surfaces `Columnable`, `Columnable'`, `eSize`, `NamedExpr`,
+  `SchemaType(..)`, and the `Semigroup`/`Monoid DataFrame` instances directly.
+
+### Breaking changes
+* Internal modules are no longer on the public surface.
+* Subpackage major bumps.
+
 ## 2.3.0.0
 
 ### Breaking changes

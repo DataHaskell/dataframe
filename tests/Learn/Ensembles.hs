@@ -14,7 +14,6 @@ import DataFrame.Boosting
 import DataFrame.DBSCAN
 import DataFrame.GMM
 import DataFrame.LinearModel
-import DataFrame.LinearSolver (defaultSolverConfig)
 import DataFrame.Metrics (r2)
 import DataFrame.ModelSelection
 

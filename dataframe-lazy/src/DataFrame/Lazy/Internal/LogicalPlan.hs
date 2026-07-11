@@ -6,8 +6,8 @@ import qualified Data.Text as T
 import DataFrame.IO.CSV (CsvReader)
 import qualified DataFrame.Internal.DataFrame as D
 import qualified DataFrame.Internal.Expression as E
-import DataFrame.Internal.Schema (Schema)
 import DataFrame.Operations.Join (JoinType)
+import DataFrame.Schema (Schema)
 
 -- | Data source for a scan node.
 data DataSource

@@ -9,11 +9,8 @@
 
 {- |
 Internal Vega-Lite spec model plus aeson encoding, shared by the web plot
-backends. Not part of the public API.
-
-The encoding medium is the untyped 'Expr'. A channel encoding resolves to a
-'ResolvedField' carrying the field name, the Vega-Lite field type (derived from
-the expression's Haskell element type) and the column values to inline.
+backends. Not public. Channel encodings resolve to a 'ResolvedField' carrying
+the field name, Vega-Lite type, and inlined column values.
 -}
 module DataFrame.Display.Internal.VegaLite (
     -- * Spec model
@@ -21,6 +18,7 @@ module DataFrame.Display.Internal.VegaLite (
     Channel (..),
     FieldType (..),
     ChannelEnc (..),
+    Sort (..),
     ScaleSpec (..),
     ScaleType (..),
     defaultScale,
@@ -129,11 +127,19 @@ data ChannelEnc = ChannelEnc
     , ceAggregate :: Maybe T.Text
     , ceBin :: Bool
     , ceScale :: ScaleSpec
+    , ceSort :: Maybe Sort
     }
 
--- | A bare channel encoding with no aggregation, binning, or scale options.
+-- | A bare channel encoding with no aggregation, binning, scale, or sort options.
 chanEnc :: Channel -> T.Text -> FieldType -> ChannelEnc
-chanEnc ch fld ft = ChannelEnc ch fld ft Nothing False defaultScale
+chanEnc ch fld ft = ChannelEnc ch fld ft Nothing False defaultScale Nothing
+
+{- | Domain ordering for a discrete channel, mirroring Vega-Lite's @sort@.
+'DataOrder' pins the axis to the order rows appear in the inlined data, so
+pre-sorted values (e.g. histogram bins) display in that order.
+-}
+data Sort = DataOrder
+    deriving (Eq, Show)
 
 {- | Per-channel scale configuration, mirroring Vega-Lite's @scale@ object.
 'Nothing' fields leave the Vega-Lite default in place; grow this record
@@ -314,7 +320,12 @@ channelValue e =
             , fmap ("aggregate" .=) (ceAggregate e)
             , if ceBin e then Just ("bin" .= True) else Nothing
             , fmap ("scale" .=) (scaleValue (ceScale e))
+            , ("sort" .=) . sortValue <$> ceSort e
             ]
+
+-- | Render a sort spec to its Vega-Lite JSON value.
+sortValue :: Sort -> Value
+sortValue DataOrder = Null
 
 -- | Render a scale spec, or 'Nothing' when every field is at its default.
 scaleValue :: ScaleSpec -> Maybe Value

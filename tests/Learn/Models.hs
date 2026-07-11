@@ -14,7 +14,6 @@ import DataFrame.DecisionTree.Model
 import DataFrame.DecisionTree.Regression
 import DataFrame.KMeans
 import DataFrame.LinearModel
-import DataFrame.LinearSolver (SolverConfig (..), defaultSolverConfig)
 import DataFrame.PCA
 import DataFrame.SVM
 import DataFrame.Transform
@@ -226,7 +225,6 @@ testTransformCompose = TestCase $ do
     let scaler = standardScaler ["x1", "x2"] regDF
         t = scalerTransform scaler
         scaledDf = applyTransform t regDF
-        -- fit model on scaled features, then compile scaling into the expr
         m = fit defaultLinearConfig (F.col @Double "y") scaledDf
         composed = compileThrough t (predict m)
         viaCompose = interpD regDF composed

@@ -1,9 +1,9 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeApplications #-}
 
-{- | Round-2 (WS-E2) behavior pins for chunk-parallel extraction: a chunked
-read must be indistinguishable from the sequential one — same column types
-(promotion resolved across chunks), same values, same errors.
+{- | Behavior pins for chunk-parallel extraction: a chunked read must be
+indistinguishable from the sequential one — same column types (promotion
+resolved across chunks), same values, and same errors.
 -}
 module Operations.ChunkParallel (tests) where
 
@@ -23,8 +23,8 @@ import DataFrame.IO.CSV (
 import qualified DataFrame.IO.CSV.Fast as D
 import qualified DataFrame.Internal.Column as DI
 import DataFrame.Internal.DataFrame (DataFrame, getColumn)
-import DataFrame.Internal.Schema (Schema (..), SchemaType (..), elements)
 import DataFrame.Operations.Typing (SafeReadMode (..))
+import DataFrame.Schema (Schema (..), SchemaType (..), elements)
 import Test.HUnit
 
 comma :: Word8
@@ -205,8 +205,6 @@ testRaggedRowsAcrossChunks = TestLabel "par_ragged" . TestCase $ do
 -- Date column with nulls: boxed chunk columns must splice correctly.
 testDateNullsAcrossChunks :: Test
 testDateNullsAcrossChunks = TestLabel "par_date_nulls" . TestCase $ do
-    -- A second column keeps null rows from looking like blank lines
-    -- (blank lines are skipped by documented behavior).
     let cell k =
             if k `mod` 17 == 9
                 then ""
@@ -240,9 +238,8 @@ testUnclosedQuoteAcrossChunks = TestLabel "par_unclosed_quote" . TestCase $ do
         Left D.CsvUnclosedQuote -> pure ()
         other -> assertFailure ("expected CsvUnclosedQuote, got " <> show other)
 
--- WS-E2 ingest pin: the parallel byte-level merge wraps the merged shared
--- buffer as 'PackedText' (no Text spine), so the parallel path is also an
--- RSS win. Values stay identical to the sequential read.
+-- The parallel byte-level merge wraps the merged buffer as 'PackedText'
+-- (no Text spine), an RSS win; values stay identical to the sequential read.
 testParallelTextFreezesPacked :: Test
 testParallelTextFreezesPacked = TestLabel "par_text_freezes_packed" . TestCase $ do
     let body =

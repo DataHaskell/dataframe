@@ -4,13 +4,9 @@
 {-# LANGUAGE NoFieldSelectors #-}
 
 {- |
-A plotly-express-style one-shot plotting API for HTML output. Mirrors
-'DataFrame.Display.Terminal.Plot' but emits embeddable, interactive Vega-Lite
-charts (rendered in the browser via vega-embed loaded from a CDN).
-
-This module is the string-keyed convenience tier. For an expression-based,
-composable grammar of graphics see "DataFrame.Display.Web.Chart" (untyped
-'Expr') and "DataFrame.Display.Web.Chart.Typed" (typed 'TExpr').
+A plotly-express-style one-shot plotting API for HTML output: the string-keyed
+convenience tier emitting interactive Vega-Lite charts. For the composable
+expression-based grammar see "DataFrame.Display.Web.Chart" and its @.Typed@.
 -}
 module DataFrame.Display.Web.Plot (
     -- * Aggregation
@@ -219,7 +215,7 @@ histogram spec df = do
         vlSpec =
             (emptySpec VL.Bar)
                 { vlEncodings =
-                    [ chanEnc X spec.x Ordinal
+                    [ (chanEnc X spec.x Ordinal){VL.ceSort = Just VL.DataOrder}
                     , chanEnc Y "count" Quantitative
                     ]
                 , vlTitle = Just chartTitle
@@ -230,10 +226,9 @@ histogram spec df = do
 -- Scatter
 -- ---------------------------------------------------------------------------
 
-{- | 'includeZero' anchors both axes at zero (Vega-Lite's own default).
-It is off by default so the axes fit the data, as expected of a scatter —
-data far from the origin (e.g. geographic coordinates) would otherwise be
-squashed against the chart edge.
+{- | 'includeZero' anchors both axes at zero. Off by default so the axes fit
+the data — otherwise points far from the origin (e.g. geographic coordinates)
+get squashed against the chart edge.
 -}
 data Scatter = Scatter
     { x :: T.Text
@@ -299,7 +294,6 @@ line spec df = do
                 [single] -> single <> " over " <> spec.x
                 _ -> T.intercalate ", " spec.y <> " over " <> spec.x
         xVals = extractNumericColumn spec.x df
-        -- Long-form melt: (x, value, series) so each y column becomes a line.
         perSeries =
             [ (col, zip xVals (extractNumericColumn col df))
             | col <- spec.y

@@ -7,7 +7,35 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TupleSections #-}
 
-module DataFrame.Monad where
+module DataFrame.Monad (
+    -- * The frame-state monad
+    FrameM,
+    runFrameM,
+    evalFrameM,
+    execFrameM,
+    modifyM,
+    inspectM,
+
+    -- * Frame verbs
+    deriveM,
+    insertM,
+    renameM,
+    filterWhereM,
+    sampleM,
+    takeM,
+    dropM,
+    columnAsListM,
+    filterJustM,
+    imputeM,
+
+    -- * Column-derivation pipelines
+    Pipeline,
+    letAs,
+    letExpr,
+    pipelineSteps,
+    toFrameM,
+    runPipeline,
+) where
 
 import Control.Monad (void)
 import DataFrame.Internal.Column (Columnable)

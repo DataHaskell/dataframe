@@ -1,16 +1,10 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
-{- | Read Parquet datasets from HuggingFace (@hf://@) into 'DataFrame's.
-
-A @hf://@ URI has the form @hf:\/\/datasets\/{owner}\/{dataset}\/{glob}@.
-When the glob contains wildcards the dataset's file list is resolved via the
-HuggingFace datasets-server API; otherwise the file is fetched directly from
-the repo.  Resolved files are downloaded to a temporary location and then read
-with the local "DataFrame.IO.Parquet" reader.
-
-This module is the home for the heavier @aeson@ and @http-conduit@
-dependencies, keeping @dataframe-parquet@ and @dataframe-lazy@ free of them.
+{- | Read Parquet datasets from HuggingFace URIs
+(@hf:\/\/datasets\/{owner}\/{dataset}\/{glob}@) into 'DataFrame's. Globs are
+resolved via the datasets-server API, files downloaded to a temp dir, then read
+with the local "DataFrame.IO.Parquet".
 -}
 module DataFrame.IO.HuggingFace (
     -- * Eager readers
@@ -49,16 +43,16 @@ import qualified Data.ByteString as BS
 import qualified Data.List as L
 import qualified Data.Text as T
 import Data.Text.Encoding (encodeUtf8)
+import DataFrame.Core (DataFrame)
 import DataFrame.IO.Parquet (
     ParquetReadOptions (..),
     defaultParquetReadOptions,
  )
 import qualified DataFrame.IO.Parquet as Parquet
-import DataFrame.Internal.DataFrame (DataFrame)
-import DataFrame.Internal.Schema (Schema)
 import qualified DataFrame.Lazy as Lazy
 import DataFrame.Operations.Merge ()
 import qualified DataFrame.Operations.Subset as DS
+import DataFrame.Schema (Schema)
 import Network.HTTP.Simple (
     getResponseBody,
     getResponseStatusCode,
@@ -121,10 +115,8 @@ applyRowRange opts df =
 -- Lazy / streaming reader -------------------------------------------------
 
 {- | Build a lazy 'Lazy.LazyDataFrame' over a @hf://@ dataset (or local path).
-
-The HuggingFace files are resolved and downloaded to a temporary directory up
-front, then scanned lazily from local disk — so the query runs in constant
-memory but the whole dataset is fetched before scanning begins.
+HuggingFace files are downloaded to a temp dir up front, then scanned lazily
+from disk — constant-memory query, but the whole dataset is fetched first.
 -}
 scanParquet :: Schema -> T.Text -> IO Lazy.LazyDataFrame
 scanParquet schema uri
@@ -207,7 +199,6 @@ hfUrlRepoPath f =
     case T.breakOn "/resolve/" (hfpUrl f) of
         (_, rest)
             | not (T.null rest) ->
-                -- Drop "/resolve/", then drop the ref component (up to and including "/")
                 T.unpack $ T.drop 1 $ T.dropWhile (/= '/') $ T.drop (T.length "/resolve/") rest
         _ ->
             T.unpack (hfpConfig f) </> T.unpack (hfpSplit f) </> T.unpack (hfpFilename f)
@@ -247,7 +238,6 @@ downloadHFFilesTo ::
     FilePath -> Maybe BS.ByteString -> [HFParquetFile] -> IO [FilePath]
 downloadHFFilesTo destDir mToken files =
     forM files $ \f -> do
-        -- Derive a collision-resistant name from the URL path components
         let fname = case (hfpConfig f, hfpSplit f) of
                 (c, s) | T.null c && T.null s -> T.unpack (hfpFilename f)
                 (c, s) -> T.unpack c <> "_" <> T.unpack s <> "_" <> T.unpack (hfpFilename f)

@@ -1,4 +1,4 @@
-<!-- scripths: 0.5.2.0 -->
+<!-- scripths: 0.5.3.0 -->
 
 <!--
   This README is a runnable scripths (https://github.com/DataHaskell/scripths)
@@ -33,7 +33,7 @@ and `predict` compiles it to an `Expr Double`.
 -- cabal: default-extensions: OverloadedStrings, TypeApplications, DataKinds, TypeOperators, FlexibleContexts
 -- cabal: ghc-options: -w
 import qualified DataFrame as D
-import DataFrame.LinearModel
+import DataFrame.Learn
 
 sales = D.fromNamedColumns
     [ ("x", D.fromList ([1, 2, 3, 4, 5, 6] :: [Double]))
@@ -75,9 +75,6 @@ putStr (unlines
 The tree compiles to nested `if/then/else` over your columns:
 
 ```haskell
-import DataFrame.DecisionTree (defaultTreeConfig)
-import DataFrame.DecisionTree.Model ()
-
 flowers = D.fromNamedColumns
     [ ("petal_length", D.fromList ([1.4, 1.3, 1.5, 1.4, 4.5, 4.7, 4.6, 4.4, 5.5, 5.8, 5.6, 5.7] :: [Double]))
     , ("petal_width",  D.fromList ([0.2, 0.2, 0.1, 0.3, 1.5, 1.4, 1.6, 1.3, 2.0, 2.1, 1.9, 2.2] :: [Double]))
@@ -101,8 +98,6 @@ Genetic programming searches for an expression that fits the data, and returns
 it as a dataframe `Expr` plus the accuracy/complexity Pareto front:
 
 ```haskell
-import DataFrame.SymbolicRegression
-
 curve = D.fromNamedColumns
     [ ("x", D.fromList xs)
     , ("y", D.fromList [x * x + x | x <- xs])
@@ -139,9 +134,6 @@ over the raw inputs. Below we standardize `x`, fit in the scaled space, then fol
 the scaler back in to recover a raw-column model:
 
 ```haskell
-import DataFrame.Transform
-import DataFrame.Metrics
-
 scaler      = standardScaler ["x"] sales
 scaledSales = applyTransform (scalerTransform scaler) sales
 scaledModel = fit defaultLinearConfig (D.col @Double "y") scaledSales
@@ -227,8 +219,6 @@ with a scikit-learn-style layout (per-class precision/recall/F1/support plus
 macro/weighted averages):
 
 ```haskell
-import DataFrame.Metrics.Report
-
 clf = fit defaultLogisticConfig (D.col @Double "species") flowers
 putStr (show (classificationReportExpr (predict clf) (D.col @Double "species") flowers))
 ```
@@ -250,8 +240,6 @@ A fitted preprocessing step is a `Transform`, and transforms compose with `<>`.
 expression over the raw columns for export:
 
 ```haskell
-import DataFrame.PCA
-
 features = ["petal_length", "petal_width"]
 scalerF  = standardScaler features flowers
 pca      = fit (PCAConfig (NComp 2) True) (map (D.col @Double) features) flowers
@@ -273,8 +261,6 @@ discovers the term, and feeding it back as a column lifts the fit from mediocre
 to exact — still a formula you can read:
 
 ```haskell
-import DataFrame.Synthesis
-
 interactions = D.fromNamedColumns
     [ ("a", D.fromList as)
     , ("b", D.fromList bs)

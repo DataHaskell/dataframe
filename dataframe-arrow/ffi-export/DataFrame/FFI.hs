@@ -36,7 +36,8 @@ import DataFrame.DecisionTree (
     defaultColumnOrdering,
     defaultSynthConfig,
     defaultTreeConfig,
-    fitDecisionTree,
+    fit,
+    predict,
  )
 import DataFrame.IO.Arrow (dataframeToArrow)
 import DataFrame.IO.CSV.Fast (fastReadCsvWithSchema)
@@ -49,14 +50,9 @@ import DataFrame.Internal.Expression (Expr (Col))
 foreign export ccall "dfExecutePlan"
     dfExecutePlan :: CString -> Ptr Word64 -> Ptr Word64 -> IO CInt
 
-{- | Execute a JSON-encoded query plan and return Arrow C Data Interface
-  pointers to Python via output parameters.
-
-  @planCS@    – JSON plan string (see DataFrame.IR for schema)
-  @schemaOut@ – receives the ArrowSchema* address as a Word64
-  @arrayOut@  – receives the ArrowArray*  address as a Word64
-
-  Returns 0 on success, -1 on error.
+{- | Execute a JSON-encoded query plan, returning Arrow C Data Interface
+pointers to Python via the @schemaOut@/@arrayOut@ output parameters (each an
+address as a 'Word64'). Returns 0 on success, -1 on error.
 -}
 dfExecutePlan :: CString -> Ptr Word64 -> Ptr Word64 -> IO CInt
 dfExecutePlan planCS schemaOut arrayOut = do
@@ -88,22 +84,9 @@ foreign export ccall "dfFitDecisionTree"
 foreign export ccall "dfFreeModel"
     dfFreeModel :: Ptr CChar -> IO ()
 
-{- | Fit a TAO decision tree on the materialized result of @plan_json@, predicting
-  @target_col@ from the remaining columns.
-
-  The caller owns the returned buffer and must release it with 'dfFreeModel'.
-
-  @target_type@ may be the literal string @"auto"@ to infer the target's type
-  from the materialized DataFrame's schema, or one of the wire-format type
-  tags (@"int"@, @"double"@, @"text"@, @"bool"@, …).
-
-  @config_json@ is a JSON object with the serializable TreeConfig fields:
-  @max_depth@, @min_samples_split@, @min_leaf_size@, @percentiles@,
-  @expression_pairs@, @tao_iterations@, @tao_convergence_tol@,
-  @max_expr_depth@, @bool_expansion@, @complexity_penalty@,
-  @enable_string_ops@, @enable_cross_cols@, @enable_arith_ops@.
-
-  Returns 0 on success, -1 on error.
+{- | Fit a TAO decision tree on a plan's materialized result, predicting the
+target column from the rest (@target_type@: @"auto"@ or a wire type tag;
+@config_json@: 'TreeConfig' fields). Caller frees via 'dfFreeModel'; 0 ok, -1 err.
 -}
 dfFitDecisionTree ::
     CString ->
@@ -255,31 +238,31 @@ inferTargetType target df = dispatchType (columnTypeRep (unsafeGetColumn target 
 fitTreeWithType ::
     T.Text -> TreeConfig -> T.Text -> DataFrame -> IO BS.ByteString
 fitTreeWithType ttag cfg target df = case ttag of
-    "int" -> fit @Int
-    "int8" -> fit @Int8
-    "int16" -> fit @Int16
-    "int32" -> fit @Int32
-    "int64" -> fit @Int64
-    "word" -> fit @Word
-    "word8" -> fit @Word8
-    "word16" -> fit @Word16
-    "word32" -> fit @Word32
-    "word64" -> fit @Word64
-    "integer" -> fit @Integer
-    "double" -> fit @Double
-    "float" -> fit @Float
-    "bool" -> fit @Bool
-    "char" -> fit @Char
-    "text" -> fit @T.Text
-    "string" -> fit @String
+    "int" -> fitEncode @Int
+    "int8" -> fitEncode @Int8
+    "int16" -> fitEncode @Int16
+    "int32" -> fitEncode @Int32
+    "int64" -> fitEncode @Int64
+    "word" -> fitEncode @Word
+    "word8" -> fitEncode @Word8
+    "word16" -> fitEncode @Word16
+    "word32" -> fitEncode @Word32
+    "word64" -> fitEncode @Word64
+    "integer" -> fitEncode @Integer
+    "double" -> fitEncode @Double
+    "float" -> fitEncode @Float
+    "bool" -> fitEncode @Bool
+    "char" -> fitEncode @Char
+    "text" -> fitEncode @T.Text
+    "string" -> fitEncode @String
     other ->
         ioError . userError $
             "DataFrame.FFI.fitTreeWithType: unsupported target type tag: "
                 ++ T.unpack other
   where
-    fit :: forall a. (Columnable a, Ord a) => IO BS.ByteString
-    fit = do
-        let expr = fitDecisionTree @a cfg (Col @a target) df
+    fitEncode :: forall a. (Columnable a, Ord a) => IO BS.ByteString
+    fitEncode = do
+        let expr = predict (fit cfg (Col @a target) df)
         case encodeExprToBytes expr of
             Right bs -> return bs
             Left err -> ioError (userError $ "encodeExprToBytes: " ++ err)

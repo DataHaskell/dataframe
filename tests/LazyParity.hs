@@ -2,14 +2,10 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeApplications #-}
 
-{- | The HARD GATE for the lazy engine: for a bounded source, the lazy result
-must be BYTE-IDENTICAL to the eager result computed with the same eager ops
-('Join.join' / 'Agg.aggregate' . 'Agg.groupBy' / 'Perm.sortBy').
-
-The lazy executor routes bounded HashJoin/HashAggregate through the whole-frame
-eager fast paths, so 'show' of the two results must agree exactly. Both a LEFT
-join pipeline (join -> groupBy -> aggregate -> sort) and a pure groupBy pipeline
-are covered.
+{- | The HARD GATE for the lazy engine: for a bounded source the lazy result
+must be BYTE-IDENTICAL to the eager result of the same ops (bounded joins and
+aggregates route through the eager fast paths). Covers a LEFT-join pipeline
+(join -> groupBy -> aggregate -> sort) and a pure groupBy pipeline.
 -}
 module LazyParity (tests) where
 
@@ -21,14 +17,14 @@ import qualified DataFrame.Functions as F
 import qualified DataFrame.IO.CSV as Csv
 import qualified DataFrame.Internal.Column as DI
 import qualified DataFrame.Internal.Expression as E
-import DataFrame.Internal.Schema (Schema (..), schemaType)
+import DataFrame.Lazy (SortOrder (Descending))
 import qualified DataFrame.Lazy as L
-import DataFrame.Lazy.Internal.LogicalPlan (SortOrder (Descending))
 import qualified DataFrame.Operations.Aggregation as Agg
 import DataFrame.Operations.Join (JoinType (LEFT))
 import qualified DataFrame.Operations.Join as Join
 import qualified DataFrame.Operations.Permutation as Perm
 import DataFrame.Operators (as, (|>))
+import DataFrame.Schema (Schema (..), schemaType)
 import System.Directory (removeFile)
 import System.IO.Temp (emptySystemTempFile)
 import Test.HUnit
@@ -102,19 +98,13 @@ joinPipelineParity =
                         [ F.sum (amount - discount) `as` "revenue"
                         , F.count amount `as` "orders"
                         ]
-                -- Eager: the exact ops the lazy executor delegates to.
                 ordersDf <- Csv.readCsvWithSchema ordersSchema ordersPath
                 customersDf <- Csv.readCsvWithSchema customersSchema customersPath
-                -- orders first => the orders side is retained, so the ~10%
-                -- orphan orders survive as a Nothing region/plan group. This
-                -- matches the lazy `L.join LEFT orders customers` below, which
-                -- also retains its left (orders) sub-query.
                 let eager =
                         Perm.sortBy [Perm.Desc (E.Col @Double "revenue")] $
                             Agg.aggregate aggs $
                                 Agg.groupBy ["region", "plan"] $
                                     Join.join LEFT ["customer_id"] ordersDf customersDf
-                -- Lazy: same query through the bounded-source fast path.
                 let customersQ = L.scanCsv customersSchema (T.pack customersPath)
                 lazy <-
                     L.scanCsv ordersSchema (T.pack ordersPath)

@@ -1,6 +1,6 @@
-cabal-version:      2.4
+cabal-version:      3.4
 name:               dataframe-viz
-version:            1.0.3.0
+version:            1.1.0.0
 synopsis:           Visualisation/plotting helpers for the dataframe ecosystem.
 description:
     Display harness plus terminal and web plotters. Built on top of
@@ -37,7 +37,8 @@ library
     build-depends:      base >= 4 && < 5,
                         aeson >= 0.11.0.0 && < 3,
                         containers >= 0.6.7 && < 0.9,
-                        dataframe-core ^>= 1.1,
+                        dataframe-core >= 2.0 && < 2.1,
+                        dataframe-core:internal >= 2.0 && < 2.1,
                         directory >= 1.3.0.0 && < 2,
                         granite >= 0.6 && < 1,
                         process ^>= 1.6,

@@ -8,22 +8,9 @@
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE UndecidableInstances #-}
 
-{- | Segment a frame by its categorical (Text) columns and fit a separate base
-model per value-combination, instead of rejecting the categoricals. A row is
-routed to its segment's model at predict time via a nested-@If@ expression keyed
-on @column == value@; combinations unseen in training, rows with a missing
-categorical key, and segments too small to fit fall through to a global model fit
-on all rows.
-
-'Segmented' wraps any base estimator whose prediction is an @Expr a@ (linear,
-logistic, symbolic regression). 'fit' returns a 'SegmentedModel'; 'predict' is the
-compiled routing expression over the raw columns.
-
-Optional partial pooling (@segPool = λ@, linear base only) shrinks each segment's
-coefficients toward a random-effects reference — the @n_g@-weighted mean of the
-per-segment fits — so small segments borrow strength from the rest of the data.
-@λ = 0@ is independent per-segment fitting; @λ > 0@ on a non-linear base is a
-fit-time error.
+{- | Fit a separate base model per categorical value-combination, routing each
+row to its segment at predict time; unseen or too-small segments fall back to a
+global fit. Optional partial pooling (linear base) shrinks small segments.
 -}
 module DataFrame.Segmented (
     module DataFrame.Model,
@@ -36,7 +23,7 @@ module DataFrame.Segmented (
     SegmentFit (..),
 ) where
 
-import Data.List (foldl', (\\))
+import Data.List ((\\))
 import qualified Data.Map.Strict as M
 import Data.Maybe (isJust)
 import qualified Data.Set as Set
@@ -69,10 +56,8 @@ import DataFrame.Operators ((.&&.), (.==.))
 import DataFrame.SymbolicRegression (SRConfig)
 
 {- | A base estimator @cfg@ wrapped to fit one model per categorical
-value-combination. @segOn@ chooses the columns to segment on ('Nothing' =
-auto-detect Text columns under @segMaxCard@); @segMinRows@ (floored at
-@features + 1@) is the smallest segment that gets its own model; @segPool@ is the
-pooling strength @λ@ in standardized units.
+value-combination. @segOn@ picks the columns ('Nothing' = auto-detect),
+@segMinRows@ the smallest own-model segment, @segPool@ the pooling strength @λ@.
 -}
 data Segmented cfg = Segmented
     { segBase :: !cfg
@@ -118,9 +103,7 @@ data SegmentedModel a model = SegmentedModel
 
 {- | How a base estimator fits its per-segment models under pooling strength @λ@.
 The default fits each segment independently and rejects @λ > 0@; the linear
-instance overrides it with closed-form shrinkage toward a random-effects
-reference. Every base model used with 'Segmented' needs an instance (a one-line
-empty instance suffices to inherit the independent default).
+instance overrides it with closed-form shrinkage. Every base model needs an instance.
 -}
 class (Fit cfg (Expr a)) => SegmentFit cfg a where
     -- | Fit the qualifying segments (each a numeric-only frame, in order).
@@ -173,8 +156,6 @@ fitSegmented (Segmented base mcols maxCard minRows lam) target df =
         Col n -> Just n
         _ -> Nothing
     feats = featureNames target df
-    -- Every Text feature is dropped from the numeric design; the chosen subset
-    -- (catCols) additionally drives the partitioning.
     textCols = [c | c <- feats, isTextCol df c]
     catCols = resolveCatCols df mTarget textCols mcols maxCard
     numericFrame = exclude textCols
@@ -250,9 +231,9 @@ distinctCount :: DataFrame -> T.Text -> Int
 distinctCount df c =
     Set.size (Set.fromList (V.toList (columnToTextVec (unsafeGetColumn c df))))
 
-{- | Reject feature columns that are neither Text (dropped/segmented) nor non-null
-'Double', naming each with its fix — clearer than the base fitter's raw type
-mismatch, and steering the user to model their types well.
+{- | Reject feature columns that are neither Text (dropped\/segmented) nor
+non-null 'Double', naming each with its fix — clearer than the base fitter's
+raw type mismatch.
 -}
 guardNumeric :: DataFrame -> [T.Text] -> Expr a -> ()
 guardNumeric df textCols target =
@@ -305,10 +286,9 @@ groupByKey df catCols =
             M.empty
             [0 .. n - 1]
 
-{- | Linear segments with exact closed-form pooling. @λ = 0@ is independent OLS
-(identical to the base fit); @λ > 0@ standardizes the design, shrinks each
-segment's coefficients toward the @n_g@-weighted mean of the per-segment fits, and
-maps back to raw coefficient space.
+{- | Linear segments with exact closed-form pooling. @λ = 0@ is independent OLS;
+@λ > 0@ shrinks each segment's coefficients toward the @n_g@-weighted mean of the
+per-segment fits.
 -}
 instance SegmentFit LinearConfig Double where
     fitSegments cfg lam target dfs
@@ -320,12 +300,13 @@ shrinkLinear ::
     LinearConfig -> Double -> Expr Double -> [DataFrame] -> [LinearRegressor]
 shrinkLinear cfg lam target dfs = map toReg dsegs
   where
-    names = featureNames target (head dfs)
+    names = case dfs of
+        (d0 : _) -> featureNames target d0
+        [] -> error "shrinkLinear: no segments"
     d = length names
     mats = [snd (numericMatrix names dframe) | dframe <- dfs]
     ys = [targetDoubles target dframe | dframe <- dfs]
     ns = map V.length mats
-    -- Standardization stats over the pooled qualifying rows.
     pooledRows = V.concat mats
     nP = V.length pooledRows
     means =
@@ -341,7 +322,6 @@ shrinkLinear cfg lam target dfs = map toReg dsegs
     stdValue j x = let s = sds VU.! j in if s == 0 then 0 else (x - means VU.! j) / s
     augStd row = VU.cons 1 (VU.imap stdValue row)
     zMats = [V.map augStd m | m <- mats]
-    -- First pass: independent standardized OLS per segment.
     olsAll = zipWith fitOLS zMats ys
     fitOLS z y = either (const Nothing) Just (qrLeastSquares z y)
     good = [(n, sol) | (n, Just sol) <- zip ns olsAll]
@@ -351,8 +331,6 @@ shrinkLinear cfg lam target dfs = map toReg dsegs
         | otherwise =
             VU.generate (d + 1) $ \k ->
                 sum [fromIntegral n * (sol VU.! k) | (n, sol) <- good] / totW
-    -- Second pass: ridge of the residual toward the reference, penalizing all
-    -- parameters; delta_seg = dref + eta.
     dsegs = zipWith solveSeg zMats ys
     solveSeg z y =
         let r = VU.zipWith (-) y (matVec z dref)

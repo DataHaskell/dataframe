@@ -36,8 +36,8 @@ import DataFrame.Internal.Column (
  )
 import DataFrame.Internal.DataFrame (DataFrame (..))
 import DataFrame.Internal.Parsing
-import DataFrame.Internal.Schema (Schema, SchemaType (..), elements)
 import DataFrame.Operations.Typing (SafeReadMode (..), effectiveSafeRead)
+import DataFrame.Schema (Schema, SchemaType (..), elements)
 import System.IO
 import Type.Reflection
 import Prelude hiding (takeWhile)
@@ -59,11 +59,9 @@ data ReadOptions = ReadOptions
     , rowsRead :: !Int
     }
 
-{- | By default we assume the file has a header and we infer types on read.
-'safeRead' starts as 'NoSafeRead' — set it to 'MaybeRead' to wrap columns as
-@Maybe a@, or 'EitherRead' to wrap as @Either Text a@ preserving the raw text
-of any rows that fail to parse. Use 'safeReadOverrides' to pick a different
-mode for specific columns.
+{- | Default read options: assume a header, infer types, no safe-read wrapping.
+Set 'safeRead' to 'MaybeRead'/'EitherRead' to wrap columns; use
+'safeReadOverrides' to pick a different mode per column.
 -}
 defaultOptions :: ReadOptions
 defaultOptions =
@@ -110,30 +108,24 @@ readSeparated c opts path = do
                 if hasHeader opts
                     then fmap (T.filter (/= '\"')) firstRow
                     else fmap (T.singleton . intToDigit) [0 .. (length firstRow - 1)]
-        -- If there was no header rewind the file cursor.
         unless (hasHeader opts) $ hSeek handle AbsoluteSeek 0
 
         currPos <- hTell handle
         when (isJust $ seekPos opts) $
             hSeek handle AbsoluteSeek (fromMaybe currPos (seekPos opts))
 
-        -- Initialize mutable vectors for each column
         let numColumns = length columnNames
         let numRows = len'
-        -- Use this row to infer the types of the rest of the column.
         (dataRow, remainder) <- readSingleLine c (leftOver opts) handle
 
-        -- This array will track the indices of all null values for each column.
         nullIndices <- VM.unsafeNew numColumns
         VM.set nullIndices []
         mutableCols <- VM.unsafeNew numColumns
         getInitialDataVectors numRows mutableCols dataRow
 
-        -- Read rows into the mutable vectors
         (unconsumed, r) <-
             fillColumns numRows c mutableCols nullIndices remainder handle
 
-        -- Freeze the mutable vectors into immutable ones
         nulls' <- V.unsafeFreeze nullIndices
         let !columnNamesV = V.fromList columnNames
         cols <-
@@ -252,11 +244,9 @@ freezeColumn colNames mutableCols nulls opts colIndex = do
 -- Streaming scan API
 -- ---------------------------------------------------------------------------
 
-{- | Open a CSV/separated file for streaming, returning an open handle
-(positioned just after the header line) and the column specification
-for the schema columns that appear in the file header.
-
-The caller is responsible for closing the handle when done.
+{- | Open a file for streaming: returns a handle positioned after the header
+and the column spec for the schema columns present in the header.
+The caller must close the handle when done.
 -}
 openCsvStream ::
     Char ->
@@ -280,12 +270,9 @@ openCsvStream sep schema path = do
                 ("openCsvStream: none of the schema columns appear in the header of " <> path)
     return (handle, colSpec)
 
-{- | Read up to @batchSz@ rows from the open handle, returning a batch
-'DataFrame' and the unconsumed leftover text.  Returns 'Nothing' when
-the handle is at EOF and there is no leftover input.
-
-The caller must pass the leftover returned by the previous call (use @""@
-for the first call).
+{- | Read up to @batchSz@ rows, returning a batch 'DataFrame' and the unconsumed
+leftover text; 'Nothing' at EOF with no leftover. Pass the previous call's
+leftover back in (use @""@ on the first call).
 -}
 readBatch ::
     Char ->
@@ -297,17 +284,13 @@ readBatch ::
 readBatch sep colSpec batchSz leftover handle = do
     let sepByte = fromIntegral (fromEnum sep) :: Word8
         numCols = length colSpec
-        -- Read in 8 MB chunks; only the partial-line tail is copied on refill.
         chunkSize = 8 * 1024 * 1024
     nullsArr <- VM.unsafeNew numCols
     VM.set nullsArr []
     mCols <- VM.unsafeNew numCols
     forM_ (zip [0 ..] colSpec) $ \(ci, (_, _, st)) ->
         VM.unsafeWrite mCols ci =<< makeCol batchSz st
-    -- buf holds unprocessed bytes; refilled on demand when no newline is found.
     bufRef <- newIORef leftover
-    -- Row-by-row scan. When the buffer has no unquoted newline, fetch another chunk.
-    -- The copy on refill is only the partial-line tail (≤ one row ≈ few hundred bytes).
     let loop !rowIdx = do
             remaining <- readIORef bufRef
             if rowIdx >= batchSz
@@ -316,7 +299,7 @@ readBatch sep colSpec batchSz leftover handle = do
                     Nothing -> do
                         chunk <- BS.hGet handle chunkSize
                         if BS.null chunk
-                            then return (rowIdx, remaining) -- EOF
+                            then return (rowIdx, remaining)
                             else writeIORef bufRef (remaining <> chunk) >> loop rowIdx
                     Just nlIdx -> do
                         let line = BS.take nlIdx remaining
@@ -389,7 +372,6 @@ getNthFieldBs sep targetIdx bs
     | not (BS.any (== 0x22) bs) = skipFast targetIdx bs
     | otherwise = go 0 0 False 0
   where
-    -- Fast path: skip fields using elemIndex (memchr); avoids pair allocation.
     skipFast k s =
         case BS.elemIndex sep s of
             Nothing -> if k == 0 then s else BS.empty
@@ -398,7 +380,6 @@ getNthFieldBs sep targetIdx bs
                     then BS.take i s
                     else skipFast (k - 1) (BS.drop (i + 1) s)
 
-    -- Slow path: quote-aware scan.
     quoteChar = 0x22 :: Word8
     len = BS.length bs
     go !idx !start !inQ !pos
@@ -448,10 +429,7 @@ findUnquotedNewline bs =
     case BS.elemIndex 0x0A bs of
         Nothing -> Nothing
         Just nlPos
-            -- No quote before the newline → safe to use this position.
-            -- Check with elemIndex to avoid allocating a ByteString slice.
             | maybe True (>= nlPos) (BS.elemIndex 0x22 bs) -> Just nlPos
-            -- Quote present → may be a newline inside a quoted field; scan carefully.
             | otherwise -> slowScan 0 False
   where
     len = BS.length bs

@@ -19,6 +19,7 @@ module DataFrame.Typed.TH.Records (
     -- * ADT-based schema derivation
     deriveSchemaFromType,
     deriveSchemaFromTypeWith,
+    deriveSchemaValues,
     SchemaOptions (..),
     defaultSchemaOptions,
     camelToSnake,
@@ -42,6 +43,7 @@ import Language.Haskell.TH
 
 import qualified DataFrame.Internal.Column as C
 import qualified DataFrame.Internal.DataFrame as D
+import qualified DataFrame.Internal.Schema.TH as SchemaTH
 import DataFrame.Typed.Record (
     HasSchema,
     Schema,
@@ -51,6 +53,13 @@ import DataFrame.Typed.Record (
  )
 import DataFrame.Typed.Types (Column, TypedDataFrame)
 import DataFrame.Typed.Util (camelToSnake)
+
+{- | Derive an untyped 'DataFrame.Schema.Schema' value plus per-column 'Expr'
+accessors from a record type. The value-level companion to
+'deriveSchemaFromType': @$(deriveSchemaValues ''Order)@ generates @orderSchema@.
+-}
+deriveSchemaValues :: Name -> DecsQ
+deriveSchemaValues = SchemaTH.deriveSchema
 
 deriveSchema :: String -> D.DataFrame -> DecsQ
 deriveSchema typeName df = do

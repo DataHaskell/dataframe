@@ -8,7 +8,6 @@ import qualified DataFrame.Functions as F
 import qualified DataFrame.Internal.Column as DI
 
 import DataFrame.LinearModel
-import DataFrame.LinearSolver (defaultSolverConfig)
 import DataFrame.Metrics
 import DataFrame.Metrics.Report
 import DataFrame.ModelSelection
@@ -48,14 +47,12 @@ testRegressionMetrics = TestCase $ do
 testMulticlassMetrics :: Test
 testMulticlassMetrics = TestCase $ do
     assertBool "accuracy" (close 1e-9 (accuracy preds3 truth3) 0.875)
-    -- class 1: tp=2 (idx2,6), fp=1 (idx3) -> precision 2/3
     assertBool
         "binary precision class 1"
         (close 1e-9 (precision (Binary 1) preds3 truth3) (2 / 3))
     assertBool
         "macro f1 sane"
         (f1 Macro preds3 truth3 > 0.8 && f1 Macro preds3 truth3 <= 1)
-    -- micro f1 == accuracy for single-label
     assertBool
         "micro f1 == accuracy"
         (close 1e-9 (f1 Micro preds3 truth3) (accuracy preds3 truth3))
@@ -74,7 +71,6 @@ testReports = TestCase $ do
     assertBool "report accuracy" (close 1e-9 (crAccuracy cr) 0.875)
     let rr = regressionReport (VU.fromList [1, 2, 3]) (VU.fromList [1, 2, 4])
     assertBool "regression report rmse" (rrRMSE rr > 0)
-    -- Show instances don't crash
     assertBool "classification report shows" (not (null (show cr)))
     assertBool "confusion shows" (not (null (show (confusionMatrix preds3 truth3))))
 
@@ -103,7 +99,6 @@ testTransformCompose :: Test
 testTransformCompose = TestCase $ do
     let scaler = standardScaler ["x"] reg
         pca = fit (PCAConfig (NComp 1) False) [F.col @Double "x"] reg
-        -- the whole point: scaler <> pcaTransform compose as a monoid
         pipeline = scalerTransform scaler <> pcaTransform pca
         out = applyTransform pipeline reg
     assertBool "pipeline produced a frame" (D.columnNames out /= [])

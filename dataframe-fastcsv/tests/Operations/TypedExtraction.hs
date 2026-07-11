@@ -2,9 +2,9 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 
-{- | Round-2 (WS-E1) behavior pins for the typed-extraction fastcsv path:
-schema bypass, unified WS-B parser semantics, byte-level missing tests,
-and the chunk-boundary scalar tail that replaced the full-file copy.
+{- | Behavior pins for the typed-extraction fastcsv path: schema bypass,
+parser semantics, byte-level missing tests, and the chunk-boundary scalar
+tail that replaced the full-file copy.
 -}
 module Operations.TypedExtraction (tests) where
 
@@ -25,8 +25,8 @@ import qualified DataFrame.IO.CSV.Fast as D
 import DataFrame.Internal.Column (Column)
 import qualified DataFrame.Internal.Column as DI
 import DataFrame.Internal.DataFrame (DataFrame, dataframeDimensions, getColumn)
-import DataFrame.Internal.Schema (Schema (..), SchemaType (..), elements)
 import DataFrame.Operations.Typing (SafeReadMode (..))
+import DataFrame.Schema (Schema (..), SchemaType (..), elements)
 import System.Directory (removeFile)
 import Test.HUnit
 
@@ -59,10 +59,9 @@ testIntOverflowDemotesToDouble = TestLabel "typed_int_overflow_demotes" $
                 df
                 (DI.fromList @Double [1.0, 9.223372036854776e18])
 
--- Divergence #2 (pinned new behavior): doubles parse with strip-equivalent
--- semantics, so a padded double past the 100-row inference sample no longer
--- demotes the whole column to Text. (Inside the sample the Text-level
--- classifier still rejects padding, by design.)
+-- Divergence #2: doubles parse with strip-equivalent semantics, so a padded
+-- double past the 100-row inference sample no longer demotes the column to
+-- Text. (Inside the sample the classifier still rejects padding.)
 testPaddedDoubleStaysDouble :: Test
 testPaddedDoubleStaysDouble = TestLabel "typed_padded_double" $
     TestCase $ do
@@ -215,9 +214,8 @@ testDateWithNulls = TestLabel "typed_date_nulls" $
                 )
 
 -- The scalar tail (last <64 bytes after the SIMD chunks) must honour the
--- quote state carried out of the SIMD region: a quoted field that opens
--- before the 64-byte boundary and closes inside the tail may contain
--- separators and newlines.
+-- quote state from the SIMD region: a quoted field opening before the
+-- boundary and closing in the tail may contain separators and newlines.
 testQuoteSpansChunkBoundary :: Test
 testQuoteSpansChunkBoundary = TestLabel "typed_quote_spans_boundary" $
     TestCase $ do

@@ -4,10 +4,9 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 
-{- | Driver for the default CSV reader (Round-2 WS-D): a single strict
-scan feeding per-column sinks, with cassava-parity semantics pinned by
-@IO.CsvGolden@. Ragged rows pad trailing columns with null and drop
-extra fields (audit D6). The result is fully forced (audit D7).
+{- | Driver for the default CSV reader: a single strict scan feeding
+per-column sinks, with cassava-parity semantics. Ragged rows pad
+trailing columns with null, drop extra fields, and force the result.
 -}
 module DataFrame.IO.CSV.Internal.Read (decodeCsvStrict) where
 
@@ -32,12 +31,12 @@ import DataFrame.IO.CSV.Internal.Sink
 import DataFrame.Internal.Column (Column, ensureOptional)
 import DataFrame.Internal.ColumnBuilder
 import DataFrame.Internal.DataFrame (DataFrame (..), forceDataFrame)
-import DataFrame.Internal.Schema (SchemaType (..), schemaType)
 import DataFrame.Operations.Typing (
     SafeReadMode (..),
     effectiveSafeRead,
     parseWithTypes,
  )
+import DataFrame.Schema (SchemaType (..), schemaType)
 import Foreign.Ptr (castPtr)
 import Type.Reflection (typeRep)
 
@@ -47,8 +46,6 @@ decodeCsvStrict opts bs = BSU.unsafeUseAsCStringLen bs $ \(cstr, _) -> do
     let !len = BS.length bs
         !sep = fromIntegral (ord (columnSeparator opts)) :: Word8
 
-        -- Position of the next non-blank record at/after @pos@ (cassava
-        -- drops single-empty-field records); @len@ when none remain.
         findRecord !pos
             | pos >= len = len
             | otherwise = withField bs len sep pos $ \cs ce _ term next ->
@@ -56,8 +53,6 @@ decodeCsvStrict opts bs = BSU.unsafeUseAsCStringLen bs $ \(cstr, _) -> do
                     then if term == termEof then len else findRecord next
                     else pos
 
-        -- Decode the record at @pos@ as header fields; returns the
-        -- position after the record.
         headerFields !pos = go pos id
           where
             go !p acc = withField bs len sep p $ \cs ce unesc term next ->
@@ -82,8 +77,6 @@ decodeCsvStrict opts bs = BSU.unsafeUseAsCStringLen bs $ \(cstr, _) -> do
     when (dataPos >= len) (error "Empty CSV file")
 
     let resolveMode = effectiveSafeRead (safeRead opts) (safeReadOverrides opts)
-        -- If ANY column is EitherRead we keep every raw cell (including
-        -- "N/A" etc.) verbatim; otherwise the missing-indicator list applies.
         anyEither = any (\n -> resolveMode n == EitherRead) names
         missing = if anyEither then [] else missingIndicators opts
         missMode

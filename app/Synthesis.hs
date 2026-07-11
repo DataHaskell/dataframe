@@ -47,8 +47,8 @@ main = do
             D.randomSplit (mkStdGen 4232) 0.7 (DT.thaw (clean train))
         testDf = DT.thaw (clean test)
 
-        model =
-            fitDecisionTree
+        fitted =
+            fit
                 ( defaultTreeConfig
                     { maxTreeDepth = 5
                     , minSamplesSplit = 5
@@ -68,8 +68,9 @@ main = do
                 )
                 (F.fromMaybe 0 (F.col @(Maybe Int) "Survived"))
                 (trainDf |> D.exclude ["PassengerId"])
+        model = predict fitted
 
-    print model
+    print fitted
 
     putStrLn "Training accuracy: "
     print $ computeAccuracy (trainDf |> D.derive (F.name prediction) model)

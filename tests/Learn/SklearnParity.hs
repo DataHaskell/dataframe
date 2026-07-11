@@ -1,10 +1,9 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeApplications #-}
 
-{- | Parity tests against scikit-learn on clean Kaggle-style datasets. The
-reference values in @data/ml/golden.json@ are produced by
-@scripts/gen_sklearn_golden.py@. Closed-form models (OLS, ridge, PCA) are held to
-tight coefficient parity; iterative models to an accuracy/inertia floor.
+{- | Parity tests against scikit-learn on clean Kaggle-style datasets; reference
+values in @data/ml/golden.json@ come from @scripts/gen_sklearn_golden.py@.
+Closed-form models get tight coefficient parity; iterative ones an accuracy floor.
 -}
 module Learn.SklearnParity (tests) where
 
@@ -32,7 +31,6 @@ import DataFrame.Boosting (
  )
 import DataFrame.KMeans
 import DataFrame.LinearModel
-import DataFrame.LinearSolver (defaultSolverConfig)
 import DataFrame.PCA
 import DataFrame.SVM
 

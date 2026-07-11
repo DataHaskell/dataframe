@@ -1,7 +1,11 @@
 {-# LANGUAGE InstanceSigs #-}
 {-# OPTIONS_GHC -Wno-orphans #-}
 
-module DataFrame.Operations.Merge where
+module DataFrame.Operations.Merge (
+    -- * Horizontal (side-by-side) merge
+    (|||),
+    -- Also exports the orphan @Semigroup@/@Monoid DataFrame@ instances.
+) where
 
 import qualified Data.List as L
 import qualified Data.Text as T
@@ -38,9 +42,6 @@ instance Semigroup D.DataFrame where
                         case optB of
                             Nothing -> case optA of
                                 Nothing ->
-                                    -- N.B. this case should never happen, because we're dealing with columns coming from
-                                    -- union of column names of both dataframes. Nothing + Nothing would mean column
-                                    -- wasn't in either dataframe, which shouldn't happen
                                     D.insertColumn name (D.fromList ([] :: [T.Text])) df
                                 Just a'' ->
                                     D.insertColumn name (D.expandColumn sumRows a'') df

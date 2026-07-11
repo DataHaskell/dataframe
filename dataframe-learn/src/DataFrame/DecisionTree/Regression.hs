@@ -1,14 +1,14 @@
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
-{- | Variance-reduction (weighted-SSE) regression trees, reusing the CART
-feature machinery. Leaves predict the (weighted) mean of their rows. The
-matrix-level 'fitRegTreeOn' lets gradient boosting refit on residuals without
-re-extracting features each round.
+{- | Variance-reduction (weighted-SSE) regression trees over the CART feature
+machinery; leaves predict the weighted mean of their rows. 'fitRegTreeOn' lets
+gradient boosting refit on residuals without re-extracting features.
 -}
 module DataFrame.DecisionTree.Regression (
     RegTreeConfig (..),
     defaultRegTreeConfig,
+    -- | Implementation verb used by the fit\/predict instances and boosting.
     fitRegTreeOn,
 ) where
 
@@ -51,8 +51,6 @@ fitRegTreeOn cfg feats y mw = buildNode 0 (VU.enumFromN 0 n) featSorted
   where
     n = VU.length y
     weightAt i = maybe 1 (VU.! i) mw
-    -- Sort every feature's rows once; each node inherits its subset by an
-    -- order-preserving filter, so no node re-sorts (cf. CART's 'buildCartNode').
     featSorted = V.map (sortIndicesByValue . cfValues) feats
 
     buildNode depth idxs sortedByFeat
@@ -62,7 +60,6 @@ fitRegTreeOn cfg feats y mw = buildNode 0 (VU.enumFromN 0 n) featSorted
       where
         leaf = Leaf (weightedMean idxs)
 
-    -- A degenerate (all-to-one-side) partition collapses back to a leaf.
     splitNode depth idxs sortedByFeat (fj, thr)
         | VU.null lefts || VU.null rights = Leaf (weightedMean idxs)
         | otherwise =
@@ -96,7 +93,6 @@ fitRegTreeOn cfg feats y mw = buildNode 0 (VU.enumFromN 0 n) featSorted
             ]
         (red, fj, thr) = maximumByFst candidates
 
-    -- Prefix-scan the sorted rows, carrying the left side's weight and Σy / Σy².
     bestThreshold fj sorted totW totSY totSY2 nodeSSE = maybeToList (go 0 0 0 0 Nothing)
       where
         vals = cfValues (feats V.! fj)

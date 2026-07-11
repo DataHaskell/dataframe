@@ -12,12 +12,9 @@ Copyright   : (c) 2024 - 2026 Michael Chavinda
 License     : MIT
 Stability   : experimental
 
-Type-safe lazy query pipelines.
-
-This module combines the compile-time schema tracking of 'TypedDataFrame'
-with the deferred execution of 'LazyDataFrame'. Queries are built as a
-logical plan tree with phantom-typed schema tracking; execution is deferred
-until 'run' is called.
+Type-safe lazy query pipelines: compile-time schema tracking ('TypedDataFrame')
+with the deferred execution of 'LazyDataFrame'. Queries build a phantom-typed
+logical plan; execution is deferred until 'run'.
 
 @
 {\-\# LANGUAGE DataKinds, TypeApplications, TypeOperators \#-\}
@@ -83,11 +80,11 @@ import Prelude hiding (filter, take)
 
 import qualified DataFrame.Internal.Column as C
 import qualified DataFrame.Internal.Expression as E
-import DataFrame.Internal.Schema (Schema)
 import DataFrame.Lazy.Internal.DataFrame (LazyDataFrame)
 import qualified DataFrame.Lazy.Internal.DataFrame as L
 import DataFrame.Lazy.Internal.LogicalPlan (SortOrder (..))
 import DataFrame.Operations.Join (JoinType (..))
+import DataFrame.Schema (Schema)
 import DataFrame.Typed.Expr
 import DataFrame.Typed.Freeze (unsafeFreeze)
 import DataFrame.Typed.Schema

@@ -8,29 +8,9 @@
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeApplications #-}
 
-{- | Pull-based (iterator) execution engine.
-
-Each operator returns a 'Stream' — an IO action that produces the next
-'DataFrame' batch on each call and returns 'Nothing' when exhausted.
-Blocking operators (Sort, HashJoin) materialise their input before producing
-output.  HashAggregate uses streaming partial aggregation when all aggregate
-expressions support it.
-
-== Streaming vs. materialize routing
-
-When the source(s) of an operator are BOUNDED (finite local CSV/Parquet
-files — the db-benchmark / join-pipeline case), 'HashJoin' and
-'HashAggregate' materialise their input and call the whole-frame optimized
-eager op (parallel 'Join.join' with salt + ParRadixSort + parallel probe;
-'Agg.aggregate' . 'Agg.groupBy' with parallel partitioned + low-card-direct
-grouping).  This inherits the eager Rounds 5-10 gains and produces results
-byte-identical to the eager path.
-
-When a source is UNBOUNDED (an online/streaming source), the per-batch
-streaming partial-aggregation / streaming-probe paths are preserved so the
-query runs in constant memory.  Boundedness is read off the physical plan
-leaves by 'isBounded'.  All current scan leaves are local files, so the
-streaming paths are a latent capability with no in-tree producer.
+{- | Pull-based (iterator) execution engine: each operator returns a 'Stream'
+yielding the next 'DataFrame' batch or 'Nothing' at end. Bounded local sources
+materialise into eager whole-frame ops; unbounded sources stream in constant memory.
 -}
 module DataFrame.Lazy.Internal.Executor (
     CsvReader,
@@ -62,7 +42,6 @@ import qualified DataFrame.IO.Parquet as Parquet
 import qualified DataFrame.Internal.Column as C
 import qualified DataFrame.Internal.DataFrame as D
 import qualified DataFrame.Internal.Expression as E
-import DataFrame.Internal.Schema (elements)
 import qualified DataFrame.Lazy.IO.Binary as Bin
 import DataFrame.Lazy.Internal.LogicalPlan (DataSource (..), SortOrder (..))
 import DataFrame.Lazy.Internal.PhysicalPlan
@@ -73,6 +52,7 @@ import DataFrame.Operations.Merge ()
 import qualified DataFrame.Operations.Permutation as Perm
 import qualified DataFrame.Operations.Subset as Sub
 import qualified DataFrame.Operations.Transformations as Trans
+import DataFrame.Schema (elements)
 import System.Directory (doesDirectoryExist, removeFile)
 import System.FilePath ((</>))
 import System.FilePath.Glob (glob)
@@ -102,12 +82,8 @@ materialized df = do
         return mb
 
 {- | Drain all batches from a stream and concatenate them into one DataFrame.
-
-Batches are buffered, then each column is concatenated across all batches in a
-single multi-way pass ('C.concatManyColumns', backed by 'VU.concat' /
-'VB.concat').  A left-fold of @acc <> batch@ would copy the growing
-accumulator on every step (≈ O(rows × batches)); this is O(rows) and keeps the
-bounded materialize path on par with a single eager whole-frame read.
+Columns are concatenated in a single multi-way pass (O(rows)) rather than a
+left-fold of @acc <> batch@ that would recopy the accumulator on every step.
 -}
 collectStream :: Stream -> IO D.DataFrame
 collectStream stream = go []
@@ -132,14 +108,9 @@ concatBatches batches@(first : _) =
 -- Boundedness analysis
 -- ---------------------------------------------------------------------------
 
-{- | A plan is BOUNDED when every scan leaf reads a finite local source
-(local CSV or local Parquet files): the whole result can be materialised, so
-blocking/bounded operators route through the whole-frame fast eager ops.
-
-A plan is UNBOUNDED when any leaf is an online/streaming source, in which case
-the streaming partial-aggregation / streaming-probe paths are kept so the query
-runs in constant memory.  No in-tree scan produces an unbounded source today,
-so this always holds; the routing is retained for future streaming sources.
+{- | True when every scan leaf is a finite local source, so the whole result can
+be materialised and routed through the eager whole-frame ops. False for
+online/streaming sources, which keep the constant-memory streaming paths.
 -}
 isBounded :: PhysicalPlan -> Bool
 isBounded (PhysicalScan (CsvSource{}) _) = True
@@ -187,7 +158,6 @@ foldBatches f seed plan = do
 -- ---------------------------------------------------------------------------
 
 buildStream :: PhysicalPlan -> IO Stream
--- Scan -----------------------------------------------------------------------
 buildStream (PhysicalScan (CsvSource path sep reader) cfg) =
     executeCsvScan path sep reader cfg
 buildStream (PhysicalScan (CsvSourceStreaming path _sep reader) cfg) =
@@ -199,7 +169,6 @@ buildStream (PhysicalSpill child path) = do
     Bin.spillToDisk path df
     df' <- Bin.readSpilled path
     materialized df'
--- Filter ---------------------------------------------------------------------
 buildStream (PhysicalFilter p child) = do
     childStream <- buildStream child
     return . Stream $
@@ -207,7 +176,6 @@ buildStream (PhysicalFilter p child) = do
             mb <- pullBatch childStream
             return $ fmap (Sub.filterWhere p) mb
         )
--- Project --------------------------------------------------------------------
 buildStream (PhysicalProject cols child) = do
     childStream <- buildStream child
     return . Stream $
@@ -215,7 +183,6 @@ buildStream (PhysicalProject cols child) = do
             mb <- pullBatch childStream
             return $ fmap (Sub.select cols) mb
         )
--- Derive ---------------------------------------------------------------------
 buildStream (PhysicalDerive name uexpr child) = do
     childStream <- buildStream child
     return . Stream $
@@ -223,7 +190,6 @@ buildStream (PhysicalDerive name uexpr child) = do
             mb <- pullBatch childStream
             return $ fmap (Trans.deriveMany [(name, uexpr)]) mb
         )
--- Limit ----------------------------------------------------------------------
 buildStream (PhysicalLimit n child) = do
     childStream <- buildStream child
     countRef <- newIORef (0 :: Int)
@@ -241,16 +207,11 @@ buildStream (PhysicalLimit n child) = do
                             modifyIORef' countRef (+ toTake)
                             return $ Just (Sub.take toTake df)
         )
--- Sort (blocking) ------------------------------------------------------------
 buildStream (PhysicalSort cols child) = do
     df <- execute child
     let sortOrds = fmap (toPermSortOrder df) cols
     materialized (Perm.sortBy sortOrds df)
--- HashAggregate --------------------------------------------------------------
 buildStream (PhysicalHashAggregate keys aggs child)
-    -- BOUNDED child: materialise then run the whole-frame parallel grouping
-    -- (parallel partitioned + low-card-direct + vectorized scatter). Same
-    -- result the eager path produces; small-batch partial-agg overhead avoided.
     | isBounded child = do
         df <- execute child
         let result = Agg.aggregate aggs (Agg.groupBy keys df)
@@ -259,12 +220,6 @@ buildStream (PhysicalHashAggregate keys aggs child) = do
     childStream <- buildStream child
     if all (isStreamableAgg . snd) aggs
         then do
-            -- Parallel streaming partial aggregation:
-            --   * N workers, each pulls batches from the child stream and
-            --     maintains its own local accumulator.
-            --   * Once the stream is drained, the N partials are merged
-            --     sequentially using the same merge expression.
-            --   * O(|groups| × N) memory in flight, then O(|groups|).
             let (partialAggs, mergeAggs, finalizer) = buildAggPlan aggs
             nCaps <- getNumCapabilities
             let workers = max 1 nCaps
@@ -286,10 +241,8 @@ buildStream (PhysicalHashAggregate keys aggs child) = do
                 writeIORef ref Nothing
                 return mb
         else do
-            -- Fallback: materialise entire child (for CollectAgg etc.)
             df <- collectStream childStream
             materialized (Agg.aggregate aggs (Agg.groupBy keys df))
--- SourceDF (split pre-loaded DataFrame into batches) -------------------------
 buildStream (PhysicalSourceDF bs df) = do
     let total = Core.nRows df
     posRef <- newIORef (0 :: Int)
@@ -302,12 +255,7 @@ buildStream (PhysicalSourceDF bs df) = do
                     batch = Sub.range (i, i + n) df
                 writeIORef posRef (i + n)
                 return (Just batch)
--- HashJoin — streaming probe (INNER/LEFT) or blocking fallback ----------------
 buildStream (PhysicalHashJoin jt leftKey rightKey leftPlan rightPlan)
-    -- BOUNDED probe side: materialise both sides and call the whole-frame eager
-    -- join (parallel probe + ParRadixSort + salt). Inherits Rounds 5/8/10 gains
-    -- and restores parity with eager (the streaming LEFT path interleaves
-    -- unmatched rows differently). Streaming kept only for an unbounded probe.
     | isBounded leftPlan = do
         leftDf <- execute leftPlan
         rightDf <- execute rightPlan
@@ -317,13 +265,11 @@ buildStream (PhysicalHashJoin jt leftKey rightKey leftPlan rightPlan) =
         Join.INNER -> streamingHashJoin assembleInnerBatch
         Join.LEFT -> streamingHashJoin assembleLeftBatch
         _ -> do
-            -- Blocking fallback for RIGHT / FULL_OUTER
             leftDf <- execute leftPlan
             rightDf <- execute rightPlan
             materialized (performJoin jt leftKey rightKey leftDf rightDf)
   where
     streamingHashJoin assembleFn = do
-        -- Materialise build (right) side once and build the compact index.
         rightDf <- execute rightPlan
         let rightDf' =
                 if leftKey == rightKey
@@ -333,7 +279,6 @@ buildStream (PhysicalHashJoin jt leftKey rightKey leftPlan rightPlan) =
             csSet = S.fromList [joinKey]
             rightHashes = Join.buildHashColumn [joinKey] rightDf'
             ci = Join.buildCompactIndex rightHashes
-        -- Stream probe (left) side batch by batch.
         leftStream <- buildStream leftPlan
         return . Stream $ do
             mBatch <- pullBatch leftStream
@@ -346,7 +291,6 @@ buildStream (PhysicalHashJoin jt leftKey rightKey leftPlan rightPlan) =
 
     assembleLeftBatch csSet probeBatch rightDf' probeIxs buildIxs =
         let batchN = Core.nRows probeBatch
-            -- Mark which probe rows were matched (may have duplicates — that's fine).
             matched =
                 VU.accumulate
                     (\_ b -> b)
@@ -358,8 +302,6 @@ buildStream (PhysicalHashJoin jt leftKey rightKey leftPlan rightPlan) =
          in Join.assembleLeft csSet probeBatch rightDf' allProbeIxs allBuildIxs
 
     assembleInnerBatch = Join.assembleInner
-
--- SortMergeJoin (blocking on both sides) -------------------------------------
 buildStream (PhysicalSortMergeJoin jt leftKey rightKey leftPlan rightPlan) = do
     leftDf <- execute leftPlan
     rightDf <- execute rightPlan
@@ -417,25 +359,21 @@ isStreamableAgg :: E.UExpr -> Bool
 isStreamableAgg (E.UExpr (E.Agg (E.CollectAgg _ _) _)) = False
 isStreamableAgg (E.UExpr (E.Agg (E.FoldAgg _ Nothing (_ :: a -> b -> a)) _)) =
     case testEquality (typeRep @a) (typeRep @b) of
-        Just Refl -> True -- self-merging: min, max, sum
+        Just Refl -> True
         Nothing -> False
 isStreamableAgg (E.UExpr (E.Agg (E.FoldAgg _ (Just _) (_ :: a -> b -> a)) _)) =
     case testEquality (typeRep @a) (typeRep @Int) of
-        Just Refl -> True -- seeded Int fold (old-style count): merge by sum
+        Just Refl -> True
         Nothing ->
             case testEquality (typeRep @a) (typeRep @b) of
-                Just Refl -> True -- seeded self-merging
+                Just Refl -> True
                 Nothing -> False
 isStreamableAgg (E.UExpr (E.Agg (E.MergeAgg{}) _)) = True
 isStreamableAgg _ = False
 
-{- | Build the partial, merge, and finalizer plan for a list of streamable
-aggregate expressions.
-
-* @partialAggs@  — applied per batch, producing one row per group
-* @mergeAggs@    — applied when combining two partial-result DataFrames
-* @finalizer@    — post-process after all batches (needed for 'MergeAgg'
-                   where the accumulator type differs from the output type)
+{- | Build the (partial, merge, finalizer) plan for a list of streamable
+aggregates: @partialAggs@ run per batch, @mergeAggs@ combine two partial
+results, and @finalizer@ post-processes (for 'MergeAgg' acc≠output types).
 -}
 buildAggPlan ::
     [(T.Text, E.UExpr)] ->
@@ -451,7 +389,6 @@ buildAggPlan aggs = foldl combine ([], [], id) (map processAgg aggs)
         (T.Text, E.UExpr) ->
         ([(T.Text, E.UExpr)], [(T.Text, E.UExpr)], D.DataFrame -> D.DataFrame)
     processAgg (name, ue) = case ue of
-        -- Seedless FoldAgg: min, max, sum (self-merging when a = b)
         E.UExpr (E.Agg (E.FoldAgg n Nothing (f :: a -> b -> a)) (_ :: E.Expr b)) ->
             case testEquality (typeRep @a) (typeRep @b) of
                 Just Refl ->
@@ -460,7 +397,6 @@ buildAggPlan aggs = foldl combine ([], [], id) (map processAgg aggs)
                     , id
                     )
                 Nothing ->
-                    -- a /= b but a = Int: merge by sum (backward compat)
                     case testEquality (typeRep @a) (typeRep @Int) of
                         Just Refl ->
                             ( [(name, ue)]
@@ -474,7 +410,6 @@ buildAggPlan aggs = foldl combine ([], [], id) (map processAgg aggs)
                             , id
                             )
                         Nothing -> ([(name, ue)], [(name, ue)], id)
-        -- Seeded FoldAgg: old-style count (a = Int)
         E.UExpr (E.Agg (E.FoldAgg n (Just _) (f :: a -> b -> a)) (_ :: E.Expr b)) ->
             case testEquality (typeRep @a) (typeRep @Int) of
                 Just Refl ->
@@ -496,10 +431,6 @@ buildAggPlan aggs = foldl combine ([], [], id) (map processAgg aggs)
                             , id
                             )
                         Nothing -> ([(name, ue)], [(name, ue)], id)
-        -- MergeAgg: count, mean, etc.
-        -- Partial step: accumulate into acc type (using id as finalizer).
-        -- Merge step: apply merge function to two acc-typed partial results.
-        -- Finalizer: apply fin to convert acc column to output type.
         E.UExpr
             ( E.Agg
                     ( E.MergeAgg
@@ -571,31 +502,20 @@ executeParquetScan path cfg = do
 -- CSV scan implementation
 -- ---------------------------------------------------------------------------
 
-{- | CSV scan, SIMD-parallel.
-
-The file is read once into memory, split at newline boundaries into N
-ByteString slices (N = RTS capabilities), and each slice is parsed in
-parallel with the SIMD reader from "DataFrame.IO.CSV.Fast" via the
-in-memory entry point — no temp-file roundtrip.  The resulting per-chunk
-DataFrames are sliced into batches and a dedicated thread feeds them
-into a bounded queue.  Pushdown predicates are applied per batch by the
-consumer.
+{- | SIMD-parallel CSV scan: the file is split at newline boundaries into one
+slice per capability, parsed concurrently, sliced into batches, and fed through
+a bounded queue. Pushdown predicates are applied per batch by the consumer.
 -}
 executeCsvScan :: FilePath -> Char -> CsvReader -> ScanConfig -> IO Stream
 executeCsvScan path _sep reader cfg = do
     nCaps <- getNumCapabilities
     chunkPaths <- splitCsvAtNewlines (max 1 nCaps) path
 
-    -- Each chunk parses in parallel via the reader carried on the
-    -- 'CsvSource' plan node.  Parsing and queue-feeding stay disjoint to
-    -- avoid 14 producers all hammering a shared TBQueue (STM contention
-    -- dominates throughput).
     let schema = scanSchema cfg
         batchSz = scanBatchSize cfg
     chunkDfs <- mapConcurrently (reader schema) chunkPaths
     mapM_ removeFile chunkPaths
 
-    -- Bounded queue with a single writer, N concurrent readers.
     queue <- newTBQueueIO (fromIntegral (max 4 (2 * nCaps)))
     _ <- forkIO $ do
         forM_ chunkDfs $ \df ->
@@ -606,7 +526,6 @@ executeCsvScan path _sep reader cfg = do
         ( do
             mb <- atomically (readTBQueue queue)
             case mb of
-                -- Re-insert the sentinel so repeated pulls after EOF stay Nothing.
                 Nothing -> atomically (writeTBQueue queue Nothing) >> return Nothing
                 Just df ->
                     let df' = case scanPushdownPredicate cfg of
@@ -663,12 +582,9 @@ sliceIntoBatches n df =
         starts = [0, n .. total - 1]
      in [Sub.range (s, min (s + n) total) df | s <- starts]
 
-{- | Split a CSV file at newline boundaries into @n@ temp files, each
-carrying the original header followed by an aligned-at-newlines slice
-of the body. Returns the temp file paths; the caller is responsible
-for removing them after use. The path-based 'fastReadCsvWithSchema'
-mmap's each file, so we get OS-paged reads instead of a single
-monolithic 'BS.readFile' of the whole input.
+{- | Split a CSV file at newline boundaries into @n@ temp files, each with the
+original header plus a body slice. Returns the paths (caller removes them); the
+per-file reader mmap's each, giving OS-paged reads instead of one monolithic read.
 -}
 splitCsvAtNewlines :: Int -> FilePath -> IO [FilePath]
 splitCsvAtNewlines n path = do
@@ -700,16 +616,9 @@ splitCsvAtNewlines n path = do
 -- Join helper
 -- ---------------------------------------------------------------------------
 
-{- | Route join to the existing Operations.Join implementation.
-When the left and right key names differ, rename the right key before joining.
-
-'Join.join' retains its first 'DataFrame' argument and makes the second one
-optional, so the lazy left sub-query ('leftDf') must be passed first for LEFT
-and RIGHT joins to retain the side the caller means. INNER and FULL_OUTER are
-symmetric in which rows survive, and 'Operations.Join' orders their output
-columns with the renamed right frame first, so they keep the @rightDf leftDf@
-order. (Passing @rightDf@ first for LEFT/RIGHT was the source of a silent
-left/right inversion: a left join dropped the left side's unmatched rows.)
+{- | Route a join to 'Operations.Join', renaming the right key when the names
+differ. 'Join.join' keeps its first argument, so LEFT/RIGHT must pass 'leftDf'
+first to retain the intended side; symmetric INNER/FULL_OUTER pass @rightDf@ first.
 -}
 performJoin ::
     Join.JoinType -> T.Text -> T.Text -> D.DataFrame -> D.DataFrame -> D.DataFrame
@@ -727,15 +636,9 @@ performJoin jt leftKey rightKey leftDf rightDf =
 -- Sort order conversion
 -- ---------------------------------------------------------------------------
 
-{- | Convert a plan-level @(column, direction)@ into a Permutation 'SortOrder'.
-
-The lazy plan only carries the column name, but 'Perm.sortBy' recovers the
-'Ord' dictionary from the type parameter of @E.Col \@a@ (it returns @EQ@ for
-every row when that type does not match the column's stored element type).
-We therefore read the materialised column's element type and emit @E.Col@ at
-exactly that type so the comparator dispatches correctly.  Unknown / non-'Ord'
-element types fall back to comparing as 'T.Text' (a no-op, matching the prior
-behaviour) rather than failing.
+{- | Convert a plan-level @(column, direction)@ into a Permutation 'SortOrder',
+emitting @E.Col@ at the materialised column's element type so 'Perm.sortBy'
+dispatches its comparator correctly; unknown/non-'Ord' types fall back to 'T.Text'.
 -}
 toPermSortOrder :: D.DataFrame -> (T.Text, SortOrder) -> Perm.SortOrder
 toPermSortOrder df (col, dir) =
@@ -748,8 +651,6 @@ toPermSortOrder df (col, dir) =
         Ascending -> Perm.Asc (E.Col @a col)
         Descending -> Perm.Desc (E.Col @a col)
 
-    -- Match the column's element type against the orderable types the
-    -- comparator can dispatch on, emitting E.Col at the matching type.
     dispatch :: C.Column -> Perm.SortOrder
     dispatch column = case column of
         C.PackedText{} -> mk @T.Text
@@ -774,8 +675,6 @@ toPermSortOrder df (col, dir) =
                                                             tryT @b @Char $
                                                                 tryT @b @T.Text (mk @T.Text)
 
-    -- If @b@ equals the candidate orderable type @a@, build the SortOrder at
-    -- @a@; otherwise defer to the fallback.
     tryT ::
         forall b a.
         (Typeable b, C.Columnable a, Ord a) =>

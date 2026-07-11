@@ -23,8 +23,8 @@ import GHC.Generics (Generic)
 import qualified DataFrame as D
 import qualified DataFrame.Functions as F
 import qualified DataFrame.Internal.Column as DI
-import qualified DataFrame.Internal.Schema as IS
 import DataFrame.Operators
+import qualified DataFrame.Schema as IS
 import DataFrame.Typed (Schema)
 import qualified DataFrame.Typed as DT
 
@@ -39,7 +39,7 @@ data Order = Order
     deriving (Show, Eq)
 
 $(DT.deriveSchemaFromType ''Order)
-$(D.deriveSchema ''Order)
+$(D.deriveSchemaValues ''Order)
 
 -- Nullable fields (Maybe Text -> RNullableBoxed; Maybe Int -> RNullableUnboxed).
 data User = User
@@ -50,7 +50,7 @@ data User = User
     deriving (Show, Eq)
 
 $(DT.deriveSchemaFromType ''User)
-$(D.deriveSchema ''User)
+$(D.deriveSchemaValues ''User)
 
 -- Identity-cased: keep the record selector names verbatim.
 data Account = Account
@@ -90,7 +90,7 @@ data Wide = Wide
     deriving (Show, Eq)
 
 $(DT.deriveSchemaFromType ''Wide)
-$(D.deriveSchema ''Wide)
+$(D.deriveSchemaValues ''Wide)
 
 -- Generics opt-in: derive the schema via Generic, not TH.
 data Foo = Foo
@@ -170,11 +170,12 @@ schemaNameOverride = TestCase $ do
         Left e -> assertFailure (T.unpack e)
         Right ys -> assertEqual "schema-name override round-trip" xs ys
 
+-- order_id is deliberately Int (not the schema's Int64) to force a mismatch.
 typeMismatchError :: Test
 typeMismatchError = TestCase $ do
     let badDf =
             D.fromNamedColumns
-                [ ("order_id", DI.fromList ([1, 2, 3] :: [Int])) -- wrong: Int, not Int64
+                [ ("order_id", DI.fromList ([1, 2, 3] :: [Int]))
                 , ("region", DI.fromList (["us", "eu", "ap"] :: [T.Text]))
                 , ("amount", DI.fromList ([10.0, 20.5, 30.0] :: [Double]))
                 ]

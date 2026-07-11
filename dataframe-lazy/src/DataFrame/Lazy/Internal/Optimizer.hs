@@ -7,18 +7,13 @@ import qualified Data.Map as M
 import qualified Data.Set as S
 import qualified Data.Text as T
 import qualified DataFrame.Internal.Expression as E
-import DataFrame.Internal.Schema (Schema (..), elements)
 import DataFrame.Lazy.Internal.LogicalPlan
 import DataFrame.Lazy.Internal.PhysicalPlan
+import DataFrame.Schema (Schema (..), elements)
 
-{- | Optimise a logical plan and lower it to a physical plan.
-
-Rules applied bottom-up (in order):
-  1. Filter fusion       — merge consecutive Filter nodes into a conjunction
-  2. Predicate pushdown  — move Filter past Derive/Project toward Scan
-  3. Dead column elim    — drop Derive nodes whose output is never referenced
-
-After rule application @toPhysical@ selects concrete operators.
+{- | Optimise a logical plan and lower it to a physical plan: fuse filters, push
+predicates toward the scan, drop dead derived columns, then let @toPhysical@
+select concrete operators.
 -}
 optimize :: Int -> LogicalPlan -> PhysicalPlan
 optimize batchSz =
@@ -63,11 +58,9 @@ andExpr =
 -- Rule 2: Predicate pushdown
 -- ---------------------------------------------------------------------------
 
-{- | Push Filter nodes as close to the Scan as possible.
-
-* Past a @Derive@ when the predicate doesn't reference the derived column.
-* Past a @Project@ when all predicate columns are in the projected set.
-* Into @ScanConfig.scanPushdownPredicate@ when the child is a @Scan@.
+{- | Push Filter nodes as close to the Scan as possible: past a @Derive@ it
+doesn't reference, past a @Project@ that keeps all its columns, and into the
+@Scan@'s pushdown predicate.
 -}
 pushPredicates :: LogicalPlan -> LogicalPlan
 pushPredicates (Filter p (Derive name expr child))
@@ -95,10 +88,9 @@ pushPredicates leaf = leaf
 -- Rule 3: Dead column elimination
 -- ---------------------------------------------------------------------------
 
-{- | Collect every column name that is explicitly referenced somewhere in the
-plan (in filter predicates, sort keys, aggregate keys, projection lists,
-join keys, and derived expressions).  Returns Nothing when "all columns
-are needed" (i.e. no Project restricts the output).
+{- | Collect every column name referenced anywhere in the plan (filters, sorts,
+aggregate/join keys, projections, derived expressions). 'Nothing' means all
+columns are needed (no Project restricts the output).
 -}
 referencedCols :: LogicalPlan -> Maybe (S.Set T.Text)
 referencedCols (Scan _ schema) = Just (S.fromList (M.keys (elements schema)))
@@ -165,13 +157,11 @@ eliminateDeadColumns plan = go (referencedCols plan) plan
 -- Logical → Physical lowering
 -- ---------------------------------------------------------------------------
 
-{- | Lower the (already-optimised) logical plan to a physical plan.
-
-Join strategy: always HashJoin (the executor can fall back to SortMerge
-at runtime once statistics are available).
+{- | Lower the (already-optimised) logical plan to a physical plan. Joins always
+lower to HashJoin; the executor may fall back to SortMerge at runtime.
 -}
 toPhysical :: Int -> LogicalPlan -> PhysicalPlan
--- Special case: Filter directly on a Scan → push into ScanConfig.
+-- A Filter directly on a Scan is folded into the scan's pushdown predicate.
 toPhysical batchSz (Filter p (Scan (CsvSource path sep reader) schema)) =
     PhysicalScan
         (CsvSource path sep reader)

@@ -9,7 +9,48 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 
-module DataFrame.Operations.Subset where
+module DataFrame.Operations.Subset (
+    -- * Row slicing
+    take,
+    takeLast,
+    drop,
+    dropLast,
+    range,
+    cube,
+    selectRows,
+
+    -- * Filtering
+    filter,
+    filterBy,
+    filterWhere,
+    filterJust,
+    filterNothing,
+    filterAllJust,
+    filterAllNothing,
+
+    -- * Column selection
+    select,
+    selectBy,
+    exclude,
+    SelectionCriteria,
+    byName,
+    byProperty,
+    byNameProperty,
+    byNameRange,
+    byIndexRange,
+
+    -- * Sampling & splitting
+    SplittableGen,
+    sample,
+    randomSplit,
+    kFolds,
+    stratifiedSample,
+    stratifiedSplit,
+
+    -- * Label helpers (exported for satellite packages)
+    columnToTextVec,
+    rowsAtIndices,
+) where
 
 import qualified Data.List as L
 import qualified Data.Map as M
@@ -52,7 +93,7 @@ import DataFrame.Operations.Transformations (apply)
 import DataFrame.Operators
 import System.Random
 import Type.Reflection
-import Prelude hiding (filter, take)
+import Prelude hiding (drop, filter, take)
 
 #if MIN_VERSION_random(1,3,0)
 type SplittableGen g = (SplitGen g, RandomGen g)
@@ -138,7 +179,6 @@ filter e@(Col filterColumnName) condition df = case getColumn filterColumnName d
     Just c@(PackedText _ _) ->
         filter e condition (insertColumn filterColumnName (materializePacked c) df)
     Just _col@(BoxedColumn bm (column :: V.Vector b)) ->
-        -- Check direct type match first, then try Maybe b match for nullable columns
         case testEquality (typeRep @a) (typeRep @b) of
             Just Refl -> filterByVector filterColumnName column condition df
             Nothing -> case (bm, typeRep @a) of

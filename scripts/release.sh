@@ -91,7 +91,7 @@ for path in sys.argv[1:]:
             if m: ver = m.group(1)
     if name and ver: local[name] = ver
 
-dep_re = re.compile(r'(dataframe-[a-z-]+)\s*(\^>=|>=)\s*([0-9.]+)(?:\s*&&\s*<\s*([0-9.]+))?')
+dep_re = re.compile(r'(dataframe[-a-z]*)(?::[a-z-]+)?\s*(\^>=|>=)\s*([0-9.]+)(?:\s*&&\s*<\s*([0-9.]+))?')
 bad = []
 for path in sys.argv[1:]:
     text = open(path).read()
@@ -129,7 +129,7 @@ import re, sys
 rel = {}
 for line in sys.argv[1].strip().splitlines():
     n, v, p = line.split("\t"); rel[n] = (v, p)
-dep_re = re.compile(r'(dataframe-[a-z-]+)\s*\^?>=')
+dep_re = re.compile(r'(dataframe[-a-z]*)(?::[a-z-]+)?\s*\^?>=')
 deps = {n: set() for n in rel}
 for n, (v, p) in rel.items():
     for m in dep_re.finditer(open(p).read()):

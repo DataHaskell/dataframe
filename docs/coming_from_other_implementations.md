@@ -631,8 +631,8 @@ print(result)
 {-# LANGUAGE TypeApplications #-}
 import qualified DataFrame as D
 import qualified Data.Text as T
-import qualified DataFrame.Expressions as F
-import DataFrame.Operations ( (|>) )
+import qualified DataFrame.Functions as F
+import DataFrame.Operators ((|>))
 import Data.Time.Calendar (toGregorian)
 
 main :: IO ()
@@ -1067,7 +1067,7 @@ result = (
 import qualified DataFrame.Lazy as L
 import qualified DataFrame.Functions as F
 import DataFrame.Operators
-import DataFrame.Internal.Schema (Schema, schemaType)
+import DataFrame.Schema (Schema, schemaType)
 import Data.Proxy (Proxy (..))
 
 mySchema :: Schema

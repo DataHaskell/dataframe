@@ -20,3 +20,4 @@ packages:
     dataframe-viz
     dataframe-learn
     dataframe-lazy
+    dataframe-expr-serializer

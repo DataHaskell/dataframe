@@ -5,7 +5,15 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 
-module DataFrame.Operations.Permutation where
+module DataFrame.Operations.Permutation (
+    -- * Sorting
+    SortOrder (..),
+    sortBy,
+
+    -- * Shuffling
+    shuffle,
+    shuffledIndices,
+) where
 
 import qualified Data.List as L
 import qualified Data.Text as T

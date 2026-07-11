@@ -1,13 +1,6 @@
 {- | SIMD-accelerated CSV reader: a C scanner finds delimiter positions,
 then each column is parsed directly from the mmap'd byte slices into
-unboxed column builders (Round-2 typed extraction). Reads are strict: the
-returned 'DataFrame' is fully built, with no deferred parse work.
-
-Extraction is chunk-parallel: inputs of 4 MB and up are split into one
-row chunk per capability and parsed by 'Control.Concurrent.forkIO'
-workers. The library never chooses RTS settings — to actually get
-parallel reads, link the executable with @-threaded@ and run with
-@+RTS -N@ (otherwise the reader falls back to the sequential path).
+typed column builders. Chunk-parallel with @-threaded@ + @+RTS -N@.
 -}
 module DataFrame.IO.CSV.Fast (
     fastReadCsv,
@@ -50,7 +43,7 @@ import DataFrame.IO.CSV.Fast.Index (
     tab,
  )
 import DataFrame.Internal.DataFrame (DataFrame (..))
-import DataFrame.Internal.Schema (Schema (..))
+import DataFrame.Schema (Schema (..))
 
 readSeparatedDefault :: Word8 -> FilePath -> IO DataFrame
 readSeparatedDefault separator =
@@ -80,10 +73,8 @@ fastReadTsvWithOpts :: ReadOptions -> FilePath -> IO DataFrame
 fastReadTsvWithOpts = readSeparated tab
 
 {- | Read a CSV and coerce each column to the type declared in the
-supplied 'Schema'.  Schema columns bypass inference entirely: they are
-parsed straight from the file bytes as the declared type, which is both
-faster than inference and guards against the row-1 \"looks like Int\"
-misclassification trap.
+supplied 'Schema'. Schema columns bypass inference: parsed straight from
+file bytes as the declared type, avoiding row-1 misclassification.
 -}
 fastReadCsvWithSchema :: Schema -> FilePath -> IO DataFrame
 fastReadCsvWithSchema schema =
@@ -117,9 +108,8 @@ fastReadCsvProj projection path = do
     pure (projectColumns projection df)
 
 {- | Filter a DataFrame's columns down to (and in the order of) the
-supplied names.  Missing names are silently dropped rather than
-raised; callers that want strict semantics can check the resulting
-'columnIndices' map.
+supplied names. Missing names are silently dropped; check the result's
+'columnIndices' map for strict semantics.
 -}
 projectColumns :: [Text] -> DataFrame -> DataFrame
 projectColumns names df =
@@ -129,14 +119,13 @@ projectColumns names df =
         (rows, _) = dataframeDimensions df
      in DataFrame newCols newIndices (rows, length idxs) M.empty
 
+-- | Reads via a private ('WriteCopy') mmap so the buffer is never copied.
 readSeparated ::
     Word8 ->
     ReadOptions ->
     FilePath ->
     IO DataFrame
 readSeparated separator opts filePath = do
-    -- WriteCopy keeps the mapping private; the scanner never needs to
-    -- grow or pad the buffer, so the file is no longer copied (audit F6).
     (bufferPtr, offset, len) <-
         mmapFileForeignPtr
             filePath

@@ -9,7 +9,7 @@ A nullable column has the Haskell type `Maybe a`. Under the hood it is stored as
 ```haskell
 import qualified Data.Vector as V
 import qualified DataFrame as D
-import qualified DataFrame.Internal.Column as DI
+import qualified DataFrame.Core as DI
 
 -- Manually build a frame with a nullable Int column
 df :: D.DataFrame
