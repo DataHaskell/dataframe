@@ -29,6 +29,7 @@ import DataFrame.Operators
 
 import Data.Either (fromRight)
 import Data.Function (on)
+import Data.List (foldl')
 import qualified Data.Map.Strict as M
 import qualified Data.Set as Set
 import qualified Data.Text as T

@@ -33,7 +33,7 @@ import DataFrame.Internal.Expression (Expr)
 import Control.Parallel (par, pseq)
 import Control.Parallel.Strategies (parListChunk, rdeepseq, using)
 import Data.Function (on)
-import Data.List (minimumBy)
+import Data.List (foldl', minimumBy)
 import Data.Maybe (catMaybes, mapMaybe)
 import qualified Data.Text as T
 import qualified Data.Vector as V

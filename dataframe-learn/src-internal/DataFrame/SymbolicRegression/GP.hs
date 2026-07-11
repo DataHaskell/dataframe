@@ -7,7 +7,7 @@ module DataFrame.SymbolicRegression.GP (
     runGP,
 ) where
 
-import Data.List (minimumBy, sortBy)
+import Data.List (foldl', minimumBy, sortBy)
 import qualified Data.Map.Strict as M
 import Data.Ord (comparing)
 import qualified Data.Vector as V

@@ -48,7 +48,7 @@ import DataFrame.Operations.Subset (exclude, filterWhere)
 
 import Control.Exception (throw)
 import Data.Function (on)
-import Data.List (maximumBy, nub, sort)
+import Data.List (foldl', maximumBy, nub, sort)
 import qualified Data.Map.Strict as M
 import Data.Maybe (fromMaybe)
 import qualified Data.Text as T
