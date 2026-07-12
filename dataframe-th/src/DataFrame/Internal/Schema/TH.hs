@@ -18,25 +18,12 @@ import qualified Data.Text as T
 import Language.Haskell.TH
 
 import DataFrame.Internal.Expression (Expr)
-import DataFrame.Internal.Schema (Schema, makeSchema, schemaType)
 import DataFrame.Operators (col)
+import DataFrame.Schema (Schema, makeSchema, schemaType)
 
 {- | Auto-generate a runtime 'Schema' (and per-column @'Expr'@ accessors)
-from a record ADT.
-
-The splice reifies the record, applies @camelCase -> snake_case@ to each
-record-selector name, and emits:
-
-* a top-level @\<lower-first TyConName\>Schema :: 'Schema'@ binding suitable
-  for passing to 'DataFrame.IO.CSV.readCsvWithSchema'.
-* one @\<lower-first TyConName\>\<UpperFirst FieldName\> :: 'Expr' /ty/@ binding
-  per field, so you can refer to columns in expression DSL code by name
-  without writing @col \@/ty/ "snake_case_name"@ at every call site.
-
-The data type must have exactly one record constructor; sum types or
-positional constructors fail the splice with a descriptive error. Field
-types must satisfy @('Columnable' a, 'Read' a)@ — the same constraints
-'schemaType' already requires.
+from a record ADT. Emits @\<tyName\>Schema@ plus one accessor per field
+(@camelCase -> snake_case@). Requires a single record constructor.
 -}
 deriveSchema :: Name -> DecsQ
 deriveSchema tyName = do

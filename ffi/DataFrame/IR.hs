@@ -49,7 +49,6 @@ import DataFrame.IR.ExprJson (SomeExpr (..), decodeExprAny, decodeExprAt)
 import DataFrame.Internal.Column (Column (..), Columnable)
 import DataFrame.Internal.DataFrame (DataFrame, unsafeGetColumn)
 import DataFrame.Internal.Expression (Expr (..), NamedExpr)
-import DataFrame.Internal.Schema (Schema, makeSchema, schemaType)
 import qualified DataFrame.Lazy as Lazy
 import DataFrame.Operations.Aggregation (aggregate, distinct, groupBy)
 import DataFrame.Operations.Core (insertVector, renameMany)
@@ -60,6 +59,7 @@ import DataFrame.Operations.Subset (exclude, filterWhere, range, select)
 import qualified DataFrame.Operations.Subset as Subset
 import DataFrame.Operations.Transformations (derive)
 import DataFrame.Operators ((.=))
+import DataFrame.Schema (Schema, makeSchema, schemaType)
 
 -- ---------------------------------------------------------------------------
 -- IR types
@@ -225,8 +225,7 @@ executePlan reader (Correlation a b node) = do
     let r = Stats.correlation a b df
         valueCol = case r of
             Just d -> V.singleton d
-            Nothing -> V.singleton (0 / 0 :: Double) -- NaN when correlation is undefined
-            -- Return a single-row frame: { first, second, correlation }
+            Nothing -> V.singleton (0 / 0 :: Double)
     return $
         insertVector "first" (V.singleton a) $
             insertVector "second" (V.singleton b) $
@@ -239,8 +238,6 @@ executePlan _reader (ReadJson path) = readJSON path
 executePlan reader (WriteCsv path node) = do
     df <- executePlan reader node
     writeCsv path df
-    -- Return the same frame so callers that pipe through .collect() get the
-    -- written data back too. Callers that don't care can discard.
     return df
 executePlan reader (ScanCsv path schemaPairs) = do
     schema <- buildSchema schemaPairs

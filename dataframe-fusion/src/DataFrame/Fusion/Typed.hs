@@ -7,7 +7,9 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 
--- | Typed DataFusion-backed query API. Mirrors 'DataFrame.Typed.Lazy' with:
+{- | Typed DataFusion-backed query API. Mirrors 'DataFrame.Typed.Lazy' but runs
+on Rust-side DataFusion via FFI.
+-}
 module DataFrame.Fusion.Typed (
     -- * Carrier
     DataFrame,
@@ -59,7 +61,7 @@ import Prelude hiding (filter, take)
 
 import qualified DataFrame.Internal.Column as IC
 import qualified DataFrame.Internal.Expression as IE
-import DataFrame.Lazy.Internal.LogicalPlan (SortOrder (..))
+import DataFrame.Lazy (SortOrder (..))
 import qualified DataFrame.Typed.Aggregate as AGG
 
 import qualified DataFrame.Fusion.FFI as F
@@ -76,11 +78,9 @@ underlying handle is owned by Rust-side DataFusion; Haskell holds a
 -}
 newtype DataFrame (cols :: [Type]) = DF {unDataFrame :: PlanHandle}
 
-{- | Scan a CSV file. The schema is taken from the @cols@ phantom via
-'KnownSchema'; the user does not pass it separately. DataFusion currently
-infers column types from the file, so the constraint is not used for
-type override yet — it is in place so v1.5 can derive the wire-format
-schema JSON from the type-level @cols@ list and pass it to Rust.
+{- | Scan a CSV file. The schema comes from the @cols@ phantom via 'KnownSchema';
+the user does not pass it separately. DataFusion currently infers column types
+from the file, so the constraint is reserved for future wire-format derivation.
 -}
 scanCsv ::
     forall cols.
@@ -131,10 +131,9 @@ select (DF plan) = do
             ph <- runPlanOp (F.df_plan_select pp cjson)
             return (DF ph)
 
-{- | Add a computed column. Result schema is the input schema with the new
-column appended (mirroring 'DataFrame.Typed.Lazy.derive'). The expression
-is lowered to JSON via 'encodeExprToBytes' and decoded into a DataFusion
-'Expr' on the Rust side.
+{- | Add a computed column, appended to the input schema (mirroring
+'DataFrame.Typed.Lazy.derive'). The expression is lowered to JSON and decoded
+into a DataFusion 'Expr' on the Rust side.
 -}
 derive ::
     forall name a cols.
@@ -168,9 +167,8 @@ groupBy ::
 groupBy (DF plan) = GD (symbolVals @keys) plan
 
 {- | Aggregate a grouped query. The first argument is a chain of 'AGG.as'
-entries composed with @(.)@; the empty composition (@id@) yields just
-the group keys. The wire format mirrors the JSON shape decoded by
-@df_plan_groupby_aggregate@ on the Rust side.
+entries composed with @(.)@; the empty composition (@id@) yields just the
+group keys.
 -}
 aggregate ::
     forall keys cols aggs.

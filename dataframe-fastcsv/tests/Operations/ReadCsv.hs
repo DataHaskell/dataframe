@@ -35,7 +35,7 @@ import DataFrame.Internal.DataFrame (
     dataframeDimensions,
     getColumn,
  )
-import DataFrame.Internal.Schema (Schema (..), SchemaType (..))
+import DataFrame.Schema (Schema (..), SchemaType (..))
 import System.Directory (removeFile)
 import System.IO (IOMode (..), withFile)
 import Test.HUnit
@@ -64,7 +64,6 @@ prettyPrintSeparated sep filepath df = withFile filepath WriteMode $ \handle -> 
     TIO.hPutStrLn
         handle
         (T.intercalate (T.singleton sep) (map (escapeField sep) headers))
-    -- Write data rows
     mapM_
         (TIO.hPutStrLn handle . T.intercalate (T.singleton sep) . getRowEscaped sep df)
         [0 .. rows - 1]
@@ -193,7 +192,6 @@ testHeaderOnly = TestLabel "malformed_header_only" $ TestCase $ do
 testTrailingBlankLine :: Test
 testTrailingBlankLine = TestLabel "malformed_trailing_blank_line" $ TestCase $ do
     df <- D.readCsvFast (fixtureDir <> "trailing_blank_line.csv")
-    -- blank line contributes 1 extra delimiter; (3+3+1) div 3 = 2, numRow=1
     assertEqual
         "trailing_blank_line.csv: 1 data row visible"
         1
@@ -252,11 +250,9 @@ testWhitespaceFields = TestLabel "malformed_whitespace_fields" $ TestCase $ do
                 (DI.fromList @T.Text ["  New York", "  Los Angeles"])
                 col
 
--- File: a,b,c header; row "1,2" (short); row "X,Y,Z" (full).
--- After the row-index refactor each line is classified individually:
--- the short row survives with a null-padded column 'c'; the full row
--- keeps its value.  This replaces the earlier "X bleeds from next row"
--- behaviour, which was data corruption masquerading as a passing test.
+-- File: a,b,c header; row "1,2" (short); row "X,Y,Z" (full). Each line is
+-- classified individually: the short row survives with a null-padded 'c';
+-- the full row keeps its value.
 testMissingFields :: Test
 testMissingFields = TestLabel "malformed_missing_fields" $ TestCase $ do
     df <- D.readCsvFast (fixtureDir <> "missing_fields.csv")
@@ -279,10 +275,9 @@ testMissingFields = TestLabel "malformed_missing_fields" $ TestCase $ do
                 (DI.fromList @(Maybe T.Text) [Nothing, Just "Z"])
                 col
 
--- File: a,b,c header; row "1,2,3,EXTRA" (over-long).
--- Under the default ragged-row policy we read columns 0..numCol-1 and
--- silently drop the EXTRA field.  A stricter `RaggedRowPolicy = Error`
--- will come with Step 7's ReadOptions knob.
+-- File: a,b,c header; row "1,2,3,EXTRA" (over-long). Under the default
+-- ragged-row policy we read columns 0..numCol-1 and silently drop the
+-- EXTRA field.
 testExtraFieldsTruncate :: Test
 testExtraFieldsTruncate =
     TestLabel "malformed_extra_fields_truncate" $ TestCase $ do
@@ -437,10 +432,9 @@ testProjection = TestLabel "projection" $ TestCase $ do
             map fst . L.sortBy (compare `on` snd) . M.toList $ columnIndices df
     assertEqual "projection preserves order" ["c", "a"] names
 
--- An unmatched `"` used to silently swallow the rest of the file: the
--- SIMD scanner's PCLMUL quote-parity chain never resets, so every byte
--- after the stray quote becomes "inside quotes."  We now raise
--- 'CsvUnclosedQuote' rather than returning a corrupted DataFrame.
+-- An unmatched `"` used to silently swallow the rest of the file (the SIMD
+-- quote-parity chain never resets). We now raise 'CsvUnclosedQuote' rather
+-- than returning a corrupted DataFrame.
 testUnclosedQuote :: Test
 testUnclosedQuote = TestLabel "malformed_unclosed_quote" $ TestCase $ do
     let path = fixtureDir <> "unclosed_quote.csv"

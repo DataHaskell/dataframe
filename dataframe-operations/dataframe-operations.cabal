@@ -1,6 +1,6 @@
-cabal-version:      2.4
+cabal-version:      3.4
 name:               dataframe-operations
-version:            1.1.2.0
+version:            2.0.0.0
 synopsis:           Column operations, expression DSL, and statistics for the dataframe ecosystem.
 description:
     Untyped column operations (select, filter, sort, join, groupBy,
@@ -27,12 +27,22 @@ common warnings
         -Wunused-local-binds
         -Wunused-packages
 
+library internal
+    import:             warnings
+    visibility:         public
+    exposed-modules:    DataFrame.Internal.Statistics
+    build-depends:      base >= 4 && < 5,
+                        dataframe-core:internal >= 2.0 && < 2.1,
+                        vector ^>= 0.13,
+                        vector-algorithms ^>= 0.9
+    hs-source-dirs:     src-internal
+    default-language:   Haskell2010
+
 library
     import:             warnings
     exposed-modules:
                         DataFrame.Functions
                         DataFrame.Monad
-                        DataFrame.Internal.Statistics
                         DataFrame.Operations.AggregateScatter
                         DataFrame.Operations.Aggregation
                         DataFrame.Operations.Core
@@ -58,8 +68,11 @@ library
     build-depends:      base >= 4 && < 5,
                         bytestring >= 0.11 && < 0.13,
                         containers >= 0.6.7 && < 0.9,
-                        dataframe-core >= 1.1.1 && < 1.2,
-                        dataframe-parsing ^>= 1.0.2,
+                        dataframe-core >= 2.0 && < 2.1,
+                        dataframe-core:internal >= 2.0 && < 2.1,
+                        dataframe-parsing >= 2.0 && < 2.1,
+                        dataframe-parsing:internal >= 2.0 && < 2.1,
+                        dataframe-operations:internal,
                         random >= 1.2 && < 2,
                         regex-tdfa >= 1.3.0 && < 2,
                         text >= 2.1 && < 3,

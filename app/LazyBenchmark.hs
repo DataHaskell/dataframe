@@ -2,21 +2,14 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeApplications #-}
 
-{- | End-to-end smoke test and benchmark for the Lazy streaming API.
+{- | End-to-end smoke test and benchmark for the Lazy streaming API:
+     generate a CSV then run five Lazy queries over it.
 
      Usage:
-       cabal run lazy-bench [-- [OPTIONS]]
-
-     Options:
-       --rows N       Number of rows to generate (default: 1_000_000_000)
-       --file PATH    Output CSV path          (default: /tmp/lazy_1b.csv)
-       --skip-gen     Skip generation if the file already exists
-
-     The executable generates a CSV file (streaming, constant memory) then
-     runs five Lazy queries over it, printing timing and result summaries.
-
-     For heap/GC stats run with:
-       cabal run lazy-bench -- +RTS -s -RTS
+       cabal run lazy-bench [-- [OPTIONS]]        (+RTS -s -RTS for heap stats)
+       --rows N     rows to generate (default 1_000_000_000)
+       --file PATH  output CSV path (default /tmp/lazy_1b.csv)
+       --skip-gen   reuse the file if it already exists
 -}
 module Main where
 
@@ -26,9 +19,9 @@ import qualified Data.Map as M
 import qualified Data.Text as T
 import Data.Time (UTCTime, diffUTCTime, getCurrentTime)
 import qualified DataFrame as D
-import DataFrame.Internal.Schema (Schema (..), schemaType)
 import qualified DataFrame.Lazy as L
 import DataFrame.Operators
+import DataFrame.Schema (Schema (..), schemaType)
 import System.Directory (doesFileExist, getFileSize)
 import System.Environment (getArgs)
 import System.Exit (exitFailure)
@@ -185,9 +178,6 @@ main = do
         n = optRows opts
         pathT = T.pack path
 
-    -- -----------------------------------------------------------------------
-    -- Phase 1: Generate
-    -- -----------------------------------------------------------------------
     putStrLn "=== Lazy API 1B-row benchmark ==="
     putStrLn $ "    rows   : " ++ commas n
     putStrLn $ "    file   : " ++ path
@@ -205,12 +195,8 @@ main = do
             sz <- getFileSize path
             putStrLn $ "  file size: " ++ showBytes sz
 
-    -- -----------------------------------------------------------------------
-    -- Phase 2: Lazy queries
-    -- -----------------------------------------------------------------------
     putStrLn "\nPhase 2: Lazy queries"
 
-    -- Schema for the generated CSV: id (Int), x (Double), y (Double), category (Text)
     let schema =
             Schema $
                 M.fromList
@@ -220,25 +206,17 @@ main = do
                     , ("category", schemaType @T.Text)
                     ]
 
-    -- Q1: Preview — limit 20, no filter.
-    -- Demonstrates that the executor reads only the first batch.
     runQuery "Q1 — preview first 20 rows (no filter)" $
         L.runDataFrame $
             L.take 20 $
                 L.scanCsv schema pathT
 
-    -- Q2: Filter + limit.
-    -- x > 0.999 ≈ 0.1% of rows. With a 512K-row batch the executor finds
-    -- ~512 matches in the first batch and stops — reads only one batch.
     runQuery "Q2 — filter (x > 0.999), limit 20" $
         L.runDataFrame $
             L.take 20 $
                 L.filter (col @Double "x" .> lit (0.999 :: Double)) $
                     L.scanCsv schema pathT
 
-    -- Q3: Filter + derive + select + limit.
-    -- Shows projection pushdown: only id/x/y/category are read, z is derived.
-    -- Predicate pushdown moves the filter into the scan batch loop.
     runQuery "Q3 — filter (x > 0.999), derive z = x*y, select [id,z], limit 20" $
         L.runDataFrame $
             L.take 20 $
@@ -247,10 +225,6 @@ main = do
                         L.filter (col @Double "x" .> lit (0.999 :: Double)) $
                             L.scanCsv schema pathT
 
-    -- Q4: Filter fusion demo.
-    -- Two consecutive filters are fused into one AND predicate by the optimizer.
-    -- Result: rows where x > 0.5 AND y > 0.5 (≈ 25% of total).
-    -- We limit to keep result size manageable.
     runQuery "Q4 — filter fusion: (x > 0.5) . (y > 0.5), limit 20" $
         L.runDataFrame $
             L.take 20 $
@@ -258,10 +232,6 @@ main = do
                     L.filter (col @Double "x" .> lit (0.5 :: Double)) $
                         L.scanCsv schema pathT
 
-    -- Q5: Full scan, heavy filter, count results.
-    -- x > 0.999 across the whole file ≈ 0.1% × N rows.
-    -- For 1B rows that is ~1M results — materialised into one DataFrame.
-    -- This query exercises streaming across all batches.
     runQuery
         ( "Q5 — full scan, filter (x > 0.999), count (~"
             ++ approx (n `div` 1000)

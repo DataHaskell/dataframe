@@ -10,7 +10,26 @@
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE UndecidableSuperClasses #-}
 
-module DataFrame.Operations.Transformations where
+module DataFrame.Operations.Transformations (
+    -- * Apply
+    apply,
+    safeApply,
+    applyMany,
+    applyInt,
+    applyDouble,
+    applyWhere,
+    applyAtIndex,
+
+    -- * Derive
+    derive,
+    deriveWithExpr,
+    deriveMany,
+
+    -- * Impute
+    ImputeOp (..),
+    impute,
+    imputeCore,
+) where
 
 import qualified Data.List as L
 import qualified Data.Map as M

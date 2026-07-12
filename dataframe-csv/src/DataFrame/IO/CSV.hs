@@ -1,11 +1,9 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
-{- | CSV reading and writing for dataframes. The reader is a strict,
-single-pass RFC 4180 scanner (cassava-compatible semantics, pinned by
-the golden suite in @tests/IO/CsvGolden.hs@) that parses fields straight
-into typed column builders. Ragged rows are padded with nulls (short
-rows) and extra fields dropped.
+{- | CSV reading and writing for dataframes. A strict, single-pass
+RFC 4180 scanner (cassava-compatible) parses fields into typed column
+builders; ragged rows are padded with nulls and extra fields dropped.
 -}
 module DataFrame.IO.CSV (
     -- * Reading
@@ -43,7 +41,7 @@ import Data.Maybe (fromMaybe)
 import DataFrame.IO.CSV.Internal.Options
 import DataFrame.IO.CSV.Internal.Read (decodeCsvStrict)
 import DataFrame.Internal.DataFrame (DataFrame (..), toSeparated)
-import DataFrame.Internal.Schema (Schema, elements)
+import DataFrame.Schema (Schema, elements)
 
 {- | Read CSV file from path and load it into a dataframe.
 
@@ -58,10 +56,8 @@ readCsv = readSeparated defaultReadOptions
 
 type CsvReader = Schema -> FilePath -> IO DataFrame
 
-{- | Schema-driven CSV reader.  Coerces each column to the type declared
-in 'Schema'; columns absent from the schema fall back to the default
-inference path.  Defined in terms of 'readSeparated' with the 'TypeSpec'
-filled in.
+{- | Schema-driven CSV reader. Coerces each column to the type declared
+in 'Schema'; columns absent from the schema fall back to inference.
 
 @
 import qualified DataFrame as D

@@ -6,7 +6,46 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 
-module DataFrame.Operations.Core where
+module DataFrame.Operations.Core (
+    -- * Dimensions
+    dimensions,
+    nRows,
+    nColumns,
+
+    -- * Construction
+    fromUnnamedColumns,
+    fromRows,
+
+    -- * Insertion
+    insert,
+    insertVector,
+    insertUnboxedVector,
+    insertWithDefault,
+    insertVectorWithDefault,
+
+    -- * Column management
+    cloneColumn,
+    rename,
+    renameMany,
+
+    -- * Inspection
+    describeColumns,
+    valueCounts,
+    valueProportions,
+    showDerivedExpressions,
+
+    -- * Folds & matrix/vector conversions
+    fold,
+    toFloatMatrix,
+    toDoubleMatrix,
+    toIntMatrix,
+    columnAsVector,
+    columnAsList,
+    columnAsIntVector,
+    columnAsDoubleVector,
+    columnAsFloatVector,
+    columnAsUnboxedVector,
+) where
 
 import qualified Data.List as L
 import qualified Data.Map as M
@@ -117,10 +156,8 @@ nColumns = snd . dataframeDimensions
 -- 'columnNames' is now defined in "DataFrame.Internal.DataFrame" and
 -- re-exported from "DataFrame" at the top level.
 
-{- | Adds a vector to the dataframe. If the vector has less elements than the dataframe and the dataframe is not empty
-the vector is converted to type `Maybe a` filled with `Nothing` to match the size of the dataframe. Similarly,
-if the vector has more elements than what's currently in the dataframe, the other columns in the dataframe are
-change to `Maybe <Type>` and filled with `Nothing`.
+{- | Adds a vector as a named column. Size mismatches are reconciled by making
+the shorter side nullable (`Maybe a`) and padding with `Nothing`.
 
 ==== __Example__
 @
@@ -160,13 +197,9 @@ insertVector ::
 insertVector name xs = insertColumn name (fromVector xs)
 {-# INLINE insertVector #-}
 
-{- | Adds a foldable collection to the dataframe. If the collection has less elements than the
-dataframe and the dataframe is not empty
-the collection is converted to type `Maybe a` filled with `Nothing` to match the size of the dataframe. Similarly,
-if the collection has more elements than what's currently in the dataframe, the other columns in the dataframe are
-change to `Maybe <Type>` and filled with `Nothing`.
-
-Be careful not to insert infinite collections with this function as that will crash the program.
+{- | Adds a foldable collection as a named column. Size mismatches are reconciled by
+making the shorter side nullable (`Maybe a`) and padding with `Nothing`.
+Do not pass infinite collections: they are fully forced.
 
 ==== __Example__
 @
@@ -202,7 +235,7 @@ insert ::
     -- | DataFrame to add column to
     DataFrame ->
     DataFrame
-insert name xs = insertColumn name (fromList (Fold.foldr' (:) [] xs)) -- TODO: Do reflection on container type so we can sometimes avoid the list construction.
+insert name xs = insertColumn name (fromList (Fold.foldr' (:) [] xs))
 {-# INLINE insert #-}
 
 {- | Adds a vector to the dataframe and pads it with a default value if it has less elements than the number of rows.
@@ -295,10 +328,8 @@ insertWithDefault defaultValue name xs d =
         values = xs' ++ replicate (rows - length xs') defaultValue
      in insertColumn name (fromList values) d
 
-{- | /O(n)/ Adds an unboxed vector to the dataframe.
-
-Same as insertVector but takes an unboxed vector. If you insert a vector of numbers through insertVector it will either way be converted
-into an unboxed vector so this function saves that extra work/conversion.
+{- | /O(n)/ Like 'insertVector' but takes an already-unboxed vector,
+skipping the boxed-to-unboxed conversion 'insertVector' would do for numbers.
 -}
 insertUnboxedVector ::
     forall a.
@@ -543,7 +574,6 @@ describeColumns df =
 
 nulls :: Column -> Int
 nulls (BoxedColumn (Just bm) xs) =
-    -- count null bits in bitmap
     let n = VG.length xs
      in n - VU.foldl' (\acc b -> acc + popCount b) 0 bm
 nulls (BoxedColumn Nothing (xs :: V.Vector a)) = case testEquality (typeRep @a) (typeRep @T.Text) of
@@ -731,14 +761,8 @@ Showing 20 rows out of 85
 fold :: (a -> DataFrame -> DataFrame) -> [a] -> DataFrame -> DataFrame
 fold f xs acc = L.foldl' (flip f) acc xs
 
-{- | Returns a dataframe as a two dimensional vector of floats.
-
-Converts all columns in the dataframe to float vectors and transposes them
-into a row-major matrix representation.
-
-This is useful for handing data over into ML systems.
-
-Returns 'Left' with an error if any column cannot be converted to floats.
+{- | The dataframe as a row-major matrix of floats, for handing data to ML systems.
+'Left' if any column cannot be converted to floats.
 -}
 toFloatMatrix ::
     DataFrame -> Either DataFrameException (V.Vector (VU.Vector Float))
@@ -753,14 +777,8 @@ toFloatMatrix df = case V.foldl'
                 (fst (dataframeDimensions df))
                 (\i -> VU.generate (V.length m) (\j -> (m VG.! j) VG.! i))
 
-{- | Returns a dataframe as a two dimensional vector of doubles.
-
-Converts all columns in the dataframe to double vectors and transposes them
-into a row-major matrix representation.
-
-This is useful for handing data over into ML systems.
-
-Returns 'Left' with an error if any column cannot be converted to doubles.
+{- | The dataframe as a row-major matrix of doubles, for handing data to ML systems.
+'Left' if any column cannot be converted to doubles.
 -}
 toDoubleMatrix ::
     DataFrame -> Either DataFrameException (V.Vector (VU.Vector Double))
@@ -775,14 +793,8 @@ toDoubleMatrix df = case V.foldl'
                 (fst (dataframeDimensions df))
                 (\i -> VU.generate (V.length m) (\j -> (m VG.! j) VG.! i))
 
-{- | Returns a dataframe as a two dimensional vector of ints.
-
-Converts all columns in the dataframe to int vectors and transposes them
-into a row-major matrix representation.
-
-This is useful for handing data over into ML systems.
-
-Returns 'Left' with an error if any column cannot be converted to ints.
+{- | The dataframe as a row-major matrix of ints, for handing data to ML systems.
+'Left' if any column cannot be converted to ints.
 -}
 toIntMatrix :: DataFrame -> Either DataFrameException (V.Vector (VU.Vector Int))
 toIntMatrix df = case V.foldl'
@@ -833,10 +845,8 @@ columnAsVector expr df
             Left e -> throw e
             Right (TColumn col) -> toVector col
 
-{- | Retrieves a column as an unboxed vector of 'Int' values.
-
-Returns 'Left' with a 'DataFrameException' if the column cannot be converted to ints.
-This may occur if the column contains non-numeric data or values outside the 'Int' range.
+{- | A column as an unboxed vector of 'Int' values.
+'Left' if the column cannot be converted to ints (non-numeric or out of range).
 -}
 columnAsIntVector ::
     (Columnable a, Num a) =>
@@ -850,10 +860,8 @@ columnAsIntVector expr df = case interpret df expr of
     Left e -> throw e
     Right (TColumn col) -> toIntVector col
 
-{- | Retrieves a column as an unboxed vector of 'Double' values.
-
-Returns 'Left' with a 'DataFrameException' if the column cannot be converted to doubles.
-This may occur if the column contains non-numeric data.
+{- | A column as an unboxed vector of 'Double' values.
+'Left' if the column cannot be converted to doubles (e.g. non-numeric data).
 -}
 columnAsDoubleVector ::
     (Columnable a, Num a) =>
@@ -870,10 +878,8 @@ columnAsDoubleVector expr df = case interpret df expr of
     Left e -> throw e
     Right (TColumn col) -> toDoubleVector col
 
-{- | Retrieves a column as an unboxed vector of 'Float' values.
-
-Returns 'Left' with a 'DataFrameException' if the column cannot be converted to floats.
-This may occur if the column contains non-numeric data.
+{- | A column as an unboxed vector of 'Float' values.
+'Left' if the column cannot be converted to floats (e.g. non-numeric data).
 -}
 columnAsFloatVector ::
     (Columnable a, Num a) =>

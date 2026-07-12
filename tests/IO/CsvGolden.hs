@@ -3,9 +3,8 @@
 {-# LANGUAGE TypeApplications #-}
 
 {- | Golden semantics for the default CSV reader, pinned against the
-cassava-based implementation (oracle runs of 2026-06-12) before the
-strict-scanner rewrite. Ragged-row cases encode the new pad-with-null
-behavior (audit D6) — the one intentional change.
+cassava-based oracle (2026-06-12) before the strict-scanner rewrite.
+Ragged-row cases encode the one intentional change: pad-with-null (audit D6).
 -}
 module IO.CsvGolden (tests) where
 
@@ -25,8 +24,8 @@ import DataFrame.Internal.DataFrame (
     forceDataFrame,
     getColumn,
  )
-import DataFrame.Internal.Schema (schemaType)
 import DataFrame.Operations.Typing (SafeReadMode (..))
+import DataFrame.Schema (schemaType)
 import Test.HUnit
 
 data Expect
@@ -156,8 +155,7 @@ goldenCases =
         , "a,b\n\t1\t,\tx\t\n2,y\n"
         , Cols (2, 2) [("a", ints [1, 2]), ("b", texts ["x", "y"])]
         )
-    , -- D6: short rows now pad trailing columns with null (was: misaligned).
-
+    ,
         ( "ragged_short_D6"
         , defaultReadOptions
         , "a,b,c\n1,2,3\n4,5\n6,7,8\n"
@@ -224,8 +222,7 @@ goldenCases =
         , "1,2\n3,4\n"
         , Cols (2, 2) [("x", ints [1, 3]), ("1", ints [2, 4])]
         )
-    , -- D6: the always-short padded column is now row-aligned (all null).
-
+    ,
         ( "providenames_more_D6"
         , defaultReadOptions{headerSpec = ProvideNames ["x", "y", "z"]}
         , "1,2\n3,4\n"
@@ -416,8 +413,7 @@ goldenCases =
         , "a,b\nNA,1\n2,2\n"
         , Cols (2, 2) [("a", texts ["NA", "2"]), ("b", eti [Right 1, Right 2])]
         )
-    , -- D6: the column after the EOF-truncated quote field is now padded.
-
+    ,
         ( "unclosed_quote_D6"
         , defaultReadOptions
         , "a,b\n\"x,2\n"

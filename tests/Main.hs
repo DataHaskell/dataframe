@@ -8,8 +8,6 @@ import GenDataFrame ()
 import Test.HUnit
 import Test.QuickCheck
 
-import qualified Cart
-import qualified DecisionTree
 import qualified Functions
 import qualified IO.CSV
 import qualified IO.CsvGolden
@@ -23,19 +21,14 @@ import qualified Internal.Parsing
 import qualified LazyParity
 import qualified LazyParquet
 import qualified Learn.Denotation
-import qualified Learn.EdgeCases
 import qualified Learn.Ensembles
 import qualified Learn.Metamorphic
 import qualified Learn.MetricsTests
 import qualified Learn.Models
-import qualified Learn.NumericalRigor
-import qualified Learn.Numerics
 import qualified Learn.Segmented
 import qualified Learn.SklearnParity
-import qualified Learn.Symbolic
 import qualified Learn.Synthesis
 import qualified Learn.TypedModel
-import qualified LinearSolver
 import qualified Monad
 import qualified Operations.Aggregations
 import qualified Operations.Apply
@@ -70,34 +63,26 @@ import qualified Plotting
 import qualified PrettyPrint
 import qualified Properties
 import qualified Properties.Categorical
-import qualified Properties.Simplify
 import qualified Simplify
-import qualified TreePruning
 import qualified Typed.IOReaders
 import qualified Typed.Parity
-import qualified Worklist
 
 tests :: Test
 tests =
     TestList $
-        DecisionTree.tests
-            ++ Internal.ColumnBuilder.tests
+        Internal.ColumnBuilder.tests
             ++ Internal.DictEncode.tests
             ++ Internal.Markdown.tests
             ++ Internal.PackedText.tests
             ++ Internal.Parsing.tests
-            ++ Learn.Numerics.tests
             ++ Learn.Denotation.tests
             ++ Learn.Models.tests
             ++ Learn.TypedModel.tests
             ++ Learn.Ensembles.tests
-            ++ Learn.Symbolic.tests
             ++ Learn.SklearnParity.tests
             ++ Learn.Synthesis.tests
             ++ Learn.MetricsTests.tests
             ++ Learn.Metamorphic.tests
-            ++ Learn.EdgeCases.tests
-            ++ Learn.NumericalRigor.tests
             ++ Learn.Segmented.tests
             ++ Operations.Aggregations.tests
             ++ Operations.Apply.tests
@@ -135,11 +120,7 @@ tests =
             ++ LazyParquet.tests
             ++ LazyParity.tests
             ++ Plotting.tests
-            ++ LinearSolver.tests
             ++ Simplify.tests
-            ++ TreePruning.tests
-            ++ Worklist.tests
-            ++ Cart.tests
             ++ PackedTextMigration.tests
             ++ PrettyPrint.tests
             ++ Typed.Parity.tests
@@ -155,7 +136,6 @@ main = do
     if failures result > 0 || errors result > 0
         then Exit.exitFailure
         else do
-            -- Property tests
             propRes <-
                 mapM
                     (quickCheckWithResult stdArgs)
@@ -167,14 +147,10 @@ main = do
                     Internal.ColumnBuilder.props
             propsRes <- mapM (quickCheckWithResult stdArgs) Properties.tests
             catRes <- mapM (quickCheckWithResult stdArgs) Properties.Categorical.tests
-            simpRes <- mapM (quickCheckWithResult stdArgs) Properties.Simplify.tests
-            wlRes <- mapM (quickCheckWithResult stdArgs) Worklist.props
             if not (all isSuccessful propRes)
                 || not (all isSuccessful cbRes)
                 || not (all isSuccessful monadRes)
                 || not (all isSuccessful propsRes)
                 || not (all isSuccessful catRes)
-                || not (all isSuccessful simpRes)
-                || not (all isSuccessful wlRes)
                 then Exit.exitFailure
                 else Exit.exitSuccess

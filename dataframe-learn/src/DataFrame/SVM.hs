@@ -4,10 +4,9 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
 
-{- | Linear support vector classification: L2-regularized squared hinge fitted
-with the FISTA engine (sklearn's LinearSVC default loss). 'fit' trains a
-one-vs-rest 'LinearSVCModel'; 'predict' is the arg-max class margin. There is no
-@predict_proba@, matching sklearn's LinearSVC.
+{- | Linear support vector classification: L2-regularized squared hinge via
+FISTA (sklearn's LinearSVC default). 'fit' trains a one-vs-rest 'LinearSVCModel';
+'predict' is the arg-max class margin (no @predict_proba@, as in sklearn).
 -}
 module DataFrame.SVM (
     module DataFrame.Model,
@@ -15,6 +14,8 @@ module DataFrame.SVM (
     SVCConfig (..),
     defaultSVCConfig,
     svcMarginExprs,
+    -- | Surfaced by @LinearSVCModel.svcModels@.
+    LinearModel (..),
 ) where
 
 import Data.List (sort)

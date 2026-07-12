@@ -382,7 +382,7 @@ For files too large to fit in memory, `DataFrame.Lazy` provides a streaming quer
 
 ```haskell
 import qualified DataFrame.Lazy as L
-import DataFrame.Internal.Schema (schemaType, makeSchema)
+import DataFrame.Schema (schemaType, makeSchema)
 
 housingSchema = makeSchema
     [ ("longitude",          schemaType @Double)

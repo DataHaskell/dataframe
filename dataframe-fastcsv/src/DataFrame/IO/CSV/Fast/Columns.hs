@@ -4,10 +4,8 @@
 {-# LANGUAGE TypeApplications #-}
 
 {- | Column-level dispatch for the fast CSV reader: resolve each column's
-target type up front into a 'ColumnPlan' (schema hit -> typed pass directly;
-miss -> sample classification + typed fallback chain; EitherRead \/ exotic
-schema types -> the legacy Text pipeline). Plans are chunk-runnable so the
-parallel reader (WS-E2) can execute them over row sub-ranges.
+target type up front into a 'ColumnPlan' (schema hit, inference chain, or
+legacy Text pipeline). Plans are chunk-runnable for the parallel reader.
 -}
 module DataFrame.IO.CSV.Fast.Columns (
     ColumnEnv (..),
@@ -46,7 +44,6 @@ import DataFrame.IO.CSV (
 import DataFrame.IO.CSV.Fast.Passes
 import DataFrame.IO.CSV.Fast.Slice (extractField)
 import DataFrame.Internal.Column (Column, ensureOptional, fromVector)
-import DataFrame.Internal.Schema (SchemaType (..))
 import DataFrame.Operations.Typing (
     ParseOptions (..),
     ParsingAssumption (..),
@@ -56,6 +53,7 @@ import DataFrame.Operations.Typing (
     makeParsingAssumption,
     parseFromExamples,
  )
+import DataFrame.Schema (SchemaType (..))
 
 -- | One step of a type-fallback chain (always ends in 'StepText').
 data Step = StepBool | StepInt | StepDouble | StepDate | StepText
@@ -212,8 +210,7 @@ finishMode _ = id
 
 {- | Build one column sequentially (single chunk over the full row range).
 Returns the column plus a flag telling the caller to re-apply the legacy
-schema conversion ('parseWithTypes') afterwards — only set for schema'd
-columns the typed passes cannot serve.
+'parseWithTypes' conversion afterwards (schema types the passes can't serve).
 -}
 buildColumn :: ColumnEnv -> T.Text -> Int -> IO (Column, Bool)
 buildColumn env name col = case planColumn env name col of

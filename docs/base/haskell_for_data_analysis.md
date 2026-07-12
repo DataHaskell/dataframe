@@ -507,7 +507,7 @@ The Lazy path requires an explicit schema — there is no inference. Build one w
 ```haskell
 -- cabal: build-depends: containers
 import qualified DataFrame.Lazy as L
-import DataFrame.Internal.Schema (Schema (..), schemaType)
+import DataFrame.Schema (Schema (..), schemaType)
 import qualified Data.Map.Strict as M
 
 housingSchema = Schema $ M.fromList

@@ -3,9 +3,9 @@ module DataFrame.Lazy.Internal.PhysicalPlan where
 import qualified Data.Text as T
 import qualified DataFrame.Internal.DataFrame as D
 import qualified DataFrame.Internal.Expression as E
-import DataFrame.Internal.Schema (Schema)
 import DataFrame.Lazy.Internal.LogicalPlan (DataSource, SortOrder)
 import DataFrame.Operations.Join (JoinType)
+import DataFrame.Schema (Schema)
 
 -- | Scan-level configuration: batch size, separator, optional pushdowns.
 data ScanConfig = ScanConfig

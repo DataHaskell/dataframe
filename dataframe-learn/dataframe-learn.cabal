@@ -1,6 +1,6 @@
-cabal-version:      2.4
+cabal-version:      3.4
 name:               dataframe-learn
-version:            1.1.1.0
+version:            2.0.0.0
 synopsis:           Interpretable, expression-returning machine learning for the dataframe ecosystem.
 description:
     A small scikit-learn-style ML library where every model returns both an
@@ -28,10 +28,13 @@ common warnings
         -Wunused-local-binds
         -Wunused-packages
 
-library
+-- Numeric kernels, linear solver, tree engine, and symbolic-regression
+-- internals. Private: reachable only by this package's own components
+-- (the public estimators below and the learn-internal test-suite).
+library internal
     import:             warnings
+    visibility:         private
     exposed-modules:
-                        DataFrame.DecisionTree
                         DataFrame.DecisionTree.Types
                         DataFrame.DecisionTree.CondVec
                         DataFrame.DecisionTree.Cart
@@ -50,16 +53,39 @@ library
                         DataFrame.LinearAlgebra.Eigen
                         DataFrame.Random
                         DataFrame.Featurize.Internal
+                        DataFrame.SymbolicRegression.Expr
+                        DataFrame.SymbolicRegression.Simplify
+                        DataFrame.SymbolicRegression.Optimize
+                        DataFrame.SymbolicRegression.GP
+    build-depends:      base >= 4 && < 5,
+                        containers >= 0.6.7 && < 0.9,
+                        parallel >= 3.3 && < 4,
+                        random >= 1.2 && < 2,
+                        dataframe-core:internal >= 2.0 && < 2.1,
+                        dataframe-operations >= 2.0 && < 2.1,
+                        text >= 2.1 && < 3,
+                        vector ^>= 0.13,
+                        vector-algorithms ^>= 0.9
+    hs-source-dirs:     src-internal
+    default-language:   Haskell2010
+
+-- Curated estimator surface: fit/predict + configs + fitted records + the
+-- DataFrame.Learn umbrella. Implementation sealed in the private sublib.
+library
+    import:             warnings
+    exposed-modules:
+                        DataFrame.Learn
                         DataFrame.Model
                         DataFrame.LinearModel
                         DataFrame.LinearModel.Regression
                         DataFrame.LinearModel.Logistic
                         DataFrame.SVM
+                        DataFrame.SVM.RFF
+                        DataFrame.DecisionTree
                         DataFrame.DecisionTree.Regression
                         DataFrame.DecisionTree.Model
                         DataFrame.PCA
                         DataFrame.PCA.Kernel
-                        DataFrame.SVM.RFF
                         DataFrame.KMeans
                         DataFrame.Transform
                         DataFrame.Transform.Serialize
@@ -72,10 +98,6 @@ library
                         DataFrame.Metrics.Report
                         DataFrame.ModelSelection
                         DataFrame.SymbolicRegression
-                        DataFrame.SymbolicRegression.Expr
-                        DataFrame.SymbolicRegression.Simplify
-                        DataFrame.SymbolicRegression.Optimize
-                        DataFrame.SymbolicRegression.GP
                         DataFrame.Synthesis
                         DataFrame.Segmented
     build-depends:      base >= 4 && < 5,
@@ -83,11 +105,52 @@ library
                         containers >= 0.6.7 && < 0.9,
                         parallel >= 3.3 && < 4,
                         random >= 1.2 && < 2,
-                        dataframe-core ^>= 1.1,
-                        dataframe-expr-serializer ^>= 1.0,
-                        dataframe-operations ^>= 1.1.1,
+                        dataframe-core >= 2.0 && < 2.1,
+                        dataframe-core:internal >= 2.0 && < 2.1,
+                        dataframe-operations >= 2.0 && < 2.1,
+                        dataframe-operations:internal >= 2.0 && < 2.1,
+                        dataframe-expr-serializer >= 1.1 && < 1.2,
+                        dataframe-learn:internal,
                         text >= 2.1 && < 3,
-                        vector ^>= 0.13,
-                        vector-algorithms ^>= 0.9
+                        vector ^>= 0.13
     hs-source-dirs:     src
+    default-language:   Haskell2010
+
+-- Tests that exercise the private `internal` sublib directly (solver, tree
+-- engine, symbolic-regression internals). They live here rather than in the
+-- meta `dataframe` test-suite because that suite cannot reach a private sublib.
+test-suite learn-internal
+    import:             warnings
+    type:               exitcode-stdio-1.0
+    main-is:            Main.hs
+    other-modules:      DataFrameApi
+                        Cart
+                        DecisionTree
+                        TreePruning
+                        Worklist
+                        LinearSolver
+                        Properties.Simplify
+                        Learn.Numerics
+                        Learn.Symbolic
+                        Learn.EdgeCases
+                        Learn.NumericalRigor
+    -- Depends on the constituent packages directly, NOT the meta `dataframe`
+    -- (which depends back on dataframe-learn, a package-level cycle).
+    build-depends:      base >= 4 && < 5,
+                        aeson >= 0.11.0.0 && < 3,
+                        bytestring >= 0.11 && < 0.13,
+                        containers >= 0.6.7 && < 0.9,
+                        dataframe-core >= 2.0 && < 2.1,
+                        dataframe-core:internal >= 2.0 && < 2.1,
+                        dataframe-csv >= 2.0 && < 2.1,
+                        dataframe-learn,
+                        dataframe-learn:internal,
+                        dataframe-operations >= 2.0 && < 2.1,
+                        dataframe-operations:internal >= 2.0 && < 2.1,
+                        HUnit ^>= 1.6,
+                        QuickCheck >= 2 && < 3,
+                        random >= 1 && < 2,
+                        text >= 2.1 && < 3,
+                        vector ^>= 0.13
+    hs-source-dirs:     tests-internal
     default-language:   Haskell2010

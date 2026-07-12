@@ -3,10 +3,9 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE TypeFamilies #-}
 
-{- | Linear regression with the standard penalties: ordinary least squares
-(Householder QR), ridge (Cholesky on the regularized normal equations), and
-lasso / elastic net (FISTA). 'fit' produces a 'LinearRegressor' record;
-'predict' compiles it to an @Expr Double@ over the raw feature columns.
+{- | Linear regression with the standard penalties: OLS (QR), ridge (Cholesky),
+and lasso\/elastic net (FISTA). 'fit' produces a 'LinearRegressor'; 'predict'
+compiles it to an @Expr Double@ over the raw feature columns.
 -}
 module DataFrame.LinearModel.Regression (
     module DataFrame.Model,
@@ -14,7 +13,6 @@ module DataFrame.LinearModel.Regression (
     LinearConfig (..),
     defaultLinearConfig,
     LinearRegressor (..),
-    predictLinear,
 ) where
 
 import qualified Data.Text as T

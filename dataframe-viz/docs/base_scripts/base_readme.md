@@ -40,8 +40,7 @@ local `dataframe-core` / `dataframe-operations` / `dataframe-viz` working trees:
 -- cabal: packages: ../../../dataframe-operations, ../../../dataframe-viz
 -- cabal: default-extensions: OverloadedStrings, TypeApplications, OverloadedLabels
 -- cabal: default-extensions: DataKinds, TypeOperators, FlexibleContexts
-import DataFrame.Internal.DataFrame (DataFrame, fromNamedColumns)
-import DataFrame.Internal.Column (fromList)
+import DataFrame.Core (DataFrame, fromNamedColumns, fromList)
 import DataFrame.Operators ((|>))
 import qualified DataFrame.Functions as F
 import DataFrame.Typed.Types (Column, TypedDataFrame)

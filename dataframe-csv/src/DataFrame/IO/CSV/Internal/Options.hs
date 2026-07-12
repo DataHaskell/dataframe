@@ -19,8 +19,8 @@ module DataFrame.IO.CSV.Internal.Options (
 import qualified Data.Map.Strict as M
 import qualified Data.Text as T
 
-import DataFrame.Internal.Schema (SchemaType)
 import DataFrame.Operations.Typing (SafeReadMode (..))
+import DataFrame.Schema (SchemaType)
 
 data HeaderSpec = NoHeader | UseFirstRow | ProvideNames [T.Text]
     deriving (Eq, Show)

@@ -9,7 +9,29 @@
 {-# LANGUAGE UndecidableInstances #-}
 {-# OPTIONS_GHC -Wno-orphans #-}
 
-module DataFrame.Operations.Statistics where
+module DataFrame.Operations.Statistics (
+    -- * Summaries
+    summarize,
+    frequencies,
+
+    -- * Aggregate statistics
+    mean,
+    meanMaybe,
+    median,
+    medianMaybe,
+    percentile,
+    genericPercentile,
+    standardDeviation,
+    skewness,
+    variance,
+    interQuartileRange,
+    correlation,
+    sum,
+
+    -- * Imputation
+    imputeWith,
+    -- Also exports the orphan @ImputeOp (Maybe b)@ instance.
+) where
 
 import qualified Data.List as L
 import qualified Data.Map as M
@@ -18,7 +40,8 @@ import qualified Data.Vector as V
 import qualified Data.Vector.Generic as VG
 import qualified Data.Vector.Unboxed as VU
 
-import Prelude as P
+import Prelude hiding (sum)
+import qualified Prelude as P
 
 import Control.Exception (throw)
 import Data.Function ((&))
@@ -227,7 +250,7 @@ _getColumnAsDouble name df = case getColumn name df of
     Nothing ->
         throw $
             ColumnsNotFoundException [name] "_getColumnAsDouble" (M.keys $ columnIndices df)
-    _ -> Nothing -- Return a type mismatch error here.
+    _ -> Nothing
 {-# INLINE _getColumnAsDouble #-}
 
 optionalToDoubleVector :: (Real a) => V.Vector (Maybe a) -> VU.Vector Double

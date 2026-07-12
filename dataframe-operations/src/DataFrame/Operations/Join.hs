@@ -8,7 +8,33 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 
-module DataFrame.Operations.Join where
+module DataFrame.Operations.Join (
+    -- * Join types
+    JoinType (..),
+
+    -- * Joins
+    join,
+    innerJoin,
+    leftJoin,
+    rightJoin,
+    fullOuterJoin,
+
+    -- * Low-level join kernels
+
+    {- | Reused by the lazy executor and the parallel-join tests; not a
+    stable public API (candidates for a future @Join.Internal@ split).
+    -}
+    buildHashColumn,
+    buildCompactIndex,
+    hashProbeKernel,
+    hashInnerKernel,
+    hashLeftKernel,
+    innerKernel,
+    parInnerKernel,
+    parLeftKernel,
+    assembleInner,
+    assembleLeft,
+) where
 
 import Control.Applicative ((<|>))
 import Control.Exception (throw)
@@ -54,34 +80,24 @@ data JoinType
 join ::
     JoinType ->
     [T.Text] ->
-    DataFrame -> -- Right hand side
-    DataFrame -> -- Left hand side
+    DataFrame ->
+    DataFrame ->
     DataFrame
 join INNER xs right = innerJoin xs right
 join LEFT xs right = leftJoin xs right
 join RIGHT xs right = rightJoin xs right
 join FULL_OUTER xs right = fullOuterJoin xs right
 
-{- | Row-count threshold for the build side.
-When the build side exceeds this, sort-merge join is used instead of the
-single-threaded hash join. The parallel chunked-probe hash join
-('parInnerKernel' \/ 'parLeftKernel') is preferred above this size when more
-than one capability is available (see 'shouldParallelizeJoin'): partitioning
-the probe over cores beats sort-merge for the large build sides measured here
-(e.g. the 2M-row build in the join pipeline). Sort-merge remains the
-single-threaded fallback.
+{- | Build-side row count above which the single-threaded hash join gives way
+to sort-merge (single-threaded) or the parallel chunked-probe hash join when
+multiple capabilities are available (see 'shouldParallelizeJoin').
 -}
 joinStrategyThreshold :: Int
 joinStrategyThreshold = 500_000
 
-{- | A compact index mapping hash values to contiguous slices of
-original row indices. All indices live in a single unboxed vector
-(@ciSortedIndices@, sorted by hash). The lookup table is an open-addressing
-linear-probe hash table held in three parallel unboxed vectors keyed by hash:
-@ciKeys@ holds the hash at each slot, @ciStarts@ the run offset into
-@ciSortedIndices@ (@-1@ marks an empty slot, since real offsets are @>= 0@),
-and @ciLens@ the run length. @ciMask@ is @tableSize - 1@ (table size is a
-power of two), used to map a hash to its home slot.
+{- | Maps hash values to contiguous slices of original row indices. Indices
+live in one hash-sorted vector; an open-addressing linear-probe table (keyed
+by hash) records each run's offset and length. @-1@ starts mark empty slots.
 -}
 data CompactIndex = CompactIndex
     { ciSortedIndices :: {-# UNPACK #-} !(VU.Vector Int)
@@ -121,18 +137,14 @@ nextPow2Above n = go 2
         | p > n = p
         | otherwise = go (p * 2)
 
-{- | Build a compact index from a vector of row hashes.
-Sorts @(hash, originalIndex)@ pairs by hash, scans for contiguous runs, then
-inserts each run into an open-addressing linear-probe table sized to keep the
-load factor under ~0.5.
+{- | Build a compact index from a vector of row hashes: sort by hash, scan for
+contiguous runs, insert each run into an open-addressing table. Capacity is
+sized for the worst case (every row distinct) so building never resizes.
 -}
 buildCompactIndex :: VU.Vector Int -> CompactIndex
 buildCompactIndex hashes =
     let n = VU.length hashes
         (sortedHashes, sortedIndices) = parSortByHash n hashes
-        -- Worst case every row is a distinct group; 2*n+1 keeps the table
-        -- sparse even then. Capacity is independent of the actual group count
-        -- so building stays a single pass with no resize.
         !cap = nextPow2Above (2 * n)
         !mask = cap - 1
         (keys, starts, lens) = runST $ do
@@ -169,9 +181,8 @@ findGroupEnd !v !h !j !n
     | otherwise = j
 {-# INLINE findGroupEnd #-}
 
-{- | Sort a hash vector, returning sorted hashes and corresponding original indices.
-Sorts an index array using hash values as the comparison key, avoiding the
-intermediate pair vector used by the naive zip-then-sort approach.
+{- | Sort a hash vector, returning sorted hashes and their original indices.
+Sorts an index array keyed by hash, avoiding an intermediate pair vector.
 -}
 sortWithIndices :: VU.Vector Int -> (VU.Vector Int, VU.Vector Int)
 sortWithIndices hashes = runST $ do
@@ -254,6 +265,9 @@ innerJoin cs left right
     | D.null right || D.null left = D.empty
     | otherwise = innerJoinNonEmpty cs left right
 
+-- Build the hash index on the smaller side and probe with the larger one;
+-- the probe side is partitioned across cores, so probing the larger maximises
+-- the parallel win.
 innerJoinNonEmpty :: [T.Text] -> DataFrame -> DataFrame -> DataFrame
 innerJoinNonEmpty cs left right =
     let
@@ -267,16 +281,7 @@ innerJoinNonEmpty cs left right =
         rightHashes = D.computeRowHashes rightKeyIdxs right
 
         buildRows = min leftRows rightRows
-        -- Probe with the larger side, build on the smaller. The probe side
-        -- drives parallelism (it is partitioned across cores), so probing the
-        -- larger side maximises the win.
         probeRows = max leftRows rightRows
-        -- Parallelize the probe either when the build is large enough to spill
-        -- cache (the original sort-merge regime) or when the build is small
-        -- (cache-resident, read-only) but the probe is huge: partitioning a
-        -- ~1e7-row probe over cores wins even against a tiny hot build (the
-        -- medium-factor lever). Both routes use the same bit-identical
-        -- 'parInnerKernel'.
         useParallel =
             shouldParallelizeJoin probeRows buildRows
                 || shouldParallelizeSmallBuildProbe probeRows
@@ -284,10 +289,8 @@ innerJoinNonEmpty cs left right =
             | buildRows > joinStrategyThreshold && not useParallel =
                 sortMergeInnerKernel leftHashes rightHashes
             | rightRows <= leftRows =
-                -- Build on right (smaller or equal), probe with left
                 innerKernel useParallel leftHashes rightHashes
             | otherwise =
-                -- Build on left (smaller), probe with right, swap result
                 let (!rIxs, !lIxs) = innerKernel useParallel rightHashes leftHashes
                  in (lIxs, rIxs)
      in
@@ -304,10 +307,8 @@ innerKernel False = hashInnerKernel
 {-# INLINE innerKernel #-}
 
 {- | Parallel inner-join kernel: build the 'CompactIndex' on @buildHashes@ once,
-then probe @probeHashes@ in parallel. Bit-for-bit identical output to
-'hashInnerKernel' (probe-row order preserved). Runs the IO probe via
-'unsafePerformIO'; the computation is pure (no observable effects, fixed result
-for fixed inputs).
+then probe @probeHashes@ in parallel. Output is bit-for-bit identical to
+'hashInnerKernel' (probe-row order preserved).
 -}
 parInnerKernel ::
     VU.Vector Int -> VU.Vector Int -> (VU.Vector Int, VU.Vector Int)
@@ -325,10 +326,9 @@ buildHashColumn keys df =
         keyIdxs = validatedKeyColIndices "buildHashColumn" csSet df
      in D.computeRowHashes keyIdxs df
 
-{- | Probe one batch of rows against a pre-built 'CompactIndex'.
-Returns @(probeExpandedIxs, buildExpandedIxs)@.
-Unlike 'hashInnerKernel', does not build the index (it is pre-built once)
-and has no cross-product row guard — the caller controls probe batch size.
+{- | Probe one batch of rows against a pre-built 'CompactIndex', returning
+@(probeExpandedIxs, buildExpandedIxs)@. Unlike 'hashInnerKernel' it neither
+builds the index nor guards cross-product size — the caller sizes batches.
 -}
 hashProbeKernel ::
     -- | Built once from the full right\/build side.
@@ -393,16 +393,13 @@ hashProbeKernel ci probeHashes =
                 <*> VU.unsafeFreeze (VUM.slice 0 total bv)
      in (VU.force pFrozen, VU.force bFrozen)
 
-{- | Hash-based inner join kernel.
-Builds compact index on @buildHashes@ (second arg), probes with
-@probeHashes@ (first arg).
-Returns @(probeExpandedIndices, buildExpandedIndices)@.
-Uses a dynamically growing output buffer to avoid pre-allocating the full
-cross-product size (which can be astronomically large for low-cardinality keys).
+{- | Hash-based inner join kernel: build the index on @buildHashes@, probe with
+@probeHashes@, return @(probeExpandedIndices, buildExpandedIndices)@. Grows its
+output buffer dynamically rather than pre-allocating the full cross product.
 -}
 
-{- | Maximum number of output rows allowed from a join kernel.
-Exceeding this limit indicates a cross-product explosion (e.g. low-cardinality keys).
+{- | Output-row ceiling for a join kernel; exceeding it signals a cross-product
+explosion (e.g. low-cardinality keys).
 -}
 maxJoinOutputRows :: Int
 maxJoinOutputRows = 500_000_000
@@ -472,15 +469,11 @@ hashInnerKernel probeHashes buildHashes =
             (,)
                 <$> VU.unsafeFreeze (VUM.slice 0 total pv)
                 <*> VU.unsafeFreeze (VUM.slice 0 total bv)
-     in -- VU.force copies the slice into a compact array, releasing the oversized
-        -- backing buffer allocated by the doubling strategy.
-        (VU.force pFrozen, VU.force bFrozen)
+     in (VU.force pFrozen, VU.force bFrozen)
 
-{- | Sort-merge inner join kernel.
-Sorts both sides by hash, walks in lockstep.
-Returns @(leftExpandedIndices, rightExpandedIndices)@.
-Uses a dynamically growing output buffer instead of a two-pass count-then-allocate
-strategy, which OOMs when low-cardinality keys produce large cross products.
+{- | Sort-merge inner join kernel: sort both sides by hash, walk in lockstep,
+return @(leftExpandedIndices, rightExpandedIndices)@. Grows its output buffer
+dynamically so low-cardinality cross products don't OOM.
 -}
 sortMergeInnerKernel ::
     VU.Vector Int -> VU.Vector Int -> (VU.Vector Int, VU.Vector Int)
@@ -565,9 +558,7 @@ sortMergeInnerKernel leftHashes rightHashes =
             (,)
                 <$> VU.unsafeFreeze (VUM.slice 0 total lv)
                 <*> VU.unsafeFreeze (VUM.slice 0 total rv)
-     in -- VU.force copies the slice into a compact array, releasing the oversized
-        -- backing buffer allocated by the doubling strategy.
-        (VU.force lFrozen, VU.force rFrozen)
+     in (VU.force lFrozen, VU.force rFrozen)
 
 -- | Assemble the result DataFrame for an inner join from expanded index vectors.
 assembleInner ::
@@ -582,7 +573,6 @@ assembleInner csSet left right leftIxs rightIxs =
         leftColSet = S.fromList (D.columnNames left)
         rightColNames = D.columnNames right
 
-        -- Pre-expand every column once
         expandedLeftCols = VB.map (D.atIndicesStable leftIxs) (D.columns left)
         expandedRightCols = VB.map (D.atIndicesStable rightIxs) (D.columns right)
 
@@ -594,7 +584,6 @@ assembleInner csSet left right leftIxs rightIxs =
             idx <- M.lookup name (D.columnIndices right)
             return (expandedRightCols `VB.unsafeIndex` idx)
 
-        -- Base DataFrame: all left columns, expanded
         baseDf =
             left
                 { columns = expandedLeftCols
@@ -607,15 +596,15 @@ assembleInner csSet left right leftIxs rightIxs =
      in D.fold
             ( \name df ->
                 if S.member name csSet
-                    then df -- Key column already present from left side
+                    then df
                     else
                         if S.member name leftColSet
-                            then -- Overlapping non-key column: merge with These
+                            then
                                 insertIfPresent
                                     name
                                     (D.mergeColumns <$> getExpandedLeft name <*> getExpandedRight name)
                                     df
-                            else -- Right-only column
+                            else
                                 insertIfPresent name (getExpandedRight name) df
             )
             rightColNames
@@ -657,6 +646,8 @@ leftJoinWithCallPoint callPoint cs left right
     | D.null left || D.nRows left == 0 = D.empty
     | otherwise = leftJoinNonEmpty callPoint cs left right
 
+-- The right side is always the build side; the left is probed (and drives
+-- parallelism). Unmatched right rows are marked with a @-1@ sentinel.
 leftJoinNonEmpty :: T.Text -> [T.Text] -> DataFrame -> DataFrame -> DataFrame
 leftJoinNonEmpty callPoint cs left right =
     let
@@ -669,10 +660,6 @@ leftJoinNonEmpty callPoint cs left right =
         rightHashes = D.computeRowHashes rightKeyIdxs right
 
         leftRows = fst (D.dimensions left)
-        -- Right is always the build side for left join; left is the probe side
-        -- (and drives parallelism). Parallelize either in the large-build regime
-        -- or when the build is small but the probe (left) is huge: the
-        -- read-only shared index is probed across cores with no synchronization.
         useParallel =
             shouldParallelizeJoin leftRows rightRows
                 || shouldParallelizeSmallBuildProbe leftRows
@@ -684,7 +671,6 @@ leftJoinNonEmpty callPoint cs left right =
             | otherwise =
                 hashLeftKernel leftHashes rightHashes
      in
-        -- rightIxs uses -1 as sentinel for "no match"
         assembleLeft csSet left right leftIxs rightIxs
 
 {- | Parallel left-join kernel: build the 'CompactIndex' on @rightHashes@ once,
@@ -698,11 +684,9 @@ parLeftKernel leftHashes rightHashes =
      in unsafePerformIO (parLeftProbe (ciSortedIndices ci) (ciLookup ci) leftHashes)
 {-# NOINLINE parLeftKernel #-}
 
-{- | Hash-based left join kernel.
-Returns @(leftExpandedIndices, rightExpandedIndices)@ where
-right indices use @-1@ as sentinel for unmatched rows.
-Uses a dynamically growing output buffer to avoid pre-allocating the full
-cross-product size (which can be astronomically large for low-cardinality keys).
+{- | Hash-based left join kernel, returning @(leftExpandedIndices,
+rightExpandedIndices)@ with @-1@ marking unmatched right rows. Grows its output
+buffer dynamically rather than pre-allocating the full cross product.
 -}
 hashLeftKernel ::
     VU.Vector Int -> VU.Vector Int -> (VU.Vector Int, VU.Vector Int)
@@ -769,10 +753,9 @@ hashLeftKernel leftHashes rightHashes = runST $ do
         <$> VU.unsafeFreeze (VUM.slice 0 total lv)
         <*> VU.unsafeFreeze (VUM.slice 0 total rv)
 
-{- | Sort-merge left join kernel.
-Returns @(leftExpandedIndices, rightExpandedIndices)@ with @-1@ sentinel.
-Uses a dynamically growing output buffer instead of a two-pass count-then-allocate
-strategy, which OOMs when low-cardinality keys produce large cross products.
+{- | Sort-merge left join kernel, returning @(leftExpandedIndices,
+rightExpandedIndices)@ with a @-1@ sentinel. Grows its output buffer
+dynamically so low-cardinality cross products don't OOM.
 -}
 sortMergeLeftKernel ::
     VU.Vector Int -> VU.Vector Int -> (VU.Vector Int, VU.Vector Int)
@@ -967,14 +950,12 @@ fullOuterJoinNonEmpty cs left right =
         leftHashes = D.computeRowHashes leftKeyIdxs left
         rightHashes = D.computeRowHashes rightKeyIdxs right
 
-        -- Both sides can have nulls in full outer
         (leftIxs, rightIxs)
             | max leftRows rightRows > joinStrategyThreshold =
                 sortMergeFullOuterKernel leftHashes rightHashes
             | otherwise =
                 hashFullOuterKernel leftHashes rightHashes
      in
-        -- Both index vectors use -1 as sentinel
         assembleFullOuter csSet left right leftIxs rightIxs
 
 {- | Hash-based full outer join kernel.
@@ -997,8 +978,6 @@ hashFullOuterKernel leftHashes rightHashes = runST $ do
         !leftCap = VU.length leftStarts
         !rightCap = VU.length rightStarts
 
-    -- Count: matched + left-only + right-only. Iterate over occupied slots
-    -- (ciStarts /= -1) in each table, cross-referencing the other via ciLookup.
     let countLeft !slot !acc
             | slot >= leftCap = acc
             | otherwise =
@@ -1029,7 +1008,6 @@ hashFullOuterKernel leftHashes rightHashes = runST $ do
     rv <- VUM.unsafeNew totalCount
     posRef <- newSTRef (0 :: Int)
 
-    -- Fill matched + left-only (iterate left slots)
     let fillLeft !slot
             | slot >= leftCap = return ()
             | otherwise = do
@@ -1066,7 +1044,6 @@ hashFullOuterKernel leftHashes rightHashes = runST $ do
                         fillLeft (slot + 1)
     fillLeft 0
 
-    -- Fill right-only (iterate right slots not in left)
     let fillRightOnly !slot
             | slot >= rightCap = return ()
             | otherwise = do
@@ -1105,7 +1082,6 @@ sortMergeFullOuterKernel leftHashes rightHashes = runST $ do
         !leftN = VU.length leftHashes
         !rightN = VU.length rightHashes
 
-    -- Pass 1: count
     let countLoop !li !ri !c
             | li >= leftN && ri >= rightN = c
             | li >= leftN = c + (rightN - ri)
@@ -1121,7 +1097,6 @@ sortMergeFullOuterKernel leftHashes rightHashes = runST $ do
             !rh = rightSH `VU.unsafeIndex` ri
         !totalRows = countLoop 0 0 0
 
-    -- Pass 2: fill
     lv <- VUM.unsafeNew totalRows
     rv <- VUM.unsafeNew totalRows
 
@@ -1164,9 +1139,8 @@ sortMergeFullOuterKernel leftHashes rightHashes = runST $ do
     fill 0 0 0
     (,) <$> VU.unsafeFreeze lv <*> VU.unsafeFreeze rv
 
-{- | Assemble the result DataFrame for a full outer join.
-Both index vectors use @-1@ sentinel; all columns gathered via
-'gatherWithSentinel'.  Key columns are coalesced (first non-null wins).
+{- | Assemble the result DataFrame for a full outer join. Both index vectors
+use a @-1@ sentinel; key columns are coalesced (first non-null wins).
 -}
 assembleFullOuter ::
     S.Set T.Text ->
@@ -1201,8 +1175,6 @@ assembleFullOuter csSet left right leftIxs rightIxs =
         insertIfPresent _ Nothing df = df
         insertIfPresent name (Just c) df = D.insertColumn name c df
 
-        -- Coalesce two nullable columns: take first non-Nothing per row,
-        -- producing a non-optional column.
         coalesceKeyColumn :: Column -> Column -> Column
         coalesceKeyColumn l r
             | D.isPackedText l || D.isPackedText r =
@@ -1252,10 +1224,9 @@ assembleFullOuter csSet left right leftIxs rightIxs =
      in D.fold
             ( \name df ->
                 if S.member name csSet
-                    then -- Key column: coalesce left and right
-                        case (getExpandedLeft name, getExpandedRight name) of
-                            (Just lc, Just rc) -> D.insertColumn name (coalesceKeyColumn lc rc) df
-                            _ -> df
+                    then case (getExpandedLeft name, getExpandedRight name) of
+                        (Just lc, Just rc) -> D.insertColumn name (coalesceKeyColumn lc rc) df
+                        _ -> df
                     else
                         if S.member name leftColSet
                             then
