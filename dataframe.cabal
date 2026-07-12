@@ -203,7 +203,6 @@ library arrow-bridge
         buildable: False
     build-depends:
         base        >= 4   && < 5,
-        dataframe-core >= 2.0 && < 2.1,
         dataframe-core:internal >= 2.0 && < 2.1,
         dataframe-expr-serializer >= 1.1 && < 1.2,
         dataframe-csv >= 2.0 && < 2.1,
