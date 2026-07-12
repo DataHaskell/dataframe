@@ -40,10 +40,6 @@ library
                       dataframe-core ^>= 2.0,
                       dataframe-operations ^>= 2.0,
                       hasktorch >= 0.2.1.6 && < 0.3
-    if impl(ghc >= 9.12)
-      build-depends: ghc-typelits-natnormalise == 0.9.3
-    else
-      build-depends: ghc-typelits-natnormalise >= 0.7.7 && < 0.9
 
     hs-source-dirs:   src
 
@@ -56,5 +52,4 @@ test-suite dataframe-hasktorch-test
     hs-source-dirs:   test
     main-is:          Main.hs
     build-depends:
-        base >= 4.11 && < 5,
-        dataframe-hasktorch
+        base >= 4.11 && < 5

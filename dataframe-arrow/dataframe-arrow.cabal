@@ -56,7 +56,6 @@ foreign-library dataframe-arrow
     other-modules:    DataFrame.FFI
     build-depends:
         base                  >= 4   && < 5,
-        dataframe-core        ^>= 2.0,
         dataframe-core:internal ^>= 2.0,
         dataframe-learn       ^>= 2.0,
         dataframe:arrow-bridge >= 1   && < 4,

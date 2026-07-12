@@ -95,7 +95,6 @@ test-suite tests
                     dataframe-fastcsv,
                     dataframe-operations >= 2.0 && < 2.1,
                     dataframe-parsing >= 2.0 && < 2.1,
-                    dataframe-parsing:internal >= 2.0 && < 2.1,
                     directory >= 1.3.0.0 && < 2,
                     HUnit ^>= 1.6,
                     QuickCheck >= 2 && < 3,
