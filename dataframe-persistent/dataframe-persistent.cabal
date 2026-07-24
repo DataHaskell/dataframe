@@ -1,6 +1,6 @@
 cabal-version:      3.0
 name:               dataframe-persistent
-version:            0.3.0.1
+version:            0.4.0.0
 
 synopsis: Persistent database integration for the dataframe library
 
@@ -41,12 +41,11 @@ library
                     DataFrame.IO.Persistent.Schema.Common,
                     DataFrame.IO.Persistent.Schema.Introspect
     build-depends:    base >= 4 && <5,
-                      bytestring >= 0.10 && < 0.13,
-                      conduit >= 1.3 && < 1.4,
-                      containers >= 0.6.7 && < 0.9,
-                      dataframe-core ^>= 2.0,
-                      dataframe-core:internal ^>= 2.0,
-                      dataframe-operations ^>= 2.0,
+                      bytestring >= 0.10 && < 0.14,
+                      conduit >= 1.3 && < 1.5,
+                      containers >= 0.6.7 && < 0.10,
+                      dataframe-core ^>= 2.1,
+                      dataframe-operations ^>= 2.1,
                       persistent >= 2.14 && < 3,
                       persistent-sqlite >= 2.13 && < 3,
                       resourcet >= 1.2 && < 2,
@@ -54,7 +53,7 @@ library
                       text >= 2.1 && < 3,
                       time >= 1.12 && < 2,
                       transformers >= 0.5 && < 0.7,
-                      vector ^>= 0.13
+                      vector >= 0.13 && < 0.15
     hs-source-dirs:   src
     default-language: Haskell2010
 
@@ -66,10 +65,9 @@ test-suite dataframe-persistent-tests
                    SchemaTHTests
     build-depends:  base >= 4 && < 5,
                     dataframe >= 1 && < 4,
-                    dataframe-operations ^>= 2.0,
-                    dataframe-persistent,
-                    HUnit ^>= 1.6,
-                    monad-logger >= 0.3 && < 0.4,
+                    dataframe-operations ^>= 2.1,
+                    HUnit >= 1.6 && < 1.8,
+                    monad-logger >= 0.3 && < 0.5,
                     persistent >= 2.14 && < 3,
                     persistent-sqlite >= 2.13 && < 3,
                     resourcet >= 0.1 && < 2,
@@ -77,6 +75,6 @@ test-suite dataframe-persistent-tests
                     text >= 2.1 && < 3,
                     time >= 1.12 && < 2,
                     transformers >= 0.5 && < 0.7,
-                    vector ^>= 0.13
+                    vector >= 0.13 && < 0.15
     hs-source-dirs: tests
     default-language: Haskell2010

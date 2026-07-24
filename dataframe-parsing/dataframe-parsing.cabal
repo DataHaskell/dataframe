@@ -1,6 +1,6 @@
 cabal-version:      3.4
 name:               dataframe-parsing
-version:            2.0.0.0
+version:            2.1.0.0
 synopsis:           Shared text/binary parsing helpers for the dataframe ecosystem.
 description:
     Parsing primitives used by the @dataframe@ family: CSV-friendly text
@@ -27,38 +27,29 @@ common warnings
         -Wunused-local-binds
         -Wunused-packages
 
-library internal
+library
     import:             warnings
-    visibility:         public
     exposed-modules:
+                        DataFrame.Schema
                         DataFrame.Internal.Binary
                         DataFrame.Internal.Parsing
                         DataFrame.Internal.Parsing.Fast
     other-modules:
+                        DataFrame.Internal.Schema
                         DataFrame.Internal.Parsing.Fast.Common
                         DataFrame.Internal.Parsing.Fast.Double
                         DataFrame.Internal.Parsing.Fast.Int
                         DataFrame.Internal.Parsing.Fast.Token
     build-depends:      base >= 4 && < 5,
-                        attoparsec >= 0.12 && < 0.15,
-                        bytestring >= 0.11 && < 0.13,
-                        bytestring-lexing >= 0.5 && < 0.6,
-                        containers >= 0.6.7 && < 0.9,
+                        attoparsec >= 0.12 && < 0.16,
+                        bytestring >= 0.11 && < 0.14,
+                        bytestring-lexing >= 0.5 && < 0.7,
+                        containers >= 0.6.7 && < 0.10,
+                        dataframe-core >= 2.1 && < 2.2,
                         text >= 2.1 && < 3,
                         time >= 1.12 && < 2,
-                        vector >= 0.12 && < 0.14
-    hs-source-dirs:     src-internal
-    default-language:   Haskell2010
-
-library
-    import:             warnings
-    exposed-modules:    DataFrame.Schema
-    other-modules:      DataFrame.Internal.Schema
-    build-depends:      base >= 4 && < 5,
-                        containers >= 0.6.7 && < 0.9,
-                        dataframe-core:internal >= 2.0 && < 2.1,
-                        text >= 2.1 && < 3
-    hs-source-dirs:     src
+                        vector >= 0.12 && < 0.15
+    hs-source-dirs:     src, src-internal
     default-language:   Haskell2010
 
 test-suite tests
@@ -68,9 +59,9 @@ test-suite tests
     other-modules:      Properties.FastParsing
                         Unit.FastParsing
     build-depends:      base >= 4 && < 5,
-                        bytestring >= 0.11 && < 0.13,
-                        dataframe-parsing:internal,
-                        HUnit ^>= 1.6,
+                        bytestring >= 0.11 && < 0.14,
+                        dataframe-parsing,
+                        HUnit >= 1.6 && < 1.8,
                         QuickCheck >= 2 && < 3,
                         text >= 2.1 && < 3
     hs-source-dirs:     tests
@@ -82,11 +73,11 @@ benchmark field-parsers
     type:               exitcode-stdio-1.0
     main-is:            FieldParsers.hs
     build-depends:      base >= 4 && < 5,
-                        bytestring >= 0.11 && < 0.13,
-                        dataframe-parsing:internal,
+                        bytestring >= 0.11 && < 0.14,
+                        dataframe-parsing,
                         text >= 2.1 && < 3,
                         time >= 1.12 && < 2,
-                        vector >= 0.12 && < 0.14
+                        vector >= 0.12 && < 0.15
     hs-source-dirs:     bench
     ghc-options:        -O2
     default-language:   Haskell2010

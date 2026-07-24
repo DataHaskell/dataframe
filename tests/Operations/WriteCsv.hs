@@ -21,6 +21,16 @@ toCsvBasic = TestLabel "toCsv_basic" $ TestCase $ do
         expected = "name,age\nAlice,30\nBob,25\nCharlie,35\n"
     assertEqual "basic toCsv" expected (toCsv df)
 
+toCsvWithNulls :: Test
+toCsvWithNulls = TestLabel "toCsv_withNulls" $ TestCase $ do
+    let df =
+            D.fromNamedColumns
+                [ ("name", DI.fromList @(Maybe T.Text) [Nothing, Just "Alice", Just "Bob", Just "Charlie"])
+                , ("age", DI.fromList @(Maybe Int) [Just 30, Nothing, Just 25, Just 35])
+                ]
+        expected = "name,age\nnull,30\nAlice,null\nBob,25\nCharlie,35\n"
+    assertEqual "toCsv with nulls" expected (toCsv df)
+
 -- Empty DataFrame produces empty text
 toCsvEmpty :: Test
 toCsvEmpty =
@@ -80,6 +90,7 @@ toCsvRoundTrip = TestLabel "toCsv_roundTrip" $ TestCase $ do
 tests :: [Test]
 tests =
     [ toCsvBasic
+    , toCsvWithNulls
     , toCsvEmpty
     , toSeparatedTab
     , toCsvDouble

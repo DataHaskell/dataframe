@@ -1,6 +1,6 @@
 cabal-version:      3.4
 name:               dataframe
-version:            3.0.0.0
+version:            3.1.0.0
 synopsis: A fast, safe, and intuitive DataFrame library.
 
 description: A fast, safe, and intuitive DataFrame library for exploratory data analysis.
@@ -128,18 +128,18 @@ library
                         DataFrame.Typed.Record,
                         DataFrame.Typed.Generic
     build-depends:    base >= 4 && <5,
-                      dataframe-core >= 2.0 && < 2.1,
-                      dataframe-json >= 1.1 && < 1.2,
-                      dataframe-expr-serializer >= 1.1 && < 1.2,
-                      dataframe-operations >= 2.0 && < 2.1,
-                      dataframe-parsing >= 2.0 && < 2.1,
-                      dataframe-viz >= 1.1 && < 1.2,
-                      dataframe-learn >= 2.0 && < 2.1
+                      dataframe-core >= 2.1 && < 2.2,
+                      dataframe-json >= 1.2 && < 1.3,
+                      dataframe-expr-serializer >= 1.2 && < 1.3,
+                      dataframe-operations >= 2.1 && < 2.2,
+                      dataframe-parsing >= 2.1 && < 2.2,
+                      dataframe-viz >= 1.2 && < 1.3,
+                      dataframe-learn >= 2.1 && < 2.2
 
     if !flag(no-csv)
         reexported-modules: DataFrame.IO.CSV,
                             DataFrame.Typed.IO.CSV
-        build-depends:   dataframe-csv >= 2.0 && < 2.1
+        build-depends:   dataframe-csv >= 2.1 && < 2.2
         cpp-options:     -DWITH_CSV
 
     if !flag(no-parquet)
@@ -157,7 +157,7 @@ library
                             DataFrame.IO.Parquet.Time,
                             DataFrame.IO.Utils.RandomAccess,
                             DataFrame.Typed.IO.Parquet
-        build-depends:   dataframe-parquet >= 1.2 && < 1.3
+        build-depends:   dataframe-parquet >= 1.3 && < 1.4
         cpp-options:     -DWITH_PARQUET
 
     -- The lazy executor calls both CSV and Parquet readers directly, so
@@ -167,21 +167,21 @@ library
                             DataFrame.Lazy.IO.Binary,
                             DataFrame.Lazy.IO.CSV,
                             DataFrame.Typed.Lazy
-        build-depends:   dataframe-lazy >= 2.0 && < 2.1
+        build-depends:   dataframe-lazy >= 2.1 && < 2.2
         cpp-options:     -DWITH_LAZY
 
     if !flag(no-th)
-        build-depends:   dataframe-th >= 2.0 && < 2.1
+        build-depends:   dataframe-th >= 2.1 && < 2.2
         cpp-options:     -DWITH_TH
         exposed-modules: DataFrame.TH,
                          DataFrame.Typed.TH
 
     if !flag(no-th) && !flag(no-csv)
-        build-depends:   dataframe-csv-th >= 1.1 && < 1.2
+        build-depends:   dataframe-csv-th >= 1.2 && < 1.3
         cpp-options:     -DWITH_CSV_TH
 
     if !flag(no-th) && !flag(no-parquet)
-        build-depends:   dataframe-parquet-th >= 1.1 && < 1.2
+        build-depends:   dataframe-parquet-th >= 1.2 && < 1.3
         cpp-options:     -DWITH_PARQUET_TH
 
     hs-source-dirs:   src
@@ -203,19 +203,19 @@ library arrow-bridge
         buildable: False
     build-depends:
         base        >= 4   && < 5,
-        dataframe-core:internal >= 2.0 && < 2.1,
-        dataframe-expr-serializer >= 1.1 && < 1.2,
-        dataframe-csv >= 2.0 && < 2.1,
-        dataframe-json >= 1.1 && < 1.2,
-        dataframe-lazy >= 2.0 && < 2.1,
-        dataframe-operations >= 2.0 && < 2.1,
-        dataframe-parquet >= 1.2 && < 1.3,
-        dataframe-parsing >= 2.0 && < 2.1,
+        dataframe-core >= 2.1 && < 2.2,
+        dataframe-expr-serializer >= 1.2 && < 1.3,
+        dataframe-csv >= 2.1 && < 2.2,
+        dataframe-json >= 1.2 && < 1.3,
+        dataframe-lazy >= 2.1 && < 2.2,
+        dataframe-operations >= 2.1 && < 2.2,
+        dataframe-parquet >= 1.3 && < 1.4,
+        dataframe-parsing >= 2.1 && < 2.2,
         text        >= 2.1 && < 3,
         aeson       >= 0.11 && < 3,
-        bytestring  >= 0.11 && < 0.13,
-        containers  >= 0.6.7 && < 0.9,
-        vector      ^>= 0.13
+        bytestring  >= 0.11 && < 0.14,
+        containers  >= 0.6.7 && < 0.10,
+        vector      >= 0.13 && < 0.15
     include-dirs:     cbits
     default-language: Haskell2010
 
@@ -223,11 +223,11 @@ executable dataframe-benchmark-example
     import: warnings
     main-is: Benchmark.hs
     build-depends:    base >= 4 && < 5,
-                      dataframe >= 3.0 && < 3.1,
-                      dataframe-operations >= 2.0 && < 2.1,
+                      dataframe >= 3.1 && < 3.2,
+                      dataframe-operations >= 2.1 && < 2.2,
                       random >= 1 && < 2,
                       time >= 1.12 && < 2,
-                      vector ^>= 0.13,
+                      vector >= 0.13 && < 0.15,
     hs-source-dirs:   app
     default-language: Haskell2010
     ghc-options: -rtsopts -threaded -with-rtsopts=-N
@@ -236,10 +236,10 @@ executable synthesis
     import: warnings
     main-is: Synthesis.hs
     build-depends:    base >= 4 && < 5,
-                      dataframe >= 3.0 && < 3.1,
-                      dataframe-core >= 2.0 && < 2.1,
-                      dataframe-learn >= 2.0 && < 2.1,
-                      dataframe-operations >= 2.0 && < 2.1,
+                      dataframe >= 3.1 && < 3.2,
+                      dataframe-core >= 2.1 && < 2.2,
+                      dataframe-learn >= 2.1 && < 2.2,
+                      dataframe-operations >= 2.1 && < 2.2,
                       random >= 1 && < 2,
                       text >= 2.1 && < 3
     hs-source-dirs:   app
@@ -268,12 +268,12 @@ executable lazy-bench
     if flag(no-csv) || flag(no-parquet)
         buildable: False
     build-depends:    base >= 4 && < 5,
-                      bytestring >= 0.11 && < 0.13,
-                      containers >= 0.6.7 && < 0.9,
-                      dataframe >= 3.0 && < 3.1,
-                      dataframe-core >= 2.0 && < 2.1,
-                      dataframe-lazy >= 2.0 && < 2.1,
-                      dataframe-parsing >= 2.0 && < 2.1,
+                      bytestring >= 0.11 && < 0.14,
+                      containers >= 0.6.7 && < 0.10,
+                      dataframe >= 3.1 && < 3.2,
+                      dataframe-core >= 2.1 && < 2.2,
+                      dataframe-lazy >= 2.1 && < 2.2,
+                      dataframe-parsing >= 2.1 && < 2.2,
                       directory >= 1.3.0.0 && < 2,
                       random >= 1 && < 2,
                       text >= 2.1 && < 3,
@@ -291,9 +291,9 @@ benchmark dataframe-benchmark
                    criterion >= 1 && < 2,
                    deepseq >= 1.4 && < 2,
                    process >= 1.6 && < 2,
-                   dataframe >= 3.0 && < 3.1,
-                   dataframe-core:internal >= 2.0 && < 2.1,
-                   dataframe-operations >= 2.0 && < 2.1,
+                   dataframe >= 3.1 && < 3.2,
+                   dataframe-core >= 2.1 && < 2.2,
+                   dataframe-operations >= 2.1 && < 2.2,
                    random >= 1 && < 2,
     default-language: Haskell2010
     ghc-options:
@@ -375,30 +375,28 @@ test-suite tests
                    Monad
     build-depends:  base >= 4 && < 5,
                     aeson >= 0.11.0.0 && < 3,
-                    bytestring >= 0.11 && < 0.13,
-                    dataframe >= 3.0 && < 3.1,
-                    dataframe-core >= 2.0 && < 2.1,
-                    dataframe-core:internal >= 2.0 && < 2.1,
-                    dataframe-csv >= 2.0 && < 2.1,
-                    dataframe-expr-serializer >= 1.1 && < 1.2,
-                    dataframe-json >= 1.1 && < 1.2,
-                    dataframe-lazy >= 2.0 && < 2.1,
-                    dataframe-learn >= 2.0 && < 2.1,
-                    dataframe-operations >= 2.0 && < 2.1,
-                    dataframe-operations:internal >= 2.0 && < 2.1,
-                    dataframe-parquet >= 1.2 && < 1.3,
-                    dataframe-parsing >= 2.0 && < 2.1,
-                    dataframe-parsing:internal >= 2.0 && < 2.1,
-                    HUnit ^>= 1.6,
+                    bytestring >= 0.11 && < 0.14,
+                    dataframe >= 3.1 && < 3.2,
+                    dataframe-core >= 2.1 && < 2.2,
+                    dataframe-core >= 2.1 && < 2.2,
+                    dataframe-csv >= 2.1 && < 2.2,
+                    dataframe-expr-serializer >= 1.2 && < 1.3,
+                    dataframe-json >= 1.2 && < 1.3,
+                    dataframe-lazy >= 2.1 && < 2.2,
+                    dataframe-learn >= 2.1 && < 2.2,
+                    dataframe-operations >= 2.1 && < 2.2,
+                    dataframe-parquet >= 1.3 && < 1.4,
+                    dataframe-parsing >= 2.1 && < 2.2,
+                    HUnit >= 1.6 && < 1.8,
                     QuickCheck >= 2 && < 3,
                     random-shuffle >= 0.0.4 && < 1,
                     random >= 1 && < 2,
                     text >= 2.1 && < 3,
                     time >= 1.12 && < 2,
-                    vector ^>= 0.13,
-                    temporary >= 1.3 && < 1.4,
+                    vector >= 0.13 && < 0.15,
+                    temporary >= 1.3 && < 1.5,
                     directory >= 1.3 && < 1.4,
-                    containers >= 0.6.7 && < 0.9
+                    containers >= 0.6.7 && < 0.10
     hs-source-dirs: tests
     default-language: Haskell2010
 
@@ -412,12 +410,12 @@ test-suite packed-text
         buildable: False
     other-modules: Internal.PackedText
     build-depends:  base >= 4 && < 5,
-                    bytestring >= 0.11 && < 0.13,
-                    dataframe >= 3.0 && < 3.1,
-                    dataframe-core:internal >= 2.0 && < 2.1,
-                    dataframe-operations >= 2.0 && < 2.1,
-                    HUnit ^>= 1.6,
+                    bytestring >= 0.11 && < 0.14,
+                    dataframe >= 3.1 && < 3.2,
+                    dataframe-core >= 2.1 && < 2.2,
+                    dataframe-operations >= 2.1 && < 2.2,
+                    HUnit >= 1.6 && < 1.8,
                     text >= 2.1 && < 3,
-                    vector ^>= 0.13
+                    vector >= 0.13 && < 0.15
     hs-source-dirs: tests
     default-language: Haskell2010

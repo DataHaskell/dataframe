@@ -341,19 +341,23 @@ getRowAsText :: DataFrame -> Int -> [T.Text]
 getRowAsText df i = map (`showElement` i) (V.toList (columns df))
 
 showElement :: Column -> Int -> T.Text
-showElement (BoxedColumn _ (c :: V.Vector a)) i = case c V.!? i of
-    Nothing -> error $ "Column index out of bounds at row " ++ show i
-    Just e
-        | Just Refl <- testEquality (typeRep @a) (typeRep @T.Text) -> e
-        | App t1 t2 <- typeRep @a
-        , Just HRefl <- eqTypeRep t1 (typeRep @Maybe) ->
-            case testEquality t2 (typeRep @T.Text) of
-                Just Refl -> fromMaybe "null" e
-                Nothing -> stripJust (T.pack (show e))
-        | otherwise -> T.pack (show e)
-showElement (UnboxedColumn _ c) i = case c VU.!? i of
-    Nothing -> error $ "Column index out of bounds at row " ++ show i
-    Just e -> T.pack (show e)
+showElement (BoxedColumn bm (c :: V.Vector a)) i = case bm of
+    Just b | not (bitmapTestBit b i) -> "null"
+    _ -> case c V.!? i of
+        Nothing -> error $ "Column index out of bounds at row " ++ show i
+        Just e
+            | Just Refl <- testEquality (typeRep @a) (typeRep @T.Text) -> e
+            | App t1 t2 <- typeRep @a
+            , Just HRefl <- eqTypeRep t1 (typeRep @Maybe) ->
+                case testEquality t2 (typeRep @T.Text) of
+                    Just Refl -> fromMaybe "null" e
+                    Nothing -> stripJust (T.pack (show e))
+            | otherwise -> T.pack (show e)
+showElement (UnboxedColumn bm c) i = case bm of
+    Just b | not (bitmapTestBit b i) -> "null"
+    _ -> case c VU.!? i of
+        Nothing -> error $ "Column index out of bounds at row " ++ show i
+        Just e -> T.pack (show e)
 showElement (PackedText bm p) i = case bm of
     Just b | not (bitmapTestBit b i) -> "null"
     _ -> packedIndexText p i

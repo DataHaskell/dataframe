@@ -1,5 +1,9 @@
 # Revision history for dataframe
 
+## 3.1.0.0
+* Fix toSeparated's handling of nulls
+* Fix build failing.
+
 ## 3.0.0.0
 
 A breaking release that removes internal functions from the public API.

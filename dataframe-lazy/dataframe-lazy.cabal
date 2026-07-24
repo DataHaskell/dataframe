@@ -1,6 +1,6 @@
 cabal-version:      3.4
 name:               dataframe-lazy
-version:            2.0.0.0
+version:            2.1.0.0
 synopsis:           Lazy query engine for the dataframe ecosystem.
 description:
     The lazy/streaming query engine: relational-algebra plans, optimizer,
@@ -42,23 +42,22 @@ library
                         DataFrame.Lazy.Internal.PhysicalPlan
     build-depends:      base >= 4 && < 5,
                         async >= 2.2 && < 3,
-                        attoparsec >= 0.12 && < 0.15,
-                        bytestring >= 0.11 && < 0.13,
-                        containers >= 0.6.7 && < 0.9,
-                        dataframe-core >= 2.0 && < 2.1,
-                        dataframe-core:internal >= 2.0 && < 2.1,
-                        dataframe-csv >= 2.0 && < 2.1,
-                        dataframe-csv:internal >= 2.0 && < 2.1,
-                        dataframe-operations >= 2.0 && < 2.1,
-                        dataframe-parquet >= 1.2 && < 1.3,
-                        dataframe-parsing >= 2.0 && < 2.1,
-                        dataframe-parsing:internal >= 2.0 && < 2.1,
+                        attoparsec >= 0.12 && < 0.16,
+                        bytestring >= 0.11 && < 0.14,
+                        containers >= 0.6.7 && < 0.10,
+                        dataframe-core >= 2.1 && < 2.2,
+                        dataframe-core >= 2.1 && < 2.2,
+                        dataframe-csv >= 2.1 && < 2.2,
+                        dataframe-csv >= 2.1 && < 2.2,
+                        dataframe-operations >= 2.1 && < 2.2,
+                        dataframe-parquet >= 1.3 && < 1.4,
+                        dataframe-parsing >= 2.1 && < 2.2,
                         directory >= 1.3.0.0 && < 2,
                         filepath >= 1.4 && < 2,
                         Glob >= 0.10 && < 1,
                         stm >= 2.5 && < 3,
                         temporary >= 1.3 && < 2,
                         text >= 2.1 && < 3,
-                        vector ^>= 0.13
+                        vector >= 0.13 && < 0.15
     hs-source-dirs:     src
     default-language:   Haskell2010

@@ -1,6 +1,6 @@
 cabal-version:      3.4
 name:               dataframe-operations
-version:            2.0.0.0
+version:            2.1.0.0
 synopsis:           Column operations, expression DSL, and statistics for the dataframe ecosystem.
 description:
     Untyped column operations (select, filter, sort, join, groupBy,
@@ -27,20 +27,10 @@ common warnings
         -Wunused-local-binds
         -Wunused-packages
 
-library internal
-    import:             warnings
-    visibility:         public
-    exposed-modules:    DataFrame.Internal.Statistics
-    build-depends:      base >= 4 && < 5,
-                        dataframe-core:internal >= 2.0 && < 2.1,
-                        vector ^>= 0.13,
-                        vector-algorithms ^>= 0.9
-    hs-source-dirs:     src-internal
-    default-language:   Haskell2010
-
 library
     import:             warnings
     exposed-modules:
+                        DataFrame.Internal.Statistics
                         DataFrame.Functions
                         DataFrame.Monad
                         DataFrame.Operations.AggregateScatter
@@ -66,18 +56,15 @@ library
                         DataFrame.Typed.Sampling
                         DataFrame.Typed.Statistics
     build-depends:      base >= 4 && < 5,
-                        bytestring >= 0.11 && < 0.13,
-                        containers >= 0.6.7 && < 0.9,
-                        dataframe-core >= 2.0 && < 2.1,
-                        dataframe-core:internal >= 2.0 && < 2.1,
-                        dataframe-parsing >= 2.0 && < 2.1,
-                        dataframe-parsing:internal >= 2.0 && < 2.1,
-                        dataframe-operations:internal,
+                        bytestring >= 0.11 && < 0.14,
+                        containers >= 0.6.7 && < 0.10,
+                        dataframe-core >= 2.1 && < 2.2,
+                        dataframe-parsing >= 2.1 && < 2.2,
                         random >= 1.2 && < 2,
                         regex-tdfa >= 1.3.0 && < 2,
                         text >= 2.1 && < 3,
                         time >= 1.12 && < 2,
-                        vector ^>= 0.13,
-                        vector-algorithms ^>= 0.9
-    hs-source-dirs:     src
+                        vector >= 0.13 && < 0.15,
+                        vector-algorithms >= 0.9 && < 0.11
+    hs-source-dirs:     src, src-internal
     default-language:   Haskell2010
