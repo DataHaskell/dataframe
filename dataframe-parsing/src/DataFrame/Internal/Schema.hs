@@ -1,10 +1,14 @@
 {-# LANGUAGE AllowAmbiguousTypes #-}
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE InstanceSigs #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE UndecidableInstances #-}
 
 {- |
 Runtime schema representation. The Template-Haskell @deriveSchema@ splice
@@ -16,14 +20,18 @@ module DataFrame.Internal.Schema (
     schemaType,
     Schema (..),
     makeSchema,
+    RuntimeSchema (..),
 ) where
 
+import Data.Kind (Type)
 import qualified Data.Map as M
 import Data.Maybe (isJust)
 import qualified Data.Proxy as P
 import qualified Data.Text as T
 import Data.Type.Equality (TestEquality (..))
 import DataFrame.Internal.Column (Columnable)
+import DataFrame.Typed.Types (Column)
+import GHC.TypeLits (KnownSymbol, symbolVal)
 import Type.Reflection (typeRep)
 
 -- | A runtime tag for a column’s element type.
@@ -86,3 +94,32 @@ newtype Schema = Schema
 -- | Construct a 'Schema' from a list of @(columnName, schemaType)@ pairs.
 makeSchema :: [(T.Text, SchemaType)] -> Schema
 makeSchema = Schema . M.fromList
+
+{- | The runtime 'Schema' behind a type-level schema — names /and/ element
+types — so a reader can project to a schema's columns and skip inference for
+them in one step.
+
+Every column type must have a 'Read' instance, which 'Columnable' does not
+imply; that is what lets the names carry their types across to a reader.
+
+==== __Examples__
+>>> :set -XTypeApplications -XDataKinds
+>>> elements (runtimeSchema @'[Column "n" Int])
+fromList [("n",Int)]
+-}
+class RuntimeSchema (cols :: [Type]) where
+    runtimeSchema :: Schema
+
+instance RuntimeSchema '[] where
+    runtimeSchema = makeSchema []
+
+instance
+    (KnownSymbol name, Columnable a, Read a, RuntimeSchema rest) =>
+    RuntimeSchema (Column name a ': rest)
+    where
+    runtimeSchema =
+        Schema $
+            M.insert
+                (T.pack (symbolVal (P.Proxy @name)))
+                (schemaType @a)
+                (elements (runtimeSchema @rest))

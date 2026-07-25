@@ -23,58 +23,114 @@ module DataFrame.IO.CSV.Fast (
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Internal as BSI
 import qualified Data.Map as M
-import qualified Data.Vector as Vector
 import qualified Data.Vector.Storable as VS
 
+import Data.Char (ord)
 import Data.Text (Text)
 import Data.Word (Word8)
 import System.IO.MMap (Mode (WriteCopy), mmapFileForeignPtr)
 
 import DataFrame.IO.CSV (
+    CsvReader,
     ReadOptions (..),
     TypeSpec (..),
     defaultReadOptions,
+    validateReadOptions,
  )
-import DataFrame.IO.CSV.Fast.Core (readSeparatedCore)
+import DataFrame.IO.CSV.Fast.Core (checkSeparatorAgrees, readSeparatedCore)
 import DataFrame.IO.CSV.Fast.Index (
     CsvParseError (..),
     comma,
     getDelimiterIndices,
     tab,
  )
-import DataFrame.Internal.DataFrame (DataFrame (..))
+import DataFrame.Internal.DataFrame (DataFrame)
 import DataFrame.Schema (Schema (..))
 
-readSeparatedDefault :: Word8 -> FilePath -> IO DataFrame
-readSeparatedDefault separator =
-    readSeparated separator defaultReadOptions
+-- | The separator a 'ReadOptions' asks for, as the scanner's byte.
+separatorByte :: ReadOptions -> Word8
+separatorByte = fromIntegral . ord . columnSeparator
 
+{- | Read a CSV file with the default options.
+
+==== __Example__
+@
+ghci> D.fastReadCsv ".\/data\/taxi.csv"
+
+@
+-}
 fastReadCsv :: FilePath -> IO DataFrame
-fastReadCsv = readSeparatedDefault comma
+fastReadCsv = fastReadCsvWithOpts defaultReadOptions
 
+{- | Alias for 'fastReadCsv'.
+
+==== __Example__
+@
+ghci> D.readCsvFast ".\/data\/taxi.csv"
+
+@
+-}
 readCsvFast :: FilePath -> IO DataFrame
 readCsvFast = fastReadCsv
 
-fastReadTsv :: FilePath -> IO DataFrame
-fastReadTsv = readSeparatedDefault tab
+{- | Read a TSV file with the default options.
 
+==== __Example__
+@
+ghci> D.fastReadTsv ".\/data\/taxi.tsv"
+
+@
+-}
+fastReadTsv :: FilePath -> IO DataFrame
+fastReadTsv = fastReadTsvWithOpts defaultReadOptions
+
+{- | Alias for 'fastReadTsv'.
+
+==== __Example__
+@
+ghci> D.readTsvFast ".\/data\/taxi.tsv"
+
+@
+-}
 readTsvFast :: FilePath -> IO DataFrame
 readTsvFast = fastReadTsv
 
 {- | Like 'fastReadCsv' but takes a 'ReadOptions' record.  Use this when
-you need to tune ragged-row handling, unclosed-quote handling, or the
-whitespace-trimming knob; otherwise stick with 'fastReadCsv'.
--}
-fastReadCsvWithOpts :: ReadOptions -> FilePath -> IO DataFrame
-fastReadCsvWithOpts = readSeparated comma
+you need to tune ragged-row handling, unclosed-quote handling, the
+whitespace-trimming knob, or the column selection; otherwise stick with
+'fastReadCsv'.  The separator comes from 'columnSeparator', so this is a
+'CsvReader' the lazy scan can drive.
 
--- | TSV counterpart to 'fastReadCsvWithOpts'.
+==== __Example__
+@
+ghci> D.fastReadCsvWithOpts D.defaultReadOptions{D.readColumns = Just ["id", "name"]} ".\/data\/customers.csv"
+
+@
+-}
+fastReadCsvWithOpts :: CsvReader
+fastReadCsvWithOpts opts = readSeparated (separatorByte opts) opts
+
+{- | TSV counterpart to 'fastReadCsvWithOpts'; pins 'columnSeparator' to tab.
+
+==== __Example__
+@
+ghci> D.fastReadTsvWithOpts D.defaultReadOptions{D.safeRead = D.MaybeRead} ".\/data\/taxi.tsv"
+
+@
+-}
 fastReadTsvWithOpts :: ReadOptions -> FilePath -> IO DataFrame
-fastReadTsvWithOpts = readSeparated tab
+fastReadTsvWithOpts opts = fastReadCsvWithOpts opts{columnSeparator = '\t'}
 
 {- | Read a CSV and coerce each column to the type declared in the
 supplied 'Schema'. Schema columns bypass inference: parsed straight from
 file bytes as the declared type, avoiding row-1 misclassification.
+
+==== __Example__
+@
+ghci> schema = D.makeSchema [("id", D.schemaType \@Int)]
+ghci> D.fastReadCsvWithSchema schema ".\/data\/customers.csv"
+
+@
 -}
 fastReadCsvWithSchema :: Schema -> FilePath -> IO DataFrame
 fastReadCsvWithSchema schema =
@@ -85,10 +141,26 @@ fastReadCsvWithSchema schema =
                 SpecifyTypes (M.toList (elements schema)) (typeSpec defaultReadOptions)
             }
 
--- | In-memory version of 'fastReadCsv'.
+{- | In-memory version of 'fastReadCsv'.
+
+==== __Example__
+@
+ghci> D.fastReadCsvFromBytes "id,name\\n1,Ada\\n"
+
+@
+-}
 fastReadCsvFromBytes :: BS.ByteString -> IO DataFrame
 fastReadCsvFromBytes = readSeparatedFromBytes comma defaultReadOptions
 
+{- | In-memory version of 'fastReadCsvWithSchema'.
+
+==== __Example__
+@
+ghci> schema = D.makeSchema [("id", D.schemaType \@Int)]
+ghci> D.fastReadCsvFromBytesWithSchema schema "id,name\\n1,Ada\\n"
+
+@
+-}
 fastReadCsvFromBytesWithSchema :: Schema -> BS.ByteString -> IO DataFrame
 fastReadCsvFromBytesWithSchema schema =
     readSeparatedFromBytes
@@ -99,33 +171,39 @@ fastReadCsvFromBytesWithSchema schema =
             }
 
 {- | Read a CSV and return only the named columns, in the order given.
-The SIMD scan and delimiter classification still run over the whole
-file, but unreferenced columns are dropped from the result.
+Shorthand for 'readColumns'. The SIMD scan and delimiter
+classification still run over the whole file, but unnamed columns are
+never extracted, parsed or allocated. Naming a column the file does not
+have raises a 'ColumnsNotFoundException'.
+
+==== __Example__
+@
+ghci> D.fastReadCsvProj ["id", "name"] ".\/data\/customers.csv"
+
+@
 -}
 fastReadCsvProj :: [Text] -> FilePath -> IO DataFrame
-fastReadCsvProj projection path = do
-    df <- fastReadCsv path
-    pure (projectColumns projection df)
+fastReadCsvProj projection =
+    readSeparated comma defaultReadOptions{readColumns = Just projection}
 
-{- | Filter a DataFrame's columns down to (and in the order of) the
-supplied names. Missing names are silently dropped; check the result's
-'columnIndices' map for strict semantics.
+{- | Reads via a private ('WriteCopy') mmap so the buffer is never copied.
+The @separator@ byte and 'columnSeparator' in @opts@ must agree; use
+'fastReadCsvWithOpts' unless you need to pass a delimiter byte directly.
+
+==== __Example__
+@
+ghci> D.readSeparated 44 D.defaultReadOptions ".\/data\/taxi.csv"  -- 44 = ','
+
+@
 -}
-projectColumns :: [Text] -> DataFrame -> DataFrame
-projectColumns names df =
-    let idxs = [(n, i) | n <- names, Just i <- [M.lookup n (columnIndices df)]]
-        newCols = Vector.fromListN (length idxs) [columns df Vector.! i | (_, i) <- idxs]
-        newIndices = M.fromList (zip (map fst idxs) [0 ..])
-        (rows, _) = dataframeDimensions df
-     in DataFrame newCols newIndices (rows, length idxs) M.empty
-
--- | Reads via a private ('WriteCopy') mmap so the buffer is never copied.
 readSeparated ::
     Word8 ->
     ReadOptions ->
     FilePath ->
     IO DataFrame
 readSeparated separator opts filePath = do
+    validateReadOptions opts
+    checkSeparatorAgrees separator opts
     (bufferPtr, offset, len) <-
         mmapFileForeignPtr
             filePath
@@ -140,6 +218,12 @@ readSeparated separator opts filePath = do
 {- | Identical to 'readSeparated' but reads from an already-loaded byte
 buffer (e.g. a slice of a memory-mapped file). Zero-copy: the bytes are
 only read, never modified or grown.
+
+==== __Example__
+@
+ghci> D.readSeparatedFromBytes 44 D.defaultReadOptions "id,name\\n1,Ada\\n"  -- 44 = ','
+
+@
 -}
 readSeparatedFromBytes ::
     Word8 ->
@@ -153,6 +237,12 @@ readSeparatedFromBytes separator opts bs = do
 {- | 'readSeparatedFromBytes' with a forced chunk count, bypassing the
 capability/size gate. Intended for tests and benchmarks that need to pin
 the parallel split; @1@ forces the sequential path.
+
+==== __Example__
+@
+ghci> D.readSeparatedFromBytesChunks 1 44 D.defaultReadOptions "id,name\\n1,Ada\\n"  -- 44 = ','
+
+@
 -}
 readSeparatedFromBytesChunks ::
     Int ->

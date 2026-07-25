@@ -1,6 +1,6 @@
 cabal-version:      3.4
 name:               dataframe-learn
-version:            2.1.0.0
+version:            2.1.0.1
 synopsis:           Interpretable, expression-returning machine learning for the dataframe ecosystem.
 description:
     A small scikit-learn-style ML library where every model returns both an
@@ -142,7 +142,7 @@ test-suite learn-internal
                         containers >= 0.6.7 && < 0.10,
                         dataframe-core >= 2.1 && < 2.2,
                         dataframe-core >= 2.1 && < 2.2,
-                        dataframe-csv >= 2.1 && < 2.2,
+                        dataframe-csv >= 2.2 && < 2.3,
                         dataframe-learn,
                         dataframe-learn:internal,
                         dataframe-operations >= 2.1 && < 2.2,

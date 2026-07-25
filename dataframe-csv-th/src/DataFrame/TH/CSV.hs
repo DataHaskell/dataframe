@@ -27,7 +27,7 @@ declareColumnsFromCsvFile path = do
     df <-
         liftIO
             ( CSV.readSeparated
-                (CSV.defaultReadOptions{CSV.numColumns = Just 100})
+                (CSV.defaultReadOptions{CSV.numRowsToRead = Just 100})
                 path
             )
     declareColumns df

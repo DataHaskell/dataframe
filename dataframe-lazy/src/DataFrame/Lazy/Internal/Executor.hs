@@ -37,7 +37,7 @@ import Data.Typeable (Typeable)
 import qualified Data.Vector as VB
 import qualified Data.Vector.Unboxed as VU
 import Data.Word (Word16, Word32, Word64, Word8)
-import DataFrame.IO.CSV (CsvReader)
+import DataFrame.IO.CSV (CsvReader, ReadOptions (..), schemaReadOptions)
 import qualified DataFrame.IO.Parquet as Parquet
 import qualified DataFrame.Internal.Column as C
 import qualified DataFrame.Internal.DataFrame as D
@@ -160,8 +160,8 @@ foldBatches f seed plan = do
 buildStream :: PhysicalPlan -> IO Stream
 buildStream (PhysicalScan (CsvSource path sep reader) cfg) =
     executeCsvScan path sep reader cfg
-buildStream (PhysicalScan (CsvSourceStreaming path _sep reader) cfg) =
-    executeCsvScanStreaming path reader cfg
+buildStream (PhysicalScan (CsvSourceStreaming path sep reader) cfg) =
+    executeCsvScanStreaming path sep reader cfg
 buildStream (PhysicalScan (ParquetSource path) cfg) =
     executeParquetScan path cfg
 buildStream (PhysicalSpill child path) = do
@@ -502,18 +502,25 @@ executeParquetScan path cfg = do
 -- CSV scan implementation
 -- ---------------------------------------------------------------------------
 
+{- | The options a CSV scan reads with: the plan's schema supplies the column
+types and the projection, the source supplies the separator.
+-}
+scanReadOptions :: Char -> ScanConfig -> ReadOptions
+scanReadOptions sep cfg =
+    (schemaReadOptions (scanSchema cfg)){columnSeparator = sep}
+
 {- | SIMD-parallel CSV scan: the file is split at newline boundaries into one
 slice per capability, parsed concurrently, sliced into batches, and fed through
 a bounded queue. Pushdown predicates are applied per batch by the consumer.
 -}
 executeCsvScan :: FilePath -> Char -> CsvReader -> ScanConfig -> IO Stream
-executeCsvScan path _sep reader cfg = do
+executeCsvScan path sep reader cfg = do
     nCaps <- getNumCapabilities
     chunkPaths <- splitCsvAtNewlines (max 1 nCaps) path
 
-    let schema = scanSchema cfg
+    let opts = scanReadOptions sep cfg
         batchSz = scanBatchSize cfg
-    chunkDfs <- mapConcurrently (reader schema) chunkPaths
+    chunkDfs <- mapConcurrently (reader opts) chunkPaths
     mapM_ removeFile chunkPaths
 
     queue <- newTBQueueIO (fromIntegral (max 4 (2 * nCaps)))
@@ -534,9 +541,10 @@ executeCsvScan path _sep reader cfg = do
                      in return (Just df')
         )
 
-executeCsvScanStreaming :: FilePath -> CsvReader -> ScanConfig -> IO Stream
-executeCsvScanStreaming path reader cfg = do
-    let schema = scanSchema cfg
+executeCsvScanStreaming ::
+    FilePath -> Char -> CsvReader -> ScanConfig -> IO Stream
+executeCsvScanStreaming path sep reader cfg = do
+    let opts = scanReadOptions sep cfg
         batchSz = scanBatchSize cfg
         windowBytes = 64 * 1024 * 1024 :: Int
     queue <- newTBQueueIO 8
@@ -547,7 +555,7 @@ executeCsvScanStreaming path reader cfg = do
                     unless (BS.null bytes) $ do
                         p <- emptySystemTempFile "lazy_csv_win_.csv"
                         BS.writeFile p (header <> BS.singleton nl <> bytes)
-                        df <- reader schema p
+                        df <- reader opts p
                         removeFile p
                         forM_ (sliceIntoBatches batchSz df) $ \b ->
                             atomically (writeTBQueue queue (Just b))

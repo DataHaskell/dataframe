@@ -19,12 +19,10 @@ module DataFrame.IO.CSV.Fast.Parallel (
 ) where
 
 import qualified Data.Text as T
-import qualified Data.Vector as V
 import qualified Data.Vector.Storable as VS
 
 import Control.Concurrent (getNumCapabilities)
 import Control.Exception (throwIO)
-import Control.Monad (zipWithM)
 import Data.Either (partitionEithers)
 import Debug.Trace (traceMarkerIO)
 import System.Mem (performMajorGC)
@@ -73,16 +71,17 @@ result as the sequential path by construction; see the chunk-determinism
 tests and property.
 -}
 buildAllColumns ::
-    Int -> ColumnEnv -> V.Vector T.Text -> Int -> IO [(Column, Bool)]
-buildAllColumns nChunks env names numCol
+    Int -> ColumnEnv -> [(T.Text, Int)] -> IO [(Column, Bool)]
+buildAllColumns nChunks env wanted
     | chunks <= 1 =
-        mapM (\c -> buildColumn env (names V.! c) c) [0 .. numCol - 1]
+        mapM (uncurry (buildColumn env)) wanted
     | otherwise = do
         width <- getNumCapabilities
-        let plans = [planColumn env (names V.! c) c | c <- [0 .. numCol - 1]]
+        let plans = [planColumn env name fieldIx | (name, fieldIx) <- wanted]
+            fields = map snd wanted
             ranges = chunkRanges chunks (ceNumRow env)
         traceMarkerIO "fastcsv:fanout"
-        perChunk <- pooledRun width [runChunk env plans r | r <- ranges]
+        perChunk <- pooledRun width [runChunk env (zip fields plans) r | r <- ranges]
         traceMarkerIO "fastcsv:join-done"
         -- Reset the major-GC trigger here, where the copyable live set is
         -- small (chunk payloads are large objects). Otherwise the heap
@@ -100,12 +99,12 @@ buildAllColumns nChunks env names numCol
                         mergeColumn
                             width
                             env
-                            (names V.! c)
-                            (plans !! c)
-                            c
-                            [(rng, cols !! c) | (rng, cols) <- zip ranges perChunk]
+                            name
+                            plan
+                            fieldIx
+                            [(rng, cols !! slot) | (rng, cols) <- zip ranges perChunk]
                     forceColumn col `seq` pure r
-                | c <- [0 .. numCol - 1]
+                | (slot, ((name, fieldIx), plan)) <- zip [0 ..] (zip wanted plans)
                 ]
         traceMarkerIO "fastcsv:merge-done"
         pure merged
@@ -132,8 +131,8 @@ chunkEnv env (off, len) =
         }
 
 -- | One worker: run every column's plan over one chunk of rows.
-runChunk :: ColumnEnv -> [ColumnPlan] -> (Int, Int) -> IO [ChunkCol]
-runChunk env plans range@(off, _) = zipWithM build [0 ..] plans
+runChunk :: ColumnEnv -> [(Int, ColumnPlan)] -> (Int, Int) -> IO [ChunkCol]
+runChunk env plans range@(off, _) = mapM (uncurry build) plans
   where
     cenv = chunkEnv env range
     build col plan = case plan of

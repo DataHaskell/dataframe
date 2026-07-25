@@ -310,15 +310,60 @@ goldenCases =
         )
     ,
         ( "row_cap"
-        , defaultReadOptions{numColumns = Just 2}
+        , defaultReadOptions{numRowsToRead = Just 2}
         , "a\n1\n2\n3\n4\n"
         , Cols (2, 1) [("a", ints [1, 2])]
         )
     ,
         ( "row_cap_zero"
-        , defaultReadOptions{numColumns = Just 0}
+        , defaultReadOptions{numRowsToRead = Just 0}
         , "a,b\n1,2\n"
         , Cols (0, 2) [("a", mtexts []), ("b", mtexts [])]
+        )
+    ,
+        ( "selected_subset"
+        , defaultReadOptions{readColumns = Just ["c", "a"]}
+        , "a,b,c\n1,x,2.5\n3,y,4.5\n"
+        , Cols (2, 2) [("c", dbls [2.5, 4.5]), ("a", ints [1, 3])]
+        )
+    ,
+        ( "selected_single_trailing"
+        , defaultReadOptions{readColumns = Just ["c"]}
+        , "a,b,c\n1,x,2\n3,y,4\n"
+        , Cols (2, 1) [("c", ints [2, 4])]
+        )
+    ,
+        ( "selected_all_reordered"
+        , defaultReadOptions{readColumns = Just ["b", "a"]}
+        , "a,b\n1,x\n2,y\n"
+        , Cols (2, 2) [("b", texts ["x", "y"]), ("a", ints [1, 2])]
+        )
+    ,
+        ( "selected_ignores_unselected_values"
+        , defaultReadOptions{readColumns = Just ["a"]}
+        , "a,b\n1,notanumber\n2,\n"
+        , Cols (2, 1) [("a", ints [1, 2])]
+        )
+    ,
+        ( "selected_noheader_positional"
+        , defaultReadOptions{headerSpec = NoHeader, readColumns = Just ["2", "0"]}
+        , "1,x,9\n2,y,8\n"
+        , Cols (2, 2) [("2", ints [9, 8]), ("0", ints [1, 2])]
+        )
+    ,
+        ( "selected_with_specified_type"
+        , defaultReadOptions
+            { readColumns = Just ["b"]
+            , typeSpec = SpecifyTypes [("b", schemaTypeText)] (InferFromSample 100)
+            }
+        , "a,b\n1,2\n3,4\n"
+        , Cols (2, 1) [("b", texts ["2", "4"])]
+        )
+    ,
+        ( "selected_missing"
+        , defaultReadOptions{readColumns = Just ["a", "nope"]}
+        , "a,b\n1,2\n"
+        , Err "Column not found"
         )
     ,
         ( "trailing_sep"

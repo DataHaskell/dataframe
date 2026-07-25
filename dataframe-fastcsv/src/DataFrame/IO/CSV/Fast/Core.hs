@@ -1,3 +1,5 @@
+{-# LANGUAGE OverloadedStrings #-}
+
 {- | The shared read pipeline behind every "DataFrame.IO.CSV.Fast" entry
 point: scan for delimiters, classify rows, then build every column with
 the typed extraction passes — chunk-parallel when the input is large and
@@ -6,6 +8,7 @@ count. The result is fully forced before it is returned.
 -}
 module DataFrame.IO.CSV.Fast.Core (
     readSeparatedCore,
+    checkSeparatorAgrees,
 ) where
 
 import qualified Data.Map as M
@@ -15,16 +18,21 @@ import qualified Data.Vector as Vector
 import qualified Data.Vector.Storable as VS
 
 import Control.Exception (throwIO)
-import Control.Monad (when)
+import Control.Monad (unless, when)
+import Data.Char (ord)
+import qualified Data.Text as T
 import Data.Word (Word8)
 import Debug.Trace (traceMarkerIO)
 
 import DataFrame.IO.CSV (
     HeaderSpec (..),
+    InvalidReadOptions (..),
     RaggedRowPolicy (..),
     ReadOptions (..),
     UnclosedQuotePolicy (..),
+    resolveSelection,
     schemaTypeMap,
+    validateReadOptions,
  )
 import DataFrame.IO.CSV.Fast.Index (
     CsvParseError (..),
@@ -55,6 +63,8 @@ readSeparatedCore ::
     VS.Vector Word8 ->
     IO DataFrame
 readSeparatedCore chunkSpec separator opts fileRaw = do
+    validateReadOptions opts
+    checkSeparatorAgrees separator opts
     let (file, _bomLen) = stripBom fileRaw
         contentLen = VS.length file
     nChunks <- maybe (autoChunkCount contentLen) pure chunkSpec
@@ -96,21 +106,22 @@ readSeparatedCore chunkSpec separator opts fileRaw = do
                         , fcTrim = fastCsvTrimUnquoted opts
                         }
                 headerNumCol = fieldsInRow rowEnds 0
-                (columnNames, dataStartRow, numCol) = case headerSpec opts of
+                (headerNames, dataStartRow, numCol) = case headerSpec opts of
                     NoHeader ->
-                        ( Vector.fromList $
-                            map (Text.pack . show) [0 .. headerNumCol - 1]
+                        ( map (Text.pack . show) [0 .. headerNumCol - 1]
                         , 0
                         , headerNumCol
                         )
                     UseFirstRow ->
-                        ( Vector.fromList $
-                            map (extractField ctx 0) [0 .. headerNumCol - 1]
+                        ( map (extractField ctx 0) [0 .. headerNumCol - 1]
                         , 1
                         , headerNumCol
                         )
                     ProvideNames ns ->
-                        (Vector.fromList ns, 0, length ns)
+                        (ns, 0, length ns)
+                wanted = resolveSelection opts headerNames
+                columnNames = Vector.fromList (map fst wanted)
+                numKept = length wanted
             if numCol == 0
                 then return emptyDataFrame
                 else do
@@ -137,9 +148,9 @@ readSeparatedCore chunkSpec separator opts fileRaw = do
                                         max 64 (contentLen `div` numCol)
                                     , ceOpts = opts
                                     }
-                        results <- buildAllColumns nChunks env columnNames numCol
+                        results <- buildAllColumns nChunks env wanted
                         traceMarkerIO "fastcsv:build-done"
-                        let cols = Vector.fromListN numCol (map fst results)
+                        let cols = Vector.fromListN numKept (map fst results)
                             legacySchema =
                                 S.fromList
                                     [ columnNames Vector.! c
@@ -152,7 +163,7 @@ readSeparatedCore chunkSpec separator opts fileRaw = do
                                 DataFrame
                                     cols
                                     colIndices
-                                    (numRow, numCol)
+                                    (numRow, numKept)
                                     M.empty
                             resolveMode =
                                 effectiveSafeRead
@@ -178,6 +189,21 @@ readSeparatedCore chunkSpec separator opts fileRaw = do
                                 Vector.foldl' (\() c -> c `seq` ()) () cols `seq`
                                     return df
                             else return $! forceDataFrame df'
+
+{- | The scanner is handed its separator as a byte, so a 'columnSeparator'
+saying anything else would be silently ignored. Reject that up front.
+-}
+checkSeparatorAgrees :: Word8 -> ReadOptions -> IO ()
+checkSeparatorAgrees separator opts =
+    unless (separator == fromIntegral (ord asked)) $
+        throwIO . InvalidReadOptions $
+            [ "columnSeparator is "
+                <> T.pack (show asked)
+                <> " but this reader was given "
+                <> T.pack (show (toEnum (fromIntegral separator) :: Char))
+            ]
+  where
+    asked = columnSeparator opts
 
 {- | An empty 'DataFrame' — returned when the input has no delimiters
 (empty file or single line with no separator and no newline). Guards

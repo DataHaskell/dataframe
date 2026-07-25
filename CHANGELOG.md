@@ -1,5 +1,9 @@
 # Revision history for dataframe
 
+## 3.2.0.0
+
+* Restrict CSV reads to selected columns for untyped and typed readers.
+
 ## 3.1.0.0
 * Fix toSeparated's handling of nulls
 * Fix build failing.

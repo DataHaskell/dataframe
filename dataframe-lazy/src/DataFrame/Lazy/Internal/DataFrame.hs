@@ -8,7 +8,7 @@
 module DataFrame.Lazy.Internal.DataFrame where
 
 import qualified Data.Text as T
-import DataFrame.IO.CSV (CsvReader, readCsvWithSchema)
+import DataFrame.IO.CSV (CsvReader, readSeparated)
 import qualified DataFrame.Internal.Column as C
 import qualified DataFrame.Internal.DataFrame as D
 import qualified DataFrame.Internal.Expression as E
@@ -54,13 +54,32 @@ fromDataFrame :: D.DataFrame -> LazyDataFrame
 fromDataFrame df = LazyDataFrame{plan = SourceDF df, batchSize = 1_000_000}
 
 {- | Scan a CSV file with the default comma separator and the in-tree
-attoparsec reader.  For the SIMD reader use 'scanCsvWith'.
+strict reader.  For the SIMD reader use 'scanCsvWith'.
+
+The 'Schema' both types and selects: only the columns it names are read,
+matching 'scanParquet'.
+
+==== __Example__
+@
+ghci> schema = D.makeSchema [("id", D.schemaType \@Int), ("name", D.schemaType \@Text)]
+ghci> L.runDataFrame (L.scanCsv schema \"customers.csv\")
+
+@
 -}
 scanCsv :: Schema -> T.Text -> LazyDataFrame
-scanCsv = scanCsvWith readCsvWithSchema
+scanCsv = scanCsvWith readSeparated
 
 {- | Like 'scanCsv' but with an explicit CSV reader (e.g. the SIMD reader
-@fastReadCsvWithSchema@ from @dataframe-fastcsv@).
+@fastReadCsvWithOpts@ from @dataframe-fastcsv@). The scan derives the
+reader's 'DataFrame.IO.CSV.ReadOptions' from the schema and separator, so
+any 'CsvReader' projects.
+
+==== __Example__
+@
+ghci> import qualified DataFrame.IO.CSV.Fast as Fast
+ghci> L.runDataFrame (L.scanCsvWith Fast.fastReadCsvWithOpts schema \"customers.csv\")
+
+@
 -}
 scanCsvWith :: CsvReader -> Schema -> T.Text -> LazyDataFrame
 scanCsvWith reader schema path =
@@ -69,6 +88,16 @@ scanCsvWith reader schema path =
         , batchSize = 1_000_000
         }
 
+{- | Like 'scanCsvWith', but the file is read in bounded-memory windows
+instead of one pass per chunk — for files too large to hold in memory even
+after the schema's projection.
+
+==== __Example__
+@
+ghci> L.runDataFrame (L.scanCsvStreamingWith Fast.fastReadCsvWithOpts schema \"huge.csv\")
+
+@
+-}
 scanCsvStreamingWith :: CsvReader -> Schema -> T.Text -> LazyDataFrame
 scanCsvStreamingWith reader schema path =
     LazyDataFrame
@@ -76,11 +105,25 @@ scanCsvStreamingWith reader schema path =
         , batchSize = 1_000_000
         }
 
--- | Scan a character-separated file with the default attoparsec reader.
-scanSeparated :: Char -> Schema -> T.Text -> LazyDataFrame
-scanSeparated = scanSeparatedWith readCsvWithSchema
+{- | Scan a character-separated file with the default strict reader.
 
--- | Like 'scanSeparated' but with an explicit CSV reader.
+==== __Example__
+@
+ghci> L.runDataFrame (L.scanSeparated ';' schema \"customers.txt\")
+
+@
+-}
+scanSeparated :: Char -> Schema -> T.Text -> LazyDataFrame
+scanSeparated = scanSeparatedWith readSeparated
+
+{- | Like 'scanSeparated' but with an explicit CSV reader.
+
+==== __Example__
+@
+ghci> L.runDataFrame (L.scanSeparatedWith Fast.fastReadCsvWithOpts ';' schema \"customers.txt\")
+
+@
+-}
 scanSeparatedWith ::
     CsvReader -> Char -> Schema -> T.Text -> LazyDataFrame
 scanSeparatedWith reader sep schema path =

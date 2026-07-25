@@ -1,6 +1,6 @@
 cabal-version:      3.4
 name:               dataframe
-version:            3.1.0.0
+version:            3.2.0.0
 synopsis: A fast, safe, and intuitive DataFrame library.
 
 description: A fast, safe, and intuitive DataFrame library for exploratory data analysis.
@@ -139,7 +139,7 @@ library
     if !flag(no-csv)
         reexported-modules: DataFrame.IO.CSV,
                             DataFrame.Typed.IO.CSV
-        build-depends:   dataframe-csv >= 2.1 && < 2.2
+        build-depends:   dataframe-csv >= 2.2 && < 2.3
         cpp-options:     -DWITH_CSV
 
     if !flag(no-parquet)
@@ -157,7 +157,7 @@ library
                             DataFrame.IO.Parquet.Time,
                             DataFrame.IO.Utils.RandomAccess,
                             DataFrame.Typed.IO.Parquet
-        build-depends:   dataframe-parquet >= 1.3 && < 1.4
+        build-depends:   dataframe-parquet >= 1.4 && < 1.5
         cpp-options:     -DWITH_PARQUET
 
     -- The lazy executor calls both CSV and Parquet readers directly, so
@@ -167,7 +167,7 @@ library
                             DataFrame.Lazy.IO.Binary,
                             DataFrame.Lazy.IO.CSV,
                             DataFrame.Typed.Lazy
-        build-depends:   dataframe-lazy >= 2.1 && < 2.2
+        build-depends:   dataframe-lazy >= 2.2 && < 2.3
         cpp-options:     -DWITH_LAZY
 
     if !flag(no-th)
@@ -205,11 +205,11 @@ library arrow-bridge
         base        >= 4   && < 5,
         dataframe-core >= 2.1 && < 2.2,
         dataframe-expr-serializer >= 1.2 && < 1.3,
-        dataframe-csv >= 2.1 && < 2.2,
+        dataframe-csv >= 2.2 && < 2.3,
         dataframe-json >= 1.2 && < 1.3,
-        dataframe-lazy >= 2.1 && < 2.2,
+        dataframe-lazy >= 2.2 && < 2.3,
         dataframe-operations >= 2.1 && < 2.2,
-        dataframe-parquet >= 1.3 && < 1.4,
+        dataframe-parquet >= 1.4 && < 1.5,
         dataframe-parsing >= 2.1 && < 2.2,
         text        >= 2.1 && < 3,
         aeson       >= 0.11 && < 3,
@@ -223,7 +223,7 @@ executable dataframe-benchmark-example
     import: warnings
     main-is: Benchmark.hs
     build-depends:    base >= 4 && < 5,
-                      dataframe >= 3.1 && < 3.2,
+                      dataframe >= 3.2 && < 3.3,
                       dataframe-operations >= 2.1 && < 2.2,
                       random >= 1 && < 2,
                       time >= 1.12 && < 2,
@@ -236,7 +236,7 @@ executable synthesis
     import: warnings
     main-is: Synthesis.hs
     build-depends:    base >= 4 && < 5,
-                      dataframe >= 3.1 && < 3.2,
+                      dataframe >= 3.2 && < 3.3,
                       dataframe-core >= 2.1 && < 2.2,
                       dataframe-learn >= 2.1 && < 2.2,
                       dataframe-operations >= 2.1 && < 2.2,
@@ -270,9 +270,9 @@ executable lazy-bench
     build-depends:    base >= 4 && < 5,
                       bytestring >= 0.11 && < 0.14,
                       containers >= 0.6.7 && < 0.10,
-                      dataframe >= 3.1 && < 3.2,
+                      dataframe >= 3.2 && < 3.3,
                       dataframe-core >= 2.1 && < 2.2,
-                      dataframe-lazy >= 2.1 && < 2.2,
+                      dataframe-lazy >= 2.2 && < 2.3,
                       dataframe-parsing >= 2.1 && < 2.2,
                       directory >= 1.3.0.0 && < 2,
                       random >= 1 && < 2,
@@ -291,7 +291,7 @@ benchmark dataframe-benchmark
                    criterion >= 1 && < 2,
                    deepseq >= 1.4 && < 2,
                    process >= 1.6 && < 2,
-                   dataframe >= 3.1 && < 3.2,
+                   dataframe >= 3.2 && < 3.3,
                    dataframe-core >= 2.1 && < 2.2,
                    dataframe-operations >= 2.1 && < 2.2,
                    random >= 1 && < 2,
@@ -364,6 +364,7 @@ test-suite tests
                    Operations.Record,
                    LazyParquet,
                    LazyParity,
+                   LazyProjection,
                    Parquet,
                    ParquetTestData,
                    Plotting,
@@ -376,16 +377,17 @@ test-suite tests
     build-depends:  base >= 4 && < 5,
                     aeson >= 0.11.0.0 && < 3,
                     bytestring >= 0.11 && < 0.14,
-                    dataframe >= 3.1 && < 3.2,
+                    dataframe >= 3.2 && < 3.3,
                     dataframe-core >= 2.1 && < 2.2,
                     dataframe-core >= 2.1 && < 2.2,
-                    dataframe-csv >= 2.1 && < 2.2,
+                    dataframe-csv >= 2.2 && < 2.3,
                     dataframe-expr-serializer >= 1.2 && < 1.3,
+                    dataframe-fastcsv >= 1.4 && < 1.5,
                     dataframe-json >= 1.2 && < 1.3,
-                    dataframe-lazy >= 2.1 && < 2.2,
+                    dataframe-lazy >= 2.2 && < 2.3,
                     dataframe-learn >= 2.1 && < 2.2,
                     dataframe-operations >= 2.1 && < 2.2,
-                    dataframe-parquet >= 1.3 && < 1.4,
+                    dataframe-parquet >= 1.4 && < 1.5,
                     dataframe-parsing >= 2.1 && < 2.2,
                     HUnit >= 1.6 && < 1.8,
                     QuickCheck >= 2 && < 3,
@@ -411,7 +413,7 @@ test-suite packed-text
     other-modules: Internal.PackedText
     build-depends:  base >= 4 && < 5,
                     bytestring >= 0.11 && < 0.14,
-                    dataframe >= 3.1 && < 3.2,
+                    dataframe >= 3.2 && < 3.3,
                     dataframe-core >= 2.1 && < 2.2,
                     dataframe-operations >= 2.1 && < 2.2,
                     HUnit >= 1.6 && < 1.8,

@@ -67,6 +67,7 @@ module DataFrame (
 
     -- * Record bridge
     module Record,
+    module TypedSchema,
 
     -- * Template Haskell column-binding splices
 #ifdef WITH_TH
@@ -300,3 +301,4 @@ import DataFrame.Typed.Record as Record (
     fromRecords,
     toRecords,
  )
+import DataFrame.Typed.Schema as TypedSchema (schemaColumnNames)

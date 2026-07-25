@@ -8,6 +8,7 @@ import Test.HUnit
 import Test.QuickCheck
 
 import qualified Operations.ChunkParallel
+import qualified Operations.Projection
 import qualified Operations.ReadCsv
 import qualified Operations.TypedExtraction
 import qualified Properties.Csv
@@ -18,6 +19,7 @@ tests =
         ( Operations.ReadCsv.tests
             <> Operations.TypedExtraction.tests
             <> Operations.ChunkParallel.tests
+            <> Operations.Projection.tests
         )
 
 isSuccessful :: Result -> Bool

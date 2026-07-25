@@ -1,6 +1,6 @@
 cabal-version:      3.4
 name:               dataframe-parquet
-version:            1.3.0.0
+version:            1.4.0.0
 
 synopsis:           Parquet reader and writer for the dataframe ecosystem.
 description:

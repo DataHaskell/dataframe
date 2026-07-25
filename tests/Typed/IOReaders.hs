@@ -18,6 +18,7 @@ import System.IO.Temp (withSystemTempFile)
 import qualified DataFrame as D
 import DataFrame.Errors (DataFrameException)
 import qualified DataFrame.Internal.Column as DI
+import DataFrame.Internal.DataFrame (getColumn)
 import qualified DataFrame.Typed as DT
 import qualified DataFrame.Typed.IO.CSV as TCSV
 
@@ -61,5 +62,42 @@ wrongSchemaThrows = TestCase $ withSystemTempFile "typed_throw.csv" $ \fp h -> d
             IO (Either DataFrameException Int)
     assertBool "wrong schema => throws DataFrameException" (isLeft r)
 
+{- | The schema is the read specification: only its columns are fetched, out
+of a file that holds more.
+-}
+typedReadProjects :: Test
+typedReadProjects = TestCase $ withSystemTempFile "typed_proj.csv" $ \fp h -> do
+    hClose h
+    D.writeCsv fp sampleDF
+    narrow <- DT.thaw <$> TCSV.readCsv @'[DT.Column "g" T.Text] fp
+    assertEqual "only the schema's column is read" ["g"] (D.columnNames narrow)
+    assertEqual "rows intact" (3, 1) (D.dimensions narrow)
+
+{- | The schema's types win over inference: a column of digits declared 'Text'
+comes back as 'Text', which a plain read would have called 'Int'.
+-}
+typedReadSharesTypes :: Test
+typedReadSharesTypes = TestCase $ withSystemTempFile "typed_types.csv" $ \fp h -> do
+    hClose h
+    D.writeCsv fp digits
+    inferred <- D.readCsv fp
+    assertEqual
+        "untyped read infers Int"
+        (Just (DI.fromList [1, 2, 3 :: Int]))
+        (getColumn "n" inferred)
+    typed <- DT.thaw <$> TCSV.readCsv @'[DT.Column "n" T.Text] fp
+    assertEqual
+        "schema types the column as Text"
+        (Just (DI.fromList ["1", "2", "3" :: T.Text]))
+        (getColumn "n" typed)
+  where
+    digits = D.fromNamedColumns [("n", DI.fromList [1, 2, 3 :: Int])]
+
 tests :: [Test]
-tests = [roundTrip, wrongSchemaEither, wrongSchemaThrows]
+tests =
+    [ roundTrip
+    , wrongSchemaEither
+    , wrongSchemaThrows
+    , typedReadProjects
+    , typedReadSharesTypes
+    ]

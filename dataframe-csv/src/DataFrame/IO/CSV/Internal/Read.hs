@@ -17,6 +17,7 @@ import qualified Data.Proxy as P
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
 import qualified Data.Vector as V
+import qualified Data.Vector.Unboxed as VU
 
 import Control.Monad (when, zipWithM)
 import Control.Monad.ST (stToIO)
@@ -42,87 +43,104 @@ import Type.Reflection (typeRep)
 
 -- | Decode a strict CSV buffer into a fully forced DataFrame.
 decodeCsvStrict :: ReadOptions -> BS.ByteString -> IO DataFrame
-decodeCsvStrict opts bs = BSU.unsafeUseAsCStringLen bs $ \(cstr, _) -> do
-    let !len = BS.length bs
-        !sep = fromIntegral (ord (columnSeparator opts)) :: Word8
+decodeCsvStrict opts bs = do
+    validateReadOptions opts
+    BSU.unsafeUseAsCStringLen bs $ \(cstr, _) -> do
+        let !len = BS.length bs
+            !sep = fromIntegral (ord (columnSeparator opts)) :: Word8
 
-        findRecord !pos
-            | pos >= len = len
-            | otherwise = withField bs len sep pos $ \cs ce _ term next ->
-                if cs == ce && term /= termSep
-                    then if term == termEof then len else findRecord next
-                    else pos
+            findRecord !pos
+                | pos >= len = len
+                | otherwise = withField bs len sep pos $ \cs ce _ term next ->
+                    if cs == ce && term /= termSep
+                        then if term == termEof then len else findRecord next
+                        else pos
 
-        headerFields !pos = go pos id
-          where
-            go !p acc = withField bs len sep p $ \cs ce unesc term next ->
-                let t =
-                        TE.decodeUtf8Lenient
-                            (if unesc then unescapeQuotes bs cs ce else sliceBS bs cs ce)
-                 in if term == termSep
-                        then go next (acc . (t :))
-                        else (acc [t], next)
+            headerFields !pos = go pos id
+              where
+                go !p acc = withField bs len sep p $ \cs ce unesc term next ->
+                    let t =
+                            TE.decodeUtf8Lenient
+                                (if unesc then unescapeQuotes bs cs ce else sliceBS bs cs ce)
+                     in if term == termSep
+                            then go next (acc . (t :))
+                            else (acc [t], next)
 
-    let hdrPos = findRecord 0
-    when (hdrPos >= len) (error "Empty CSV file")
-    let (hdrFields, afterHdr) = headerFields hdrPos
-        positional n = map (T.pack . show) [0 .. n - 1 :: Int]
-        (names, dataPos0) = case headerSpec opts of
-            UseFirstRow -> (map T.strip hdrFields, afterHdr)
-            NoHeader -> (positional (length hdrFields), hdrPos)
-            ProvideNames ns ->
-                (ns ++ drop (length ns) (positional (length hdrFields)), hdrPos)
-        !ncols = length names
-        dataPos = findRecord dataPos0
-    when (dataPos >= len) (error "Empty CSV file")
+        let hdrPos = findRecord 0
+        when (hdrPos >= len) (error "Empty CSV file")
+        let (hdrFields, afterHdr) = headerFields hdrPos
+            positional n = map (T.pack . show) [0 .. n - 1 :: Int]
+            (names, dataPos0) = case headerSpec opts of
+                UseFirstRow -> (map T.strip hdrFields, afterHdr)
+                NoHeader -> (positional (length hdrFields), hdrPos)
+                ProvideNames ns ->
+                    (ns ++ drop (length ns) (positional (length hdrFields)), hdrPos)
+            !nfields = length names
+            dataPos = findRecord dataPos0
+        when (dataPos >= len) (error "Empty CSV file")
 
-    let resolveMode = effectiveSafeRead (safeRead opts) (safeReadOverrides opts)
-        anyEither = any (\n -> resolveMode n == EitherRead) names
-        missing = if anyEither then [] else missingIndicators opts
-        missMode
-            | null missing = MissNone
-            | missing == missingIndicators defaultReadOptions = MissCanonical
-            | otherwise = MissCustom
-        env = Env bs (castPtr cstr) missMode missing
-        rowHint = len `div` max 1 (ncols * 8) + 16
+        let selection = resolveSelection opts names
+            !keptNames = map fst selection
+            !ncols = length selection
+            !sinkOf =
+                VU.replicate nfields (-1)
+                    VU.// [(fieldIx, slot) | (slot, (_, fieldIx)) <- zip [0 ..] selection]
 
-    sinks <- mapM (newSink opts resolveMode rowHint) names
-    let !sinksV = V.fromList sinks
+        let resolveMode = effectiveSafeRead (safeRead opts) (safeReadOverrides opts)
+            anyEither = any (\n -> resolveMode n == EitherRead) keptNames
+            missing = if anyEither then [] else missingIndicators opts
+            missMode
+                | null missing = MissNone
+                | missing == missingIndicators defaultReadOptions = MissCanonical
+                | otherwise = MissCustom
+            env = Env bs (castPtr cstr) missMode missing
+            rowHint = len `div` max 1 (nfields * 8) + 16
 
-    let pad !row !col
-            | col >= ncols = pure ()
-            | otherwise = nullSink (V.unsafeIndex sinksV col) row >> pad row (col + 1)
-        dec b = if b > 0 then b - 1 else b
-        rowLoop !pos !row !budget
-            | budget == 0 || pos >= len = pure row
-            | otherwise = withField bs len sep pos $ \cs ce unesc term next ->
-                if cs == ce && term /= termSep
-                    then if term == termEof then pure row else rowLoop next row budget
-                    else do
-                        feedSink env (V.unsafeIndex sinksV 0) row cs ce unesc
-                        if term == termSep
-                            then fieldLoop next row 1 budget
-                            else pad row 1 >> rowLoop next (row + 1) (dec budget)
-        fieldLoop !pos !row !col !budget =
-            withField bs len sep pos $ \cs ce unesc term next -> do
-                when (col < ncols) $
-                    feedSink env (V.unsafeIndex sinksV col) row cs ce unesc
-                if term == termSep
-                    then fieldLoop next row (col + 1) budget
-                    else pad row (col + 1) >> rowLoop next (row + 1) (dec budget)
+        sinks <- mapM (newSink opts resolveMode rowHint) keptNames
+        let !sinksV = V.fromList sinks
+            sinkAt !col
+                | col >= nfields = -1
+                | otherwise = VU.unsafeIndex sinkOf col
 
-    nrows <- rowLoop dataPos 0 (fromMaybe (-1) (numColumns opts))
+        let pad !row !col
+                | col >= nfields = pure ()
+                | otherwise = do
+                    let !slot = VU.unsafeIndex sinkOf col
+                    when (slot >= 0) $ nullSink (V.unsafeIndex sinksV slot) row
+                    pad row (col + 1)
+            feedAt !slot !row !cs !ce !unesc =
+                when (slot >= 0) $
+                    feedSink env (V.unsafeIndex sinksV slot) row cs ce unesc
+            dec b = if b > 0 then b - 1 else b
+            rowLoop !pos !row !budget
+                | budget == 0 || pos >= len = pure row
+                | otherwise = withField bs len sep pos $ \cs ce unesc term next ->
+                    if cs == ce && term /= termSep
+                        then if term == termEof then pure row else rowLoop next row budget
+                        else do
+                            feedAt (sinkAt 0) row cs ce unesc
+                            if term == termSep
+                                then fieldLoop next row 1 budget
+                                else pad row 1 >> rowLoop next (row + 1) (dec budget)
+            fieldLoop !pos !row !col !budget =
+                withField bs len sep pos $ \cs ce unesc term next -> do
+                    feedAt (sinkAt col) row cs ce unesc
+                    if term == termSep
+                        then fieldLoop next row (col + 1) budget
+                        else pad row (col + 1) >> rowLoop next (row + 1) (dec budget)
 
-    cols <- zipWithM (finalizeSink bs opts resolveMode nrows) names sinks
-    let df =
-            DataFrame
-                (V.fromList cols)
-                (M.fromList (zip names [0 ..]))
-                (nrows, ncols)
-                M.empty
-    pure $!
-        forceDataFrame
-            (parseWithTypes resolveMode (schemaTypeMap (typeSpec opts)) df)
+        nrows <- rowLoop dataPos 0 (fromMaybe (-1) (numRowsToRead opts))
+
+        cols <- zipWithM (finalizeSink bs opts resolveMode nrows) keptNames sinks
+        let df =
+                DataFrame
+                    (V.fromList cols)
+                    (M.fromList (zip keptNames [0 ..]))
+                    (nrows, ncols)
+                    M.empty
+        pure $!
+            forceDataFrame
+                (parseWithTypes resolveMode (schemaTypeMap (typeSpec opts)) df)
 
 {- | Resolve a column's sink: EitherRead and to-be-inferred columns
 collect raw slices; schema'd Int/Double parse straight into builders;

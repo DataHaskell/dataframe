@@ -40,7 +40,7 @@ import DataFrame.DecisionTree (
     predict,
  )
 import DataFrame.IO.Arrow (dataframeToArrow)
-import DataFrame.IO.CSV.Fast (fastReadCsvWithSchema)
+import DataFrame.IO.CSV.Fast (fastReadCsvWithOpts)
 import DataFrame.IR (PlanNode, executePlan)
 import DataFrame.IR.ExprJson (encodeExprToBytes)
 import DataFrame.Internal.Column (Column (..), Columnable, materializePacked)
@@ -63,7 +63,7 @@ dfExecutePlan planCS schemaOut arrayOut = do
                 fail
                 return
                 (Aeson.eitherDecode (BL.fromStrict planBytes))
-        df <- executePlan fastReadCsvWithSchema node
+        df <- executePlan fastReadCsvWithOpts node
         (sPtr, aPtr) <- dataframeToArrow df
         poke schemaOut (fromIntegral (ptrToWordPtr (castPtr sPtr)))
         poke arrayOut (fromIntegral (ptrToWordPtr (castPtr aPtr)))
@@ -117,7 +117,7 @@ dfFitDecisionTree planCS targetCS targetTypeCS configCS modelOut lenOut = do
                 fail
                 return
                 (Aeson.eitherDecodeStrict planBytes :: Either String PlanNode)
-        df <- executePlan fastReadCsvWithSchema node
+        df <- executePlan fastReadCsvWithOpts node
 
         let typeTag =
                 if targetTypeStr == "auto"

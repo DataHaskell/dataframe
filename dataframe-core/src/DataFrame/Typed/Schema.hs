@@ -62,6 +62,7 @@ module DataFrame.Typed.Schema (
 
     -- * KnownSchema class
     KnownSchema (..),
+    schemaColumnNames,
 
     -- * Helpers
     AllKnownSymbol (..),
@@ -574,6 +575,18 @@ instance
     schemaEvidence =
         (T.pack (symbolVal (Proxy @name)), someTypeRep (Proxy @a))
             : schemaEvidence @rest
+
+{- | The column names a schema declares, in schema order. Pass it to a reader's
+options to fetch only those columns:
+
+@
+D.readCsvWithOpts
+    D.defaultReadOptions{D.readColumns = Just (schemaColumnNames \@(Schema Customer))}
+    "customers.csv"
+@
+-}
+schemaColumnNames :: forall cols. (KnownSchema cols) => [T.Text]
+schemaColumnNames = map fst (schemaEvidence @cols)
 
 -- | A class that provides a list of 'Text' values for a type-level list of Symbols.
 class AllKnownSymbol (names :: [Symbol]) where

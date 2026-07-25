@@ -318,6 +318,7 @@ module DataFrame.Typed (
 
     -- * Constraints
     KnownSchema (..),
+    schemaColumnNames,
     AllKnownSymbol (..),
 ) where
 

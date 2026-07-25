@@ -20,6 +20,7 @@ import qualified Internal.PackedText
 import qualified Internal.Parsing
 import qualified LazyParity
 import qualified LazyParquet
+import qualified LazyProjection
 import qualified Learn.Denotation
 import qualified Learn.Ensembles
 import qualified Learn.Metamorphic
@@ -119,6 +120,7 @@ tests =
             ++ Parquet.tests
             ++ LazyParquet.tests
             ++ LazyParity.tests
+            ++ LazyProjection.tests
             ++ Plotting.tests
             ++ Simplify.tests
             ++ PackedTextMigration.tests
