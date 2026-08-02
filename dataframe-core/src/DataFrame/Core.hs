@@ -91,12 +91,12 @@ import DataFrame.Internal.DataFrame (
 import DataFrame.Internal.Expression (
     Expr,
     NamedExpr,
-    toNamedExpr,
-    toUExpr,
-    fromUExpr,
     eSize,
+    fromUExpr,
     prettyPrint,
     prettyPrintWidth,
+    toNamedExpr,
+    toUExpr,
  )
 import DataFrame.Internal.Row (
     Any,
