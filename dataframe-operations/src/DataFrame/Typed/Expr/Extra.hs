@@ -1,6 +1,6 @@
 {-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE MonoLocalBinds #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 {- | Typed counterparts of the remaining "DataFrame.Functions" expression
 combinators not already provided by "DataFrame.Typed.Expr". Each wraps the

@@ -118,7 +118,18 @@ instance Show UExpr where
     show :: UExpr -> String
     show (UExpr expr) = show expr
 
+toUExpr :: (Columnable a) => Expr a -> UExpr
+toUExpr = UExpr
+
+fromUExpr :: forall a. (Columnable a) => UExpr -> Maybe (Expr a)
+fromUExpr (UExpr (expr :: Expr b)) = do
+    Refl <- testEquality (typeRep @a) (typeRep @b)
+    pure expr
+
 type NamedExpr = (T.Text, UExpr)
+
+toNamedExpr :: (Columnable a) => T.Text -> Expr a -> NamedExpr
+toNamedExpr exprName expr = (exprName, UExpr expr)
 
 instance (Num a, Columnable a) => Num (Expr a) where
     (+) :: Expr a -> Expr a -> Expr a
