@@ -40,6 +40,9 @@ module DataFrame.Core (
     -- * Expressions
     Expr,
     NamedExpr,
+    toNamedExpr,
+    toUExpr,
+    fromUExpr,
     eSize,
     prettyPrint,
     prettyPrintWidth,
@@ -88,6 +91,9 @@ import DataFrame.Internal.DataFrame (
 import DataFrame.Internal.Expression (
     Expr,
     NamedExpr,
+    toNamedExpr,
+    toUExpr,
+    fromUExpr,
     eSize,
     prettyPrint,
     prettyPrintWidth,
