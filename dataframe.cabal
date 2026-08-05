@@ -153,6 +153,7 @@ library
                             DataFrame.IO.Parquet.Page,
                             DataFrame.IO.Parquet.Schema,
                             DataFrame.IO.Parquet.Utils,
+                            DataFrame.IO.Parquet.Writer,
                             DataFrame.IO.Parquet.Seeking,
                             DataFrame.IO.Parquet.Time,
                             DataFrame.IO.Utils.RandomAccess,

@@ -45,6 +45,7 @@ library
                         DataFrame.IO.Parquet.Thrift
                         DataFrame.IO.Parquet.Time
                         DataFrame.IO.Parquet.Utils
+                        DataFrame.IO.Parquet.Writer
                         DataFrame.IO.Utils.RandomAccess
                         DataFrame.Typed.IO.Parquet
     build-depends:      base >= 4 && < 5,
