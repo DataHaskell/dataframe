@@ -74,12 +74,12 @@ countAllAggregationTyped =
             ( testData
                 & either (error . show) id
                     . DT.freezeWithError
-                        @[ DT.Column "test1" Int
-                         , DT.Column "test2" Int
-                         , DT.Column "test3" Int
-                         , DT.Column "test4" Char
-                         , DT.Column "test5" String
-                         , DT.Column "test6" Integer
+                        @[ '("test1", Int)
+                         , '("test2", Int)
+                         , '("test3", Int)
+                         , '("test4", Char)
+                         , '("test5", String)
+                         , '("test6", Integer)
                          ]
                 & DT.groupBy @'["test1"]
                 & DT.aggregate (DT.as @"n" DT.countAll)
@@ -101,12 +101,12 @@ foldAggregationTyped =
             ( testData
                 & either (error . show) id
                     . DT.freezeWithError
-                        @[ DT.Column "test1" Int
-                         , DT.Column "test2" Int
-                         , DT.Column "test3" Int
-                         , DT.Column "test4" Char
-                         , DT.Column "test5" String
-                         , DT.Column "test6" Integer
+                        @[ '("test1", Int)
+                         , '("test2", Int)
+                         , '("test3", Int)
+                         , '("test4", Char)
+                         , '("test5", String)
+                         , '("test6", Integer)
                          ]
                 & DT.groupBy @'["test1"]
                 & DT.aggregate (DT.as @"test2_count" (DT.count (DT.col @"test2")))
@@ -145,12 +145,12 @@ numericAggregationTyped =
             ( testData
                 & either (error . show) id
                     . DT.freezeWithError
-                        @[ DT.Column "test1" Int
-                         , DT.Column "test2" Int
-                         , DT.Column "test3" Int
-                         , DT.Column "test4" Char
-                         , DT.Column "test5" String
-                         , DT.Column "test6" Integer
+                        @[ '("test1", Int)
+                         , '("test2", Int)
+                         , '("test3", Int)
+                         , '("test4", Char)
+                         , '("test5", String)
+                         , '("test6", Integer)
                          ]
                 & DT.groupBy @'["test1"]
                 & DT.aggregate (DT.as @"test2_mean" (DT.mean (DT.col @"test2")))

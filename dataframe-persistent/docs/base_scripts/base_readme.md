@@ -88,7 +88,7 @@ import DataFrame.IO.Persistent.Schema (declareTable)
 ```
 
 The splice brings one thing into scope, the type
-`type ArtistsSchema = '[Column "ArtistId" Int, Column "Name" (Maybe Text)]`:
+`type ArtistsSchema = '[ '("ArtistId", Int), '("Name", Maybe Text)]`:
 
 ```haskell
 $(declareTable "./data/chinook.db" "artists")

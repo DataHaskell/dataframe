@@ -25,9 +25,9 @@ import qualified DataFrame.Typed.IO.CSV as TCSV
 import Test.HUnit
 
 type S =
-    '[ DT.Column "x" Int
-     , DT.Column "y" Double
-     , DT.Column "g" T.Text
+    '[ '("x", Int)
+     , '("y", Double)
+     , '("g", T.Text)
      ]
 
 sampleDF :: D.DataFrame
@@ -50,7 +50,7 @@ wrongSchemaEither :: Test
 wrongSchemaEither = TestCase $ withSystemTempFile "typed_err.csv" $ \fp h -> do
     hClose h
     D.writeCsv fp sampleDF
-    res <- TCSV.readCsvWithError @'[DT.Column "nope" Int] fp
+    res <- TCSV.readCsvWithError @'[ '("nope", Int)] fp
     assertBool "wrong schema => Left" (isLeft res)
 
 wrongSchemaThrows :: Test
@@ -58,7 +58,7 @@ wrongSchemaThrows = TestCase $ withSystemTempFile "typed_throw.csv" $ \fp h -> d
     hClose h
     D.writeCsv fp sampleDF
     r <-
-        try (TCSV.readCsv @'[DT.Column "nope" Int] fp >>= evaluate . DT.nRows) ::
+        try (TCSV.readCsv @'[ '("nope", Int)] fp >>= evaluate . DT.nRows) ::
             IO (Either DataFrameException Int)
     assertBool "wrong schema => throws DataFrameException" (isLeft r)
 
@@ -69,7 +69,7 @@ typedReadProjects :: Test
 typedReadProjects = TestCase $ withSystemTempFile "typed_proj.csv" $ \fp h -> do
     hClose h
     D.writeCsv fp sampleDF
-    narrow <- DT.thaw <$> TCSV.readCsv @'[DT.Column "g" T.Text] fp
+    narrow <- DT.thaw <$> TCSV.readCsv @'[ '("g", T.Text)] fp
     assertEqual "only the schema's column is read" ["g"] (D.columnNames narrow)
     assertEqual "rows intact" (3, 1) (D.dimensions narrow)
 
@@ -85,7 +85,7 @@ typedReadSharesTypes = TestCase $ withSystemTempFile "typed_types.csv" $ \fp h -
         "untyped read infers Int"
         (Just (DI.fromList [1, 2, 3 :: Int]))
         (getColumn "n" inferred)
-    typed <- DT.thaw <$> TCSV.readCsv @'[DT.Column "n" T.Text] fp
+    typed <- DT.thaw <$> TCSV.readCsv @'[ '("n", T.Text)] fp
     assertEqual
         "schema types the column as Text"
         (Just (DI.fromList ["1", "2", "3" :: T.Text]))

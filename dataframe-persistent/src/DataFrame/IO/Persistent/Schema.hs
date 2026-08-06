@@ -17,7 +17,7 @@ runtime values and the same schema can be reused across databases.
 @
 -- Typed schema, checked at compile time:
 \$('declareTable' "chinook.db" "artists")
--- generates: type ArtistsSchema = '[Column "ArtistId" Int, Column "Name" (Maybe Text)]
+-- generates: type ArtistsSchema = '[ '("ArtistId", Int), '("Name", Maybe Text)]
 -- read any database/table into it:
 --   readTableTyped \@ArtistsSchema "chinook.db" "artists" :: IO (TypedDataFrame ArtistsSchema)
 
@@ -54,10 +54,9 @@ import Database.Persist.TH (mkPersist, sqlSettings)
 
 import DataFrame.IO.Persistent.Schema.Common
 import DataFrame.IO.Persistent.Schema.Introspect
-import DataFrame.Typed.Types (Column)
 
 {- | Read @table@ from the SQLite database at @path@ and emit a typed schema
-synonym, @type \<Table\>Schema = '[Column ...]@. Read into it with
+synonym, @type \<Table\>Schema = '[ '(name, ty), ...]@. Read into it with
 'DataFrame.IO.Persistent.Read.readTableTyped'.
 -}
 declareTable :: FilePath -> String -> Q [Dec]
@@ -77,7 +76,7 @@ declareTableFromSchema :: [ColumnInfo] -> String -> Q [Dec]
 declareTableFromSchema cols name =
     schemaDecl defaultDeclareOptions (T.pack name) cols
 
--- | Emit @type \<Table\>Schema = '[Column ...]@ for the selected columns.
+-- | Emit @type \<Table\>Schema = '[ '(name, ty), ...]@ for the selected columns.
 schemaDecl :: DeclareOptions -> Text -> [ColumnInfo] -> Q [Dec]
 schemaDecl opts table cols0 = do
     let cols = selectColumns opts cols0
@@ -94,7 +93,7 @@ schemaType opts cols =
     buildSchemaType
         [(ciName c, thType (resolvedType opts c), isNullable opts c) | c <- cols]
 
--- | Fold @(name, type, nullable)@ triples into a promoted @'[Column name ty]@.
+-- | Fold @(name, type, nullable)@ triples into a promoted @'[ '(name, ty)]@.
 buildSchemaType :: [(Text, Type, Bool)] -> Type
 buildSchemaType = foldr cons PromotedNilT
   where
@@ -102,7 +101,7 @@ buildSchemaType = foldr cons PromotedNilT
 
 columnEntry :: (Text, Type, Bool) -> Type
 columnEntry (name, ty, nullable) =
-    ConT ''Column
+    PromotedTupleT 2
         `AppT` LitT (StrTyLit (T.unpack name))
         `AppT` wrapMaybe nullable ty
 

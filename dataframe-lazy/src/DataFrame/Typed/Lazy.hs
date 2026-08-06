@@ -21,13 +21,13 @@ logical plan; execution is deferred until 'run'.
 import qualified DataFrame.Typed.Lazy as TL
 import DataFrame.Typed (Column)
 
-type Schema = '[Column \"id\" Int, Column \"name\" Text, Column \"score\" Double]
+type Schema = '[ '(\"id\", Int), '(\"name\", Text), '(\"score\", Double)]
 
 main = do
     let query = TL.scanCsv \@Schema \"data.csv\"
               & TL.filter (TL.col \@\"score\" TL..>. TL.lit 0.5)
               & TL.select \@'[\"id\", \"name\"]
-    df <- TL.run query   -- TypedDataFrame '[Column \"id\" Int, Column \"name\" Text]
+    df <- TL.run query   -- TypedDataFrame '[ '(\"id\", Int), '(\"name\", Text)]
     print df
 @
 -}
@@ -91,7 +91,7 @@ import DataFrame.Typed.Schema
 import DataFrame.Typed.Types
 
 -- | A lazy query with compile-time schema tracking.
-newtype TypedLazyDataFrame (cols :: [Type]) = TLD {_unTLD :: LazyDataFrame}
+newtype TypedLazyDataFrame (cols :: [(Symbol, Type)]) = TLD {_unTLD :: LazyDataFrame}
 
 instance Show (TypedLazyDataFrame cols) where
     show (TLD ldf) = "TypedLazyDataFrame { " ++ show ldf ++ " }"
@@ -140,7 +140,7 @@ derive ::
     (KnownSymbol name, C.Columnable a, AssertAbsent name cols) =>
     TExpr cols a ->
     TypedLazyDataFrame cols ->
-    TypedLazyDataFrame (Snoc cols (Column name a))
+    TypedLazyDataFrame (Snoc cols '(name, a))
 derive (TExpr expr) (TLD ldf) =
     TLD (L.derive (T.pack (symbolVal (Proxy @name))) expr ldf)
 
@@ -153,7 +153,7 @@ select ::
 select (TLD ldf) = TLD (L.select (DataFrame.Typed.Schema.symbolVals @names) ldf)
 
 -- | A typed lazy grouped query.
-newtype TypedLazyGrouped (keys :: [Symbol]) (cols :: [Type]) = TLG
+newtype TypedLazyGrouped (keys :: [Symbol]) (cols :: [(Symbol, Type)]) = TLG
     { _unTLG :: ([T.Text], LazyDataFrame)
     }
 

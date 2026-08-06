@@ -530,10 +530,10 @@ divMaybeIntMaybeDouble =
 -- ---------------------------------------------------------------------------
 
 type CrossSchema =
-    '[ DT.Column "x" Int
-     , DT.Column "y" (Maybe Int)
-     , DT.Column "d" Double
-     , DT.Column "md" (Maybe Double)
+    '[ '("x", Int)
+     , '("y", Maybe Int)
+     , '("d", Double)
+     , '("md", Maybe Double)
      ]
 
 typedCrossData :: DT.TypedDataFrame CrossSchema
@@ -617,7 +617,7 @@ typedMulIntDouble =
 -- Typed TExpr layer tests
 -- ---------------------------------------------------------------------------
 
-type TestSchema = '[DT.Column "x" Int, DT.Column "y" (Maybe Int)]
+type TestSchema = '[ '("x", Int), '("y", Maybe Int)]
 
 typedTestData :: DT.TypedDataFrame TestSchema
 typedTestData =

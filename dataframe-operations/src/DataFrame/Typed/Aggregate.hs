@@ -83,7 +83,7 @@ as ::
     (KnownSymbol name, Columnable a) =>
     TExpr cols a ->
     TAgg keys cols aggs ->
-    TAgg keys cols (Column name a ': aggs)
+    TAgg keys cols ('(name, a) ': aggs)
 as = TAggCons (T.pack (symbolVal (Proxy @name)))
 
 {- | Run a typed aggregation against a grouped DataFrame.
@@ -99,9 +99,9 @@ result = grouped |> aggregate
     . as \@\"orders\" (count (col \@\"order_id\"))
     )
 -- result :: TypedDataFrame
---     '[ Column \"region\" Text
---      , Column \"total\"  Double
---      , Column \"orders\" Int
+--     '[ '(\"region\", Text)
+--      , '(\"total\", Double)
+--      , '(\"orders\", Int)
 --      ]
 @
 -}

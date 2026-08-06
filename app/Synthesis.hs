@@ -28,7 +28,7 @@ $( DT.deriveSchemaFromCsvFileWith
 
 -- Survived is Maybe Int (safeRead = MaybeRead); prediction is Int (model output).
 type RawPredSchema =
-    '[DT.Column "Survived" (Maybe Int), DT.Column "prediction" Int]
+    '[ '("Survived", Maybe Int), '("prediction", Int)]
 
 prediction :: D.Expr Int
 prediction = F.col @Int "prediction"

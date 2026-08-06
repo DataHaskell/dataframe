@@ -65,7 +65,7 @@ deriveWAITyped =
                         (error . show)
                         id
                         ( DT.freezeWithError
-                            @[DT.Column "test1" Int, DT.Column "test2" String, DT.Column "test3" Char]
+                            @['("test1", Int), '("test2", String), '("test3", Char)]
                             testData
                         )
                     )

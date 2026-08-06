@@ -30,8 +30,7 @@ import qualified Data.Proxy as P
 import qualified Data.Text as T
 import Data.Type.Equality (TestEquality (..))
 import DataFrame.Internal.Column (Columnable)
-import DataFrame.Typed.Types (Column)
-import GHC.TypeLits (KnownSymbol, symbolVal)
+import GHC.TypeLits (KnownSymbol, Symbol, symbolVal)
 import Type.Reflection (typeRep)
 
 -- | A runtime tag for a column’s element type.
@@ -104,10 +103,10 @@ imply; that is what lets the names carry their types across to a reader.
 
 ==== __Examples__
 >>> :set -XTypeApplications -XDataKinds
->>> elements (runtimeSchema @'[Column "n" Int])
+>>> elements (runtimeSchema @'[ '("n", Int)])
 fromList [("n",Int)]
 -}
-class RuntimeSchema (cols :: [Type]) where
+class RuntimeSchema (cols :: [(Symbol, Type)]) where
     runtimeSchema :: Schema
 
 instance RuntimeSchema '[] where
@@ -115,7 +114,7 @@ instance RuntimeSchema '[] where
 
 instance
     (KnownSymbol name, Columnable a, Read a, RuntimeSchema rest) =>
-    RuntimeSchema (Column name a ': rest)
+    RuntimeSchema ('(name, a) ': rest)
     where
     runtimeSchema =
         Schema $

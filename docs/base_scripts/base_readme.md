@@ -200,9 +200,9 @@ df |> D.derive "rooms_per_household"
 
 ```haskell
 -- Generates:
--- type HousingSchema = '[ DT.Column "longitude" Double
---                       , DT.Column "latitude" Double
---                       , DT.Column "total_rooms" Double
+-- type HousingSchema = '[ '("longitude", Double)
+--                       , '("latitude", Double)
+--                       , '("total_rooms", Double)
 --                       , ...
 --                       ]
 $(DT.deriveSchemaFromCsvFile "HousingSchema" "./data/housing.csv")
@@ -225,7 +225,7 @@ data Order = Order
 $(DT.deriveSchemaFromType ''Order)
 -- expands to:
 --   type OrderSchema =
---     '[DT.Column "order_id" Int64, DT.Column "region" Text, DT.Column "amount" Double]
+--     '[ '("order_id", Int64), '("region", Text), '("amount", Double)]
 --   instance DT.HasSchema Order where
 --     type Schema Order = OrderSchema
 --     toColumns   = ...
@@ -311,9 +311,9 @@ When you want compile-time guarantees that column names exist and types match, w
 
 ```haskell
 type EmployeeSchema =
-    '[ DT.Column "name"       Text
-     , DT.Column "department" Text
-     , DT.Column "salary"     Double
+    '[ '("name", Text)
+     , '("department", Text)
+     , '("salary", Double)
      ]
 
 employees <- D.readCsv "./data/employees.csv"
@@ -332,7 +332,7 @@ case DT.freeze @EmployeeSchema employees of
 ```text
 -- Typo in column name -> compile error
 tdf |> DT.filterWhere (DT.col @"slary" DT..>. DT.lit 50000)
--- error: Column "slary" not found in schema
+-- error: Column 'slary' not found in schema
 
 -- Wrong type -> compile error
 tdf |> DT.filterWhere (DT.col @"name" DT..>. DT.lit 50000)
@@ -342,7 +342,7 @@ tdf |> DT.filterWhere (DT.col @"name" DT..>. DT.lit 50000)
 `filterAllJust` goes further — it strips `Maybe` from every column in the schema type, so downstream code can't accidentally treat cleaned columns as nullable:
 
 ```haskell
-type ScoreSchema = '[ DT.Column "name" Text, DT.Column "score" (Maybe Double) ]
+type ScoreSchema = '[ '("name", Text), '("score", Maybe Double)]
 
 scoresDf = D.fromNamedColumns
     [ ("name",  D.fromList ["a", "b", "c" :: Text])

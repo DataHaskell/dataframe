@@ -33,7 +33,7 @@ the string name.  `inspectM` lets you peek at the frame mid-pipeline without bre
 The whole computation stays pure — `execFrameM df m` just runs it.
 
 **Typed** wraps `DataFrame` in a phantom type that tracks the full schema as a type-level list of
-`Column "name" Type` entries.  The `freeze`/`freezeWithError` boundary validates the runtime
+`'("name", Type)` entries.  The `freeze`/`freezeWithError` boundary validates the runtime
 frame against the declared schema.  After that, every column access (`T.col @"salary"`), every
 derivation (`T.derive @"bonus"`), and every `select`/`exclude`/`rename` is checked at compile time.
 Operations like `T.filterAllJust` go further — they change the **type**, promoting `Maybe Int`
@@ -427,11 +427,11 @@ reference to the expression, not a copy of the name.
 import qualified DataFrame.Typed as T
 import Data.Time.Calendar (Day)
 
-type MySchema = '[ T.Column "date" Day
-                 , T.Column "A"    Double
-                 , T.Column "B"    Double
-                 , T.Column "C"    Double
-                 , T.Column "D"    Double
+type MySchema = '[ '("date", Day)
+                 , '("A", Double)
+                 , '("B", Double)
+                 , '("C", Double)
+                 , '("D", Double)
                  ]
 
 case T.freeze @MySchema df of
@@ -1007,15 +1007,15 @@ Here the schema is declared upfront and every column access is validated at comp
 import qualified DataFrame.Typed as T
 import Data.Time.Calendar (Day)
 
-type BirthdateSchema = '[ T.Column "name"      T.Text
-                        , T.Column "birthdate"  Day
-                        , T.Column "weight"     Double
-                        , T.Column "height"     Double
+type BirthdateSchema = '[ '("name", T.Text)
+                        , '("birthdate", Day)
+                        , '("weight", Double)
+                        , '("height", Double)
                         ]
 
 -- After the typed ops the result schema is inferred by the compiler:
--- '[ Column "decade" Int, Column "avg_weight" Double
---  , Column "avg_height" Double, Column "names" [T.Text] ]
+-- '[ '("decade", Int), '("avg_weight", Double)
+--  , '("avg_height", Double), '("names", [T.Text])]
 example :: T.TypedDataFrame BirthdateSchema -> IO ()
 example tdf = do
     let result = T.aggregate
@@ -1404,14 +1404,14 @@ in the result, so any downstream code that still treats them as optional fails a
 import qualified DataFrame.Typed as T
 
 type StarwarsSchema =
-    '[ T.Column "name"    T.Text
-     , T.Column "height"  (Maybe Double)
-     , T.Column "mass"    (Maybe Double)
-     , T.Column "species" T.Text
+    '[ '("name", T.Text)
+     , '("height", Maybe Double)
+     , '("mass", Maybe Double)
+     , '("species", T.Text)
      ]
 
 -- filterAllJust strips Maybe from every column:
--- result :: TypedDataFrame '[Column "name" Text, Column "height" Double, ...]
+-- result :: TypedDataFrame '[ '("name", Text), '("height", Double), ...]
 example :: T.TypedDataFrame StarwarsSchema -> T.TypedDataFrame _
 example tdf =
     let stripped = T.filterAllJust tdf
@@ -1741,9 +1741,9 @@ import Data.Text (Text)
 import DataFrame.Operators
 
 type PurchaseSchema =
-    '[ T.Column "country"  Text
-     , T.Column "amount"   Int
-     , T.Column "discount" Int
+    '[ '("country", Text)
+     , '("amount", Int)
+     , '("discount", Int)
      ]
 
 main :: IO ()
@@ -1809,7 +1809,7 @@ execFrameM df $ do
 
 **Typed**
 ```haskell
--- T.derive prepends Column "bonus" Double to the schema type
+-- T.derive prepends '("bonus", Double) to the schema type
 tdf |> T.derive @"bonus" (T.col @"salary" * T.lit 0.1)
 ```
 

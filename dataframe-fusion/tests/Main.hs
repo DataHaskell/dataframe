@@ -18,16 +18,15 @@ import Test.HUnit (
     runTestTT,
  )
 
-import DataFrame.Fusion.Typed (Column)
 import qualified DataFrame.Fusion.Typed as Fusion
 import qualified DataFrame.Operations.Core as Core
 import DataFrame.Typed.Freeze (thaw)
 
 -- | A minimal smoke schema: id (int), score (double), name (text).
 type CsvCols =
-    '[ Column "id" Int
-     , Column "score" Double
-     , Column "name" T.Text
+    '[ '("id", Int)
+     , '("score", Double)
+     , '("name", T.Text)
      ]
 
 testCsv :: T.Text
@@ -51,8 +50,8 @@ deptsCsv =
         ]
 
 type DeptCols =
-    '[ Column "id" Int
-     , Column "dept" T.Text
+    '[ '("id", Int)
+     , '("dept", T.Text)
      ]
 
 testFixtureDir :: IO FilePath

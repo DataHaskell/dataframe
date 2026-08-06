@@ -9,7 +9,7 @@ suitable for 'DataFrame.Typed.freeze' / @readParquet \@Schema@.
 
 @
 deriveSchemaFromParquetFile \"Trips\" \"trips.parquet\"
--- generates:  type Trips = '[Column \"id\" Int, Column \"fare\" Double, ...]
+-- generates:  type Trips = '[ '(\"id\", Int), '(\"fare\", Double), ...]
 @
 -}
 module DataFrame.Typed.TH.Parquet (

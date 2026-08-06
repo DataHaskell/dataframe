@@ -1,5 +1,20 @@
 # Revision history for dataframe
 
+## 3.3.0.0
+
+### Breaking changes
+* Typed schemas are now type-level lists of promoted pairs instead of the
+  `Column` phantom: `'[ '("name", Text), '("age", Int)]` replaces
+  `'[Column "name" Text, Column "age" Int]`. `Column` is no longer exported
+  from `DataFrame.Typed`; the schema kind is `[(Symbol, Type)]`.
+* Coordinated major bumps: `dataframe-core` → `2.2.0.0`,
+  `dataframe-operations`/`dataframe-parsing`/`dataframe-learn`/`dataframe-th`
+  → `2.2.0.0`, `dataframe-csv`/`dataframe-lazy` → `2.3.0.0`,
+  `dataframe-parquet` → `1.5.0.0`, `dataframe-csv-th`/`dataframe-parquet-th`
+  → `1.3.0.0`, `dataframe-viz` → `1.3.0.0`, `dataframe-fusion` → `0.2.0.0`,
+  `dataframe-persistent` → `0.5.0.0`, with inter-package bounds raised to
+  match.
+
 ## 3.2.0.0
 
 * Restrict CSV reads to selected columns for untyped and typed readers.

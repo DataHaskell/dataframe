@@ -14,9 +14,6 @@ module DataFrame.Typed.Types (
     -- * Core phantom-typed wrapper
     TypedDataFrame (..),
 
-    -- * Column phantom type (no constructors)
-    Column,
-
     -- * Typed expressions (schema-validated)
     TExpr (..),
 
@@ -49,23 +46,17 @@ import DataFrame.Internal.Types (These (..))
 
 {- | A phantom-typed wrapper over the untyped 'DataFrame'.
 
-The type parameter @cols@ is a type-level list of @Column name ty@ entries
+The type parameter @cols@ is a type-level list of @'(name, ty)@ pairs
 that tracks the schema at compile time. All operations delegate to the
 untyped core at runtime and update the phantom type at compile time.
 -}
-newtype TypedDataFrame (cols :: [Type]) = TDF {unTDF :: D.DataFrame}
+newtype TypedDataFrame (cols :: [(Symbol, Type)]) = TDF {unTDF :: D.DataFrame}
 
 instance Show (TypedDataFrame cols) where
     show (TDF df) = show df
 
 instance Eq (TypedDataFrame cols) where
     (TDF a) == (TDF b) = a == b
-
-{- | A phantom type that pairs a type-level column name ('Symbol')
-with its element type. Has no value-level constructors — used
-purely at the type level to describe schemas.
--}
-data Column (name :: Symbol) (a :: Type)
 
 {- | A typed expression validated against schema @cols@, producing values of type @a@.
 
@@ -75,7 +66,7 @@ column references exist in the schema with the correct type.
 
 Use 'unTExpr' to extract the underlying 'Expr' for delegation to the untyped API.
 -}
-newtype TExpr (cols :: [Type]) a = TExpr {unTExpr :: Expr a}
+newtype TExpr (cols :: [(Symbol, Type)]) a = TExpr {unTExpr :: Expr a}
 
 -- | Shows the underlying expression; the schema phantom is type-level only.
 instance (Show a) => Show (TExpr cols a) where
@@ -85,23 +76,23 @@ instance (Show a) => Show (TExpr cols a) where
 @AsTExpr cols (Expr r) = TExpr cols r@. Lets a result type follow the frame —
 an @Expr@ over a plain frame becomes a @TExpr@ over a typed one.
 -}
-type family AsTExpr (cols :: [Type]) (e :: Type) :: Type where
+type family AsTExpr (cols :: [(Symbol, Type)]) (e :: Type) :: Type where
     AsTExpr cols (Expr r) = TExpr cols r
 
 -- | Lift an untyped expression into its 'TExpr' for schema @cols@.
-class ToTExpr (cols :: [Type]) e where
+class ToTExpr (cols :: [(Symbol, Type)]) e where
     toTExpr :: e -> AsTExpr cols e
 
 instance ToTExpr cols (Expr r) where
     toTExpr = TExpr
 
 -- | A typed sort order validated against schema @cols@.
-data TSortOrder (cols :: [Type]) where
+data TSortOrder (cols :: [(Symbol, Type)]) where
     Asc :: (Columnable a, Ord a) => TExpr cols a -> TSortOrder cols
     Desc :: (Columnable a, Ord a) => TExpr cols a -> TSortOrder cols
 
 -- | A phantom-typed wrapper over 'GroupedDataFrame'.
-newtype TypedGrouped (keys :: [Symbol]) (cols :: [Type])
+newtype TypedGrouped (keys :: [Symbol]) (cols :: [(Symbol, Type)])
     = TGD {unTGD :: D.GroupedDataFrame}
 
 {- | Internal aggregation chain. Each cons prepends a 'Column' to the
@@ -115,7 +106,7 @@ as \@\"total\"   (F.sum  salary)
   . as \@\"avg_age\" (F.mean age)
 @
 -}
-data TAgg (keys :: [Symbol]) (cols :: [Type]) (aggs :: [Type]) where
+data TAgg (keys :: [Symbol]) (cols :: [(Symbol, Type)]) (aggs :: [(Symbol, Type)]) where
     TAggNil :: TAgg keys cols '[]
     TAggCons ::
         (Columnable a) =>
@@ -125,7 +116,7 @@ data TAgg (keys :: [Symbol]) (cols :: [Type]) (aggs :: [Type]) where
         TExpr cols a ->
         -- | rest
         TAgg keys cols aggs ->
-        TAgg keys cols (Column name a ': aggs)
+        TAgg keys cols ('(name, a) ': aggs)
 
 {- | Extract the runtime 'NamedExpr' list from a 'TAgg', in
 declaration order (reversed from the cons-built order).

@@ -1,7 +1,6 @@
 cabal-version:      3.4
 name:               dataframe-parquet
-version:            1.4.0.0
-
+version:            1.5.0.0
 synopsis:           Parquet reader and writer for the dataframe ecosystem.
 description:
     @DataFrame.IO.Parquet@ — pure-Haskell Parquet 2.0 reader and writer
@@ -50,10 +49,10 @@ library
     build-depends:      base >= 4 && < 5,
                         bytestring >= 0.11 && < 0.14,
                         containers >= 0.6.7 && < 0.10,
-                        dataframe-core >= 2.1 && < 2.2,
-                        dataframe-core >= 2.1 && < 2.2,
-                        dataframe-operations >= 2.1 && < 2.2,
-                        dataframe-parsing >= 2.1 && < 2.2,
+                        dataframe-core >= 2.2 && < 2.3,
+                        dataframe-core >= 2.2 && < 2.3,
+                        dataframe-operations >= 2.2 && < 2.3,
+                        dataframe-parsing >= 2.2 && < 2.3,
                         directory >= 1.3.0.0 && < 2,
                         filepath >= 1.4 && < 2,
                         Glob >= 0.10 && < 1,

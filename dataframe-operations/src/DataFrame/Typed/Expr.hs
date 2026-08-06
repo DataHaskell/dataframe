@@ -25,7 +25,7 @@ Unlike the untyped @Expr a@ where column references are unchecked strings,
 == Example
 
 @
-type Schema = '[Column \"age\" Int, Column \"salary\" Double]
+type Schema = '[ '(\"age\", Int), '(\"salary\", Double)]
 
 -- This compiles:
 goodExpr :: TExpr Schema Double
@@ -178,7 +178,7 @@ The column name must exist in @cols@ and its type must match @a@.
 Both checks happen at compile time via type families.
 
 @
-salary :: TExpr '[Column \"salary\" Double] Double
+salary :: TExpr '[(\"salary\", Double)] Double
 salary = col \@\"salary\"
 @
 -}
@@ -221,10 +221,6 @@ ifThenElse ::
     TExpr cols Bool -> TExpr cols a -> TExpr cols a -> TExpr cols a
 ifThenElse (TExpr c) (TExpr t) (TExpr e) = TExpr (If c t e)
 
--------------------------------------------------------------------------------
--- Numeric instances (mirror Expr's instances)
--------------------------------------------------------------------------------
-
 instance (Num a, Columnable a) => Num (TExpr cols a) where
     (TExpr a) + (TExpr b) = TExpr (a + b)
     (TExpr a) - (TExpr b) = TExpr (a - b)
@@ -259,10 +255,6 @@ instance (Floating a, Columnable a) => Floating (TExpr cols a) where
 
 instance (IsString a, Columnable a) => IsString (TExpr cols a) where
     fromString = TExpr . fromString
-
--------------------------------------------------------------------------------
--- Lifting arbitrary functions
--------------------------------------------------------------------------------
 
 -- | Lift a unary function into a typed expression.
 lift ::
@@ -381,10 +373,6 @@ infixr 8 .^^., .^^, .^., .^
 (.||) (TExpr a) (TExpr b) =
     TExpr (Binary (MkBinaryOp (nullCmpOp (||)) "nullor" (Just ".||") True 2) a b)
 
--------------------------------------------------------------------------------
--- Nullable-aware arithmetic operators
--------------------------------------------------------------------------------
-
 infixl 6 .+, .-
 infixl 7 .*, ./
 
@@ -485,10 +473,6 @@ infixl 7 .*, ./
     TExpr cols a -> TExpr cols b -> TExpr cols a
 (.^) (TExpr a) (TExpr b) =
     TExpr (Binary (MkBinaryOp (applyNull2 (^)) "pow" (Just ".^") False 8) a b)
-
--------------------------------------------------------------------------------
--- Nullable-aware comparison operators (three-valued logic)
--------------------------------------------------------------------------------
 
 {- | Nullable-aware equality. Widens numeric operands to their common type,
 so @TExpr cols Double .== TExpr cols Int@ typechecks. Returns @Maybe Bool@

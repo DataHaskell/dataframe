@@ -270,7 +270,7 @@ grammar (Chart.toVegaSpec
 box-and-whisker (quartiles, 1.5×IQR whiskers, outliers):
 
 ```haskell
-type Cols = '[ Column "income" Double, Column "value" Double, Column "region" Text ]
+type Cols = '[ '("income", Double), '("value", Double), '("region", Text)]
 
 case freeze @Cols df of
     Nothing  -> "schema mismatch"

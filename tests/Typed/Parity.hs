@@ -18,9 +18,9 @@ import qualified DataFrame.Typed.Statistics as TS
 import Test.HUnit
 
 type S =
-    '[ DT.Column "x" Int
-     , DT.Column "y" Double
-     , DT.Column "g" T.Text
+    '[ '("x", Int)
+     , '("y", Double)
+     , '("g", T.Text)
      ]
 
 baseDF :: D.DataFrame
@@ -178,10 +178,10 @@ leftDF = D.fromNamedColumns [("x", DI.fromList [1, 2 :: Int])]
 rightDF :: D.DataFrame
 rightDF = D.fromNamedColumns [("y", DI.fromList [1.0, 2.0 :: Double])]
 
-leftT :: DT.TypedDataFrame '[DT.Column "x" Int]
+leftT :: DT.TypedDataFrame '[ '("x", Int)]
 leftT = either (error . show) id (DT.freezeWithError leftDF)
 
-rightT :: DT.TypedDataFrame '[DT.Column "y" Double]
+rightT :: DT.TypedDataFrame '[ '("y", Double)]
 rightT = either (error . show) id (DT.freezeWithError rightDF)
 
 -- Numeric-only frame for the matrix test.
@@ -192,7 +192,7 @@ numericDF =
         , ("y", DI.fromList [1.5, 2.5, 3.5 :: Double])
         ]
 
-numericT :: DT.TypedDataFrame '[DT.Column "x" Int, DT.Column "y" Double]
+numericT :: DT.TypedDataFrame '[ '("x", Int), '("y", Double)]
 numericT = either (error . show) id (DT.freezeWithError numericDF)
 
 tests :: [Test]
