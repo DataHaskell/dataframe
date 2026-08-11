@@ -441,7 +441,6 @@ taoRecoversNestedObliqueDerived = TestCase $ do
         0.0
         finalLoss
 
--- Shared setup for C2 (a) and (b): axis-aligned pool only, oblique label.
 obliqueAxisAlignedFixture ::
     (D.DataFrame, V.Vector Int, [Expr Bool], Tree T.Text)
 obliqueAxisAlignedFixture =
@@ -463,8 +462,6 @@ obliqueAxisAlignedFixture =
                 Tree T.Text
      in (df, indices, axisConds, initTree)
 
--- C2 (a): with the linear solver OFF, axis-aligned pool cannot recover the
--- oblique decision boundary. Preserves the original guarantee of the test.
 taoAxisAlignedInsufficientForObliqueDiscreteOnly :: Test
 taoAxisAlignedInsufficientForObliqueDiscreteOnly = TestCase $ do
     let (df, indices, axisConds, initTree) = obliqueAxisAlignedFixture
@@ -481,8 +478,6 @@ taoAxisAlignedInsufficientForObliqueDiscreteOnly = TestCase $ do
         "axis-aligned stump cannot recover oblique label without linear solver (loss > 0.1)"
         (finalLoss > 0.1)
 
--- C2 (b): with the linear solver ON, the L1-LR fit discovers the oblique
--- (x + y) hyperplane even though only axis-aligned conditions are in the pool.
 taoLinearRecoversObliqueFromAxisAlignedPool :: Test
 taoLinearRecoversObliqueFromAxisAlignedPool = TestCase $ do
     let (df, indices, axisConds, initTree) = obliqueAxisAlignedFixture
@@ -500,10 +495,6 @@ taoLinearRecoversObliqueFromAxisAlignedPool = TestCase $ do
         "linear solver recovers oblique split from axis-aligned-only pool"
         0.0
         finalLoss
-
-------------------------------------------------------------------------
--- Nullable numeric feature tests
-------------------------------------------------------------------------
 
 -- Cleanly separable nullable column (no actual nulls): Just 1..6 -> "pos",
 -- Just 7..12 -> "neg". Exercises the nullable numeric path.
@@ -632,10 +623,6 @@ numericExprsWithTermsMixedTest = TestCase $ do
     assertBool
         "combined exprs include NMaybeDouble (nullable arithmetic)"
         (any (\case NMaybeDouble _ -> True; _ -> False) exprs)
-
-------------------------------------------------------------------------
--- Probability tree tests
-------------------------------------------------------------------------
 
 -- probsFromIndices: counts correct on a 3-row slice
 probsFromIndicesBasic :: Test
@@ -780,13 +767,6 @@ probArgmaxMatchesClassifier = TestCase $ do
                         )
                         indices
 
-------------------------------------------------------------------------
--- C4-C9 / D-series: linear solver integration tests
-------------------------------------------------------------------------
-
--- C4: Nested oblique recovery without oblique hints; label set by two oblique
--- boundaries but only axis-aligned thresholds in the pool. The linear solver
--- should learn both splits and reach zero loss.
 taoRecoversNestedObliqueWithoutHint :: Test
 taoRecoversNestedObliqueWithoutHint = TestCase $ do
     let labelExpr =
@@ -828,9 +808,6 @@ taoRecoversNestedObliqueWithoutHint = TestCase $ do
         0.0
         finalLoss
 
--- C5: Monotone loss across iterations with the linear solver enabled.
--- Resolves Issue 1 from the prior plan (currentCond included in the
--- competition pool).
 taoMonotoneWithLinear :: Test
 taoMonotoneWithLinear = TestCase $ do
     let indices = V.enumFromN 0 20
@@ -868,8 +845,6 @@ taoLinearVsDiscreteCompetition = TestCase $ do
         0.0
         finalLoss
 
--- C8: Linear solver respects the L1 penalty and produces sparse hyperplanes
--- on data where only some features are informative.
 taoLinearProducesSparsity :: Test
 taoLinearProducesSparsity = TestCase $ do
     let n = 50 :: Int
@@ -911,7 +886,32 @@ taoLinearProducesSparsity = TestCase $ do
         )
         ("a" `elem` rootCols || "b" `elem` rootCols)
 
--- C9: Determinism — same training data produces an equal (eqExpr) tree.
+taoLinearDoesNotUseTarget :: Test
+taoLinearDoesNotUseTarget = TestCase $ do
+    let n = 40 :: Int
+        as = [fromIntegral (i `div` 4) :: Double | i <- [0 .. n - 1]]
+        bs = [fromIntegral (i `mod` 3) :: Double | i <- [0 .. n - 1]]
+        targets = [if even i then 1.0 else 0.0 :: Double | i <- [0 .. n - 1]]
+        df =
+            D.fromNamedColumns
+                [ ("target", DI.fromList targets)
+                , ("a", DI.fromList as)
+                , ("b", DI.fromList bs)
+                ]
+        cfg =
+            defaultTreeConfig
+                { maxTreeDepth = 1
+                , taoIterations = 10
+                , minLeafSize = 1
+                , useLinearSolver = True
+                , minCarePointsForLinear = 2
+                }
+        result = fitDecisionTree @Double cfg (Col "target") df
+        rootCols = getColumns result
+    assertBool
+        ("target must not appear in the fitted Expr (got " ++ show result ++ ")")
+        ("target" `notElem` rootCols)
+
 taoLinearDeterministic :: Test
 taoLinearDeterministic = TestCase $ do
     let cfg =
@@ -945,13 +945,6 @@ taoLinearTinyCareSet = TestCase $ do
         "skipping linear solver yields same expression as linear-off baseline"
         (eqExpr result resultOff)
 
-------------------------------------------------------------------------
--- Categorical-condition generator tests (Phase 1-2 of the plan)
-------------------------------------------------------------------------
-
--- A binary-target DataFrame with a 5-level Text column whose levels have
--- monotonically-increasing positive rates. Breiman's algorithm should
--- enumerate the 4 contiguous-prefix splits in that exact rate order.
 breimanBinaryDF :: D.DataFrame
 breimanBinaryDF =
     let n = 100 :: Int
@@ -1084,11 +1077,6 @@ testCategoricalNullableBinary = TestCase $ do
         feat = "feat" :: T.Text
         feats' = filter (\c -> feat `elem` getColumns c) conds
     assertEqual "Breiman prefixes on nullable column ignore nulls" 2 (length feats')
-
-------------------------------------------------------------------------
--- PR 2 extended: threshold-consolidation rewrite in combineAndVec /
--- combineOrVec. Positive cases, negative cases, semantic-preservation check.
-------------------------------------------------------------------------
 
 -- A small synthetic DataFrame to materialize CondVecs against.
 threshFixtureDF :: D.DataFrame
@@ -1329,6 +1317,7 @@ tests =
     , TestLabel "C5 taoMonotoneWithLinear" taoMonotoneWithLinear
     , TestLabel "C6 taoLinearVsDiscreteCompetition" taoLinearVsDiscreteCompetition
     , TestLabel "C8 taoLinearProducesSparsity" taoLinearProducesSparsity
+    , TestLabel "C8b taoLinearDoesNotUseTarget" taoLinearDoesNotUseTarget
     , TestLabel "C9 taoLinearDeterministic" taoLinearDeterministic
     , TestLabel "D1 taoLinearTinyCareSet" taoLinearTinyCareSet
     , TestLabel "E1 categoricalBreimanBinary" testCategoricalBreimanBinary

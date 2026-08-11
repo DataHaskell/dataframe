@@ -1,5 +1,5 @@
 {-# LANGUAGE ConstrainedClassMethods #-}
-{-# LANGUAGE ExplicitNamespaces #-}
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GADTs #-}
@@ -7,6 +7,7 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE UndecidableSuperClasses #-}
 
@@ -40,8 +41,10 @@ import Control.Exception (throw)
 import Data.Maybe
 import DataFrame.Errors (DataFrameException (..), TypeErrorContext (..))
 import DataFrame.Internal.Column (
+    Column,
     Columnable,
     TypedColumn (..),
+    columnTypeString,
     hasMissing,
     ifoldrColumn,
     imapColumn,
@@ -52,6 +55,8 @@ import DataFrame.Internal.Expression
 import DataFrame.Internal.Interpreter
 import DataFrame.Internal.Nullable (BaseType)
 import DataFrame.Operations.Core
+import GHC.TypeLits (ErrorMessage (..), TypeError)
+import Type.Reflection (typeRep)
 
 -- | O(k) Apply a function to a given column in a dataframe.
 apply ::
@@ -218,7 +223,9 @@ applyAtIndex i f columnName df = case getColumn columnName df of
         Left e -> throw e
         Right column' -> insertColumn columnName column' df
 
--- | Core impute implementation for nullable columns. Silently no-ops on non-nullable columns.
+{- | Core impute implementation for nullable columns. A column with no null
+bitmap cannot hold a missing value, so imputing it is a mistake, not a no-op.
+-}
 imputeCore ::
     forall b.
     (Columnable b) =>
@@ -234,8 +241,23 @@ imputeCore (Col columnName) value df = case getColumn columnName df of
         Left (TypeMismatchException context) -> throw $ TypeMismatchException (context{callingFunctionName = Just "impute"})
         Left exception -> throw exception
         Right res -> res
-    _ -> df
-imputeCore _ _ df = df
+    Just col ->
+        throw
+            (nonNullableColumnError columnName ("Maybe " ++ show (typeRep @b)) col)
+imputeCore expr _ _ = throw (NonColumnReferenceException (T.pack (show expr)))
+
+{- | 'impute' was handed a column that carries no null bitmap, so there is
+nothing it could replace.
+-}
+nonNullableColumnError :: T.Text -> String -> Column -> DataFrameException
+nonNullableColumnError columnName wanted col =
+    TypeMismatchException @() @()
+        MkTypeErrorContext
+            { userType = Left wanted
+            , expectedType = Left (columnTypeString col)
+            , errorColumnName = Just (T.unpack columnName)
+            , callingFunctionName = Just "impute"
+            }
 
 class (Columnable a) => ImputeOp a where
     runImpute :: Expr a -> BaseType a -> DataFrame -> DataFrame
@@ -246,12 +268,24 @@ class (Columnable a) => ImputeOp a where
         DataFrame ->
         DataFrame
 
-instance {-# OVERLAPPABLE #-} (Columnable a) => ImputeOp a where
-    runImpute _ _ df = df
-    runImputeWith _ _ df = df
+instance
+    {-# OVERLAPPABLE #-}
+    ( Columnable a
+    , TypeError
+        ( 'Text "impute needs a nullable column, but was given Expr "
+            ':<>: 'ShowType a
+            ':$$: 'Text "Try F.col @(Maybe "
+            ':<>: 'ShowType a
+            ':<>: 'Text ") instead."
+        )
+    ) =>
+    ImputeOp a
+    where
+    runImpute = errorWithoutStackTrace "impute: unreachable"
+    runImputeWith = errorWithoutStackTrace "impute: unreachable"
 
 {- | Replace all instances of `Nothing` in a column with the given value.
-When the column is already non-nullable, this is a silent no-op.
+Throws when the column carries no nulls to replace.
 -}
 impute ::
     forall a.

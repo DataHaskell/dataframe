@@ -17,15 +17,15 @@ import qualified Data.Vector.Unboxed as VU
 
 import Control.Exception (throw)
 import Data.Function (on)
-import Data.Maybe (catMaybes, fromMaybe, isNothing, mapMaybe)
+import Data.Maybe (catMaybes, fromMaybe, isNothing)
 import Data.Type.Equality (TestEquality (..))
-import Data.Typeable (type (:~:) (..))
-import DataFrame.Errors (DataFrameException (..))
+import Data.Typeable (Typeable, type (:~:) (..))
+import DataFrame.Errors (DataFrameException (..), TypeErrorContext (..))
 import DataFrame.Internal.Column
 import DataFrame.Internal.DataFrame
 import DataFrame.Internal.Expression (Expr (..))
 import DataFrame.Internal.PackedText (packedIndexText, packedLength)
-import Type.Reflection (typeOf, typeRep)
+import Type.Reflection (TypeRep, typeOf, typeRep)
 
 data Any where
     Value :: (Columnable a) => a -> Any
@@ -80,29 +80,43 @@ type Row = V.Vector Any
 (!?) (x : _) 0 = Just x
 (!?) (_x : xs) n = (!?) xs (n - 1)
 
-{- | Reconstruct column @i@ from a list of rows. The element type is taken from
-the first non-'Null' cell; a differently-typed cell is skipped. If any cell is
-'Null' the result is a nullable column, so a round-trip preserves nulls.
--}
-mkColumnFromRow :: Int -> [[Any]] -> Column
-mkColumnFromRow i rows =
-    let cells = mapMaybe (!? i) rows
-     in case L.find isValue cells of
-            Nothing -> fromList ([] :: [T.Text])
-            Just (Value (_ :: a)) ->
-                let collect Null = Just (Nothing :: Maybe a)
-                    collect (Value (v' :: b)) =
-                        case testEquality (typeRep @a) (typeRep @b) of
-                            Just Refl -> Just (Just v')
-                            Nothing -> Nothing
-                    maybes = mapMaybe collect cells
-                 in if any isNothing maybes
-                        then fromMaybeVec (V.fromList maybes)
-                        else fromList (catMaybes maybes)
-            Just Null -> fromList ([] :: [T.Text])
+mkColumnFromRow :: T.Text -> Int -> [[Any]] -> Column
+mkColumnFromRow name i rows =
+    case L.find isValue cells of
+        Just (Value (_ :: a)) ->
+            let collect _ Null = Nothing :: Maybe a
+                collect r (Value (v' :: b)) =
+                    case testEquality (typeRep @a) (typeRep @b) of
+                        Just Refl -> Just v'
+                        Nothing -> throw (mismatchAt r (typeRep @b) (typeRep @a))
+                maybes = zipWith collect [0 :: Int ..] cells
+             in if any isNothing maybes
+                    then fromMaybeVec (V.fromList maybes)
+                    else fromList (catMaybes maybes)
+        _ -> fromMaybeVec (V.fromList (map (const (Nothing :: Maybe T.Text)) cells))
   where
+    cells = zipWith cellAt [0 :: Int ..] rows
+    cellAt r row = fromMaybe (throw (missingCellAt r)) (row !? i)
     isValue (Value _) = True
     isValue Null = False
+    mismatchAt ::
+        forall x y.
+        (Typeable x, Typeable y) => Int -> TypeRep x -> TypeRep y -> DataFrameException
+    mismatchAt r actual expected =
+        TypeMismatchException
+            MkTypeErrorContext
+                { userType = Right actual
+                , expectedType = Right expected
+                , errorColumnName = Just (T.unpack name ++ ", row " ++ show r)
+                , callingFunctionName = Just "fromRows"
+                }
+    missingCellAt r =
+        InternalException
+            ( "fromRows: row "
+                <> T.pack (show r)
+                <> " has no cell for column "
+                <> name
+            )
 
 {- | Convert the whole dataframe to a list of rows, one per row index in natural
 order; each row lists all columns ordered by column index. Materializes every

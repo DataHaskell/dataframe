@@ -2,6 +2,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
@@ -19,10 +20,13 @@ module DataFrame.Boosting.AdaBoost (
     AdaBoostModel (..),
 ) where
 
+import Control.Exception (throw)
 import Data.List (sort)
 import Data.Maybe (fromMaybe, maybeToList)
+import qualified Data.Text as T
 import qualified Data.Vector as V
 import qualified Data.Vector.Unboxed as VU
+import DataFrame.Errors (DataFrameException (..))
 
 import DataFrame.DecisionTree.Cart (
     CartFeature (..),
@@ -101,7 +105,7 @@ fitAdaBoost cfg target@(Col name) df =
     clamp e = max 1e-10 (min (1 - 1e-10) e)
     normalize v = let s = VU.sum v in if s == 0 then v else VU.map (/ s) v
 fitAdaBoost _ expr _ =
-    error ("fitAdaBoost: target must be a column, got " ++ show expr)
+    throw (NonColumnReferenceException ("fitAdaBoost: " <> T.pack (show expr)))
 
 predictCodes ::
     forall a.
@@ -113,7 +117,7 @@ predictCodes df classesV stump =
     preds :: [a]
     preds = case interpret df (treeToExpr stump) of
         Right (TColumn c) -> either (const []) V.toList (toVector @a @V.Vector c)
-        Left e -> error (show e)
+        Left e -> throw e
     toCode v = fromMaybe 0 (V.findIndex (== v) classesV)
 
 -- | A depth-bounded weighted classification tree (weighted Gini splits).

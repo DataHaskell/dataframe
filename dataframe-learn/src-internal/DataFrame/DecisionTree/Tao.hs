@@ -213,7 +213,7 @@ findBestSplitTAO env indices leftTree rightTree currentCond
             leftTree
             rightTree
     penaltyCV = evalWithPenaltyVec cfg carePoints
-    linearCandidate = bestLinearCandidate cfg (teDf env) carePoints
+    linearCandidate = bestLinearCandidate cfg (teTarget env) (teDf env) carePoints
     valid = filterValidCandidates cfg indices (teConds env)
     pool =
         candidatePool

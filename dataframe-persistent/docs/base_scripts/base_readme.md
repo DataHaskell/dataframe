@@ -35,6 +35,7 @@ This is the quickest way in, similar to pandas' `read_sql_table` / `read_sql`. Y
 and a table.
 
 ```haskell
+-- cabal: packages: ../../.., ../.., ../../../dataframe-core, ../../../dataframe-learn, ../../../dataframe-parsing, ../../../dataframe-operations, ../../../dataframe-csv, ../../../dataframe-json, ../../../dataframe-parquet, ../../../dataframe-lazy, ../../../dataframe-viz, ../../../dataframe-expr-serializer, ../../../dataframe-th, ../../../dataframe-csv-th, ../../../dataframe-parquet-th, ../../../dataframe-huggingface
 -- cabal: build-depends: dataframe, dataframe-persistent, text
 -- cabal: default-extensions: OverloadedStrings, TemplateHaskell, DataKinds
 -- cabal: default-extensions: TypeApplications, TypeOperators, FlexibleContexts

@@ -1,5 +1,13 @@
 # Revision history for dataframe
 
+## 3.4.0.0
+
+* `impute` on a non-nullable expression is now fails and throws when given a column with the wrong type.
+* `fromRows` throws on a cell whose type differs from its column's, and on a row too short to reach a column.
+* `F.add`, `F.sub`, `F.mult`, `F.divide`, `F.prettyPrint` are now visible.
+* `F.isNull` / `F.isNotNull` as aliases for `isNothing` / `isJust`.
+* `DataFrame.Monad` now implements `selectM`, `excludeM` and `sortByM`.
+
 ## 3.3.0.0
 
 ### Breaking changes

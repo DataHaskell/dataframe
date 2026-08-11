@@ -1,6 +1,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
 
@@ -17,8 +18,10 @@ module DataFrame.DecisionTree.Model (
     DecisionTreeRegressor (..),
 ) where
 
+import Control.Exception (throw)
 import qualified Data.Map.Strict as M
 import qualified Data.Text as T
+import DataFrame.Errors (DataFrameException (..))
 
 import qualified Data.Vector as V
 
@@ -83,8 +86,10 @@ instance Fit RegTreeConfig (Expr Double) where
                     (targetDoubles target df)
                     Nothing
             _ ->
-                error
-                    ("fit @DecisionTreeRegressor: target must be a column, got " ++ show target)
+                throw
+                    ( NonColumnReferenceException
+                        ("fit @DecisionTreeRegressor: " <> T.pack (show target))
+                    )
         e = treeToExpr t
 
 instance Predict DecisionTreeRegressor where

@@ -1,4 +1,5 @@
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 
@@ -166,7 +167,8 @@ extractFeatures features df = Features names cols rows n d
 -- | The column name behind a @Col@ feature expression.
 columnExprName :: Expr Double -> T.Text
 columnExprName (Col n) = n
-columnExprName e = error ("expected a column expression, got " ++ show e)
+columnExprName e =
+    throw (NonColumnReferenceException ("columnExprName: " <> T.pack (show e)))
 
 -- | Interpret a @Col@ (or numeric) expression to a @Double@ vector.
 materializeColumn :: DataFrame -> Expr Double -> VU.Vector Double
@@ -197,7 +199,7 @@ argMinExpr = argExtreme (.<=.)
 argExtreme ::
     (Columnable a) =>
     (Expr Double -> Expr Double -> Expr Bool) -> [(a, Expr Double)] -> Expr a
-argExtreme _ [] = error "argExtreme: no classes"
+argExtreme _ [] = throw (EmptyDataSetException "argExtreme")
 argExtreme _ [(c, _)] = Lit c
 argExtreme cmp ((c, sc) : rest) =
     If

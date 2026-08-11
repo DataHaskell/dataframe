@@ -20,12 +20,12 @@ import qualified DataFrame as D
 import qualified DataFrame.Functions as F
 import DataFrame.Internal.Column (TypedColumn (..), toVector)
 import qualified DataFrame.Internal.Column as DI
-import DataFrame.Internal.Expression (Expr)
+import DataFrame.Internal.Expression (Expr, getColumns)
 import DataFrame.Internal.Interpreter (interpret)
 
+import DataFrame.DecisionTree.Regression (defaultRegTreeConfig)
 import DataFrame.LinearModel
 import DataFrame.Metrics
-import DataFrame.Model (fit, predict)
 import DataFrame.Operations.Merge ()
 
 -- Semigroup DataFrame (row concatenation)
@@ -246,13 +246,6 @@ testColumnOrderParity = TestCase $ do
         "column order: predictions on the same frame agree"
         (closeList 1e-7 p0 p1)
 
--- Law: standardScaler output has mean ~0, std ~1 ---------------------------
-
-{- | The defining law of a standard scaler: after transforming, each scaled
-column has sample mean ≈ 0 and (population) std ≈ 1. We recompute the moments
-here in plain Haskell from the transformed frame — not via the scaler — so a
-wrong denominator or a centring bug is caught.
--}
 testStandardScalerLaw :: Test
 testStandardScalerLaw = TestCase $ do
     let cols = ["x1", "x2"]
@@ -271,10 +264,6 @@ testStandardScalerLaw = TestCase $ do
         )
         cols
 
-{- | The scaler model's stored stats must match the data's own moments: a guard
-against the scaler storing the wrong mean/std even if transform happens to
-look plausible. Computed independently from the raw columns.
--}
 testScalerStatsMatchData :: Test
 testScalerStatsMatchData = TestCase $ do
     let scaler = standardScaler ["x1", "x2"] baseDF
@@ -291,11 +280,6 @@ testScalerStatsMatchData = TestCase $ do
         "scaler stds match data"
         (closeList 1e-9 (VU.toList (smStds scaler)) [sd1, sd2])
 
--- Metric laws --------------------------------------------------------------
-
-{- | Perfect prediction → accuracy exactly 1.0; a single deliberate miss drops it
-below 1. Pins both ends so a metric that ignores its inputs can't pass.
--}
 testAccuracyLaw :: Test
 testAccuracyLaw = TestCase $ do
     let truth = VU.fromList [0, 1, 2, 1, 0, 2]
@@ -309,9 +293,6 @@ testAccuracyLaw = TestCase $ do
         "accuracy in [0,1]"
         (let a = accuracy oneWrong truth in a >= 0 && a <= 1)
 
-{- | Accuracy is permutation-invariant: applying the same permutation to preds
-and truth leaves it unchanged. Both vectors are genuinely reordered.
--}
 testAccuracyPermInvariant :: Test
 testAccuracyPermInvariant = TestCase $ do
     let preds = VU.fromList [0, 0, 1, 1, 2, 2, 1, 0]
@@ -322,10 +303,6 @@ testAccuracyPermInvariant = TestCase $ do
     -- Sanity: the metric is non-trivial here (not 0 or 1), so invariance is meaningful.
     assertBool "accuracy: non-degenerate baseline" (a0 > 0 && a0 < 1)
 
-{- | r² of a perfect fit is exactly 1; r² of predicting the constant mean is
-exactly 0. These are the two anchor points of the R² definition. Catches a
-swapped SS_res/SS_tot or a wrong sign.
--}
 testR2Anchors :: Test
 testR2Anchors = TestCase $ do
     let truth = VU.fromList [1, 3, 2, 8, 5, 4]
@@ -348,9 +325,37 @@ testR2OfFittedModel = TestCase $ do
     assertBool "r2 of exact linear fit ~ 1" (close 1e-9 score 1.0)
     assertBool "rmse of exact linear fit ~ 0" (err < 1e-6)
 
+testTargetNeverAFeature :: Test
+testTargetNeverAFeature = TestCase $ do
+    let n = 40 :: Int
+        leakDF =
+            D.fromNamedColumns
+                [ ("y", DI.fromList [if even i then 1.0 else 0.0 :: Double | i <- [0 .. n - 1]])
+                , ("a", DI.fromList [fromIntegral (i `div` 4) :: Double | i <- [0 .. n - 1]])
+                , ("b", DI.fromList [fromIntegral (i `mod` 3) :: Double | i <- [0 .. n - 1]])
+                ]
+        assertNoTarget name expr =
+            assertBool
+                ( name
+                    ++ ": target 'y' must not appear in the fitted Expr (got "
+                    ++ show expr
+                    ++ ")"
+                )
+                ("y" `notElem` getColumns expr)
+    assertNoTarget
+        "linear"
+        (predict (fit defaultLinearConfig (F.col @Double "y") leakDF))
+    assertNoTarget
+        "regression tree"
+        (predict (fit defaultRegTreeConfig (F.col @Double "y") leakDF))
+    assertNoTarget
+        "classification tree"
+        (predict (fit D.defaultTreeConfig (F.col @Double "y") leakDF))
+
 tests :: [Test]
 tests =
-    [ testDuplicateRows
+    [ testTargetNeverAFeature
+    , testDuplicateRows
     , testPermuteRows
     , testScaleFeature
     , testRenameColumns

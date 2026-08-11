@@ -1,18 +1,16 @@
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeFamilies #-}
 
 {- | Feature synthesis by bottom-up enumerative search with observational
 equivalence — the canonical enumerative method from Solar-Lezama's
-/Introduction to Program Synthesis/, hardened for a numeric, examples-only
-setting.
+/Introduction to Program Synthesis/.
 
 Given a frame and a numeric target column, it searches for a small, interpretable
-arithmetic expression over the other columns whose values track the target. The
-specification is purely the example rows; there is no SMT solver and no logical
-spec. Deterministic and pure.
+arithmetic expression over the other columns whose values track the target.
 
 The engine:
 
@@ -48,6 +46,7 @@ module DataFrame.Synthesis (
     synthesizeFeatures,
 ) where
 
+import Control.Exception (throw)
 import Data.Bits (xor)
 import Data.Either (fromRight)
 import Data.List (sortBy)
@@ -59,6 +58,7 @@ import qualified Data.Vector.Unboxed as VU
 import Data.Word (Word64)
 import GHC.Float (castDoubleToWord64)
 
+import DataFrame.Errors (DataFrameException (..))
 import DataFrame.Featurize.Internal (featureNames)
 import qualified DataFrame.Functions as F
 import DataFrame.Internal.DataFrame (DataFrame)
@@ -91,6 +91,8 @@ data SynthesisConfig = SynthesisConfig
     , synLoss :: !LossFunction
     , synTopK :: !Int
     -- ^ How many ranked features to return in the bank.
+    , synMaxAllocBytes :: !Int
+    -- ^ Refuse a search whose largest layer would allocate beyond this.
     }
     deriving (Eq, Show)
 
@@ -101,6 +103,7 @@ defaultSynthesisConfig =
         , synBankCap = 500
         , synLoss = PearsonCorrelation
         , synTopK = 16
+        , synMaxAllocBytes = 8 * 1024 * 1024 * 1024
         }
 
 {- | A synthesized feature. 'sfExpr' is the best-scoring expression and 'sfFeatures'
@@ -134,6 +137,7 @@ synthesizeFeatures ::
     SynthesisConfig -> Expr Double -> DataFrame -> SynthesizedFeature
 synthesizeFeatures cfg target df
     | null leaves || VU.null tgt = SynthesizedFeature (Lit 0) (negate (1 / 0)) []
+    | Just err <- oversizedSearch cfg (length leaves) n = throw err
     | otherwise = SynthesizedFeature best bestScore ranked
   where
     feats = featureNames target df
@@ -276,6 +280,49 @@ absorb ::
 absorb cfg tgt seen0 cands = (capLayer cfg tgt fresh, seen')
   where
     (fresh, seen') = dedupProgs seen0 cands
+
+oversizedSearch :: SynthesisConfig -> Int -> Int -> Maybe DataFrameException
+oversizedSearch cfg nLeaves n
+    | synMaxSize cfg <= 3 = Nothing
+    | estimate <= budget = Nothing
+    | otherwise =
+        Just
+            ( InternalException
+                ( "synthesizeFeatures: a search to synMaxSize="
+                    <> T.pack (show (synMaxSize cfg))
+                    <> " over "
+                    <> T.pack (show nLeaves)
+                    <> " leaves and "
+                    <> T.pack (show n)
+                    <> " rows would allocate about "
+                    <> T.pack (show (estimate `div` (1024 * 1024 * 1024)))
+                    <> " GiB, past the "
+                    <> T.pack (show (budget `div` (1024 * 1024 * 1024)))
+                    <> " GiB synMaxAllocBytes budget. Lower synMaxSize to "
+                    <> T.pack (show largestFittingSize)
+                    <> ", narrow the column set, or raise synMaxAllocBytes."
+                )
+            )
+  where
+    budget = synMaxAllocBytes cfg
+    bytesPerProg = 8 * max 1 n
+    -- 4 commutative ops over unordered pairs plus sub and div over ordered
+    -- pairs, all quadratic in the bank; unaries and powers are lower order.
+    binaryOpCount = 4 :: Int
+    -- Layer k pairs the capped bank with itself over the binary operators.
+    candidatesAt k
+        | k <= 2 = nLeaves
+        | otherwise =
+            binaryOpCount * min (synBankCap cfg) (candidatesAt (k - 1)) ^ (2 :: Int)
+    estimate = sum [candidatesAt k * bytesPerProg | k <- [2 .. synMaxSize cfg]]
+    largestFittingSize =
+        last
+            ( 3
+                : [ k
+                  | k <- [3 .. synMaxSize cfg]
+                  , sum [candidatesAt j * bytesPerProg | j <- [2 .. k]] <= budget
+                  ]
+            )
 
 -- | When a layer has more distinct programs than the cap, keep the best-scoring.
 capLayer :: SynthesisConfig -> Output -> [Prog] -> [Prog]

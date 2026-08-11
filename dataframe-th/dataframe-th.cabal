@@ -34,8 +34,8 @@ library
     other-modules:      DataFrame.Internal.Schema.TH
     build-depends:      base >= 4 && < 5,
                         containers >= 0.6.7 && < 0.10,
-                        dataframe-core >= 2.2 && < 2.3,
-                        dataframe-operations >= 2.2 && < 2.3,
+                        dataframe-core >= 2.3 && < 2.4,
+                        dataframe-operations >= 2.3 && < 2.4,
                         dataframe-parsing >= 2.2 && < 2.3,
                         template-haskell >= 2.0 && < 3,
                         text >= 2.1 && < 3,

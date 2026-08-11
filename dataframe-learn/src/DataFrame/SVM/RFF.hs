@@ -18,10 +18,12 @@ module DataFrame.SVM.RFF (
     RFFSVMModel (..),
 ) where
 
+import Control.Exception (throw)
 import Data.List (sort)
 import qualified Data.Text as T
 import qualified Data.Vector as V
 import qualified Data.Vector.Unboxed as VU
+import DataFrame.Errors (DataFrameException (..))
 
 import DataFrame.Featurize.Internal (featureNames, numericMatrix, targetValues)
 import qualified DataFrame.Functions as F
@@ -100,7 +102,11 @@ fitRFFSVM ::
 fitRFFSVM cfg target df =
     case classes of
         [neg, pos] -> build neg pos
-        _ -> error "fitRFFSVM: binary classification only (got /= 2 classes)"
+        _ ->
+            throw
+                ( InternalException
+                    "fitRFFSVM: binary classification only, but the target has /= 2 classes"
+                )
   where
     names = featureNames target df
     (nameVec, mat) = numericMatrix names df

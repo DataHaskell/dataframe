@@ -11,7 +11,15 @@
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE UndecidableInstances #-}
 
-module DataFrame.Functions (module DataFrame.Functions, module DataFrame.Operators) where
+module DataFrame.Functions (
+    module DataFrame.Functions,
+    module DataFrame.Operators,
+    add,
+    sub,
+    mult,
+    divide,
+    prettyPrint,
+) where
 
 import DataFrame.Internal.Column
 import DataFrame.Internal.Expression
@@ -476,6 +484,16 @@ isNothing = liftDecorated Maybe.isNothing "isNothing" Nothing
 {-# SPECIALIZE isNothing :: Expr (Maybe Double) -> Expr Bool #-}
 {-# SPECIALIZE isNothing :: Expr (Maybe Int) -> Expr Bool #-}
 {-# INLINEABLE isNothing #-}
+
+-- | SQL spelling of 'isNothing'.
+isNull :: (Columnable a) => Expr (Maybe a) -> Expr Bool
+isNull = isNothing
+{-# INLINEABLE isNull #-}
+
+-- | SQL spelling of 'isJust'.
+isNotNull :: (Columnable a) => Expr (Maybe a) -> Expr Bool
+isNotNull = isJust
+{-# INLINEABLE isNotNull #-}
 
 fromJust :: (Columnable a) => Expr (Maybe a) -> Expr a
 fromJust = liftDecorated Maybe.fromJust "fromJust" Nothing

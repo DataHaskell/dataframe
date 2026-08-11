@@ -24,6 +24,10 @@ module DataFrame.Monad (
     sampleM,
     takeM,
     dropM,
+    selectM,
+    excludeM,
+    sortByM,
+    SortOrder (..),
     columnAsListM,
     filterJustM,
     imputeM,
@@ -43,6 +47,8 @@ import DataFrame.Internal.DataFrame (DataFrame)
 import DataFrame.Internal.Expression (Expr (..), UExpr (..), prettyPrint)
 import DataFrame.Internal.Nullable (BaseType)
 import qualified DataFrame.Operations.Core as D
+import DataFrame.Operations.Permutation (SortOrder)
+import qualified DataFrame.Operations.Permutation as D
 import qualified DataFrame.Operations.Subset as D
 import DataFrame.Operations.Transformations (ImputeOp)
 import qualified DataFrame.Operations.Transformations as D
@@ -110,6 +116,17 @@ takeM n = modifyM (D.take n)
 
 dropM :: Int -> FrameM ()
 dropM n = modifyM (D.drop n)
+
+-- | Keep only the named columns. 'dropM' drops rows; this drops columns.
+selectM :: [T.Text] -> FrameM ()
+selectM names = modifyM (D.select names)
+
+-- | Drop the named columns.
+excludeM :: [T.Text] -> FrameM ()
+excludeM names = modifyM (D.exclude names)
+
+sortByM :: [SortOrder] -> FrameM ()
+sortByM orders = modifyM (D.sortBy orders)
 
 columnAsListM :: (Columnable a) => Expr a -> FrameM [a]
 columnAsListM c = inspectM (D.columnAsList c)

@@ -107,6 +107,7 @@ tests =
             ++ Operations.Shuffle.tests
             ++ Operations.Sort.tests
             ++ Operations.Statistics.tests
+            ++ Monad.hunitTests
             ++ Operations.Subset.hunitTests
             ++ Operations.Take.tests
             ++ Operations.Typing.tests

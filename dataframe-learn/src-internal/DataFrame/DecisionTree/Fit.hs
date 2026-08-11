@@ -1,5 +1,6 @@
 {-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 
@@ -38,6 +39,7 @@ import DataFrame.DecisionTree.Predict (partitionIndices)
 import DataFrame.DecisionTree.Prune (pruneDead, pruneExpr)
 import DataFrame.DecisionTree.Tao (taoOptimize, taoOptimizeCV)
 import DataFrame.DecisionTree.Types (Tree (..), TreeConfig (..))
+import DataFrame.Errors (DataFrameException (..))
 import qualified DataFrame.Functions as F
 import DataFrame.Internal.Column (Columnable, TypedColumn (..), toVector)
 import DataFrame.Internal.DataFrame (DataFrame)
@@ -69,7 +71,8 @@ fitDecisionTree cfg (Col target) df =
     condVecs = candidatePool @a cfg target df
     initialTree = buildCartTree @a cfg target df
     indices = V.enumFromN 0 (nRows df)
-fitDecisionTree _ expr _ = error ("Cannot create tree for compound expression: " ++ show expr)
+fitDecisionTree _ expr _ =
+    throw (NonColumnReferenceException ("fitDecisionTree: " <> T.pack (show expr)))
 
 -- | The deduplicated numeric + discrete candidate pool for a target column.
 candidatePool ::
@@ -116,7 +119,7 @@ calculateGini target df
 
 majorityValue :: forall a. (Columnable a, Ord a) => T.Text -> DataFrame -> a
 majorityValue target df
-    | M.null counts = error "Empty DataFrame in leaf"
+    | M.null counts = throw (EmptyDataSetException "majorityValue (tree leaf)")
     | otherwise = fst (maximumBy (compare `on` snd) (M.toList counts))
   where
     counts = getCounts @a target df
@@ -197,7 +200,8 @@ fitProbTree cfg (Col target) df = probExprs (buildProbTree @a pruned target df i
     pruned =
         pruneDead
             (taoOptimize @a cfg target conds df indices (buildCartTree @a cfg target df))
-fitProbTree _ expr _ = error ("Cannot create prob tree for compound expression: " ++ show expr)
+fitProbTree _ expr _ =
+    throw (NonColumnReferenceException ("fitProbTree: " <> T.pack (show expr)))
 
 -- | Convert a 'ProbTree' into one @Expr Double@ per class.
 probExprs ::

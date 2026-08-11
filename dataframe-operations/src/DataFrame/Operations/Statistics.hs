@@ -327,7 +327,7 @@ instance {-# OVERLAPPING #-} (Columnable b) => ImputeOp (Maybe b) where
                     if all (== h) (toList @b value)
                         then imputeCore col h df
                         else error "Impute expression returned more than one value"
-    runImputeWith _ _ df = df
+    runImputeWith _ expr _ = throw (NonColumnReferenceException (T.pack (show expr)))
 
 imputeWith ::
     forall a.

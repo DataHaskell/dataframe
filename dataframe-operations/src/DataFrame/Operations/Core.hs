@@ -665,9 +665,9 @@ fromUnnamedColumns = fromNamedColumns . zip (map (T.pack . show) [(0 :: Int) ..]
 fromRows :: [T.Text] -> [[Any]] -> DataFrame
 fromRows names rows =
     L.foldl'
-        (\df i -> insertColumn (names !! i) (mkColumnFromRow i rows) df)
+        (\df (i, name) -> insertColumn name (mkColumnFromRow name i rows) df)
         empty
-        [0 .. length names - 1]
+        (zip [0 ..] names)
 
 {- | O (k * n) Counts the occurences of each value in a given column.
 
