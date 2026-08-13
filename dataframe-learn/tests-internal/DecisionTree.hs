@@ -28,7 +28,9 @@ import DataFrame.DecisionTree.Fit (
 import DataFrame.DecisionTree.Numeric (
     NumExpr (NMaybeDouble),
     generateNumericConds,
+    missingnessConditions,
     numericCols,
+    numericCondVecs,
     numericExprsWithTerms,
  )
 import DataFrame.DecisionTree.Predict (
@@ -45,16 +47,22 @@ import qualified DataFrame.Functions as F
 import qualified DataFrame.Internal.Column as DI
 import DataFrame.Internal.Expression (Expr (..), eqExpr, getColumns)
 import DataFrame.Internal.Interpreter (interpret)
+import DataFrame.Internal.PackedText (mkPackedContiguous)
 import qualified DataFrame.LinearSolver
 import DataFrame.Operators
 import qualified DataFrameApi as D
 
+import Control.Monad (zipWithM_)
+import qualified Data.ByteString as B
 import Data.Function (on)
 import Data.List (maximumBy, sort)
 import qualified Data.Map.Strict as M
 import qualified Data.Text as T
+import qualified Data.Text.Array as A
+import Data.Text.Encoding (encodeUtf8)
 import qualified Data.Vector as V
 import qualified Data.Vector.Unboxed as VU
+import Data.Word (Word8)
 import Test.HUnit
 
 ------------------------------------------------------------------------
@@ -359,10 +367,6 @@ taoDeadBranchNoCrash = TestCase $ do
         "dead-branch tree must produce a valid loss in [0,1]"
         (finalLoss >= 0.0 && finalLoss <= 1.0)
 
-------------------------------------------------------------------------
--- Shared fixtures: 4x4 grid
-------------------------------------------------------------------------
-
 gridPairs :: [(Double, Double)]
 gridPairs = [(x, y) | y <- [1 .. 4], x <- [1 .. 4]]
 
@@ -372,10 +376,6 @@ gridBaseDF =
         [ ("x", DI.fromList (map fst gridPairs))
         , ("y", DI.fromList (map snd gridPairs))
         ]
-
-------------------------------------------------------------------------
--- Oblique recovery tests
-------------------------------------------------------------------------
 
 taoRecoversSingleObliqueDerived :: Test
 taoRecoversSingleObliqueDerived = TestCase $ do
@@ -624,7 +624,101 @@ numericExprsWithTermsMixedTest = TestCase $ do
         "combined exprs include NMaybeDouble (nullable arithmetic)"
         (any (\case NMaybeDouble _ -> True; _ -> False) exprs)
 
--- probsFromIndices: counts correct on a 3-row slice
+missingnessCondsTest :: Test
+missingnessCondsTest = TestCase $ do
+    let conds = missingnessConditions (D.exclude ["label"] nullsMixedDF)
+    assertEqual "one nullable column -> one missingness cond" 1 (length conds)
+    assertBool
+        "cond is isNothing x"
+        (eqExpr (head conds) (F.isNothing (F.col @(Maybe Double) "x")))
+    assertBool
+        "no missingness conds for a non-nullable DataFrame"
+        (null (missingnessConditions fixtureDF))
+
+poolContainsMissingnessTest :: Test
+poolContainsMissingnessTest =
+    TestCase $
+        assertBool
+            "generateNumericConds contains isNothing x"
+            ( any
+                (`eqExpr` F.isNothing (F.col @(Maybe Double) "x"))
+                (generateNumericConds defaultTreeConfig (D.exclude ["label"] nullsMixedDF))
+            )
+
+missingnessCondVecTest :: Test
+missingnessCondVecTest = TestCase $ do
+    let cvs =
+            numericCondVecs
+                defaultTreeConfig
+                (D.exclude ["label"] nullsMixedDF)
+                nullsMixedDF
+        isMissingCV cv = eqExpr (cvExpr cv) (F.isNothing (F.col @(Maybe Double) "x"))
+        expected = VU.fromList [False, True, False, False, True, False]
+    case filter isMissingCV cvs of
+        (cv : _) -> assertEqual "isNothing vector marks null slots" expected (cvVec cv)
+        [] -> assertFailure "no isNothing CondVec in pool"
+
+observedOnlyThresholdsTest :: Test
+observedOnlyThresholdsTest = TestCase $ do
+    let df =
+            D.fromNamedColumns
+                [
+                    ( "x"
+                    , DI.fromVector
+                        ( V.fromList
+                            (replicate 5 Nothing ++ map Just [10, 20, 30, 40, 50]) ::
+                            V.Vector (Maybe Double)
+                        )
+                    )
+                ]
+        conds = generateNumericConds defaultTreeConfig{percentiles = [50]} df
+        leqAt t = F.fromMaybe False (F.col @(Maybe Double) "x" .<= F.lit (t :: Double))
+    assertBool
+        "median threshold from observed values (30)"
+        (any (`eqExpr` leqAt 30) conds)
+    assertBool "no null-skewed threshold (10)" (not (any (`eqExpr` leqAt 10) conds))
+
+packedFromTexts :: Maybe [Int] -> [T.Text] -> DI.Column
+packedFromTexts nullIdxs ts =
+    DI.PackedText bm (mkPackedContiguous arr (VU.fromList offs))
+  where
+    bytess = map (B.unpack . encodeUtf8) ts
+    offs = scanl (+) 0 (map length bytess)
+    arr = arrayFromBytes (concat bytess)
+    bm = DI.buildBitmapFromNulls (length ts) <$> nullIdxs
+
+arrayFromBytes :: [Word8] -> A.Array
+arrayFromBytes ws = A.run $ do
+    m <- A.new (length ws)
+    zipWithM_ (A.unsafeWrite m) [0 ..] ws
+    pure m
+
+-- G5: nullable PackedText columns (what CSV ingest emits for nullable text)
+-- get a missingness candidate; non-nullable PackedText does not.
+packedMissingnessTest :: Test
+packedMissingnessTest = TestCase $ do
+    let df =
+            D.fromNamedColumns
+                [("s", packedFromTexts (Just [1, 3]) ["yes", "", "no", ""])]
+        isMissingS = F.isNothing (F.col @(Maybe T.Text) "s")
+        conds = missingnessConditions df
+    assertEqual "one missingness cond for nullable PackedText" 1 (length conds)
+    assertBool "cond is isNothing s" (eqExpr (head conds) isMissingS)
+    assertBool
+        "no missingness cond for non-nullable PackedText"
+        ( null
+            ( missingnessConditions
+                (D.fromNamedColumns [("t", packedFromTexts Nothing ["a", "b"])])
+            )
+        )
+    case filter (eqExpr isMissingS . cvExpr) (numericCondVecs defaultTreeConfig df df) of
+        (cv : _) ->
+            assertEqual
+                "isNothing vector marks null slots"
+                (VU.fromList [False, True, False, True])
+                (cvVec cv)
+        [] -> assertFailure "no isNothing CondVec for PackedText column"
+
 probsFromIndicesBasic :: Test
 probsFromIndicesBasic = TestCase $ do
     let df =
@@ -824,9 +918,6 @@ taoMonotoneWithLinear = TestCase $ do
         ("loss must be non-increasing across iterations (got " ++ show losses ++ ")")
         (all (\(a, b) -> b <= a + 1e-9) pairs)
 
--- C6: When the discrete pool contains an exact-zero-error split (axis-aligned
--- works perfectly), the competition picks the simpler discrete candidate
--- rather than a similarly-good but more complex linear one.
 taoLinearVsDiscreteCompetition :: Test
 taoLinearVsDiscreteCompetition = TestCase $ do
     let indices = V.enumFromN 0 20
@@ -1301,6 +1392,11 @@ tests =
     , TestLabel "nullableFitZeroLoss" nullableFitZeroLossTest
     , TestLabel "nullableFitWithNullsNoCrash" nullableFitWithNullsNoCrashTest
     , TestLabel "numericExprsWithTermsMixed" numericExprsWithTermsMixedTest
+    , TestLabel "G1 missingnessConds" missingnessCondsTest
+    , TestLabel "G2 poolContainsMissingness" poolContainsMissingnessTest
+    , TestLabel "G3 missingnessCondVec" missingnessCondVecTest
+    , TestLabel "G4 observedOnlyThresholds" observedOnlyThresholdsTest
+    , TestLabel "G5 packedMissingness" packedMissingnessTest
     , TestLabel "probsFromIndicesBasic" probsFromIndicesBasic
     , TestLabel "probsFromIndicesSubset" probsFromIndicesSubset
     , TestLabel "probsFromIndicesSingleClass" probsFromIndicesSingleClass

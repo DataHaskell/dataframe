@@ -6,8 +6,10 @@
 {-# LANGUAGE TypeApplications #-}
 
 {- | Numeric split candidates: per-column Double expressions, arithmetic
-expansion, and threshold conditions. 'numericCondVecs' materializes the
-pool with one interpret per distinct expression.
+expansion, and threshold conditions. Nullable columns also contribute an
+@isNothing@ candidate, so missingness is splittable directly rather than
+only via the null-routing of value splits. 'numericCondVecs' materializes
+the pool with one interpret per distinct expression.
 -}
 module DataFrame.DecisionTree.Numeric (
     NumExpr (..),
@@ -16,13 +18,14 @@ module DataFrame.DecisionTree.Numeric (
     combineNumExprs,
     numericConditions,
     generateNumericConds,
+    missingnessConditions,
     percentilesOf,
     numericCondVecs,
     numericExprsWithTerms,
     numericCols,
 ) where
 
-import DataFrame.DecisionTree.CondVec (CondVec (..))
+import DataFrame.DecisionTree.CondVec (CondVec (..), materializeCondVec)
 import DataFrame.DecisionTree.Types (SynthConfig (..), TreeConfig (..))
 import qualified DataFrame.Functions as F
 import DataFrame.Internal.Column
@@ -33,7 +36,7 @@ import DataFrame.Internal.Types
 import DataFrame.Operators
 
 import Data.List (sort)
-import Data.Maybe (fromMaybe)
+import Data.Maybe (catMaybes, mapMaybe)
 import qualified Data.Set as Set
 import qualified Data.Text as T
 import Data.Type.Equality (testEquality, (:~:) (..))
@@ -95,14 +98,30 @@ numericConditions :: TreeConfig -> DataFrame -> [Expr Bool]
 numericConditions = generateNumericConds
 
 generateNumericConds :: TreeConfig -> DataFrame -> [Expr Bool]
-generateNumericConds cfg df = do
-    expr <- numericExprsWithTerms (synthConfig cfg) df
-    threshold <- numericThresholds cfg df expr
-    condsFromExpr expr threshold
+generateNumericConds cfg df = thresholdConds ++ missingnessConditions df
+  where
+    thresholdConds = do
+        expr <- numericExprsWithTerms (synthConfig cfg) df
+        threshold <- numericThresholds cfg df expr
+        condsFromExpr expr threshold
 
+missingnessConditions :: DataFrame -> [Expr Bool]
+missingnessConditions df = concatMap missingCond (columnNames df)
+  where
+    missingCond name = case unsafeGetColumn name df of
+        BoxedColumn (Just _) (_ :: V.Vector b) -> [F.isNothing (Col @(Maybe b) name)]
+        UnboxedColumn (Just _) (_ :: VU.Vector b) -> [F.isNothing (Col @(Maybe b) name)]
+        PackedText (Just _) _ -> [F.isNothing (Col @(Maybe T.Text) name)]
+        _ -> []
+
+-- | Thresholds for nullable expressions come from the observed values only.
 numericThresholds :: TreeConfig -> DataFrame -> NumExpr -> [Double]
 numericThresholds cfg df (NDouble e) = thresholdsForExpr cfg df e
-numericThresholds cfg df (NMaybeDouble e) = thresholdsForExpr cfg df (F.fromMaybe 0 e)
+numericThresholds cfg df (NMaybeDouble e) =
+    maybe
+        []
+        (percentilesOf (percentiles cfg) . catMaybes . V.toList)
+        (interpretMaybeDoubleCol df e)
 
 thresholdsForExpr :: TreeConfig -> DataFrame -> Expr Double -> [Double]
 thresholdsForExpr cfg df e =
@@ -142,7 +161,9 @@ deriving each threshold/operator truth vector by direct comparison.
 Byte-identical to materializing 'numericConditions' one at a time.
 -}
 numericCondVecs :: TreeConfig -> DataFrame -> DataFrame -> [CondVec]
-numericCondVecs cfg dfGen df = concatMap forExpr (numericExprsWithTerms (synthConfig cfg) dfGen)
+numericCondVecs cfg dfGen df =
+    concatMap forExpr (numericExprsWithTerms (synthConfig cfg) dfGen)
+        ++ mapMaybe (materializeCondVec df) (missingnessConditions dfGen)
   where
     forExpr (NDouble e) = maybe [] (condsForDouble cfg e) (interpretDoubleCol df e)
     forExpr (NMaybeDouble e) = maybe [] (condsForMaybe cfg e) (interpretMaybeDoubleCol df e)
@@ -166,7 +187,7 @@ condsForMaybe ::
     TreeConfig -> Expr (Maybe Double) -> V.Vector (Maybe Double) -> [CondVec]
 condsForMaybe cfg e mvals = concatMap (maybeCondsAt e mvals (V.length mvals)) ts
   where
-    ts = percentilesOf (percentiles cfg) (map (fromMaybe 0) (V.toList mvals))
+    ts = percentilesOf (percentiles cfg) (catMaybes (V.toList mvals))
 
 maybeCondsAt ::
     Expr (Maybe Double) -> V.Vector (Maybe Double) -> Int -> Double -> [CondVec]
