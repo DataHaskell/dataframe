@@ -167,6 +167,10 @@ mkRowFromArgs names df i = V.map get (V.fromList names)
         Just (BoxedColumn bm column) -> cellAny bm i (column V.! i)
         Just (UnboxedColumn bm column) -> cellAny bm i (column VU.! i)
         Just (PackedText bm p) -> cellAny bm i (packedIndexText p i)
+        Just c@(MergedColumn _ _) ->
+            case materializeMerged (sliceColumn i 1 c) of
+                BoxedColumn bm column -> cellAny bm 0 (column V.! 0)
+                _ -> error "mkRowFromArgs: materializeMerged is boxed"
 
 -- Returns row values in the caller's requested column order, not the
 -- dataframe's storage order.
@@ -190,6 +194,12 @@ mkRowRep df names i = V.generate (L.length names) (\index -> get (names' V.! ind
             Nothing -> throwError name
         Just (PackedText bm p)
             | i < packedLength p -> cellAny bm i (packedIndexText p i)
+            | otherwise -> throwError name
+        Just c@(MergedColumn _ _)
+            | i < columnLength c ->
+                case materializeMerged (sliceColumn i 1 c) of
+                    BoxedColumn bm column -> cellAny bm 0 (column V.! 0)
+                    _ -> error "mkRowRep: materializeMerged is boxed"
             | otherwise -> throwError name
         Nothing ->
             throw $ ColumnsNotFoundException [name] "mkRowRep" (M.keys $ columnIndices df)

@@ -661,6 +661,7 @@ toPermSortOrder df (col, dir) =
 
     dispatch :: C.Column -> Perm.SortOrder
     dispatch column = case column of
+        c@(C.MergedColumn _ _) -> dispatch (C.materializeMerged c)
         C.PackedText{} -> mk @T.Text
         C.BoxedColumn _ (_ :: VB.Vector b) -> pick @b
         C.UnboxedColumn _ (_ :: VU.Vector b) -> pick @b

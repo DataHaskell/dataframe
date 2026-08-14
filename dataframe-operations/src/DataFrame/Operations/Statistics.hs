@@ -272,6 +272,7 @@ sum (Col name) df = case getColumn name df of
         Just Refl -> VG.sum column
         Nothing -> 0
     Just (PackedText _ _) -> 0
+    Just (MergedColumn _ _) -> 0 -- matches the old eager These column (type never Num)
 sum expr df = case interpret df expr of
     Left e -> throw e
     Right (TColumn xs) -> case toVector @a @V.Vector xs of

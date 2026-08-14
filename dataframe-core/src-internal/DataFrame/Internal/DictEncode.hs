@@ -11,11 +11,14 @@ tested building block; profiled slower than the hash group-by, so unused for now
 module DataFrame.Internal.DictEncode (
     dictEncodeColumn,
     dictEncodeColumnUpTo,
+    dictCompactColumn,
     dictMaxCardinality,
 ) where
 
+import Control.Monad (when)
 import Control.Monad.ST (runST)
 import qualified Data.Text as T
+import qualified Data.Text.Array as A
 import Data.Type.Equality (TestEquality (..), type (:~:) (Refl))
 import qualified Data.Vector as V
 import qualified Data.Vector.Unboxed as VU
@@ -26,7 +29,9 @@ import DataFrame.Internal.Column (Bitmap, Column (..), bitmapTestBit)
 import DataFrame.Internal.Hash (fnvOffset, mixBytes, mixText, nullSalt)
 import DataFrame.Internal.HashTable (htInsert, newHashTable)
 import DataFrame.Internal.PackedText (
-    PackedTextData,
+    PackedTextData (..),
+    mkOffsets,
+    mkSel,
     packedLength,
     packedSlice,
     sliceEqBytes,
@@ -127,3 +132,40 @@ buildCodes maxCard n hashAt eqAt
             Just card -> do
                 frozen <- VU.unsafeFreeze codes
                 pure (Just (frozen, card))
+
+dictCompactColumn :: Column -> Column
+dictCompactColumn col@(PackedText bm p) =
+    case encodePacked dictMaxCardinality bm p of
+        Just (codes, card)
+            | 2 * card <= packedLength p ->
+                PackedText bm (dictPacked p codes card)
+        _ -> col
+dictCompactColumn col = col
+
+dictPacked :: PackedTextData -> VU.Vector Int -> Int -> PackedTextData
+dictPacked p codes card = runST $ do
+    let n = VU.length codes
+    reps <- VUM.replicate card (-1)
+    let findReps !i !remaining
+            | remaining <= 0 || i >= n = pure ()
+            | otherwise = do
+                let c = VU.unsafeIndex codes i
+                cur <- VUM.unsafeRead reps c
+                if cur < 0
+                    then VUM.unsafeWrite reps c i >> findReps (i + 1) (remaining - 1)
+                    else findReps (i + 1) remaining
+    findReps 0 card
+    repsV <- VU.unsafeFreeze reps
+    let lens = VU.map (\r -> let (_, _, l) = packedSlice p r in l) repsV
+        offs = VU.scanl' (+) 0 lens
+        total = VU.last offs
+    marr <- A.new (max 1 total)
+    let copyRep !c =
+            when (c < card) $ do
+                let r = VU.unsafeIndex repsV c
+                    (arr, o, l) = packedSlice p r
+                A.copyI l marr (VU.unsafeIndex offs c) arr o
+                copyRep (c + 1)
+    copyRep 0
+    arr <- A.unsafeFreeze marr
+    pure (PackedTextData arr (mkOffsets offs) (Just (mkSel card codes)) True)

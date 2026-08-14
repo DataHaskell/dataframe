@@ -58,6 +58,7 @@ import DataFrame.Internal.Column (
     Column (..),
     bitmapTestBit,
     buildBitmapFromValid,
+    materializeMerged,
     materializePacked,
  )
 import DataFrame.Internal.DataFrame (DataFrame (..))
@@ -114,6 +115,7 @@ buildColumnSchema name col =
     nameLen = fromIntegral (BS.length nameBytes) :: Word16
 
 columnTypeTag :: Column -> Word8
+columnTypeTag c@(MergedColumn _ _) = columnTypeTag (materializeMerged c)
 columnTypeTag (UnboxedColumn Nothing (_ :: VU.Vector a)) =
     case testEquality (typeRep @a) (typeRep @Int) of
         Just Refl -> tagInt
@@ -132,6 +134,7 @@ columnTypeTag (PackedText Nothing _) = tagText
 columnTypeTag (PackedText (Just _) _) = tagMaybeText
 
 buildColumnData :: Int -> Column -> BSB.Builder
+buildColumnData n c@(MergedColumn _ _) = buildColumnData n (materializeMerged c)
 buildColumnData _ (UnboxedColumn Nothing (v :: VU.Vector a)) =
     case testEquality (typeRep @a) (typeRep @Int) of
         Just Refl -> buildIntVector v

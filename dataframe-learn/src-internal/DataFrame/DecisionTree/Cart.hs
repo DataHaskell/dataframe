@@ -273,6 +273,9 @@ featuresOfColumn df c = case unsafeGetColumn c df of
     pt@(PackedText _ _) -> case materializePacked pt of
         BoxedColumn _ (v :: V.Vector b) -> oneHotFeatures @b (nRows df) c v
         _ -> []
+    mc@(MergedColumn _ _) -> case materializeMerged mc of
+        BoxedColumn _ (v :: V.Vector b) -> oneHotFeatures @b (nRows df) c v
+        _ -> []
 
 numericFeature ::
     forall b. (Columnable b, VU.Unbox b) => T.Text -> VU.Vector b -> [CartFeature]
@@ -304,6 +307,11 @@ cartTargetLabels target df = case unsafeGetColumn target df of
         Nothing -> V.map (T.pack . show) v
     UnboxedColumn _ (v :: VU.Vector b) -> V.map (T.pack . show) (V.convert v)
     pt@(PackedText _ _) -> case materializePacked pt of
+        BoxedColumn _ (v :: V.Vector b) -> case testEquality (typeRep @b) (typeRep @T.Text) of
+            Just Refl -> v
+            Nothing -> V.map (T.pack . show) v
+        _ -> V.empty
+    mc@(MergedColumn _ _) -> case materializeMerged mc of
         BoxedColumn _ (v :: V.Vector b) -> case testEquality (typeRep @b) (typeRep @T.Text) of
             Just Refl -> v
             Nothing -> V.map (T.pack . show) v

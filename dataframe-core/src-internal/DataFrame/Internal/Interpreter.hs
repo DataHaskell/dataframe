@@ -471,6 +471,7 @@ input — the sort happens once, not per-group.
 sliceGroups :: Column -> VU.Vector Int -> VU.Vector Int -> V.Vector Column
 sliceGroups col os indices = case col of
     PackedText _ _ -> sliceGroups (materializePacked col) os indices
+    MergedColumn _ _ -> sliceGroups (materializeMerged col) os indices
     BoxedColumn bm vec ->
         let !sorted =
                 V.generate
@@ -570,6 +571,7 @@ promoteToDoubleWith onResult col = case col of
                 SFalse -> castMismatch @c @b
     BoxedColumn _ _ -> tryParseWith @Double onResult col
     PackedText _ _ -> promoteToDoubleWith onResult (materializePacked col)
+    MergedColumn _ _ -> promoteToDoubleWith onResult (materializeMerged col)
 
 promoteToFloatWith ::
     forall b.
@@ -610,6 +612,7 @@ promoteToFloatWith onResult col = case col of
                 SFalse -> castMismatch @c @b
     BoxedColumn _ _ -> tryParseWith @Float onResult col
     PackedText _ _ -> promoteToFloatWith onResult (materializePacked col)
+    MergedColumn _ _ -> promoteToFloatWith onResult (materializeMerged col)
 
 promoteToIntWith ::
     forall b.
@@ -650,6 +653,7 @@ promoteToIntWith onResult col = case col of
                 SFalse -> castMismatch @c @b
     BoxedColumn _ _ -> tryParseWith @Int onResult col
     PackedText _ _ -> promoteToIntWith onResult (materializePacked col)
+    MergedColumn _ _ -> promoteToIntWith onResult (materializeMerged col)
 
 -- | Single parse primitive: apply @onResult@ to the result of 'reads'.
 parseWith :: (Read a) => (Either String a -> b) -> String -> b
@@ -665,6 +669,7 @@ tryParseWith ::
     (Either String a -> b) -> Column -> Either DataFrameException Column
 tryParseWith onResult col = case col of
     PackedText _ _ -> tryParseWith onResult (materializePacked col)
+    MergedColumn _ _ -> tryParseWith onResult (materializeMerged col)
     BoxedColumn bm (v :: V.Vector c) ->
         case testEquality (typeRep @c) (typeRep @String) of
             Just Refl -> case bm of

@@ -247,6 +247,10 @@ columnConds ctx df colName = case unsafeGetColumn colName df of
         BoxedColumn Nothing (column :: V.Vector a) -> nonNullColConds ctx colName column
         BoxedColumn (Just bm) (column :: V.Vector a) -> nullableColConds ctx colName bm column
         _ -> []
+    mc@(MergedColumn _ _) -> case materializeMerged mc of
+        BoxedColumn Nothing (column :: V.Vector a) -> nonNullColConds ctx colName column
+        BoxedColumn (Just bm) (column :: V.Vector a) -> nullableColConds ctx colName bm column
+        _ -> []
 
 nonNullColConds ::
     forall a target.
@@ -360,6 +364,10 @@ columnCondVecs ctx df colName = case unsafeGetColumn colName df of
     BoxedColumn (Just bm) (column :: V.Vector a) -> mapMaybe (materializeCondVec df) (nullableColConds ctx colName bm column)
     UnboxedColumn _ (_ :: VU.Vector a) -> []
     pt@(PackedText _ _) -> case materializePacked pt of
+        BoxedColumn Nothing (column :: V.Vector a) -> nonNullColCondVecs ctx colName column
+        BoxedColumn (Just bm) (column :: V.Vector a) -> mapMaybe (materializeCondVec df) (nullableColConds ctx colName bm column)
+        _ -> []
+    mc@(MergedColumn _ _) -> case materializeMerged mc of
         BoxedColumn Nothing (column :: V.Vector a) -> nonNullColCondVecs ctx colName column
         BoxedColumn (Just bm) (column :: V.Vector a) -> mapMaybe (materializeCondVec df) (nullableColConds ctx colName bm column)
         _ -> []

@@ -17,7 +17,7 @@ import qualified Data.Text as Text
 import qualified Data.Vector as Vector
 import qualified Data.Vector.Storable as VS
 
-import Control.Exception (throwIO)
+import Control.Exception (evaluate, throwIO)
 import Control.Monad (unless, when)
 import Data.Char (ord)
 import qualified Data.Text as T
@@ -49,7 +49,13 @@ import DataFrame.IO.CSV.Fast.IndexPar (
  )
 import DataFrame.IO.CSV.Fast.Parallel (autoChunkCount, buildAllColumns)
 import DataFrame.IO.CSV.Fast.Passes (ColumnEnv (..))
-import DataFrame.IO.CSV.Fast.Slice (FieldCtx (..), extractField, stripBom)
+import DataFrame.IO.CSV.Fast.Slice (
+    FieldCtx (..),
+    FieldLayout (..),
+    compactRows,
+    extractField,
+    stripBom,
+ )
 import DataFrame.Internal.DataFrame (DataFrame (..), forceDataFrame)
 import DataFrame.Operations.Typing (effectiveSafeRead, parseWithTypes)
 
@@ -100,8 +106,7 @@ readSeparatedCore chunkSpec separator opts fileRaw = do
                     FieldCtx
                         { fcFile = file
                         , fcBS = byteStringView contentLen file
-                        , fcDelims = indices
-                        , fcRowEnds = rowEnds
+                        , fcLayout = LayoutFlat indices rowEnds
                         , fcContentLen = contentLen
                         , fcTrim = fastCsvTrimUnquoted opts
                         }
@@ -137,10 +142,17 @@ readSeparatedCore chunkSpec separator opts fileRaw = do
                     when (fastCsvOnRaggedRow opts == RaiseOnRagged) $
                         checkNoRaggedRows rowEnds dataRows numCol
                     traceMarkerIO "fastcsv:rows-done"
+                    mapM_ (\(nm, ix) -> evaluate nm >> evaluate ix) wanted
+                    ctx' <-
+                        evaluate $
+                            case compactRows contentLen indices rowEnds numCol of
+                                Just lay -> ctx{fcLayout = lay}
+                                Nothing -> ctx
+                    traceMarkerIO "fastcsv:index-compacted"
                     VS.unsafeWith file $ \filePtr -> do
                         let env =
                                 ColumnEnv
-                                    { ceCtx = ctx
+                                    { ceCtx = ctx'
                                     , ceRows = dataRows
                                     , ceNumRow = numRow
                                     , cePtr = filePtr

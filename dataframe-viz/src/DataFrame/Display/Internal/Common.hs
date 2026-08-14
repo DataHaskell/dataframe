@@ -51,6 +51,7 @@ import DataFrame.Internal.Column (
     Column (..),
     Columnable,
     isNumeric,
+    materializeMerged,
     materializePacked,
  )
 import DataFrame.Internal.DataFrame (DataFrame (..), getColumn)
@@ -170,6 +171,7 @@ columnToStrings col = case col of
     UnboxedColumn _ vec ->
         V.toList $ VG.map (T.pack . show) (VG.convert vec)
     PackedText _ _ -> columnToStrings (materializePacked col)
+    MergedColumn _ _ -> columnToStrings (materializeMerged col)
 
 -- | Coerce a numeric column to @[Double]@; errors if the element type is not numeric.
 columnToDoubles :: (HasCallStack) => Column -> [Double]
@@ -177,6 +179,7 @@ columnToDoubles col = case col of
     BoxedColumn _ vec -> vectorToDoubles vec
     UnboxedColumn _ vec -> unboxedVectorToDoubles vec
     PackedText _ _ -> columnToDoubles (materializePacked col)
+    MergedColumn _ _ -> columnToDoubles (materializeMerged col)
 
 vectorToDoubles :: forall a. (Columnable a, Show a) => V.Vector a -> [Double]
 vectorToDoubles vec =
@@ -214,6 +217,9 @@ getCategoricalCounts colName df =
                     UnboxedColumn _ (vec :: VU.Vector a) ->
                         Just (countUnboxed (typeRep @a) vec)
                     PackedText _ _ -> case materializePacked col of
+                        BoxedColumn _ (vec :: V.Vector a) -> Just (countBoxed (typeRep @a) vec)
+                        _ -> Nothing
+                    MergedColumn _ _ -> case materializeMerged col of
                         BoxedColumn _ (vec :: V.Vector a) -> Just (countBoxed (typeRep @a) vec)
                         _ -> Nothing
   where

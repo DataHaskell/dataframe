@@ -177,8 +177,10 @@ asTextWith fmt mTrunc d =
         getType (UnboxedColumn (Just _) (_ :: VU.Vector a)) = T.pack $ showMaybeType @a
         getType (PackedText Nothing _) = T.pack $ show (typeRep @T.Text)
         getType (PackedText (Just _) _) = T.pack $ showMaybeType @T.Text
+        getType c@(MergedColumn _ _) = getType (mergedHead c)
 
         get :: Maybe Column -> V.Vector T.Text
+        get (Just c@(MergedColumn _ _)) = get (Just (materializeMerged c))
         get (Just (BoxedColumn (Just bm) (column :: V.Vector a))) =
             V.generate (V.length column) $ \i ->
                 if bitmapTestBit bm i
@@ -341,6 +343,10 @@ getRowAsText :: DataFrame -> Int -> [T.Text]
 getRowAsText df i = map (`showElement` i) (V.toList (columns df))
 
 showElement :: Column -> Int -> T.Text
+showElement (MergedColumn a b) i =
+    showElement
+        (materializeMerged (MergedColumn (sliceColumn i 1 a) (sliceColumn i 1 b)))
+        0
 showElement (BoxedColumn bm (c :: V.Vector a)) i = case bm of
     Just b | not (bitmapTestBit b i) -> "null"
     _ -> case c V.!? i of

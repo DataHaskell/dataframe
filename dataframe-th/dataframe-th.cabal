@@ -1,6 +1,6 @@
 cabal-version:      3.4
 name:               dataframe-th
-version:            2.2.0.0
+version:            2.2.0.1
 synopsis:           Record-based Template Haskell splices for the dataframe ecosystem.
 description:
     The IO-agnostic part of the @dataframe@ TH machinery — splices that
@@ -34,8 +34,8 @@ library
     other-modules:      DataFrame.Internal.Schema.TH
     build-depends:      base >= 4 && < 5,
                         containers >= 0.6.7 && < 0.10,
-                        dataframe-core >= 2.3 && < 2.4,
-                        dataframe-operations >= 2.3 && < 2.4,
+                        dataframe-core >= 2.4 && < 2.5,
+                        dataframe-operations >= 2.4 && < 2.5,
                         dataframe-parsing >= 2.2 && < 2.3,
                         template-haskell >= 2.0 && < 3,
                         text >= 2.1 && < 3,

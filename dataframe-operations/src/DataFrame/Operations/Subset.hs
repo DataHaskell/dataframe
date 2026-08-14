@@ -178,6 +178,8 @@ filter e@(Col filterColumnName) condition df = case getColumn filterColumnName d
             ColumnsNotFoundException [filterColumnName] "filter" (M.keys $ columnIndices df)
     Just c@(PackedText _ _) ->
         filter e condition (insertColumn filterColumnName (materializePacked c) df)
+    Just c@(MergedColumn _ _) ->
+        filter e condition (insertColumn filterColumnName (materializeMerged c) df)
     Just _col@(BoxedColumn bm (column :: V.Vector b)) ->
         case testEquality (typeRep @a) (typeRep @b) of
             Just Refl -> filterByVector filterColumnName column condition df
@@ -518,6 +520,7 @@ kFolds pureGen folds df =
 
 -- | Convert any Column to a vector of Text labels (one per row).
 columnToTextVec :: Column -> V.Vector T.Text
+columnToTextVec c@(MergedColumn _ _) = columnToTextVec (materializeMerged c)
 columnToTextVec (BoxedColumn bm (col' :: V.Vector a)) =
     case bm of
         Nothing -> case testEquality (typeRep @a) (typeRep @T.Text) of

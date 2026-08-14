@@ -71,7 +71,9 @@ import DataFrame.Internal.Column (
     columnTypeString,
     fromList,
     fromVector,
+    materializeMerged,
     materializePacked,
+    mergedHead,
     toDoubleVector,
     toFloatVector,
     toIntVector,
@@ -571,6 +573,7 @@ describeColumns df =
                         columnType
                         : acc
     go acc i col@(PackedText _ _) = go acc i (materializePacked col)
+    go acc i col@(MergedColumn _ _) = go acc i (materializeMerged col)
 
 nulls :: Column -> Int
 nulls (BoxedColumn (Just bm) xs) =
@@ -957,4 +960,11 @@ showDerivedExpressions df =
         Just (UnboxedColumn Nothing (_ :: VU.Vector a)) -> UExpr (Col @a name)
         Just (PackedText (Just _) _) -> UExpr (Col @(Maybe T.Text) name)
         Just (PackedText Nothing _) -> UExpr (Col @T.Text name)
+        Just c@(MergedColumn _ _) -> case mergedHead c of
+            BoxedColumn (Just _) (_ :: V.Vector a) -> UExpr (Col @(Maybe a) name)
+            BoxedColumn Nothing (_ :: V.Vector a) -> UExpr (Col @a name)
+            _ ->
+                error $
+                    "showDerivedExpressions: merged column did not materialize boxed: "
+                        ++ T.unpack name
         Nothing -> error $ "showDerivedExpressions: column not found: " ++ T.unpack name
