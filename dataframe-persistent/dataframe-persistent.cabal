@@ -1,6 +1,6 @@
 cabal-version:      3.0
 name:               dataframe-persistent
-version:            0.5.0.1
+version:            0.5.0.0
 synopsis: Persistent database integration for the dataframe library
 
 description: This package provides integration between the dataframe library and the Persistent database library, allowing you to load database entities into DataFrames and save DataFrames back to the database.

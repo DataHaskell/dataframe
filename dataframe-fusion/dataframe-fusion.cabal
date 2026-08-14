@@ -1,6 +1,6 @@
 cabal-version:      3.0
 name:               dataframe-fusion
-version:            0.2.0.1
+version:            0.2.0.0
 synopsis: Apache DataFusion backend for the dataframe typed API.
 
 description: A typed, plan-based wrapper around Apache DataFusion. Mirrors

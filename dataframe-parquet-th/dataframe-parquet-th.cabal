@@ -1,6 +1,6 @@
 cabal-version:      3.4
 name:               dataframe-parquet-th
-version:            1.3.0.1
+version:            1.3.0.0
 synopsis:           Parquet-file-based Template Haskell splices for the dataframe ecosystem.
 description:
     Splices that read Parquet file metadata at compile time and emit

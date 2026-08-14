@@ -1,6 +1,6 @@
 cabal-version:      2.4
 name:               dataframe-huggingface
-version:            1.2.0.3
+version:            1.2.0.2
 synopsis:           Read Parquet datasets from HuggingFace into dataframes.
 description:
     @DataFrame.IO.HuggingFace@ — resolve and download Parquet files from

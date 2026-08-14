@@ -1,6 +1,6 @@
 cabal-version:      3.4
 name:               dataframe-th
-version:            2.2.0.1
+version:            2.2.0.0
 synopsis:           Record-based Template Haskell splices for the dataframe ecosystem.
 description:
     The IO-agnostic part of the @dataframe@ TH machinery — splices that
