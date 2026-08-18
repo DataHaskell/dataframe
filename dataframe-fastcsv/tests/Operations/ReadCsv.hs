@@ -37,7 +37,14 @@ import DataFrame.Internal.DataFrame (
  )
 import DataFrame.Schema (Schema (..), SchemaType (..))
 import System.Directory (removeFile)
-import System.IO (IOMode (..), hSetEncoding, hSetNewlineMode, noNewlineTranslation, utf8, withFile)
+import System.IO (
+    IOMode (..),
+    hSetEncoding,
+    hSetNewlineMode,
+    noNewlineTranslation,
+    utf8,
+    withFile,
+ )
 import Test.HUnit
 import Type.Reflection (typeRep)
 
