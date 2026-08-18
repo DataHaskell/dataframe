@@ -29,9 +29,9 @@ import qualified DataFrame.Functions as F
 import qualified DataFrame.Internal.Column as DI
 import DataFrame.Operators
 import qualified DataFrame.Schema as IS
-import System.Directory (getTemporaryDirectory)
 import DataFrame.Typed (Schema)
 import qualified DataFrame.Typed as DT
+import System.Directory (getTemporaryDirectory)
 
 import Test.HUnit
 
