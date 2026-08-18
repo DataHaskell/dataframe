@@ -37,7 +37,7 @@ import DataFrame.Internal.DataFrame (
  )
 import DataFrame.Schema (Schema (..), SchemaType (..))
 import System.Directory (removeFile)
-import System.IO (IOMode (..), withFile)
+import System.IO (IOMode (..), hSetEncoding, hSetNewlineMode, noNewlineTranslation, utf8, withFile)
 import Test.HUnit
 import Type.Reflection (typeRep)
 
@@ -59,6 +59,12 @@ prettyPrintTsv = prettyPrintSeparated '\t'
 
 prettyPrintSeparated :: Char -> FilePath -> DataFrame -> IO ()
 prettyPrintSeparated sep filepath df = withFile filepath WriteMode $ \handle -> do
+    -- Byte-exact UTF-8 output: a default handle uses the OS locale
+    -- encoding (crashes on non-ANSI text under a non-UTF-8 codepage)
+    -- and translates \n to \r\n on Windows, corrupting quoted embedded
+    -- newlines for the byte-level reader.
+    hSetEncoding handle utf8
+    hSetNewlineMode handle noNewlineTranslation
     let (rows, _) = dataframeDimensions df
     let headers = map fst (L.sortBy (compare `on` snd) (M.toList (columnIndices df)))
     TIO.hPutStrLn

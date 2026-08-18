@@ -20,7 +20,10 @@ import qualified Data.List as L
 import qualified Data.Map as M
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
-import qualified Data.Text.IO as TIO
+-- UTF-8 byte-mode IO: the plain Data.Text.IO writer honours the
+-- handle's text mode, which on Windows turns \n into \r\n and
+-- corrupts inputs meant for byte-level parsers.
+import qualified Data.Text.IO.Utf8 as TIO
 import qualified Data.Vector as V
 
 import DataFrame.IO.CSV (defaultReadOptions)
@@ -130,7 +133,7 @@ the temp file afterwards no matter what.
 -}
 withCsvFile :: String -> T.Text -> (FilePath -> IO a) -> IO a
 withCsvFile label body action = do
-    let path = "/tmp/fastcsv_prop_" <> label <> ".csv"
+    let path = "./tests/data/unstable_csv/fastcsv_prop_" <> label <> ".csv"
     TIO.writeFile path body
     r <- action path
     removeFile path
@@ -209,7 +212,7 @@ prop_unclosed_quote_throws = forAll (listOf1 arbitrary) $ \(cells :: [Cell]) ->
                 T.intercalate "," (map (encodeCell ',' . unCell) cells)
             csv = "v\n" <> plainRow <> ",\"dangling\n"
         result <- run $ do
-            let path = "/tmp/fastcsv_prop_unclosed.csv"
+            let path = "./tests/data/unstable_csv/fastcsv_prop_unclosed.csv"
             TIO.writeFile path csv
             r <- try @CsvParseError (D.fastReadCsv path)
             removeFile path

@@ -1,0 +1,6 @@
+# CSV/TSV test fixtures are byte-exact inputs for byte-level parsers
+# (dataframe-fastcsv reads raw bytes); git must never translate their
+# line endings on checkout, or quoted embedded newlines gain \r on
+# Windows and round-trip tests fail.
+*.csv -text
+*.tsv -text
