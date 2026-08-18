@@ -4,6 +4,7 @@
 module Operations.WriteCsv where
 
 import qualified Data.Text as T
+
 -- UTF-8 byte-mode IO: the plain Data.Text.IO writer honours the
 -- handle's text mode, which on Windows turns \n into \r\n and
 -- corrupts inputs meant for byte-level parsers.
