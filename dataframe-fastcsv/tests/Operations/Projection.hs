@@ -10,10 +10,6 @@ module Operations.Projection (tests) where
 
 import qualified Data.Map as M
 import qualified Data.Text as T
-
--- UTF-8 byte-mode IO: the plain Data.Text.IO writer honours the
--- handle's text mode, which on Windows turns \n into \r\n and
--- corrupts inputs meant for byte-level parsers.
 import qualified Data.Text.IO.Utf8 as TIO
 
 import Control.Exception (SomeException, evaluate, try)
