@@ -1,4 +1,3 @@
-
 module Main (main) where
 
 import Control.Exception (evaluate)
