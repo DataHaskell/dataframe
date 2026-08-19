@@ -79,7 +79,7 @@ import qualified Pinch
 -- of space. So how do we ensure that we both hit our page size target, our record size target, and have
 -- the same number of rows in each column?
 --
--- First we must consider the page size and row group sizes to be best effort. They could be slightly above
+-- We must consider the page size and row group sizes to be best effort. They could be slightly above
 -- or below the target. The characteristics of the parquet file will depend on both the write options and
 -- the specific data being encoded. Arrow-rs runs batches of rows through the writer, flushing when
 -- they see that a page/rowgroup has met or exceeded its limit. 
@@ -107,6 +107,13 @@ import qualified Pinch
 -- We haven't yet implemented all the encodings and compressions possible. The writer should first 
 -- be brought to parity with the reader, and then we should implement encodings and compressions in
 -- both together so neither lags behind the other.
+--
+-- We also don't yet support a way to have different compressions/endodings per page, and I imagine
+-- we would use some kind of heuristid to select these things, if we should want such a thing at all
+--
+-- Repetition levels and Definitions levlels above 1 are also not yet supported, but that may come hand
+-- in hand with bigger work where we work out the best way to support arbitraritly nested rows in
+-- dataframe in a general way (as opposed to what we have today)
 
 writeParquet :: FilePath -> DataFrame -> IO ()
 writeParquet = writeParquetWithOptions defaultParquetWriteOptions
