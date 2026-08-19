@@ -65,9 +65,15 @@ byteStringDateParser "%Y-%m-%d" = parseDateField
 byteStringDateParser fmt = readByteStringDate fmt
 {-# INLINE byteStringDateParser #-}
 
--- | Alias for 'readInt', which now rejects overflow itself.
+{- | 'DataFrame.Internal.Parsing.readInt' that rejects overflow instead of
+wrapping. Fields of <= 18 chars cannot overflow and keep the Text-level
+parse; longer (rare) fields take the exact byte-level parser, so an
+overflowing cell demotes\/promotes instead of silently wrapping.
+-}
 readIntStrict :: T.Text -> Maybe Int
-readIntStrict = readInt
+readIntStrict t
+    | T.length t <= 18 = readInt t
+    | otherwise = parseIntField (TE.encodeUtf8 t)
 {-# INLINE readIntStrict #-}
 
 {- | Candidate-mask priority, reproducing the documented fallback order:

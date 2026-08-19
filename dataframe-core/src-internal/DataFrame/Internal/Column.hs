@@ -39,7 +39,7 @@ import Data.Bits (
  )
 import Data.Kind (Type)
 import Data.Maybe
-import Data.Type.Equality (TestEquality (..), type (:~~:) (HRefl))
+import Data.Type.Equality (TestEquality (..))
 import Data.Word (Word8)
 import DataFrame.Errors
 import DataFrame.Internal.PackedText (
@@ -209,21 +209,27 @@ columnBitmap (UnboxedColumn bm _) = bm
 columnBitmap (PackedText bm _) = bm
 columnBitmap (MergedColumn _ _) = Nothing
 
-{- | Drop the null slots of a payload-typed view of a nullable column: those
-slots hold a sentinel, not a value. A @Maybe@-typed view already encodes the
-nulls, so it is returned untouched. Backpermute never forces the kept-out
-slots, so boxed error thunks at null slots are safe.
+{- | Drops the null values in a nullable column: those slots hold a sentinel,
+not a value. Identity on columns without a bitmap. 'VG.ifilter' inspects only
+the index, so boxed error thunks at null slots are never forced.
 -}
-dropNulls ::
-    forall v a.
-    (Typeable a, VG.Vector v a, VG.Vector v Int) => Maybe Bitmap -> v a -> v a
-dropNulls Nothing xs = xs
-dropNulls (Just bm) xs = case typeRep @a of
-    App m _ | Just HRefl <- eqTypeRep m (typeRep @Maybe) -> xs
-    _ -> VG.backpermute xs keep
-  where
-    keep = VG.fromList [i | i <- [0 .. VG.length xs - 1], bitmapTestBit bm i]
+dropNulls :: Column -> Column
+dropNulls (BoxedColumn (Just bm) xs) =
+    BoxedColumn Nothing (VG.ifilter (\i _ -> bitmapTestBit bm i) xs)
+dropNulls (UnboxedColumn (Just bm) xs) =
+    UnboxedColumn Nothing (VG.ifilter (\i _ -> bitmapTestBit bm i) xs)
+dropNulls c@(PackedText (Just _) _) = dropNulls (materializePacked c)
+dropNulls c = c
 {-# INLINE dropNulls #-}
+
+{- | 'dropNulls', unless the view type @a@ is @Maybe@-headed: a @Maybe@-typed
+view encodes the nulls as values, so the column passes through untouched.
+-}
+dropNullsExceptMaybe :: forall a. (Typeable a) => Column -> Column
+dropNullsExceptMaybe c = case typeRep @a of
+    App m _ | Just HRefl <- eqTypeRep m (typeRep @Maybe) -> c
+    _ -> dropNulls c
+{-# INLINE dropNullsExceptMaybe #-}
 
 {- | Decode a 'PackedText' into a @BoxedColumn Text@ (bit-identical to
 materializing at freeze). Identity on every other column.

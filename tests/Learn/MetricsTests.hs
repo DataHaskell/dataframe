@@ -1,7 +1,10 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 
 module Learn.MetricsTests (tests) where
+
+import qualified Control.Exception as E
 
 import qualified DataFrame as D
 import qualified DataFrame.Functions as F
@@ -50,9 +53,11 @@ testRegressionMetrics = TestCase $ do
     assertBool
         "mae averages over compared pairs"
         (close 1e-9 (mae (VU.fromList [2, 2]) (VU.fromList [0, 0, 0, 0])) 2)
-    assertBool
-        "no predictions is not a perfect score"
-        (isNaN (mse VU.empty (VU.fromList [5, 5, 5])))
+    -- No compared pairs throws instead of scoring.
+    r <- E.try (E.evaluate (mse VU.empty (VU.fromList [5, 5, 5])))
+    case r of
+        Left (_ :: E.SomeException) -> pure ()
+        Right v -> assertFailure ("mse with no pairs returned " ++ show v)
 
 testMulticlassMetrics :: Test
 testMulticlassMetrics = TestCase $ do

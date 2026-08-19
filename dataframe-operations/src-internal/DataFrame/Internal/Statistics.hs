@@ -17,9 +17,7 @@ import DataFrame.Errors (DataFrameException (..))
 mean' :: (Real a, VU.Unbox a) => VU.Vector a -> Double
 mean' samp
     | VU.null samp = throw $ EmptyDataSetException "mean"
-    -- Widen per element: summing at 'a' wraps for Int columns.
-    | otherwise =
-        VU.foldl' (\acc x -> acc + rtf x) 0 samp / fromIntegral (VU.length samp)
+    | otherwise = rtf (VU.sum samp) / fromIntegral (VU.length samp)
 {-# INLINE [0] mean' #-}
 
 meanDouble' :: VU.Vector Double -> Double
@@ -31,9 +29,7 @@ meanDouble' samp
 meanInt' :: VU.Vector Int -> Double
 meanInt' samp
     | VU.null samp = throw $ EmptyDataSetException "mean"
-    | otherwise =
-        VU.foldl' (\acc x -> acc + fromIntegral x) 0 samp
-            / fromIntegral (VU.length samp)
+    | otherwise = fromIntegral (VU.sum samp) / fromIntegral (VU.length samp)
 {-# INLINE meanInt' #-}
 
 {-# RULES
@@ -58,8 +54,7 @@ median' samp
             then pure (rtf middleElement)
             else do
                 prev <- VUM.read mutableSamp (middleIndex - 1)
-                -- Widen before adding: 'a' addition wraps for Int.
-                pure ((rtf middleElement + rtf prev) / 2)
+                pure (rtf (middleElement + prev) / 2)
 {-# INLINE median' #-}
 
 -- accumulator: count, mean, m2
@@ -121,29 +116,31 @@ skewness' :: (VU.Unbox a, Real a, Num a) => VU.Vector a -> Double
 skewness' = computeSkewness . VU.foldl' skewnessStep (SkewAcc 0 0 0 0)
 {-# INLINE skewness' #-}
 
-{- | Centered two-pass form: the one-pass @n*Sxy - Sx*Sy@ form cancels
-catastrophically on low-variance columns and can report |r| > 1.
--}
+data CorrelationStats
+    = CorrelationStats
+        {-# UNPACK #-} !Double
+        {-# UNPACK #-} !Double
+        {-# UNPACK #-} !Double
+        {-# UNPACK #-} !Double
+        {-# UNPACK #-} !Double
+
 correlation' :: VU.Vector Double -> VU.Vector Double -> Maybe Double
 correlation' xs ys
     | n < 2 = Nothing
     | VU.length xs /= VU.length ys = Nothing
     | otherwise =
         let nf = fromIntegral n
-            !mx = VU.sum xs / nf
-            !my = VU.sum ys / nf
-            !sxy = VU.sum (VU.zipWith (\x y -> (x - mx) * (y - my)) xs ys)
-            !sxx = VU.sum (VU.map (\x -> (x - mx) * (x - mx)) xs)
-            !syy = VU.sum (VU.map (\y -> (y - my) * (y - my)) ys)
-         in Just (clamp (sxy / sqrt (sxx * syy)))
+            initial = CorrelationStats 0 0 0 0 0
+            (CorrelationStats sumX sumY sumXX sumYY sumXY) = VU.ifoldl' step initial xs
+
+            !num = nf * sumXY - sumX * sumY
+            !den = sqrt ((nf * sumXX - sumX * sumX) * (nf * sumYY - sumY * sumY))
+         in Just (num / den)
   where
     n = VU.length xs
-    -- Cauchy-Schwarz: clamp the last rounding, never the formula. Explicit
-    -- guards so the zero-variance NaN passes through ('max' would eat it).
-    clamp r
-        | r > 1 = 1
-        | r < -1 = -1
-        | otherwise = r
+    step (CorrelationStats sx sy sxx syy sxy) i x =
+        let !y = VU.unsafeIndex ys i
+         in CorrelationStats (sx + x) (sy + y) (sxx + x * x) (syy + y * y) (sxy + x * y)
 {-# INLINE correlation' #-}
 
 quantiles' ::

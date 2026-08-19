@@ -67,10 +67,9 @@ import DataFrame.Internal.Column (
     Column (..),
     Columnable,
     TypedColumn (..),
-    columnBitmap,
     columnLength,
     columnTypeString,
-    dropNulls,
+    dropNullsExceptMaybe,
     fromList,
     fromVector,
     materializeMerged,
@@ -690,7 +689,7 @@ valueCounts ::
     forall a. (Ord a, Columnable a) => Expr a -> DataFrame -> [(a, Int)]
 valueCounts expr df
     | null df = throw (EmptyDataSetException "valueCounts")
-    | otherwise = case columnAsVectorNonNull expr df of
+    | otherwise = case nonNullElements expr df of
         Left e -> throw e
         Right column' ->
             let
@@ -698,19 +697,21 @@ valueCounts expr df
              in
                 M.toAscList column
 
--- | As 'columnAsVector', minus null slots: a sentinel is not a category.
-columnAsVectorNonNull ::
+{- | The column's present values: 'columnAsVector' after 'dropNulls'. Shorter
+than the column when it has nulls; a sentinel is not a category.
+-}
+nonNullElements ::
     forall a.
     (Columnable a) => Expr a -> DataFrame -> Either DataFrameException (V.Vector a)
-columnAsVectorNonNull expr df = case expr of
+nonNullElements expr df = case expr of
     Col name -> case getColumn name df of
-        Just col -> withColumnName name (dropNulls (columnBitmap col) <$> toVector col)
+        Just col -> withColumnName name (toVector (dropNullsExceptMaybe @a col))
         Nothing ->
             Left $
                 ColumnsNotFoundException [name] "valueCounts" (M.keys $ columnIndices df)
     _ -> case interpret df expr of
         Left e -> throw e
-        Right (TColumn col) -> dropNulls (columnBitmap col) <$> toVector col
+        Right (TColumn col) -> toVector (dropNullsExceptMaybe @a col)
 
 {- | O (k * n) Shows the proportions of each value in a given column.
 
@@ -728,7 +729,7 @@ valueProportions ::
     forall a. (Ord a, Columnable a) => Expr a -> DataFrame -> [(a, Double)]
 valueProportions expr df
     | null df = throw (EmptyDataSetException "valueCounts")
-    | otherwise = case columnAsVectorNonNull expr df of
+    | otherwise = case nonNullElements expr df of
         Left e -> throw e
         Right column' ->
             let

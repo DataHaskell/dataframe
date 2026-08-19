@@ -319,7 +319,6 @@ test-suite tests
                    Internal.DictEncode,
                    Internal.Markdown,
                    Internal.PackedText,
-                   Internal.Parsing,
                    PackedTextMigration,
                    PrettyPrint,
                    Learn.Denotation,

@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 
@@ -45,6 +46,7 @@ import Data.Ord (comparing)
 import qualified Data.Text as T
 import qualified Data.Vector.Unboxed as VU
 
+import DataFrame.Errors (DataFrameException (..))
 import DataFrame.Internal.Column (TypedColumn (..), toVector)
 import DataFrame.Internal.DataFrame (DataFrame)
 import DataFrame.Internal.Expression (Expr)
@@ -82,9 +84,8 @@ nCompared preds truth = fromIntegral (min (VU.length preds) (VU.length truth))
 -- | Mean squared error.
 mse :: Metric
 mse preds truth
-    | VU.null truth = 0
-    -- No predictions is not a perfect score.
-    | n == 0 = 0 / 0
+    -- No compared pairs is not a score of any kind.
+    | n == 0 = throw (EmptyDataSetException "mse")
     | otherwise =
         VU.sum (VU.zipWith (\p t -> (p - t) ^ (2 :: Int)) preds truth) / n
   where
@@ -97,8 +98,7 @@ rmse preds truth = sqrt (mse preds truth)
 -- | Mean absolute error.
 mae :: Metric
 mae preds truth
-    | VU.null truth = 0
-    | n == 0 = 0 / 0
+    | n == 0 = throw (EmptyDataSetException "mae")
     | otherwise = VU.sum (VU.zipWith (\p t -> abs (p - t)) preds truth) / n
   where
     n = nCompared preds truth
@@ -106,8 +106,7 @@ mae preds truth
 -- | Coefficient of determination @R²@.
 r2 :: Metric
 r2 preds truth
-    | VU.null truth = 0
-    | n == 0 = 0 / 0
+    | n == 0 = throw (EmptyDataSetException "r2")
     | ssTot == 0 = 0
     | otherwise = 1 - ssRes / ssTot
   where
@@ -120,8 +119,7 @@ r2 preds truth
 -- | Fraction of exact matches.
 accuracy :: Metric
 accuracy preds truth
-    | VU.null truth = 0
-    | n == 0 = 0 / 0
+    | n == 0 = throw (EmptyDataSetException "accuracy")
     | otherwise =
         fromIntegral (VU.length (VU.filter id (VU.zipWith (==) preds truth))) / n
   where
@@ -130,8 +128,7 @@ accuracy preds truth
 -- | Binary log loss; probabilities clamped away from @0@/@1@.
 logLoss :: Metric
 logLoss probs truth
-    | VU.null truth = 0
-    | n == 0 = 0 / 0
+    | n == 0 = throw (EmptyDataSetException "logLoss")
     | otherwise =
         negate
             ( VU.sum
