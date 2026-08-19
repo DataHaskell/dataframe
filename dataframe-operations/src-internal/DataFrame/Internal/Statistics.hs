@@ -17,7 +17,9 @@ import DataFrame.Errors (DataFrameException (..))
 mean' :: (Real a, VU.Unbox a) => VU.Vector a -> Double
 mean' samp
     | VU.null samp = throw $ EmptyDataSetException "mean"
-    | otherwise = rtf (VU.sum samp) / fromIntegral (VU.length samp)
+    -- Widen per element: summing at 'a' wraps for Int columns.
+    | otherwise =
+        VU.foldl' (\acc x -> acc + rtf x) 0 samp / fromIntegral (VU.length samp)
 {-# INLINE [0] mean' #-}
 
 meanDouble' :: VU.Vector Double -> Double
@@ -29,7 +31,9 @@ meanDouble' samp
 meanInt' :: VU.Vector Int -> Double
 meanInt' samp
     | VU.null samp = throw $ EmptyDataSetException "mean"
-    | otherwise = fromIntegral (VU.sum samp) / fromIntegral (VU.length samp)
+    | otherwise =
+        VU.foldl' (\acc x -> acc + fromIntegral x) 0 samp
+            / fromIntegral (VU.length samp)
 {-# INLINE meanInt' #-}
 
 {-# RULES
@@ -54,7 +58,8 @@ median' samp
             then pure (rtf middleElement)
             else do
                 prev <- VUM.read mutableSamp (middleIndex - 1)
-                pure (rtf (middleElement + prev) / 2)
+                -- Widen before adding: 'a' addition wraps for Int.
+                pure ((rtf middleElement + rtf prev) / 2)
 {-# INLINE median' #-}
 
 -- accumulator: count, mean, m2
@@ -73,7 +78,9 @@ varianceStep (VarAcc !n !meanVal !m2) !x =
 
 computeVariance :: VarAcc -> Double
 computeVariance (VarAcc !n _ !m2)
-    | n < 2 = 0 -- or error "variance of <2 samples"
+    | n == 0 = throw $ EmptyDataSetException "variance"
+    -- Sample variance is undefined at n = 1: NaN, not a spurious 0.
+    | n < 2 = 0 / 0
     | otherwise = m2 / fromIntegral (n - 1)
 {-# INLINE computeVariance #-}
 
@@ -106,38 +113,37 @@ skewnessStep (SkewAcc !n !meanVal !m2 !m3) !x' =
 computeSkewness :: SkewAcc -> Double
 computeSkewness (SkewAcc n _ m2 m3)
     | n < 3 = 0 -- or error "skewness of <3 samples"
-    | otherwise = (sqrt (fromIntegral n - 1) * m3) / sqrt (m2 ^ (3 :: Int))
+    -- m2, m3 are raw sums, so population g1 = sqrt n * m3 / m2^(3/2).
+    | otherwise = (sqrt (fromIntegral n) * m3) / sqrt (m2 ^ (3 :: Int))
 {-# INLINE computeSkewness #-}
 
 skewness' :: (VU.Unbox a, Real a, Num a) => VU.Vector a -> Double
 skewness' = computeSkewness . VU.foldl' skewnessStep (SkewAcc 0 0 0 0)
 {-# INLINE skewness' #-}
 
-data CorrelationStats
-    = CorrelationStats
-        {-# UNPACK #-} !Double
-        {-# UNPACK #-} !Double
-        {-# UNPACK #-} !Double
-        {-# UNPACK #-} !Double
-        {-# UNPACK #-} !Double
-
+{- | Centered two-pass form: the one-pass @n*Sxy - Sx*Sy@ form cancels
+catastrophically on low-variance columns and can report |r| > 1.
+-}
 correlation' :: VU.Vector Double -> VU.Vector Double -> Maybe Double
 correlation' xs ys
     | n < 2 = Nothing
     | VU.length xs /= VU.length ys = Nothing
     | otherwise =
         let nf = fromIntegral n
-            initial = CorrelationStats 0 0 0 0 0
-            (CorrelationStats sumX sumY sumXX sumYY sumXY) = VU.ifoldl' step initial xs
-
-            !num = nf * sumXY - sumX * sumY
-            !den = sqrt ((nf * sumXX - sumX * sumX) * (nf * sumYY - sumY * sumY))
-         in Just (num / den)
+            !mx = VU.sum xs / nf
+            !my = VU.sum ys / nf
+            !sxy = VU.sum (VU.zipWith (\x y -> (x - mx) * (y - my)) xs ys)
+            !sxx = VU.sum (VU.map (\x -> (x - mx) * (x - mx)) xs)
+            !syy = VU.sum (VU.map (\y -> (y - my) * (y - my)) ys)
+         in Just (clamp (sxy / sqrt (sxx * syy)))
   where
     n = VU.length xs
-    step (CorrelationStats sx sy sxx syy sxy) i x =
-        let !y = VU.unsafeIndex ys i
-         in CorrelationStats (sx + x) (sy + y) (sxx + x * x) (syy + y * y) (sxy + x * y)
+    -- Cauchy-Schwarz: clamp the last rounding, never the formula. Explicit
+    -- guards so the zero-variance NaN passes through ('max' would eat it).
+    clamp r
+        | r > 1 = 1
+        | r < -1 = -1
+        | otherwise = r
 {-# INLINE correlation' #-}
 
 quantiles' ::
@@ -202,11 +208,14 @@ interQuartileRange' samp =
 {-# INLINE interQuartileRange' #-}
 
 meanSquaredError :: VU.Vector Double -> VU.Vector Double -> Maybe Double
-meanSquaredError target prediction =
-    let
-        squareDiff = VU.ifoldl' (\sq i e -> (e - target VU.! i) ^ (2 :: Int) + sq) 0 prediction
-     in
-        Just $ squareDiff / fromIntegral (max (VU.length target) (VU.length prediction))
+meanSquaredError target prediction
+    | VU.length target /= VU.length prediction = Nothing
+    | VU.null target = Nothing
+    | otherwise =
+        Just
+            ( VU.sum (VU.zipWith (\t p -> (p - t) ^ (2 :: Int)) target prediction)
+                / fromIntegral (VU.length target)
+            )
 {-# INLINE meanSquaredError #-}
 
 mutualInformationBinned ::

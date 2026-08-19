@@ -416,7 +416,10 @@ summarize df =
 
 -- | Round a @Double@ to Specified Precision
 roundTo :: Int -> Double -> Double
-roundTo n x = fromInteger (round $ x * 10 ^ n) / 10.0 ^^ n
+roundTo n x
+    -- 'round' on NaN yields garbage; keep NaN visible in summaries.
+    | isNaN x = x
+    | otherwise = fromInteger (round $ x * 10 ^ n) / 10.0 ^^ n
 
 toPct2dp :: Double -> String
 toPct2dp x

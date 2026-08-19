@@ -73,15 +73,22 @@ columnOf df e = case interpret @Double df e of
     Right (TColumn c) -> fromRight VU.empty (toVector @Double @VU.Vector c)
     Left err -> throw err
 
-n2 :: VU.Vector Double -> Double
-n2 = fromIntegral . VU.length
+{- | Compared pairs: 'VU.zipWith' truncates to the shorter vector, so every
+mean below divides by this, never by the length of 'truth' alone.
+-}
+nCompared :: VU.Vector Double -> VU.Vector Double -> Double
+nCompared preds truth = fromIntegral (min (VU.length preds) (VU.length truth))
 
 -- | Mean squared error.
 mse :: Metric
 mse preds truth
     | VU.null truth = 0
+    -- No predictions is not a perfect score.
+    | n == 0 = 0 / 0
     | otherwise =
-        VU.sum (VU.zipWith (\p t -> (p - t) ^ (2 :: Int)) preds truth) / n2 truth
+        VU.sum (VU.zipWith (\p t -> (p - t) ^ (2 :: Int)) preds truth) / n
+  where
+    n = nCompared preds truth
 
 -- | Root mean squared error.
 rmse :: Metric
@@ -91,29 +98,40 @@ rmse preds truth = sqrt (mse preds truth)
 mae :: Metric
 mae preds truth
     | VU.null truth = 0
-    | otherwise = VU.sum (VU.zipWith (\p t -> abs (p - t)) preds truth) / n2 truth
+    | n == 0 = 0 / 0
+    | otherwise = VU.sum (VU.zipWith (\p t -> abs (p - t)) preds truth) / n
+  where
+    n = nCompared preds truth
 
 -- | Coefficient of determination @R²@.
 r2 :: Metric
 r2 preds truth
-    | VU.null truth || ssTot == 0 = 0
+    | VU.null truth = 0
+    | n == 0 = 0 / 0
+    | ssTot == 0 = 0
     | otherwise = 1 - ssRes / ssTot
   where
-    mean = VU.sum truth / n2 truth
-    ssRes = VU.sum (VU.zipWith (\p t -> (t - p) ^ (2 :: Int)) preds truth)
-    ssTot = VU.sum (VU.map (\t -> (t - mean) ^ (2 :: Int)) truth)
+    n = nCompared preds truth
+    truth' = VU.take (min (VU.length preds) (VU.length truth)) truth
+    mean = VU.sum truth' / n
+    ssRes = VU.sum (VU.zipWith (\p t -> (t - p) ^ (2 :: Int)) preds truth')
+    ssTot = VU.sum (VU.map (\t -> (t - mean) ^ (2 :: Int)) truth')
 
 -- | Fraction of exact matches.
 accuracy :: Metric
 accuracy preds truth
     | VU.null truth = 0
+    | n == 0 = 0 / 0
     | otherwise =
-        fromIntegral (VU.length (VU.filter id (VU.zipWith (==) preds truth))) / n2 truth
+        fromIntegral (VU.length (VU.filter id (VU.zipWith (==) preds truth))) / n
+  where
+    n = nCompared preds truth
 
 -- | Binary log loss; probabilities clamped away from @0@/@1@.
 logLoss :: Metric
 logLoss probs truth
     | VU.null truth = 0
+    | n == 0 = 0 / 0
     | otherwise =
         negate
             ( VU.sum
@@ -123,8 +141,9 @@ logLoss probs truth
                     truth
                 )
             )
-            / n2 truth
+            / n
   where
+    n = nCompared probs truth
     clampP p = max 1e-15 (min (1 - 1e-15) p)
 
 -- | Averaging strategy for multiclass precision/recall/F1.

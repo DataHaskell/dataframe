@@ -185,10 +185,12 @@ prop_doubleParity :: Field -> Property
 prop_doubleParity (Field f) =
     bitsOf (parseDoubleField f) === bitsOf (readByteStringDouble f)
 
+-- | 'show' output must parse back to the exact same double (NaN is nullish).
 prop_doubleShowRoundTrip :: Double -> Property
 prop_doubleShowRoundTrip d =
-    let f = C.pack (show d)
-     in bitsOf (parseDoubleField f) === bitsOf (readByteStringDouble f)
+    not (isNaN d) ==>
+        let f = C.pack (show d)
+         in bitsOf (parseDoubleField f) === bitsOf (Just d)
 
 prop_doubleSlice :: Field -> Field -> Field -> Property
 prop_doubleSlice (Field pre) (Field f) (Field post) =

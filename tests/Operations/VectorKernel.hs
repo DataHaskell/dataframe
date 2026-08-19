@@ -123,7 +123,12 @@ parityCase n keys aggs =
             fast = D.aggregate aggs gdf
             ref = interpretOnly aggs gdf
             label = "n=" ++ show n ++ " keys=" ++ show keys ++ " #aggs=" ++ show (length aggs)
-         in assertEqual ("kernel==interpreter " ++ label) ref fast
+         in -- Full render: value-exact via 'show', and NaN cells (singleton
+            -- group stddev/variance) compare equal, which 'Eq' refuses.
+            assertEqual
+                ("kernel==interpreter " ++ label)
+                (D.toMarkdown ref)
+                (D.toMarkdown fast)
 
 tests :: [Test]
 tests =

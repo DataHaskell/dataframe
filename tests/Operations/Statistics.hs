@@ -56,6 +56,7 @@ skewnessOfSymmetricDataSet =
             0
         )
 
+-- Population skewness g1, the form the docs define (matches scipy.stats.skew).
 skewnessOfSimpleDataSet :: Test
 skewnessOfSimpleDataSet =
     TestCase
@@ -63,7 +64,7 @@ skewnessOfSimpleDataSet =
             "Skewness of a simple data set"
             ( abs
                 ( D.skewness' (VU.fromList [25 :: Int, 28, 26, 30, 40, 50, 40])
-                    - 0.566_731_633_676
+                    - 0.612_140_127_240_396_6
                 )
                 < 1e-12
             )
@@ -181,6 +182,57 @@ wrongQuantileIndex =
             (print $ D.quantiles' (VU.fromList [5]) 4 (VU.fromList [1 :: Int, 2, 3, 4, 5]))
         )
 
+-- Int aggregation must widen before summing, not wrap at 2^63.
+medianOfLargeIntDataSet :: Test
+medianOfLargeIntDataSet =
+    TestCase
+        ( assertEqual
+            "Median of an even length Int data set near maxBound"
+            9.223372036854776e18
+            (D.median' (VU.fromList [maxBound - 1, maxBound :: Int]))
+        )
+
+meanOfLargeIntDataSet :: Test
+meanOfLargeIntDataSet =
+    TestCase
+        ( assertEqual
+            "Mean of an Int data set summing past 2^63"
+            9.223372036854776e18
+            (D.meanInt' (VU.fromList [maxBound, maxBound :: Int]))
+        )
+
+-- The one-pass correlation form cancelled catastrophically here (gave 2.0).
+correlationLowVarianceBounded :: Test
+correlationLowVarianceBounded =
+    TestCase
+        ( let df =
+                D.fromNamedColumns
+                    [ ("a", DI.fromList [1e8 :: Double, 1e8, 1.00000002e8])
+                    , ("b", DI.fromList [1e8 :: Double, 1e8, 1.00000003e8])
+                    ]
+           in case D.correlation "a" "b" df of
+                Nothing -> assertFailure "Expected Just 1.0, got Nothing"
+                Just r ->
+                    assertBool
+                        "collinear large-offset columns give r = 1"
+                        (abs (r - 1.0) < 1e-9)
+        )
+
+-- Self-correlation with a large offset flipped sign (gave -1.0).
+correlationSelfLargeOffset :: Test
+correlationSelfLargeOffset =
+    TestCase
+        ( let df =
+                D.fromNamedColumns
+                    [("a", DI.fromList [1e11 :: Double, 1e11 + 1, 1e11 + 2])]
+           in case D.correlation "a" "a" df of
+                Nothing -> assertFailure "Expected Just 1.0, got Nothing"
+                Just r ->
+                    assertBool
+                        "self correlation at a large offset is 1"
+                        (abs (r - 1.0) < 1e-9)
+        )
+
 summarizeOptional :: Test
 summarizeOptional =
     TestCase
@@ -276,6 +328,10 @@ tests =
         interQuartileRangeOfEvenLengthDataSet
     , TestLabel "wrongQuantileNumber" wrongQuantileNumber
     , TestLabel "wrongQuantileIndex" wrongQuantileIndex
+    , TestLabel "medianOfLargeIntDataSet" medianOfLargeIntDataSet
+    , TestLabel "meanOfLargeIntDataSet" meanOfLargeIntDataSet
+    , TestLabel "correlationLowVarianceBounded" correlationLowVarianceBounded
+    , TestLabel "correlationSelfLargeOffset" correlationSelfLargeOffset
     , TestLabel "summarizeOptional" summarizeOptional
     , TestLabel "correlationPerfectPositive" correlationPerfectPositive
     , TestLabel "correlationPerfectNegative" correlationPerfectNegative

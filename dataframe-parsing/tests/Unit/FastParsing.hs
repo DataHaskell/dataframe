@@ -4,11 +4,13 @@
 
 Each case asserts parity with the reference parsers plus, where the
 parser-semantics contract (benchmarks/csv/results/code-audit.md section 2)
-pins a concrete value, the value itself.
+pins a concrete value, the value itself. Doubles are additionally pinned
+against 'read', which is correctly rounded.
 -}
 module Unit.FastParsing (tests) where
 
 import qualified Data.ByteString as BS
+import qualified Data.ByteString.Char8 as C
 
 import Data.Word (Word64)
 import GHC.Float (castDoubleToWord64)
@@ -94,6 +96,9 @@ doubleCases =
     , "1e-1024"
     , "1e-1025"
     , "Infinity"
+    , "-Infinity"
+    , "+Infinity"
+    , " Infinity "
     , "NaN"
     , "1e"
     , "1e+"
@@ -114,11 +119,28 @@ pinnedDoubles =
     , ("5.", Nothing)
     , ("1e3.5", Nothing)
     , ("1_000", Nothing)
-    , ("Infinity", Nothing)
+    , ("Infinity", Just (1 / 0))
+    , ("-Infinity", Just (-1 / 0))
     , ("NaN", Nothing)
-    , -- The reference parser is NOT correctly rounded here; bit-exact
-      -- parity means we must reproduce its 2.2250738585072e-308.
-      ("2.2250738585072011e-308", Just 2.2250738585072e-308)
+    , ("2.2250738585072011e-308", Just 2.225073858507201e-308)
+    ]
+
+-- | Correct rounding: every case must equal 'read' bit for bit.
+strtodDoubles :: [BS.ByteString]
+strtodDoubles =
+    [ "1.7976931348623157e308"
+    , "4.9406564584124654e-324"
+    , "1e-310"
+    , "1e-309"
+    , "1e-308"
+    , "2.2250871628565451e-249"
+    , "1.602176634e-19"
+    , "0.30000000000000004"
+    , "9007199254740993.9007199254740993"
+    , "123456789012345678901234567890e-25"
+    , "1e999"
+    , "1e-999"
+    , "-0"
     ]
 
 boolCases :: [BS.ByteString]
@@ -197,6 +219,14 @@ pinnedCase input expected =
             (bitsOf expected)
             (bitsOf (parseDoubleField input))
 
+readParityCase :: BS.ByteString -> Test
+readParityCase input =
+    TestLabel ("read parity: " ++ show input) . TestCase $
+        assertEqual
+            ("read parity on " ++ show input)
+            (bitsOf (Just (read (C.unpack input))))
+            (bitsOf (parseDoubleField input))
+
 tests :: [Test]
 tests =
     map (parityCase "int" parseIntField readByteStringInt) intCases
@@ -204,6 +234,7 @@ tests =
             (parityCase "double" (bitsOf . parseDoubleField) (bitsOf . readByteStringDouble))
             doubleCases
         ++ map (uncurry pinnedCase) pinnedDoubles
+        ++ map readParityCase strtodDoubles
         ++ map (parityCase "bool" parseBoolField readByteStringBool) boolCases
         ++ map (parityCase "missing" isMissingField isNullishBS) missingCases
         ++ map (parityCase "date" parseDateField (readByteStringDate "%Y-%m-%d")) dateCases
