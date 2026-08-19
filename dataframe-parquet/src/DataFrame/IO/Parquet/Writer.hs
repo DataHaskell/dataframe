@@ -3,8 +3,7 @@
 
 module DataFrame.IO.Parquet.Writer (writeParquet, writeParquetWithOptions, defaultParquetWriteOptions) where
 
-import qualified Data.Vector as Vector
-import Data.Vector (Vector)
+import DataFrame.Internal.DataFrame (DataFrame)
 
 --A Parquet file is a series of row groups followed by the file metadata (which contains the schema and the
 -- metadata for all the rowgroups, which, in turn, contain the metadata for each column chunk). Inside each
@@ -22,9 +21,6 @@ data ParquetWriteOptions = ParquetWriteOptions
     { pageSize :: Int
     , rowGroupSize :: Int
     , batchSize :: Int
-    , preferredCompressionCodec :: CompressionCodec
-    , rowGroupBuffer :: RowGroupBuffer
-    , 
     }
     deriving (Eq, Show)
 
@@ -70,82 +66,27 @@ defaultParquetWriteOptions = undefined
 --
 -- refer to DataFrame.IO.Utils.RandomAccess for the buffer implementation.
 
--- I tested write speeds by doing (on Apple Silicon)
--- `dd if=/dev/zero of=test bs={$n}k oflag=direct conv=fdatasync
--- Results:
---
--- ```
---    | block size | data (GiB) |  time (s) | GiB/s |
---    |------------|------------|-----------|-------|
---    | 4k         |       4.00 |     2.371 |  1.69 |
---    | 8k         |       4.00 |     1.486 |  2.69 |
---    | 16k        |       4.00 |     1.045 |  3.83 |
---    | 32k        |       4.00 |     0.740 |  5.40 |
---    | 64k        |       4.00 |     0.675 |  5.92 |
---    | 128k       |       4.00 |     0.669 |  5.98 |
---    | 256k       |       4.00 |     0.664 |  6.03 |
---    | 512k       |       4.00 |     0.670 |  5.97 |
---    | 1024k      |       4.00 |     0.664 |  6.02 |
---    | 4096k      |       4.00 |     0.668 |  5.99 |
--- ```
--- We see that our raw data-writing throughput caps out at 64k and declines slightly above that. So we
--- need to split our buffer into 64k chunks and flush each to dis k(of course, this
--- may very well vary from machine to machine, regardless, 64KiB is probably good enough).
---
-
-
 -- We need writers for each level of the Parquet file
   
 -- A RowGroupWriter that flushes into the file
-data RowGroupEnv = RowGroupEnv
-  { rowGroupBuffer :: !(Vector ColumnChunkWriter)
-  , pageWriter :: PageWriter 
-  }
 
-type RowGroupWriter b a = ReaderIO (RowGroupEnv b) a
 
 -- The RowGroupWriter has in its env a Vector of ColumnChunkWriters
 -- (which is essentially the row group buffer)
-type ColumnChunkWriter = ReaderIO
 
 -- And the RowGroupWriter also needs a PageWriter
-type PageWriter = ReaderIO
 
 writeParquet :: FilePath -> DataFrame -> IO ()
 writeParquet = writeParquetWithOptions defaultParquetWriteOptions
 
 writeParquetWithOptions :: ParquetWriteOptions -> FilePath -> DataFrame -> IO ()
-writeParquetWithOptions options filepath dataframe = do
-  let 
-      initialState = WriterStateRecord 0 options.rowGroupSize emptyColumnChunkState  
-      (_, (pages, metadata)) = runState initialState
-        $ foldChunks (chunkDataFrame options.rowGroupSize dataframe) generateRowGroup
-      schema = generateSchema dataframe
-  writeFile filepath (pages <> buildMetadata metadata)
+writeParquetWithOptions _options _filepath _dataframe = undefined
 
 -- I don't see how this scales to multiple reader/writer threads so we may have
 -- to change this later
 
-data WriterStateRecord = WriterStateRecord
-  { offset :: Int64
-  , chunkSize :: Int64
-  , columnChunkState :: ColumnChunkStateRecord
-  }
 
-data ColumnChunkStateRecord = ColumnChunkStateRecord
-  { thriftType :: ThriftType
-  , encodings :: Set Encoding
-  , codec :: CompressionCodec
-  , total_uncompressed_size :: Int64
-  , total_compressed_size :: Int64
-  , data_page_offset :: Maybe Int64
-  , dictionary_page_offset :: Maybe Int64
-  }
-initColumnChunkState :: Column -> ColumnChunkStateRecord
-initColumnChunkState = undefined
 
-emptyColumnChunkState :: ColumnChunkStateRecord
-emptyColumnChunkState = undefined
 
 -- type WriterState a = State WriterStateRecord a
 -- 
