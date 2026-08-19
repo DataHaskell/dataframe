@@ -10,6 +10,7 @@ module DataFrame.IO.Parquet.Writer.ColumnChunkWriter (
     askColumnChunk,
     initColumnState,
     writeRow,
+    writeRowAndMaybeFinalize,
     maybeFinalizePage,
     finalizePage,
     bufferedSize,
@@ -19,11 +20,11 @@ import Control.Monad (when)
 import Control.Monad.IO.Class (MonadIO (..))
 import qualified Data.ByteString as BS
 import Data.Int (Int64)
-import Data.IORef (IORef, modifyIORef', newIORef, readIORef)
+import Data.IORef (IORef, modifyIORef', newIORef)
 import qualified Data.Text as T
 import qualified Data.Vector as VB
 import DataFrame.IO.Parquet.Thrift
-import DataFrame.IO.Parquet.Writer.DefLevels (DefLevels (..))
+import DataFrame.IO.Parquet.Writer.DefLevels (DefLevels (..), pushDef)
 import DataFrame.IO.Parquet.Writer.Encoder (Encoder (..), buildEncoder)
 import DataFrame.IO.Parquet.Writer.Metadata (mkDataPageHeader, mkSchemaElem)
 import DataFrame.IO.Parquet.Writer.Options (ParquetWriteOptions (..))
@@ -31,10 +32,8 @@ import DataFrame.IO.Parquet.Writer.PageWriter (
     PageState (..),
     PageWriter (..),
     assemblePageBody,
-    bumpRows,
     newPageState,
     pageRows,
-    recordDef,
     resetPage,
  )
 import DataFrame.IO.Utils.RandomAccess (
@@ -111,12 +110,25 @@ initColumnState opts name col = do
             }
 
 writeRow :: Int -> ColumnChunkWriter ()
-writeRow row = do
-    st <- askColumnChunk
-    present <- page (encWriteValue (ckEncoder st) row)
-    page $ do
-        when (ckNullable st) (recordDef present)
-        bumpRows
+writeRow row = ColumnChunkWriter (writeRowIO row)
+
+writeRowIO :: Int -> ColumnChunkState -> IO ()
+writeRowIO row st = do
+    let pageState = ckPage st
+    present <- encWriteValue (ckEncoder st) pageState.psValues row
+    when (ckNullable st) (pushDef pageState.psDefs (if present then 1 else 0))
+    modifyIORef' pageState.psRows (+ 1)
+{-# INLINE writeRowIO #-}
+
+writeRowAndMaybeFinalize ::
+    ParquetWriteOptions -> Int -> ColumnChunkState -> IO ()
+writeRowAndMaybeFinalize opts row st = do
+    writeRowIO row st
+    size <- bufferResidency st.ckPage.psValues
+    when
+        (size >= opts.pageSize)
+        (runColumnChunkWriter (finalizePage opts.compressionCodec) st)
+{-# INLINE writeRowAndMaybeFinalize #-}
 
 maybeFinalizePage :: ParquetWriteOptions -> ColumnChunkWriter ()
 maybeFinalizePage opts = do
@@ -128,7 +140,7 @@ finalizePage codec = do
     st <- askColumnChunk
     rows <- page pageRows
     when (rows > 0) $ do
-        page (encFinishValues (ckEncoder st))
+        liftIO (encFinishValues (ckEncoder st) st.ckPage.psValues)
         body <- page (assemblePageBody (ckNullable st))
         writeDataPage codec rows body
         page resetPage

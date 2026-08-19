@@ -12,10 +12,9 @@ module DataFrame.IO.Parquet.Writer.Encoder (
 ) where
 
 import Control.Monad (when)
-import Control.Monad.IO.Class (MonadIO (..))
 import Data.Bits (shiftL, (.|.))
-import Data.Int (Int32, Int64)
 import Data.IORef (newIORef, readIORef, writeIORef)
+import Data.Int (Int32, Int64)
 import qualified Data.Text as T
 import qualified Data.Text.Array as TA
 import Data.Text.Internal (Text (Text))
@@ -26,14 +25,14 @@ import qualified Data.Vector as VB
 import qualified Data.Vector.Unboxed as VU
 import Data.Word (Word8)
 import DataFrame.IO.Parquet.Thrift
-import DataFrame.IO.Parquet.Writer.PageWriter (PageWriter)
 import DataFrame.IO.Utils.RandomAccess (
-    putDoubleLE,
-    putFloatLE,
-    putGenerated,
-    putWord32LE,
-    putWord64LE,
-    putWord8,
+    MemoryBuffer,
+    appendTextArraySlice,
+    writeDoubleLE,
+    writeFloatLE,
+    writeWord32LE,
+    writeWord64LE,
+    writeWord8,
  )
 import DataFrame.Internal.Column (
     Bitmap,
@@ -55,24 +54,37 @@ data Encoder = Encoder
     { encType :: !ThriftType
     , encConverted :: !(Maybe ConvertedType)
     , encLogical :: !(Maybe LogicalType)
-    , encWriteValue :: !(Int -> PageWriter Bool) -- Boolean for wat def levels should be (see pushDef)
-    , encFinishValues :: !(PageWriter ())
+    , encWriteValue :: !(MemoryBuffer -> Int -> IO Bool)
+    , encFinishValues :: !(MemoryBuffer -> IO ())
     }
 
 buildEncoder :: Column -> IO Encoder
 buildEncoder col
     | hasElemType @Int32 col =
-        pure $ scalarEncoder @Int32 (INT32 enum) Nothing Nothing (putWord32LE . fromIntegral) col
+        pure $
+            scalarEncoder @Int32
+                (INT32 enum)
+                Nothing
+                Nothing
+                (\buffer -> writeWord32LE buffer . fromIntegral)
+                col
     | hasElemType @Int64 col =
-        pure $ scalarEncoder @Int64 (INT64 enum) Nothing Nothing (putWord64LE . fromIntegral) col
+        pure $
+            scalarEncoder @Int64
+                (INT64 enum)
+                Nothing
+                Nothing
+                (\buffer -> writeWord64LE buffer . fromIntegral)
+                col
     | hasElemType @Float col =
-        pure $ scalarEncoder @Float (FLOAT enum) Nothing Nothing putFloatLE col
+        pure $ scalarEncoder @Float (FLOAT enum) Nothing Nothing writeFloatLE col
     | hasElemType @Double col =
-        pure $ scalarEncoder @Double (DOUBLE enum) Nothing Nothing putDoubleLE col
+        pure $ scalarEncoder @Double (DOUBLE enum) Nothing Nothing writeDoubleLE col
     | hasElemType @Bool col = boolEncoder col
     | hasElemType @T.Text col = pure (textEncoder col)
     | hasElemType @UTCTime col = pure (timestampEncoder col)
-    | otherwise = error ("writeParquet: unsupported column type " <> columnTypeString col)
+    | otherwise =
+        error ("writeParquet: unsupported column type " <> columnTypeString col)
 
 scalarEncoder ::
     forall a.
@@ -80,19 +92,53 @@ scalarEncoder ::
     ThriftType ->
     Maybe ConvertedType ->
     Maybe LogicalType ->
-    (a -> PageWriter ()) ->
+    (MemoryBuffer -> a -> IO ()) ->
     Column ->
     Encoder
 scalarEncoder tt conv logical writeValue col =
-    Encoder tt conv logical (columnWriter @a col writeValue) (pure ())
+    Encoder tt conv logical (columnWriter @a col writeValue) (const (pure ()))
+{-# INLINEABLE scalarEncoder #-}
+{-# SPECIALIZE scalarEncoder ::
+    ThriftType ->
+    Maybe ConvertedType ->
+    Maybe LogicalType ->
+    (MemoryBuffer -> Int32 -> IO ()) ->
+    Column ->
+    Encoder
+    #-}
+{-# SPECIALIZE scalarEncoder ::
+    ThriftType ->
+    Maybe ConvertedType ->
+    Maybe LogicalType ->
+    (MemoryBuffer -> Int64 -> IO ()) ->
+    Column ->
+    Encoder
+    #-}
+{-# SPECIALIZE scalarEncoder ::
+    ThriftType ->
+    Maybe ConvertedType ->
+    Maybe LogicalType ->
+    (MemoryBuffer -> Float -> IO ()) ->
+    Column ->
+    Encoder
+    #-}
+{-# SPECIALIZE scalarEncoder ::
+    ThriftType ->
+    Maybe ConvertedType ->
+    Maybe LogicalType ->
+    (MemoryBuffer -> Double -> IO ()) ->
+    Column ->
+    Encoder
+    #-}
 
 columnWriter ::
     forall a.
-    Columnable a =>
+    (Columnable a) =>
     Column ->
-    (a -> PageWriter ()) ->
+    (MemoryBuffer -> a -> IO ()) ->
+    MemoryBuffer ->
     Int ->
-    PageWriter Bool
+    IO Bool
 columnWriter col writeValue = case col of
     BoxedColumn bitmap (values :: VB.Vector b) ->
         case testEquality (typeRep @a) (typeRep @b) of
@@ -104,32 +150,56 @@ columnWriter col writeValue = case col of
             Nothing -> mismatch
     _ -> mismatch
   where
-    writeFrom bitmap at row
-        | isPresent bitmap row = writeValue (at row) >> pure True
+    writeFrom bitmap at buffer row
+        | isPresent bitmap row = writeValue buffer (at row) >> pure True
         | otherwise = pure False
-    mismatch = error ("writeParquet: incompatible column representation for " <> columnTypeString col)
+    mismatch =
+        error
+            ("writeParquet: incompatible column representation for " <> columnTypeString col)
+{-# INLINEABLE columnWriter #-}
+{-# SPECIALIZE columnWriter ::
+    Column -> (MemoryBuffer -> Int32 -> IO ()) -> MemoryBuffer -> Int -> IO Bool
+    #-}
+{-# SPECIALIZE columnWriter ::
+    Column -> (MemoryBuffer -> Int64 -> IO ()) -> MemoryBuffer -> Int -> IO Bool
+    #-}
+{-# SPECIALIZE columnWriter ::
+    Column -> (MemoryBuffer -> Float -> IO ()) -> MemoryBuffer -> Int -> IO Bool
+    #-}
+{-# SPECIALIZE columnWriter ::
+    Column -> (MemoryBuffer -> Double -> IO ()) -> MemoryBuffer -> Int -> IO Bool
+    #-}
+{-# SPECIALIZE columnWriter ::
+    Column -> (MemoryBuffer -> Bool -> IO ()) -> MemoryBuffer -> Int -> IO Bool
+    #-}
+{-# SPECIALIZE columnWriter ::
+    Column -> (MemoryBuffer -> UTCTime -> IO ()) -> MemoryBuffer -> Int -> IO Bool
+    #-}
 
 isPresent :: Maybe Bitmap -> Int -> Bool
 isPresent Nothing _ = True
 isPresent (Just bitmap) row = bitmapTestBit bitmap row
+{-# INLINE isPresent #-}
 
 boolEncoder :: Column -> IO Encoder
 boolEncoder col = do
     bitsRef <- newIORef (0 :: Word8)
     countRef <- newIORef (0 :: Int)
-    let addBit value = do
-            bits <- liftIO (readIORef bitsRef)
-            count <- liftIO (readIORef countRef)
+    let addBit buffer value = do
+            bits <- readIORef bitsRef
+            count <- readIORef countRef
             let bits' = if value then bits .|. ((1 :: Word8) `shiftL` count) else bits
                 count' = count + 1
             if count' == 8
-                then putWord8 bits' >> liftIO (writeIORef bitsRef 0 >> writeIORef countRef 0)
-                else liftIO (writeIORef bitsRef bits' >> writeIORef countRef count')
-        finish = do
-            count <- liftIO (readIORef countRef)
-            when (count > 0) (liftIO (readIORef bitsRef) >>= putWord8)
-            liftIO (writeIORef bitsRef 0 >> writeIORef countRef 0)
-    pure (Encoder (BOOLEAN enum) Nothing Nothing (columnWriter @Bool col addBit) finish)
+                then writeWord8 buffer bits' >> writeIORef bitsRef 0 >> writeIORef countRef 0
+                else writeIORef bitsRef bits' >> writeIORef countRef count'
+        finish buffer = do
+            count <- readIORef countRef
+            when (count > 0) (readIORef bitsRef >>= writeWord8 buffer)
+            writeIORef bitsRef 0
+            writeIORef countRef 0
+    pure
+        (Encoder (BOOLEAN enum) Nothing Nothing (columnWriter @Bool col addBit) finish)
 
 textEncoder :: Column -> Encoder
 textEncoder col =
@@ -138,7 +208,7 @@ textEncoder col =
         (Just (UTF8 enum))
         (Just (LT_STRING (putField StringType)))
         writePresent
-        (pure ())
+        (const (pure ()))
   where
     writePresent = case col of
         BoxedColumn bitmap (values :: VB.Vector a) ->
@@ -147,26 +217,30 @@ textEncoder col =
                 Nothing -> mismatch
         PackedText bitmap packed -> writePacked bitmap packed
         _ -> mismatch
-    writeBoxed bitmap values row
-        | isPresent bitmap row = writeText (VB.unsafeIndex values row) >> pure True
+    writeBoxed bitmap values buffer row
+        | isPresent bitmap row =
+            writeText buffer (VB.unsafeIndex values row) >> pure True
         | otherwise = pure False
-    writePacked bitmap packed row
+    writePacked bitmap packed buffer row
         | isPresent bitmap row = do
             let baseRow = maybe row (\selection -> selAt selection row) packed.ptSel
                 start = offAt packed.ptOffsets baseRow
                 end = offAt packed.ptOffsets (baseRow + 1)
-            writeTextSlice packed.ptBytes start (end - start)
+            writeTextSlice buffer packed.ptBytes start (end - start)
             pure True
         | otherwise = pure False
-    mismatch = error ("writeParquet: incompatible text representation for " <> columnTypeString col)
+    mismatch =
+        error
+            ("writeParquet: incompatible text representation for " <> columnTypeString col)
 
-writeText :: T.Text -> PageWriter ()
-writeText (Text bytes offset count) = writeTextSlice bytes offset count
+writeText :: MemoryBuffer -> T.Text -> IO ()
+writeText buffer (Text bytes offset count) = writeTextSlice buffer bytes offset count
 
-writeTextSlice :: TA.Array -> Int -> Int -> PageWriter ()
-writeTextSlice bytes offset count = do
-    putWord32LE (fromIntegral count)
-    putGenerated count (TA.unsafeIndex bytes . (+ offset))
+writeTextSlice :: MemoryBuffer -> TA.Array -> Int -> Int -> IO ()
+writeTextSlice buffer bytes offset count = do
+    writeWord32LE buffer (fromIntegral count)
+    appendTextArraySlice buffer bytes offset count
+{-# INLINE writeTextSlice #-}
 
 timestampEncoder :: Column -> Encoder
 timestampEncoder col =
@@ -175,9 +249,9 @@ timestampEncoder col =
         (Just (TIMESTAMP_MICROS enum))
         (Just timestampLogical)
         (columnWriter @UTCTime col writeMicros)
-        (pure ())
+        (const (pure ()))
   where
-    writeMicros t = putWord64LE (fromIntegral (utcToMicros t))
+    writeMicros buffer t = writeWord64LE buffer (fromIntegral (utcToMicros t))
 
 timestampLogical :: LogicalType
 timestampLogical =

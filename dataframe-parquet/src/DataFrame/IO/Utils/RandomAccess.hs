@@ -22,6 +22,7 @@ module DataFrame.IO.Utils.RandomAccess (
     withFileBuffer,
     appendByteString,
     appendGeneratedBytes,
+    appendTextArraySlice,
     appendByteStringHandle,
     writeWord8,
     writeWord32LE,
@@ -47,10 +48,12 @@ module DataFrame.IO.Utils.RandomAccess (
 ) where
 
 import Control.Monad.IO.Class (MonadIO (..))
+import Control.Monad.ST (stToIO)
 import Data.ByteString.Internal (ByteString (PS), create)
 import qualified Data.Foldable as Foldable
 import qualified Data.ByteString.Unsafe as BU
 import qualified Data.ByteString as BS
+import qualified Data.Text.Array as TA
 import qualified Data.Vector.Storable as VS
 import Data.Word (Word8, Word32, Word64)
 import Data.Bits (shiftR)
@@ -378,6 +381,17 @@ appendGeneratedBytes buffer count at
             | otherwise = writeByteArray array (position + i) (at i) >> go (i + 1)
       go 0
       writeIORef buffer.positionRef (position + count)
+
+appendTextArraySlice :: MemoryBuffer -> TA.Array -> Int -> Int -> IO ()
+appendTextArraySlice buffer source offset count
+  | count < 0 = ioError $ userError "appendTextArraySlice: negative length"
+  | otherwise = do
+      position <- readIORef buffer.positionRef
+      array <- ensureCapacity buffer (position + count)
+      withMutableByteArrayContents array $ \destination ->
+        stToIO (TA.copyToPointer source offset (destination `plusPtr` position) count)
+      writeIORef buffer.positionRef (position + count)
+{-# INLINE appendTextArraySlice #-}
 
 flushBufferToFile :: WritableBinaryHandle -> MemoryBuffer -> IO ()
 flushBufferToFile handle = runReaderIO (flushTo (FileSink handle))

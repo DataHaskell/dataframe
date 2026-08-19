@@ -21,9 +21,8 @@ import DataFrame.IO.Parquet.Writer.ColumnChunkWriter (
     bufferedSize,
     finalizePage,
     initColumnState,
-    maybeFinalizePage,
     runColumnChunkWriter,
-    writeRow,
+    writeRowAndMaybeFinalize,
  )
 import DataFrame.IO.Parquet.Writer.Encoder (Encoder (..))
 import DataFrame.IO.Parquet.Writer.Metadata (magic, rootSchemaElement)
@@ -139,7 +138,7 @@ writeParquetWithOptions opts path df = do
                     -- When a page is full (frome the page size writer option) flush it to its ColumnChunk
                     -- When all the columnChunks combined match or exceed the row group size option
                     -- flush all the columnchunks to file one by one
-                    VB.forM_ cols (runColumnChunkWriter (writeRow row >> maybeFinalizePage opts))
+                    VB.forM_ cols (writeRowAndMaybeFinalize opts row)
                     modifyIORef' rgRowsRef (+ 1)
                     when ((row + 1) `mod` interval == 0) $ do
                         size <- bufferedSize cols
