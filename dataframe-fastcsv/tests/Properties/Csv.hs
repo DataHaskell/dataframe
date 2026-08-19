@@ -124,6 +124,7 @@ columnAsText name df = do
                 Nothing -> Nothing
         UnboxedColumn{} -> Nothing
         PackedText{} -> Nothing
+        MergedColumn{} -> Nothing
 
 {- | Run a property in @IO@ against a generated CSV text, cleaning up
 the temp file afterwards no matter what.

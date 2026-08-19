@@ -94,6 +94,7 @@ getRowEscaped sep df i = V.ifoldr go [] (columns df)
   where
     go :: Int -> Column -> [T.Text] -> [T.Text]
     go idx c@(PackedText _ _) acc = go idx (DI.materializePacked c) acc
+    go idx c@(MergedColumn _ _) acc = go idx (DI.materializeMerged c) acc
     go _ (BoxedColumn bm (c :: V.Vector a)) acc = case c V.!? i of
         Just e -> escapeField sep textRep : acc
           where
