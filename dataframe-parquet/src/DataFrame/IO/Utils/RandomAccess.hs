@@ -2,12 +2,28 @@
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE TypeFamilies #-}
 
-module DataFrame.IO.Utils.RandomAccess where
+module DataFrame.IO.Utils.RandomAccess (
+    uncurry3,
+    Range (..),
+    RandomAccess (..),
+    ReaderIO (runReaderIO),
+    LocalFile,
+    MMappedFile,
+    unsafeToByteString,
+    WritableBinaryHandle,
+    openWritableBinaryFile,
+    withWritableBinaryFile,
+    HasBuffer (..),
+    Sink (..),
+    MemoryBuffer (..),
+    mallocBuffer,
+    BufferHandle,
+    withFileBuffer,
+) where
 
 import Control.Monad.IO.Class (MonadIO (..))
-import Data.ByteString (ByteString)
-import Data.ByteString.Internal (ByteString (PS), fromForeignPtr0)
-import Data.ByteString.Builder (Builder, byteString)
+import Data.ByteString.Internal (ByteString (PS))
+import qualified Data.Foldable as Foldable
 import qualified Data.Vector.Storable as VS
 import Data.Word (Word8)
 import DataFrame.IO.Parquet.Seeking (
@@ -16,12 +32,32 @@ import DataFrame.IO.Parquet.Seeking (
     fSeek,
     readLastBytes,
  )
-import Foreign (castForeignPtr)
+import Control.Exception (bracket)
+import Control.Monad (foldM)
+import Control.Monad.Primitive (RealWorld)
+import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import Data.Primitive.ByteArray (
+    MutableByteArray,
+    copyMutableByteArray,
+    getSizeofMutableByteArray,
+    mutableByteArrayContents,
+    newPinnedByteArray,
+    resizeMutableByteArray,
+    writeByteArray,
+ )
+import Foreign (castForeignPtr, plusPtr)
 import System.IO (
-    SeekMode (AbsoluteSeek),
+    BufferMode (NoBuffering),
     Handle,
-    WriteMode,
-    withBinaryFile
+    IOMode (AppendMode, ReadWriteMode),
+    SeekMode (AbsoluteSeek),
+    hClose,
+    hGetBuf,
+    hPutBuf,
+    hSeek,
+    hSetBinaryMode,
+    hSetBuffering,
+    openBinaryFile,
  )
 
 uncurry3 :: (a -> b -> c -> d) -> (a, b, c) -> d
@@ -100,14 +136,14 @@ unsafeToByteString v = PS (castForeignPtr ptr) offset' len
 
 newtype WritableBinaryHandle = WritableBinaryHandle { unHandle :: Handle }
 
-openWritableBinaryFile :: (HasBuffer m) => FilePath -> m WritableBinaryHandle
-openWritableBinaryFile filepath = liftIO $ do
-  h <- openBinaryFile AppendMode
+openWritableBinaryFile :: FilePath -> IO WritableBinaryHandle
+openWritableBinaryFile filepath = do
+  h <- openBinaryFile filepath AppendMode
   hSetBinaryMode h True
-  hSetBuffering h $ BlockBuffering (Just 65536)
+  hSetBuffering h NoBuffering
   pure . WritableBinaryHandle $ h
 
-withWritableBinaryFile :: (HasBuffer m) => FilePath -> (WriteableBinaryHandle -> m r) -> m r
+withWritableBinaryFile :: FilePath -> (WritableBinaryHandle -> IO a) -> IO a
 withWritableBinaryFile filepath action =
   bracket
     (openWritableBinaryFile filepath)
@@ -121,54 +157,91 @@ class (Monad m) => HasBuffer m where
   writeBytes :: (Foldable f) => f Word8 -> m ()
   flushTo :: Sink -> m ()
   
-data BufferPointer = BufferPointer
-  { pointer :: !(IORef (ForeignPtr Word8)) -- Reallocatoble if we need to grow 
-  , size :: !(IORef Int) -- Reallocatable if we need to grow it
-  , cursor :: !(IORef Int)
-  }
-
 data MemoryBuffer = MemoryBuffer
   { arrayRef :: !(IORef (MutableByteArray RealWorld))
   , positionRef :: !(IORef Int)
   }
+
+mallocBuffer :: Int -> IO MemoryBuffer
+mallocBuffer capacity
+  | capacity < 0 = ioError $ userError "mallocBuffer: negative capacity"
+  | otherwise = do
+      array <- newPinnedByteArray capacity
+      MemoryBuffer <$> newIORef array <*> newIORef 0
 
 data Sink = MemorySink MemoryBuffer | FileSink WritableBinaryHandle
 
 instance HasBuffer (ReaderIO MemoryBuffer) where
   type Buffer (ReaderIO MemoryBuffer) = MemoryBuffer
 
-  askBuffer = ReaderIO id
+  askBuffer = ReaderIO pure
   
   residency = ReaderIO $ \buffer -> readIORef buffer.positionRef
   
   writeBytes bytes = ReaderIO $ \buffer -> do
     position <- readIORef buffer.positionRef 
-    array <- ensureCapacity buffer (position + length bytes)
-    newPosition <- foldM (\i byte -> writeByteArray array i byte >> pure (i + 1)) res bytes
+    array <- ensureCapacity buffer (position + Foldable.length bytes)
+    newPosition <- foldM (\i byte -> writeByteArray array i byte >> pure (i + 1)) position bytes
     writeIORef buffer.positionRef newPosition
 
   flushTo (MemorySink destination) = ReaderIO $ \source ->
-    guard (destination /= source)
-    sourceArray <- readIORef source.arrayRef
-    sourcePosition <- readIORef source.positionRef
-    destinationPosition <- readIORef destination.positionRef
-    let newDestinationPosition = destinationPosition + sourcePosition
-    destinationArray <- ensureCapacity destination newDestinationPosition
-    copyMutableByteArray
-      destinationArray
-      destinationPosition
-      sourceArray
-      0 -- offset
-      sourcePosition -- number of bytes
-    writeIORef destination.positionRef newDestinationPosition
-    writeIORef source.positionRef 0
+    if destination.arrayRef == source.arrayRef
+      then pure ()
+      else do
+        sourceArray <- readIORef source.arrayRef
+        sourcePosition <- readIORef source.positionRef
+        destinationPosition <- readIORef destination.positionRef
+        let newDestinationPosition = destinationPosition + sourcePosition
+        destinationArray <- ensureCapacity destination newDestinationPosition
+        copyMutableByteArray
+          destinationArray
+          destinationPosition
+          sourceArray
+          0 -- offset
+          sourcePosition -- number of bytes
+        writeIORef destination.positionRef newDestinationPosition
+        writeIORef source.positionRef 0
 
-  flushTo (FileSink _) = undefined
+  -- I tested write speeds by doing (on Apple Silicon)
+  -- `dd if=/dev/zero of=test bs={$n}k oflag=direct conv=fdatasync
+  -- Results:
+  --
+  -- ```
+  --    | block size | data (GiB) |  time (s) | GiB/s |
+  --    |------------|------------|-----------|-------|
+  --    | 4k         |       4.00 |     2.371 |  1.69 |
+  --    | 8k         |       4.00 |     1.486 |  2.69 |
+  --    | 16k        |       4.00 |     1.045 |  3.83 |
+  --    | 32k        |       4.00 |     0.740 |  5.40 |
+  --    | 64k        |       4.00 |     0.675 |  5.92 |
+  --    | 128k       |       4.00 |     0.669 |  5.98 |
+  --    | 256k       |       4.00 |     0.664 |  6.03 |
+  --    | 512k       |       4.00 |     0.670 |  5.97 |
+  --    | 1024k      |       4.00 |     0.664 |  6.02 |
+  --    | 4096k      |       4.00 |     0.668 |  5.99 |
+  -- ```
+  -- So when writing to a file to minimize syscall overhead while
+  -- trying not to create dirty pages in the kernel page cache, we'll
+  -- be flushing in 256 KiB chunks.
+  flushTo (FileSink (WritableBinaryHandle h)) = ReaderIO $ \buffer -> do
+    array <- readIORef buffer.arrayRef
+    position <- readIORef buffer.positionRef
+    let ptr = mutableByteArrayContents array
+        chunkSize = 262144 -- 256 KiB
+        go offset
+          | offset >= position = pure ()
+          | otherwise = do
+              let n = min chunkSize (position - offset)
+              hPutBuf h (ptr `plusPtr` offset) n
+              go (offset + n)
+    go 0
+    writeIORef buffer.positionRef 0
 
-ensureCapacity :: MemoryBuffer -> Int -> IO MutableByteArray
+ensureCapacity :: MemoryBuffer -> Int -> IO (MutableByteArray RealWorld)
 ensureCapacity buffer needed = do
   array <- readIORef buffer.arrayRef
-  if needed <= sizeOfMutableByteArray array
+  maxSize <- getSizeofMutableByteArray array -- ensure sequencing in the presence of resizing
+  if needed <= maxSize
   then pure array
   else do
     grown <- resizeMutableByteArray array (needed + (needed `div` 2))
@@ -176,8 +249,77 @@ ensureCapacity buffer needed = do
     pure grown
     
 data BufferHandle = BufferHandle
-  { handle :: !WritableBinaryHandle
-  , cursor :: !(IORef Int)
+  { bufferPath :: !FilePath
+  , bufferHandle :: !WritableBinaryHandle
+  , residencyRef :: !(IORef Int)
+  , flushedRef :: !(IORef Int)
   }
+
+withFileBuffer :: FilePath -> (BufferHandle -> IO a) -> IO a
+withFileBuffer filepath action =
+  bracket open (hClose . unHandle . bufferHandle) action
+  where
+    open = do
+      h <- openBinaryFile filepath ReadWriteMode
+      hSetBinaryMode h True
+      hSetBuffering h NoBuffering
+      res <- newIORef 0
+      flushed <- newIORef 0
+      pure (BufferHandle filepath (WritableBinaryHandle h) res flushed)
+
+instance HasBuffer (ReaderIO BufferHandle) where
+  type Buffer (ReaderIO BufferHandle) = BufferHandle
+
+  askBuffer = ReaderIO pure
+
+  residency = ReaderIO $ \bh -> readIORef bh.residencyRef
+
+  writeBytes bytes = ReaderIO $ \bh -> do
+    let WritableBinaryHandle h = bh.bufferHandle
+    scratch <- newPinnedByteArray 1
+    n <-
+      foldM
+        ( \count byte -> do
+            writeByteArray scratch 0 byte
+            hPutBuf h (mutableByteArrayContents scratch) 1
+            pure (count + 1)
+        )
+        0
+        bytes
+    position <- readIORef bh.residencyRef
+    writeIORef bh.residencyRef (position + n)
+
+  -- Flushing from a file to a sink happens using
+  -- a reusable 256 KiB buffer closed over this function
+  -- Usually for this instance we shoulc be diong only
+  -- file to file but file to buffer is also bossible
+  -- if you should want to do that, for whatever reason
+  -- (don't let me tell you how to live your life)
+  flushTo sink = ReaderIO $ \bh -> do
+    count <- readIORef bh.residencyRef
+    offset <- readIORef bh.flushedRef
+    let WritableBinaryHandle h = bh.bufferHandle
+        chunkSize = 262144
+    chunk <- newPinnedByteArray (min chunkSize count)
+    let ptr = mutableByteArrayContents chunk
+        pushChunk n = case sink of
+          FileSink (WritableBinaryHandle out) -> hPutBuf out ptr n
+          MemorySink dest -> do
+            destinationPosition <- readIORef dest.positionRef
+            let newDestinationPosition = destinationPosition + n
+            destinationArray <- ensureCapacity dest newDestinationPosition
+            copyMutableByteArray destinationArray destinationPosition chunk 0 n
+            writeIORef dest.positionRef newDestinationPosition
+        go remaining
+          | remaining <= 0 = pure ()
+          | otherwise = do
+              actual <- hGetBuf h ptr (min chunkSize remaining)
+              if actual <= 0
+                then pure ()
+                else pushChunk actual >> go (remaining - actual)
+    hSeek h AbsoluteSeek (fromIntegral offset)
+    go count
+    writeIORef bh.residencyRef 0
+    writeIORef bh.flushedRef (offset + count)
 
 
