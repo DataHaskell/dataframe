@@ -152,10 +152,58 @@ testGridSearch = TestCase $ do
     assertBool "best score high" (gsBestScore res > 0.99)
     assertEqual "all configs scored" 3 (length (gsAll res))
 
+{- | Logistic boosting must recover a known conditional probability, not merely
+rank it. A leaf set to the mean gradient instead of @Σg/Σh@ understeps every
+step by at least 4x, leaving probabilities shrunk toward the base rate while the
+ranking — and so any accuracy or AUC check — still looks healthy.
+
+Each @x@ carries a fixed 20 rows of which exactly @round (20 * trueP x)@ are
+positive, so the empirical conditional probability at every @x@ is 'trueP' and
+the target is separable in rank but not in value.
+-}
+sigmoidCurveDF :: D.DataFrame
+sigmoidCurveDF =
+    D.fromNamedColumns
+        [ ("x", DI.fromList (concatMap (replicate group . fst) cells))
+        , ("label", DI.fromList (concatMap snd cells))
+        ]
+  where
+    group = 20 :: Int
+    xs = [fromIntegral i / 10 - 1 | i <- [0 .. 20 :: Int]] :: [Double]
+    cells = [(x, labelsAt x) | x <- xs]
+    labelsAt x =
+        let k = round (fromIntegral group * trueP x) :: Int
+         in replicate k 1 ++ replicate (group - k) (0 :: Double)
+
+trueP :: Double -> Double
+trueP x = 1 / (1 + exp (negate (4 * x)))
+
+testGBMCalibration :: Test
+testGBMCalibration = TestCase $ do
+    let m =
+            fit
+                defaultGBConfig
+                    { gbLoss = LogisticDeviance
+                    , gbNEstimators = 100
+                    , gbLearningRate = 0.1
+                    , gbMaxDepth = 3
+                    }
+                (F.col @Double "label")
+                sigmoidCurveDF
+        probs = interpD sigmoidCurveDF (gbProbaExpr m)
+        truth = map trueP (interpD sigmoidCurveDF (F.col @Double "x"))
+        err =
+            sum (zipWith (\p t -> abs (p - t)) probs truth)
+                / fromIntegral (length probs)
+    assertBool
+        ("logistic boosting recovers the conditional probability " ++ show err)
+        (err < 0.03)
+
 tests :: [Test]
 tests =
     [ testGBMRegression
     , testGBMStaged
+    , testGBMCalibration
     , testAdaBoost
     , testGMM
     , testDBSCAN

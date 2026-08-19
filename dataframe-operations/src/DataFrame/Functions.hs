@@ -11,7 +11,15 @@
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE UndecidableInstances #-}
 
-module DataFrame.Functions (module DataFrame.Functions, module DataFrame.Operators) where
+module DataFrame.Functions (
+    module DataFrame.Functions,
+    module DataFrame.Operators,
+    add,
+    sub,
+    mult,
+    divide,
+    prettyPrint,
+) where
 
 import DataFrame.Internal.Column
 import DataFrame.Internal.Expression
@@ -27,6 +35,7 @@ import qualified Data.Map as M
 import qualified Data.Maybe as Maybe
 import qualified Data.Text as T
 import Data.Time
+import Data.Type.Equality (testEquality, type (:~:) (Refl))
 import qualified Data.Vector as V
 import qualified Data.Vector.Unboxed as VU
 
@@ -39,6 +48,7 @@ import DataFrame.Internal.Nullable (
  )
 import DataFrame.Operators
 import Text.Regex.TDFA
+import Type.Reflection (typeRep)
 import Prelude hiding (maximum, minimum)
 import Prelude as P
 
@@ -321,6 +331,49 @@ mean =
 {-# SPECIALIZE mean :: Expr Int64 -> Expr Double #-}
 {-# INLINEABLE mean #-}
 
+-- | The k largest values per group.
+topK :: (Columnable a, Ord a) => Int -> Expr a -> Expr [a]
+topK = kExtremes "topK" (>)
+{-# INLINEABLE topK #-}
+
+-- | The k smallest values per group.
+bottomK :: (Columnable a, Ord a) => Int -> Expr a -> Expr [a]
+bottomK = kExtremes "bottomK" (<)
+{-# INLINEABLE bottomK #-}
+
+{- | Top k values after applying an ordering function. Floating-point NaNs
+are dropped: they have no place in a total order, and admitting them would
+make the merge non-associative (results would depend on chunk boundaries in
+the lazy executor).
+-}
+kExtremes ::
+    forall a.
+    (Columnable a, Ord a) =>
+    T.Text -> (a -> a -> Bool) -> Int -> Expr a -> Expr [a]
+kExtremes opName wins k =
+    Agg
+        ( MergeAgg
+            (opName <> "_" <> T.pack (show k))
+            []
+            step
+            (L.foldl' step)
+            id
+        )
+  where
+    step acc x
+        | isNaNLike x = acc
+        | otherwise = insert x acc
+    insert x = P.take k . go
+      where
+        go (z : zs) | wins z x = z : go zs
+        go zs = x : zs
+
+    isNaNLike :: a -> Bool
+    isNaNLike x
+        | Just Refl <- testEquality (typeRep @a) (typeRep @Double) = isNaN x
+        | Just Refl <- testEquality (typeRep @a) (typeRep @Float) = isNaN x
+        | otherwise = False
+
 meanMaybe :: forall a. (Columnable a, Real a) => Expr (Maybe a) -> Expr Double
 meanMaybe = Agg (CollectAgg "meanMaybe" (mean' . optionalToDoubleVector))
 {-# SPECIALIZE meanMaybe :: Expr (Maybe Double) -> Expr Double #-}
@@ -476,6 +529,16 @@ isNothing = liftDecorated Maybe.isNothing "isNothing" Nothing
 {-# SPECIALIZE isNothing :: Expr (Maybe Double) -> Expr Bool #-}
 {-# SPECIALIZE isNothing :: Expr (Maybe Int) -> Expr Bool #-}
 {-# INLINEABLE isNothing #-}
+
+-- | SQL spelling of 'isNothing'.
+isNull :: (Columnable a) => Expr (Maybe a) -> Expr Bool
+isNull = isNothing
+{-# INLINEABLE isNull #-}
+
+-- | SQL spelling of 'isJust'.
+isNotNull :: (Columnable a) => Expr (Maybe a) -> Expr Bool
+isNotNull = isJust
+{-# INLINEABLE isNotNull #-}
 
 fromJust :: (Columnable a) => Expr (Maybe a) -> Expr a
 fromJust = liftDecorated Maybe.fromJust "fromJust" Nothing

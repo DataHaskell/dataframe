@@ -15,7 +15,7 @@ module DataFrame.DecisionTree.Linear (
     materializeFeatureForCare,
 ) where
 
-import DataFrame.DecisionTree.Numeric (NumExpr (..), numericCols)
+import DataFrame.DecisionTree.Numeric (NumExpr (..), numExprCols, numericCols)
 import DataFrame.DecisionTree.Types (
     CarePoint (..),
     Direction (..),
@@ -33,27 +33,34 @@ import qualified Data.Vector as V
 import qualified Data.Vector.Unboxed as VU
 
 {- | Best oblique candidate, or 'Nothing' when the linear path is disabled or
-there are too few care points to fit on.
+there are too few care points to fit on. The target column is named so it can
+be kept out of the feature set.
 -}
 bestLinearCandidate ::
-    TreeConfig -> DataFrame -> [CarePoint] -> Maybe (Expr Bool)
-bestLinearCandidate cfg df carePoints
+    TreeConfig -> T.Text -> DataFrame -> [CarePoint] -> Maybe (Expr Bool)
+bestLinearCandidate cfg target df carePoints
     | not (useLinearSolver cfg) = Nothing
     | length carePoints < minCarePointsForLinear cfg = Nothing
-    | otherwise = fitLinearCandidate cfg df carePoints
+    | otherwise = fitLinearCandidate cfg target df carePoints
 
 {- | Fit an L1 logistic regression to the care points and convert the resulting
 hyperplane to a condition, or 'Nothing' when no numeric features exist or the
 fitted model is all-zero or degenerate.
 -}
 fitLinearCandidate ::
-    TreeConfig -> DataFrame -> [CarePoint] -> Maybe (Expr Bool)
-fitLinearCandidate cfg df carePoints = case materializedFeatures df carePoints of
-    [] -> Nothing
-    mats -> linearFromFeatures cfg carePoints mats
+    TreeConfig -> T.Text -> DataFrame -> [CarePoint] -> Maybe (Expr Bool)
+fitLinearCandidate cfg target df carePoints =
+    case materializedFeatures target df carePoints of
+        [] -> Nothing
+        mats -> linearFromFeatures cfg carePoints mats
 
-materializedFeatures :: DataFrame -> [CarePoint] -> [(T.Text, VU.Vector Double)]
-materializedFeatures df carePoints = mapMaybe (materializeFeatureForCare df carePoints) (numericCols df)
+materializedFeatures ::
+    T.Text -> DataFrame -> [CarePoint] -> [(T.Text, VU.Vector Double)]
+materializedFeatures target df carePoints =
+    mapMaybe (materializeFeatureForCare df carePoints) (featureCols target df)
+
+featureCols :: T.Text -> DataFrame -> [NumExpr]
+featureCols target df = filter (notElem target . numExprCols) (numericCols df)
 
 linearFromFeatures ::
     TreeConfig -> [CarePoint] -> [(T.Text, VU.Vector Double)] -> Maybe (Expr Bool)

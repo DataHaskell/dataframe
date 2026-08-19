@@ -44,6 +44,7 @@ import DataFrame.IO.CSV (
 import DataFrame.IO.CSV.Fast.Passes
 import DataFrame.IO.CSV.Fast.Slice (extractField)
 import DataFrame.Internal.Column (Column, ensureOptional, fromVector)
+import DataFrame.Internal.DictEncode (dictCompactColumn)
 import DataFrame.Operations.Typing (
     ParseOptions (..),
     ParsingAssumption (..),
@@ -218,13 +219,13 @@ buildColumn env name col = case planColumn env name col of
     PlanSchema mode nspec t -> do
         r <- runSchemaChunk env nspec mode t col 0
         c <- either (throwIO . schemaError name t) (pure . passColumn) r
-        pure (finishMode mode c, False)
+        pure (finishMode mode (dictCompactColumn c), False)
     PlanChain mode nspec steps checkAllNull -> do
         oc <- runChainChunk env nspec steps checkAllNull col
         let c = case oc of
                 AllNullChunk -> allNullColumn (ceNumRow env)
                 Resolved _ c' -> passColumn c'
-        pure (finishMode mode c, False)
+        pure (finishMode mode (dictCompactColumn c), False)
 
 {- | The original Text-materializing pipeline, kept for 'EitherRead' and
 exotic schema types (cold paths).

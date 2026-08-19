@@ -86,7 +86,6 @@ import qualified DataFrame.Internal.Column as C
 import qualified DataFrame.Internal.DataFrame as D
 import DataFrame.Typed.Record (requireColumn)
 import DataFrame.Typed.Schema (Append)
-import DataFrame.Typed.Types (Column)
 import DataFrame.Typed.Util (camelToSnake)
 
 {- | Field-name policy applied to record selectors when computing
@@ -97,15 +96,15 @@ import DataFrame.Typed.Util (camelToSnake)
 -}
 data NameCase = SnakeCase | IdentityCase
 
-{- | The schema type @[Column name ty, ...]@ derived from the 'Rep' of a
+{- | The schema type @'[ '(name, ty), ...]@ derived from the 'Rep' of a
 record type, with the given 'NameCase' applied to each field name.
 -}
-type family RepToSchema (nc :: NameCase) (r :: Type -> Type) :: [Type] where
+type family RepToSchema (nc :: NameCase) (r :: Type -> Type) :: [(Symbol, Type)] where
     RepToSchema nc (M1 D _ f) = RepToSchema nc f
     RepToSchema nc (M1 C _ f) = RepToSchema nc f
     RepToSchema nc (a :*: b) = Append (RepToSchema nc a) (RepToSchema nc b)
     RepToSchema nc (M1 S ('MetaSel ('Just name) _ _ _) (K1 _ a)) =
-        '[Column (TransformName nc name) a]
+        '(TransformName nc name, a) ': '[]
 
 type family TransformName (nc :: NameCase) (name :: Symbol) :: Symbol where
     TransformName 'SnakeCase s = CamelToSnake s

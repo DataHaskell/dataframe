@@ -85,11 +85,6 @@ import qualified DataFrame.Operations.Transformations as D
 import DataFrame.Typed.Freeze (unsafeFreeze)
 import DataFrame.Typed.Schema
 import DataFrame.Typed.Types (TExpr (..), TSortOrder (..), TypedDataFrame (..))
-import qualified DataFrame.Typed.Types as T
-
--------------------------------------------------------------------------------
--- Schema-preserving operations
--------------------------------------------------------------------------------
 
 {- | Filter rows where a boolean expression evaluates to True.
 The expression is validated against the schema at compile time.
@@ -113,8 +108,8 @@ filterBy pred' (TExpr expr) (TDF df) = TDF (D.filterBy pred' expr df)
 Strips 'Maybe' from all column types in the result schema.
 
 @
-df :: TDF '[Column \"x\" (Maybe Double), Column \"y\" Int]
-filterAllJust df :: TDF '[Column \"x\" Double, Column \"y\" Int]
+df :: TDF '[ '(\"x\", Maybe Double), '(\"y\", Int)]
+filterAllJust df :: TDF '[ '(\"x\", Double), '(\"y\", Int)]
 @
 -}
 filterAllJust :: TypedDataFrame cols -> TypedDataFrame (StripAllMaybe cols)
@@ -203,17 +198,13 @@ sample g frac (TDF df) = TDF (D.sample g frac df)
 shuffle :: (RandomGen g) => g -> TypedDataFrame cols -> TypedDataFrame cols
 shuffle g (TDF df) = TDF (D.shuffle g df)
 
--------------------------------------------------------------------------------
--- Schema-modifying operations
--------------------------------------------------------------------------------
-
 {- | Derive a new column from a typed expression. The column name must NOT
 already exist in the schema (enforced at compile time via 'AssertAbsent').
 The expression is validated against the current schema.
 
 @
 df' = derive \@\"total\" (col \@\"price\" * col \@\"qty\") df
--- df' :: TDF (Column \"total\" Double ': originalCols)
+-- df' :: TDF ('(\"total\", Double ': originalCols))
 @
 -}
 derive ::
@@ -224,7 +215,7 @@ derive ::
     ) =>
     TExpr cols a ->
     TypedDataFrame cols ->
-    TypedDataFrame (Snoc cols (T.Column name a))
+    TypedDataFrame (Snoc cols '(name, a))
 derive (TExpr expr) (TDF df) = unsafeFreeze (D.derive colName expr df)
   where
     colName = T.pack (symbolVal (Proxy @name))
@@ -286,7 +277,7 @@ insert ::
     , Foldable t
     , AssertAbsent name cols
     ) =>
-    t a -> TypedDataFrame cols -> TypedDataFrame (T.Column name a ': cols)
+    t a -> TypedDataFrame cols -> TypedDataFrame ('(name, a) ': cols)
 insert xs (TDF df) = unsafeFreeze (D.insert colName xs df)
   where
     colName = T.pack (symbolVal (Proxy @name))
@@ -298,7 +289,7 @@ insertColumn ::
     , Columnable a
     , AssertAbsent name cols
     ) =>
-    C.Column -> TypedDataFrame cols -> TypedDataFrame (T.Column name a ': cols)
+    C.Column -> TypedDataFrame cols -> TypedDataFrame ('(name, a) ': cols)
 insertColumn col (TDF df) = unsafeFreeze (D.insertColumn colName col df)
   where
     colName = T.pack (symbolVal (Proxy @name))
@@ -310,7 +301,7 @@ insertVector ::
     , Columnable a
     , AssertAbsent name cols
     ) =>
-    V.Vector a -> TypedDataFrame cols -> TypedDataFrame (T.Column name a ': cols)
+    V.Vector a -> TypedDataFrame cols -> TypedDataFrame ('(name, a) ': cols)
 insertVector vec (TDF df) = unsafeFreeze (D.insertVector colName vec df)
   where
     colName = T.pack (symbolVal (Proxy @name))
@@ -323,7 +314,7 @@ cloneColumn ::
     , AssertPresent old cols
     , AssertAbsent new cols
     ) =>
-    TypedDataFrame cols -> TypedDataFrame (T.Column new (Lookup old cols) ': cols)
+    TypedDataFrame cols -> TypedDataFrame ('(new, Lookup old cols) ': cols)
 cloneColumn (TDF df) = unsafeFreeze (D.cloneColumn oldName newName df)
   where
     oldName = T.pack (symbolVal (Proxy @old))
@@ -358,13 +349,6 @@ replaceColumn (TExpr expr) (TDF df) = unsafeFreeze (D.derive colName expr df)
 -- | Vertically merge two DataFrames with the same schema.
 append :: TypedDataFrame cols -> TypedDataFrame cols -> TypedDataFrame cols
 append (TDF a) (TDF b) = TDF (a <> b)
-
--------------------------------------------------------------------------------
--- Set algebra (topos operations)
---
--- Each treats a DataFrame as a /set/ of rows and is schema-preserving:
--- the output type equals the input type; only which rows are present changes.
--------------------------------------------------------------------------------
 
 -- | Rows appearing in either DataFrame, deduplicated (set union).
 union :: TypedDataFrame cols -> TypedDataFrame cols -> TypedDataFrame cols

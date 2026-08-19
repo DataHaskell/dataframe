@@ -85,10 +85,10 @@ testRightJoin =
             (D.sortBy [D.Asc (F.col @Text "key")] (rightJoin ["key"] df1 df2))
         )
 
-tdf1 :: DT.TypedDataFrame [DT.Column "key" Text, DT.Column "A" Text]
+tdf1 :: DT.TypedDataFrame ['("key", Text), '("A", Text)]
 tdf1 = either (error . show) id (DT.freezeWithError df1)
 
-tdf2 :: DT.TypedDataFrame [DT.Column "key" Text, DT.Column "B" Text]
+tdf2 :: DT.TypedDataFrame ['("key", Text), '("B", Text)]
 tdf2 = either (error . show) id (DT.freezeWithError df2)
 
 testInnerJoinTyped :: Test
@@ -128,7 +128,7 @@ dfOptional =
         ]
 
 tdfOptional ::
-    DT.TypedDataFrame [DT.Column "key" Text, DT.Column "C" (Maybe Int)]
+    DT.TypedDataFrame ['("key", Text), '("C", Maybe Int)]
 tdfOptional = either (error . show) id (DT.freezeWithError dfOptional)
 
 {- | A left join over an already-optional column must not nest the Maybe: the
@@ -155,7 +155,7 @@ testLeftJoinTypedOptional =
   where
     joined ::
         DT.TypedDataFrame
-            [DT.Column "key" Text, DT.Column "A" Text, DT.Column "C" (Maybe Int)]
+            ['("key", Text), '("A", Text), '("C", Maybe Int)]
     joined = DT.leftJoin @'["key"] tdf1 tdfOptional
 
 testRightJoinTyped :: Test

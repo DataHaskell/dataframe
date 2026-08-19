@@ -12,7 +12,11 @@ import qualified Data.Map as M
 import qualified Data.Proxy as P
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
-import qualified Data.Text.IO as TIO
+
+-- UTF-8 byte-mode IO: the plain Data.Text.IO writer honours the
+-- handle's text mode, which on Windows turns \n into \r\n and
+-- corrupts inputs meant for byte-level parsers.
+import qualified Data.Text.IO.Utf8 as TIO
 
 import Control.Exception (ErrorCall, evaluate, try)
 import Data.Time (Day)

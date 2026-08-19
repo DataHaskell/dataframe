@@ -38,6 +38,7 @@ module DataFrame.Metrics (
     f1Of,
 ) where
 
+import Control.Exception (throw)
 import Data.Either (fromRight)
 import Data.List (nub, sort, sortBy)
 import Data.Ord (comparing)
@@ -70,7 +71,7 @@ predictColumn = derive
 columnOf :: DataFrame -> Expr Double -> VU.Vector Double
 columnOf df e = case interpret @Double df e of
     Right (TColumn c) -> fromRight VU.empty (toVector @Double @VU.Vector c)
-    Left err -> error (show err)
+    Left err -> throw err
 
 n2 :: VU.Vector Double -> Double
 n2 = fromIntegral . VU.length

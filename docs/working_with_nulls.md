@@ -190,10 +190,10 @@ D.derive "bare_score" (F.coerce @Int "score") df
 import qualified DataFrame.Typed as T
 import qualified DataFrame.Typed.Expr as TE
 
-type MySchema = '[T.Column "id" Int, T.Column "score" (Maybe Int)]
+type MySchema = '[ '("id", Int), '("score", Maybe Int)]
 
 -- filterAllJust strips Maybe from all columns in the type
-stripped :: T.TypedDataFrame '[T.Column "id" Int, T.Column "score" Int]
+stripped :: T.TypedDataFrame '[ '("id", Int), '("score", Int)]
 stripped = T.filterAllJust typedDf
 
 -- Nullable-aware expression
@@ -209,10 +209,10 @@ negScore = TE.nullLift negate (TE.col @"score")
 
 ```haskell
 -- Before
-df :: T.TypedDataFrame '[T.Column "x" (Maybe Double), T.Column "y" Int]
+df :: T.TypedDataFrame '[ '("x", Maybe Double), '("y", Int)]
 
 -- After
-T.filterAllJust df :: T.TypedDataFrame '[T.Column "x" Double, T.Column "y" Int]
+T.filterAllJust df :: T.TypedDataFrame '[ '("x", Double), '("y", Int)]
 ```
 
 This is tracked statically — you get a type error if you later try to treat the stripped column as `Maybe`.
@@ -222,7 +222,7 @@ This is tracked statically — you get a type error if you later try to treat th
 ```haskell
 -- Replace Nothing in "score" with 0; schema changes from Maybe Int → Int
 T.impute @"score" 0 typedDf
-    :: T.TypedDataFrame '[T.Column "id" Int, T.Column "score" Int]
+    :: T.TypedDataFrame '[ '("id", Int), '("score", Int)]
 ```
 
 ---

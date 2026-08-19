@@ -45,3 +45,4 @@ Cargo.lock
 *.db-wal
 *.db-shm
 *.db-journal
+.env

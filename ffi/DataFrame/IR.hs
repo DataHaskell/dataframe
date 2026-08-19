@@ -46,7 +46,11 @@ import DataFrame.IO.CSV (
 import DataFrame.IO.JSON (readJSON)
 import qualified DataFrame.IO.Parquet as Parquet
 import DataFrame.IR.ExprJson (SomeExpr (..), decodeExprAny, decodeExprAt)
-import DataFrame.Internal.Column (Column (..), Columnable)
+import DataFrame.Internal.Column (
+    Column (..),
+    Columnable,
+    mergedHead,
+ )
 import DataFrame.Internal.DataFrame (DataFrame, unsafeGetColumn)
 import DataFrame.Internal.Expression (Expr (..), NamedExpr)
 import qualified DataFrame.Lazy as Lazy
@@ -256,6 +260,7 @@ mkSortOrder isAsc name col = dispatchType (columnTypeRep col)
     columnTypeRep (UnboxedColumn _ (_ :: VU.Vector a)) = SomeTypeRep (typeRep @a)
     columnTypeRep (BoxedColumn _ (_ :: V.Vector a)) = SomeTypeRep (typeRep @a)
     columnTypeRep (PackedText _ _) = SomeTypeRep (typeRep @T.Text)
+    columnTypeRep c@(MergedColumn _ _) = columnTypeRep (mergedHead c)
     mk :: (Columnable a, Ord a) => Expr a -> SortOrder
     mk = if isAsc then Asc else Desc
     dispatchType (SomeTypeRep tr)
@@ -334,6 +339,7 @@ runFrequencies colName df = dispatchType (columnTypeRep (unsafeGetColumn colName
     columnTypeRep (UnboxedColumn _ (_ :: VU.Vector a)) = SomeTypeRep (typeRep @a)
     columnTypeRep (BoxedColumn _ (_ :: V.Vector a)) = SomeTypeRep (typeRep @a)
     columnTypeRep (PackedText _ _) = SomeTypeRep (typeRep @T.Text)
+    columnTypeRep c@(MergedColumn _ _) = columnTypeRep (mergedHead c)
 
     fr :: forall a. (Columnable a, Ord a) => IO DataFrame
     fr = return $ Stats.frequencies (Col @a colName) df
@@ -370,6 +376,7 @@ countExpr name colName (BoxedColumn Nothing (_ :: V.Vector a)) = return $ name .
 countExpr name colName (BoxedColumn (Just _) (_ :: V.Vector a)) = return $ name .= count (Col @(Maybe a) colName)
 countExpr name colName (PackedText Nothing _) = return $ name .= count (Col @T.Text colName)
 countExpr name colName (PackedText (Just _) _) = return $ name .= count (Col @(Maybe T.Text) colName)
+countExpr name colName c@(MergedColumn _ _) = countExpr name colName (mergedHead c)
 
 sumExpr :: T.Text -> T.Text -> Column -> IO NamedExpr
 sumExpr name colName (UnboxedColumn Nothing (_ :: VU.Vector a))

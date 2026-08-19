@@ -1073,7 +1073,7 @@ A type-level mistake on an aggregated column — say, treating `count` (an `Int`
 
 Throughout this guide we have used `F.col @Type "colName"` to reference columns. The expressions are typed (the `@Type` annotation is checked), but the schema of the *dataframe* is not in the Haskell type. This creates a subtle foot-gun: an `Expr` built against one dataframe can be silently applied to a completely different dataframe — the compiler will accept it, but at runtime you get either a missing-column error or, worse, wrong results from a same-named column with different semantics.
 
-`DataFrame.Typed` solves this by moving the full column schema into the type system. The schema becomes a type-level list of `DT.Column "name" Type` entries. If a column does not exist in a `TypedDataFrame`, or if you use it with the wrong type, the code will not compile.
+`DataFrame.Typed` solves this by moving the full column schema into the type system. The schema becomes a type-level list of `'("name", Type)` entries. If a column does not exist in a `TypedDataFrame`, or if you use it with the wrong type, the code will not compile.
 
 The trade-off is more explicit upfront ceremony (a TH splice, a freeze call, and the `DataKinds` extension). When you want that guarantee for a production pipeline, it is worth it.
 
@@ -1090,16 +1090,16 @@ $(DT.deriveSchemaFromCsvFile "Housing" "../data/housing.csv")
 **By hand** — equivalent to what the TH splice generates:
 
 ```haskell
-type Housing = [ DT.Column "longitude"          Double
-               , DT.Column "latitude"           Double
-               , DT.Column "housing_median_age" Double
-               , DT.Column "total_rooms"        Double
-               , DT.Column "total_bedrooms"     (Maybe Double)
-               , DT.Column "population"         Double
-               , DT.Column "households"         Double
-               , DT.Column "median_income"      Double
-               , DT.Column "median_house_value" Double
-               , DT.Column "ocean_proximity"    T.Text
+type Housing = [ '("longitude", Double)
+               , '("latitude", Double)
+               , '("housing_median_age", Double)
+               , '("total_rooms", Double)
+               , '("total_bedrooms", Maybe Double)
+               , '("population", Double)
+               , '("households", Double)
+               , '("median_income", Double)
+               , '("median_house_value", Double)
+               , '("ocean_proximity", T.Text)
                ]
 ```
 

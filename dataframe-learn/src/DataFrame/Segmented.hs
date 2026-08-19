@@ -2,6 +2,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
@@ -23,6 +24,7 @@ module DataFrame.Segmented (
     SegmentFit (..),
 ) where
 
+import Control.Exception (throw)
 import Data.List (foldl', (\\))
 import qualified Data.Map.Strict as M
 import Data.Maybe (isJust)
@@ -30,6 +32,7 @@ import qualified Data.Set as Set
 import qualified Data.Text as T
 import qualified Data.Vector as V
 import qualified Data.Vector.Unboxed as VU
+import DataFrame.Errors (DataFrameException (..))
 
 import DataFrame.Featurize.Internal (featureNames, numericMatrix, targetDoubles)
 import DataFrame.Internal.Column (
@@ -302,7 +305,7 @@ shrinkLinear cfg lam target dfs = map toReg dsegs
   where
     names = case dfs of
         (d0 : _) -> featureNames target d0
-        [] -> error "shrinkLinear: no segments"
+        [] -> throw (EmptyDataSetException "shrinkLinear")
     d = length names
     mats = [snd (numericMatrix names dframe) | dframe <- dfs]
     ys = [targetDoubles target dframe | dframe <- dfs]

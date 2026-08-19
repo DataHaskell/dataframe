@@ -12,7 +12,7 @@ import qualified Data.Vector.Mutable as VM
 
 import Control.Concurrent (forkIO)
 import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar)
-import Control.Exception (SomeException, throwIO, try)
+import Control.Exception (ErrorCall (..), SomeException, throwIO, try)
 import Control.Monad (when)
 import Data.IORef (atomicModifyIORef', newIORef)
 
@@ -31,6 +31,10 @@ forkJoin actions = do
 {- | Run the actions on a pool of @width@ threads (work-stealing via a
 shared counter), so finer-grained chunks balance load without running
 every chunk's builders concurrently. Results keep their input order.
+
+Each action slot is cleared before the action runs, so data captured by a
+completed closure is unreachable as soon as it finishes — callers rely on
+this to release per-column chunk payloads during the parallel merge.
 -}
 pooledRun :: Int -> [IO a] -> IO [a]
 pooledRun width actions
@@ -38,14 +42,18 @@ pooledRun width actions
     | otherwise = do
         next <- newIORef 0
         out <- VM.unsafeNew n
-        let acts = V.fromListN n actions
-            worker = do
+        acts <- VM.unsafeNew n
+        sequence_ [VM.unsafeWrite acts i a | (i, a) <- zip [0 ..] actions]
+        let worker = do
                 i <- atomicModifyIORef' next (\j -> (j + 1, j))
                 when (i < n) $ do
-                    r <- acts V.! i
+                    act <- VM.unsafeRead acts i
+                    VM.unsafeWrite acts i consumed
+                    r <- act
                     VM.write out i r
                     worker
         _ <- forkJoin (replicate width worker)
         V.toList <$> V.freeze out
   where
     n = length actions
+    consumed = throwIO (ErrorCall "pooledRun: slot already consumed")

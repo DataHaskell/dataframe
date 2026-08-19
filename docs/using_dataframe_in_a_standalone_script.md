@@ -272,8 +272,8 @@ You can also define the schema by hand as follows:
 import qualified DataFrame as D
 import qualified DataFrame.Typed as DT
 
-type Housing = [ DT.Column "latitude" Double
-               , DT.Column "longitude" Double
+type Housing = [ '("latitude", Double)
+               , '("longitude", Double)
                -- other fields are skipped for brevity.
                ]
 

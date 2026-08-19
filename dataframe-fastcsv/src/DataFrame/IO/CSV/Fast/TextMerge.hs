@@ -17,6 +17,7 @@ import qualified Data.Vector.Unboxed.Mutable as VUM
 import Control.Monad (void)
 import Control.Monad.ST (stToIO)
 
+import Data.Int (Int32)
 import DataFrame.IO.CSV.Fast.Workers (pooledRun)
 import DataFrame.Internal.Column (Column (..))
 import DataFrame.Internal.ColumnMerge (
@@ -25,7 +26,7 @@ import DataFrame.Internal.ColumnMerge (
     spliceBitmaps,
     tcRows,
  )
-import DataFrame.Internal.PackedText (mkPackedContiguous)
+import DataFrame.Internal.PackedText (mkPackedContiguous, mkPackedContiguous32)
 
 {- | Merge text chunks with @width@-way parallel byte copies + offset
 rebase, then wrap the shared buffer as 'PackedText'. Single chunks take
@@ -39,26 +40,38 @@ mergeTextChunksPar width cs = do
         totalBytes = last byteOffs
         totalRows = last rowOffs
     marr <- stToIO (A.new (max 1 totalBytes))
-    offsMV <- VUM.unsafeNew (totalRows + 1)
-    VUM.unsafeWrite offsMV 0 0
     -- Byte copy + offset rebase, parallel over chunks (disjoint ranges).
-    void . pooledRun width $
-        [ do
-            stToIO (A.copyI (tcUsed c) marr bOff (tcBytes c) 0)
-            let co = tcOffsets c
-                n = tcRows c
-                fill !i
-                    | i > n = pure ()
-                    | otherwise = do
-                        VUM.unsafeWrite
-                            offsMV
-                            (rOff + i)
-                            (bOff + VU.unsafeIndex co i)
-                        fill (i + 1)
-            fill 1
-        | (c, bOff, rOff) <- zip3 cs byteOffs rowOffs
-        ]
-    arr <- stToIO (A.unsafeFreeze marr)
-    offs <- VU.unsafeFreeze offsMV
+    let splice writeOff =
+            void . pooledRun width $
+                [ do
+                    stToIO (A.copyI (tcUsed c) marr bOff (tcBytes c) 0)
+                    let co = tcOffsets c
+                        n = tcRows c
+                        fill !i
+                            | i > n = pure ()
+                            | otherwise = do
+                                writeOff (rOff + i) (bOff + VU.unsafeIndex co i)
+                                fill (i + 1)
+                    fill 1
+                | (c, bOff, rOff) <- zip3 cs byteOffs rowOffs
+                ]
+    -- The final width is known before allocation: Int32 offsets whenever
+    -- the merged buffer stays under 2^31 bytes (the common case).
+    packed <-
+        if totalBytes <= fromIntegral (maxBound :: Int32)
+            then do
+                offsMV <- VUM.unsafeNew (totalRows + 1) :: IO (VUM.IOVector Int32)
+                VUM.unsafeWrite offsMV 0 0
+                splice (\i v -> VUM.unsafeWrite offsMV i (fromIntegral v))
+                mkPackedContiguous32
+                    <$> stToIO (A.unsafeFreeze marr)
+                    <*> VU.unsafeFreeze offsMV
+            else do
+                offsMV <- VUM.unsafeNew (totalRows + 1) :: IO (VUM.IOVector Int)
+                VUM.unsafeWrite offsMV 0 0
+                splice (VUM.unsafeWrite offsMV)
+                mkPackedContiguous
+                    <$> stToIO (A.unsafeFreeze marr)
+                    <*> VU.unsafeFreeze offsMV
     let !bm = spliceBitmaps [(tcBitmap c, tcRows c) | c <- cs]
-    pure (PackedText bm (mkPackedContiguous arr offs))
+    pure (PackedText bm packed)

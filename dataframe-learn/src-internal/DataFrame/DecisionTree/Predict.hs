@@ -1,4 +1,5 @@
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 
@@ -32,6 +33,7 @@ import DataFrame.DecisionTree.Types (
     Tree (..),
     TreeConfig (..),
  )
+import DataFrame.Errors (DataFrameException (..))
 import DataFrame.Internal.Column (Columnable, TypedColumn (..), toVector)
 import DataFrame.Internal.DataFrame (DataFrame)
 import DataFrame.Internal.Expression (Expr (..))
@@ -183,7 +185,7 @@ countLabels vals = V.foldl' (\acc i -> M.insertWith (+) (vals V.! i) (1 :: Int) 
 
 majorityOf :: M.Map a Int -> a
 majorityOf counts
-    | M.null counts = error "Empty indices in majorityValueFromIndices"
+    | M.null counts = throw (EmptyDataSetException "majorityValueFromIndices")
     | otherwise = fst (maximumBy (compare `on` snd) (M.toList counts))
 
 computeTreeLoss ::

@@ -57,7 +57,7 @@ with nullable fields or a non-Double:
 import qualified DataFrame.Typed as T
 import Data.Maybe (fromJust)
 
-salesT     = T.unsafeFreeze @'[T.Column "x" Double, T.Column "y" Double] sales
+salesT     = T.unsafeFreeze @'[ '("x", Double), '("y", Double) ] sales
 typedModel = fit defaultLinearConfig (T.col @"y") salesT
 scored     = T.derive @"prediction" (predict typedModel) salesT
 

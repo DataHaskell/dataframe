@@ -57,11 +57,13 @@ import DataFrame.Typed.Freeze (ToDataFrame (..), thaw)
 import DataFrame.Typed.Schema (AllDouble)
 import DataFrame.Typed.Types (AsTExpr, TExpr (..), ToTExpr (..), TypedDataFrame)
 
+import GHC.TypeLits (Symbol)
+
 {- | A model trained on a typed frame, carrying the schema @cols@ as a phantom so
 its 'predict' yields a typed 'TExpr'. Use 'fittedModel' to recover the bare model
 record (coefficients, etc.).
 -}
-newtype Fitted (cols :: [Type]) model = Fitted {fittedModel :: model}
+newtype Fitted (cols :: [(Symbol, Type)]) model = Fitted {fittedModel :: model}
 
 {- | The type 'fit' returns for a given frame source: the bare @model@ for an
 untyped 'DataFrame', or a schema-tagged 'Fitted' for a 'TypedDataFrame'. Training

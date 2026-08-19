@@ -1,6 +1,6 @@
 cabal-version:      3.4
 name:               dataframe-csv
-version:            2.2.0.0
+version:            2.3.0.0
 synopsis:           CSV reader and writer for the dataframe ecosystem.
 description:
     @DataFrame.IO.CSV@ — strict single-pass CSV read/write (pure
@@ -39,9 +39,9 @@ library
     build-depends:      base >= 4 && < 5,
                         bytestring >= 0.11 && < 0.14,
                         containers >= 0.6.7 && < 0.10,
-                        dataframe-core >= 2.1 && < 2.2,
-                        dataframe-operations >= 2.1 && < 2.2,
-                        dataframe-parsing >= 2.1 && < 2.2,
+                        dataframe-core >= 2.4 && < 2.5,
+                        dataframe-operations >= 2.4 && < 2.5,
+                        dataframe-parsing >= 2.2 && < 2.3,
                         text >= 2.1 && < 3,
                         time >= 1.12 && < 2,
                         vector >= 0.13 && < 0.15

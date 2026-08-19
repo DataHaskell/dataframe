@@ -26,7 +26,12 @@ import qualified Data.Vector.Unboxed.Mutable as VUM
 import System.IO.Unsafe (unsafePerformIO)
 import Type.Reflection (typeRep)
 
-import DataFrame.Internal.Column (Bitmap, Column (..), bitmapTestBit)
+import DataFrame.Internal.Column (
+    Bitmap,
+    Column (..),
+    bitmapTestBit,
+    materializeMerged,
+ )
 import DataFrame.Internal.Hash (
     fnvOffset,
     mixBytes,
@@ -38,6 +43,7 @@ import DataFrame.Internal.Hash (
  )
 import DataFrame.Internal.PackedText (
     PackedTextData (..),
+    offAt,
     packedSlice,
  )
 import DataFrame.Internal.Types (
@@ -103,6 +109,7 @@ structure mirrors the sequential grouping hash: typed unboxed fast paths, then a
 -}
 mixColumnRange :: VUM.IOVector Int -> Int -> Int -> Column -> IO ()
 mixColumnRange mv lo hi = \case
+    c@(MergedColumn _ _) -> mixColumnRange mv lo hi (materializeMerged c)
     UnboxedColumn ubm (v :: VU.Vector a) ->
         case testEquality (typeRep @a) (typeRep @Int) of
             Just Refl -> unboxedRange mv lo hi ubm mixInt v
@@ -196,8 +203,8 @@ packedRange mv lo hi bm p =
             | i >= hi = pure ()
             | otherwise = do
                 h <- VUM.unsafeRead mv i
-                let !o = VU.unsafeIndex offs i
-                    !l = VU.unsafeIndex offs (i + 1) - o
+                let !o = offAt offs i
+                    !l = offAt offs (i + 1) - o
                     !h' = if valid i then mixBytes h arr o l else mixInt h nullSalt
                 VUM.unsafeWrite mv i h'
                 go (i + 1)

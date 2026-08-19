@@ -272,6 +272,7 @@ sum (Col name) df = case getColumn name df of
         Just Refl -> VG.sum column
         Nothing -> 0
     Just (PackedText _ _) -> 0
+    Just (MergedColumn _ _) -> 0 -- matches the old eager These column (type never Num)
 sum expr df = case interpret df expr of
     Left e -> throw e
     Right (TColumn xs) -> case toVector @a @V.Vector xs of
@@ -327,7 +328,7 @@ instance {-# OVERLAPPING #-} (Columnable b) => ImputeOp (Maybe b) where
                     if all (== h) (toList @b value)
                         then imputeCore col h df
                         else error "Impute expression returned more than one value"
-    runImputeWith _ _ df = df
+    runImputeWith _ expr _ = throw (NonColumnReferenceException (T.pack (show expr)))
 
 imputeWith ::
     forall a.

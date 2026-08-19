@@ -17,10 +17,6 @@ import qualified Data.Vector.Unboxed as VU
 import System.Random (mkStdGen, randomR)
 import Test.HUnit
 
-------------------------------------------------------------------------
--- Test fixtures and helpers
-------------------------------------------------------------------------
-
 -- Generate n points with d features, each value uniform in [-1, 1], from a seed.
 syntheticPoints :: Int -> Int -> Int -> V.Vector (VU.Vector Double)
 syntheticPoints seed n d =
@@ -88,10 +84,6 @@ logisticLoss features labels w b =
                     else (-margin) + log (1 + exp margin)
      in sum [loss i | i <- [0 .. n - 1]] / fromIntegral n
 
-------------------------------------------------------------------------
--- A1: Recover known hyperplane with no L1
-------------------------------------------------------------------------
-
 testA1RecoverHyperplane :: Test
 testA1RecoverHyperplane = TestCase $ do
     let groundTruth = VU.fromList [0.7, -0.5]
@@ -115,10 +107,6 @@ testA1RecoverHyperplane = TestCase $ do
         ("recovered weights should align with ground truth (cos = " ++ show cosSim ++ ")")
         (cosSim > 0.99)
     assertBool "all training points predicted correctly" sameSignAll
-
-------------------------------------------------------------------------
--- A2: L1 produces sparse weights
-------------------------------------------------------------------------
 
 testA2L1Sparsity :: Test
 testA2L1Sparsity = TestCase $ do
@@ -161,10 +149,6 @@ testA2L1Sparsity = TestCase $ do
         )
         (noiseZero >= 6)
 
-------------------------------------------------------------------------
--- A3: Convergence on well-conditioned input
-------------------------------------------------------------------------
-
 testA3Convergence :: Test
 testA3Convergence = TestCase $ do
     let groundTruth = VU.fromList [1.0, -0.5, 0.7]
@@ -192,10 +176,6 @@ testA3Convergence = TestCase $ do
         )
         (lossFit < loss0)
 
-------------------------------------------------------------------------
--- A4: Final loss <= initial loss (monotone or near-monotone in FISTA)
-------------------------------------------------------------------------
-
 testA4LossNotIncreasing :: Test
 testA4LossNotIncreasing = TestCase $ do
     let groundTruth = VU.fromList [0.8, 0.4]
@@ -214,10 +194,6 @@ testA4LossNotIncreasing = TestCase $ do
         )
         (lossFit <= loss0 + 1e-9)
 
-------------------------------------------------------------------------
--- A5: Degenerate input — all labels +1
-------------------------------------------------------------------------
-
 testA5AllSameDirection :: Test
 testA5AllSameDirection = TestCase $ do
     let rows = syntheticPoints 4 50 3
@@ -235,10 +211,6 @@ testA5AllSameDirection = TestCase $ do
         "all-same labels should produce a positive-predicting model"
         allPositive
 
-------------------------------------------------------------------------
--- A6: Degenerate — empty input
-------------------------------------------------------------------------
-
 testA6Empty :: Test
 testA6Empty = TestCase $ do
     let cfg = defaultSolverConfig
@@ -251,10 +223,6 @@ testA6Empty = TestCase $ do
         (VU.fromList [0, 0])
         (lmWeights model)
     assertEqual "empty input -> zero intercept" 0 (lmIntercept model)
-
-------------------------------------------------------------------------
--- A7: Degenerate — constant feature
-------------------------------------------------------------------------
 
 testA7ConstantFeature :: Test
 testA7ConstantFeature = TestCase $ do
@@ -286,10 +254,6 @@ testA7ConstantFeature = TestCase $ do
         (ws !! 1 /= 0)
     assertBool "no NaN/Inf" (not anyBad)
 
-------------------------------------------------------------------------
--- A8: Numerical stability with large feature values
-------------------------------------------------------------------------
-
 testA8LargeValues :: Test
 testA8LargeValues = TestCase $ do
     let scale = 1000.0 :: Double
@@ -313,11 +277,6 @@ testA8LargeValues = TestCase $ do
             ++ "/100)"
         )
         (sameSigns >= 90)
-
-------------------------------------------------------------------------
--- A9: Standardization round-trip — recovered weights point in the true
--- direction even when raw-feature scales differ by orders of magnitude.
-------------------------------------------------------------------------
 
 testA9StandardizationRoundTrip :: Test
 testA9StandardizationRoundTrip = TestCase $ do
@@ -356,10 +315,6 @@ testA9StandardizationRoundTrip = TestCase $ do
         )
         (cs > 0.95)
 
-------------------------------------------------------------------------
--- A10: Determinism — same input -> same output
-------------------------------------------------------------------------
-
 testA10Determinism :: Test
 testA10Determinism = TestCase $ do
     let groundTruth = VU.fromList [0.6, 0.4]
@@ -370,10 +325,6 @@ testA10Determinism = TestCase $ do
         m2 = fitL1Logistic cfg rows labels (V.fromList ["x", "y"])
     assertEqual "same input -> same weights" (lmWeights m1) (lmWeights m2)
     assertEqual "same input -> same intercept" (lmIntercept m1) (lmIntercept m2)
-
-------------------------------------------------------------------------
--- A11: Two-feature ground truth recovery (w_2/w_1 ratio)
-------------------------------------------------------------------------
 
 testA11GroundTruthRatio :: Test
 testA11GroundTruthRatio = TestCase $ do
@@ -402,10 +353,6 @@ testA11GroundTruthRatio = TestCase $ do
         ("b/w1 should approximate -3.0 (got " ++ show biasRatio ++ ")")
         (biasRatio > -3.4 && biasRatio < -2.6)
 
-------------------------------------------------------------------------
--- B1: modelToExpr produces a well-typed Expr Bool
-------------------------------------------------------------------------
-
 testB1ExprWellTyped :: Test
 testB1ExprWellTyped = TestCase $ do
     let model =
@@ -432,10 +379,6 @@ testB1ExprWellTyped = TestCase $ do
             Right vals ->
                 assertEqual "Expr matches manual evaluation" manual (V.toList vals)
 
-------------------------------------------------------------------------
--- B2: Zero weights are dropped from the resulting Expr
-------------------------------------------------------------------------
-
 testB2ZeroWeightsPruned :: Test
 testB2ZeroWeightsPruned = TestCase $ do
     let model =
@@ -447,11 +390,6 @@ testB2ZeroWeightsPruned = TestCase $ do
         expr = modelToExpr model
         cols = sort (getColumns expr)
     assertEqual "only column b appears in the Expr" ["b"] cols
-
-------------------------------------------------------------------------
--- A14: Constant feature at large raw value — weight must be exactly 0
--- and no NaN/Inf leaks into the rest of the fit.
-------------------------------------------------------------------------
 
 testA14ConstantHugeValue :: Test
 testA14ConstantHugeValue = TestCase $ do
@@ -478,10 +416,6 @@ testA14ConstantHugeValue = TestCase $ do
         ("signal feature has non-zero weight (got " ++ show (ws !! 1) ++ ")")
         (ws !! 1 /= 0)
 
-------------------------------------------------------------------------
--- A15: Variance exactly zero (all rows identical for that column).
-------------------------------------------------------------------------
-
 testA15AllZeroFeature :: Test
 testA15AllZeroFeature = TestCase $ do
     let baseRows = syntheticPoints 15 80 1
@@ -499,11 +433,6 @@ testA15AllZeroFeature = TestCase $ do
     assertEqual "zero-variance column has weight zero" 0 w0
     assertBool ("signal weight non-zero (" ++ show (ws !! 1) ++ ")") (ws !! 1 /= 0)
 
-------------------------------------------------------------------------
--- A16: Severely imbalanced labels (99:1) — should not collapse to a
--- constant predictor on the majority class without some learning.
-------------------------------------------------------------------------
-
 testA16ImbalancedLabels :: Test
 testA16ImbalancedLabels = TestCase $ do
     let nPos = 99
@@ -520,10 +449,6 @@ testA16ImbalancedLabels = TestCase $ do
         anyBad = any (\v -> isNaN v || isInfinite v) (b : ws)
     assertBool "no NaN/Inf with 99:1 imbalance" (not anyBad)
     assertBool ("intercept favors majority class (got b=" ++ show b ++ ")") (b > 0)
-
-------------------------------------------------------------------------
--- A17: Mixed per-feature raw scales — should not diverge.
-------------------------------------------------------------------------
 
 testA17ImbalancedRawScales :: Test
 testA17ImbalancedRawScales = TestCase $ do
@@ -551,10 +476,6 @@ testA17ImbalancedRawScales = TestCase $ do
         ("non-divergent under wild scales (got " ++ show correct ++ "/100)")
         (correct >= 65)
 
-------------------------------------------------------------------------
--- A12: maxIter = 0 returns the initial point unchanged
-------------------------------------------------------------------------
-
 testA12MaxIterZero :: Test
 testA12MaxIterZero = TestCase $ do
     let rows = syntheticPoints 20 50 2
@@ -566,11 +487,6 @@ testA12MaxIterZero = TestCase $ do
         (VU.fromList [0, 0])
         (lmWeights model)
     assertEqual "maxIter=0 returns zero intercept" 0 (lmIntercept model)
-
-------------------------------------------------------------------------
--- A13: maxIter = 1 takes exactly one prox step (results differ from
--- the initial zero point but may not be near the optimum).
-------------------------------------------------------------------------
 
 testA13MaxIterOne :: Test
 testA13MaxIterOne = TestCase $ do
@@ -588,12 +504,6 @@ testA13MaxIterOne = TestCase $ do
     let badW = VU.any (\x -> isNaN x || isInfinite x) (lmWeights m1)
         badB = isNaN (lmIntercept m1) || isInfinite (lmIntercept m1)
     assertBool "no NaN/Inf after one iteration" (not (badW || badB))
-
-------------------------------------------------------------------------
--- PR 3: Elastic Net recovery on correlated-feature pairs. Pure L1 picks one
--- of two correlated informative features; Elastic Net keeps both non-zero
--- (Zou & Hastie 2005 grouping effect). Cases: ρ ≈ 0.97 and ρ ≈ 0.7.
-------------------------------------------------------------------------
 
 -- Generate two correlated features f0, f1 with correlation ρ, plus
 -- noise features f2..f7. Truth is sign(f0 + f1).
@@ -677,12 +587,6 @@ testA19ElasticNetRecoveryMid = TestCase $ do
         ("ρ=0.7 EN grouping: |w0/w1| ∈ [0.33, 3.0]; got ratio=" ++ show ratio)
         (ratio >= 0.33 && ratio <= 3.0)
 
-------------------------------------------------------------------------
--- PR 3: A20 — class-balanced fit on 95/5 imbalance. Unweighted, the intercept
--- polarises toward logit(0.95) ≈ 2.94; with class-balanced weights it sits
--- near 0 and predictions become roughly balanced on a symmetric test set.
-------------------------------------------------------------------------
-
 testA20ClassBalancedFit :: Test
 testA20ClassBalancedFit = TestCase $ do
     let n = 200 :: Int
@@ -749,10 +653,6 @@ testA20ClassBalancedFit = TestCase $ do
             ++ show fracBal
         )
         (fracBal >= 0.40 && fracBal <= 0.60)
-
-------------------------------------------------------------------------
--- Test list
-------------------------------------------------------------------------
 
 tests :: [Test]
 tests =

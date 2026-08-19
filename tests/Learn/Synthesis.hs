@@ -7,8 +7,9 @@ deterministic.
 -}
 module Learn.Synthesis (tests) where
 
+import Assertions (assertExpectException)
+import qualified Data.Text as T
 import qualified DataFrame as D
-import DataFrame.Model (fit)
 import DataFrame.Synthesis
 
 import Test.HUnit
@@ -73,9 +74,48 @@ deterministic = TestCase $ do
         (D.prettyPrint (sfExpr a))
         (D.prettyPrint (sfExpr b))
 
+{- | A wide frame at the default 'synMaxSize' refuses instead of exhausting the
+heap. 'synBankCap' caps what is kept, not what is generated, so the layers past
+size 4 used to allocate tens of gigabytes and kill the process — which no test
+can catch, because there is no process left to fail.
+-}
+refusesOversizedSearch :: Test
+refusesOversizedSearch =
+    TestCase
+        ( assertExpectException
+            "[Error Case]"
+            "synMaxAllocBytes"
+            ( print
+                (D.prettyPrint (sfExpr (fit defaultSynthesisConfig (D.col @Double "y") wide)))
+            )
+        )
+
+-- | The same frame is fine once the search is small enough to fit the budget.
+acceptsSmallSearch :: Test
+acceptsSmallSearch = TestCase $ do
+    let cfg = defaultSynthesisConfig{synMaxSize = 3}
+        m = fit cfg (D.col @Double "y") wide
+    assertBool "a size-3 search over the wide frame returns" (sfScore m >= -1.0)
+
+-- | 12 features over 3000 rows: the shape that killed the kernel.
+wide :: D.DataFrame
+wide =
+    D.fromNamedColumns
+        ( ("y", D.fromList (map (\i -> fromIntegral (i `mod` 7) :: Double) idx))
+            : [ ( "f" <> T.pack (show c)
+                , D.fromList (map (\i -> fromIntegral ((i * c) `mod` 13) :: Double) idx)
+                )
+              | c <- [1 .. 12 :: Int]
+              ]
+        )
+  where
+    idx = [0 .. 2999 :: Int]
+
 tests :: [Test]
 tests =
-    [ recoversQuadratic
+    [ refusesOversizedSearch
+    , acceptsSmallSearch
+    , recoversQuadratic
     , exactRecoveryMSE
     , recoversRatio
     , distinctFeatures

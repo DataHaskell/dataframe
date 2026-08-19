@@ -34,6 +34,9 @@ import DataFrame.Internal.Column (
     Column (..),
     Columnable,
     allValidBitmap,
+    isMergedColumn,
+    isPackedText,
+    materializeMerged,
     materializePacked,
  )
 import DataFrame.Internal.PackedText (mkPackedContiguous)
@@ -94,8 +97,14 @@ All chunks must have the same element type.
 mergeColumns :: [Column] -> Column
 mergeColumns [] = error "DataFrame.Internal.ColumnBuilder.mergeColumns: empty list"
 mergeColumns [c] = c
+-- Normalize on the whole list, not the head: a packed or merged chunk in any
+-- position must demote every chunk to the common boxed form.
+mergeColumns cols@(c0 : _)
+    | any isMergedColumn cols = mergeColumns (map materializeMerged cols)
+    | any isPackedText cols = mergeColumns (map materializePacked cols)
 mergeColumns cols@(c0 : _) = case c0 of
     PackedText _ _ -> mergeColumns (map materializePacked cols)
+    MergedColumn _ _ -> mergeColumns (map materializeMerged cols)
     UnboxedColumn _ (_ :: VU.Vector a) ->
         let parts = map (unboxedPart @a) cols
             !merged = VU.concat (map snd parts)

@@ -76,7 +76,7 @@ import DataFrame.Typed.Types
 underlying handle is owned by Rust-side DataFusion; Haskell holds a
 'ForeignPtr' that frees it on garbage collection.
 -}
-newtype DataFrame (cols :: [Type]) = DF {unDataFrame :: PlanHandle}
+newtype DataFrame (cols :: [(Symbol, Type)]) = DF {unDataFrame :: PlanHandle}
 
 {- | Scan a CSV file. The schema comes from the @cols@ phantom via 'KnownSchema';
 the user does not pass it separately. DataFusion currently infers column types
@@ -140,7 +140,7 @@ derive ::
     (KnownSymbol name, IC.Columnable a, AssertAbsent name cols) =>
     TExpr cols a ->
     DataFrame cols ->
-    IO (DataFrame (Snoc cols (Column name a)))
+    IO (DataFrame (Snoc cols '(name, a)))
 derive (TExpr expr) (DF plan) = do
     bytes <- case encodeExprToBytes expr of
         Right bs -> return bs
@@ -153,7 +153,7 @@ derive (TExpr expr) (DF plan) = do
                 return (DF ph)
 
 -- | A grouped query: an 'DataFrame' tagged with the group-by key list.
-data Grouped (keys :: [Symbol]) (cols :: [Type]) = GD
+data Grouped (keys :: [Symbol]) (cols :: [(Symbol, Type)]) = GD
     { gdKeys :: ![T.Text]
     , gdPlan :: !PlanHandle
     }

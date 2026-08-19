@@ -1,3 +1,5 @@
+<!-- scripths: 0.5.3.0 -->
+
 <!--
   This file is the runnable scripths source for dataframe-viz's README.
   Every ```haskell block executes in order in one shared session against a
@@ -36,15 +38,15 @@ local `dataframe-core` / `dataframe-operations` / `dataframe-viz` working trees:
 
 ```haskell
 -- cabal: build-depends: text, aeson
--- cabal: packages: ../../../dataframe-core, ../../../dataframe-parsing
--- cabal: packages: ../../../dataframe-operations, ../../../dataframe-viz
+-- cabal: packages: ../dataframe-core, ../dataframe-parsing
+-- cabal: packages: ../dataframe-operations, ../dataframe-viz
 -- cabal: default-extensions: OverloadedStrings, TypeApplications, OverloadedLabels
 -- cabal: default-extensions: DataKinds, TypeOperators, FlexibleContexts
 import DataFrame.Internal.DataFrame (DataFrame, fromNamedColumns)
 import DataFrame.Internal.Column (fromList)
 import DataFrame.Operators ((|>))
 import qualified DataFrame.Functions as F
-import DataFrame.Typed.Types (Column, TypedDataFrame)
+import DataFrame.Typed.Types (TypedDataFrame)
 import DataFrame.Typed.Freeze (freeze)
 import qualified DataFrame.Typed.Expr as TE
 import Data.Text (Text)
@@ -270,7 +272,7 @@ grammar (Chart.toVegaSpec
 box-and-whisker (quartiles, 1.5×IQR whiskers, outliers):
 
 ```haskell
-type Cols = '[ Column "income" Double, Column "value" Double, Column "region" Text ]
+type Cols = '[ '("income", Double), '("value", Double), '("region", Text)]
 
 case freeze @Cols df of
     Nothing  -> "schema mismatch"

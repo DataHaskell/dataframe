@@ -33,9 +33,9 @@ import Test.HUnit
 
 -- | All-Double schema: two features and a Double target.
 type Houses =
-    '[ DT.Column "x1" Double
-     , DT.Column "x2" Double
-     , DT.Column "y" Double
+    '[ '("x1", Double)
+     , '("x2", Double)
+     , '("y", Double)
      ]
 
 regDF :: D.DataFrame

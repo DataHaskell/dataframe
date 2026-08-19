@@ -26,7 +26,6 @@ module DataFrame.Typed.TH.Records (
 
     -- * Re-export for TH splices
     TypedDataFrame,
-    Column,
 
     -- * Shared helpers (used by sibling TH modules)
     getSchemaInfo,
@@ -51,7 +50,7 @@ import DataFrame.Typed.Record (
     requireColumn,
     toColumns,
  )
-import DataFrame.Typed.Types (Column, TypedDataFrame)
+import DataFrame.Typed.Types (TypedDataFrame)
 import DataFrame.Typed.Util (camelToSnake)
 
 {- | Derive an untyped 'DataFrame.Schema.Schema' value plus per-column 'Expr'
@@ -90,7 +89,7 @@ mkColumnType :: (T.Text, String) -> Q Type
 mkColumnType (name, tyStr) = do
     ty <- parseTypeString tyStr
     let nameLit = LitT (StrTyLit (T.unpack name))
-    pure $ ConT ''Column `AppT` nameLit `AppT` ty
+    pure $ PromotedTupleT 2 `AppT` nameLit `AppT` ty
 
 parseTypeString :: String -> Q Type
 parseTypeString "Int" = pure $ ConT ''Int
@@ -161,7 +160,7 @@ deriveSchemaFromTypeWith opts tyName = do
             Just s -> mkName s
             Nothing -> mkName (nameBase tyName ++ "Schema")
     let columnTypes =
-            [ ConT ''Column `AppT` LitT (StrTyLit colName) `AppT` ty
+            [ PromotedTupleT 2 `AppT` LitT (StrTyLit colName) `AppT` ty
             | (colName, _, ty) <- fields
             ]
         schemaType =

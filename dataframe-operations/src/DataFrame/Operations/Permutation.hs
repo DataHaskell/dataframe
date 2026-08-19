@@ -28,7 +28,12 @@ import Control.Monad.ST (runST)
 import Data.Type.Equality (testEquality, (:~:) (Refl))
 import Data.Vector.Internal.Check (HasCallStack)
 import DataFrame.Errors (DataFrameException (..))
-import DataFrame.Internal.Column (Column (..), Columnable, atIndicesStable)
+import DataFrame.Internal.Column (
+    Column (..),
+    Columnable,
+    atIndicesStable,
+    materializeMerged,
+ )
 import DataFrame.Internal.DataFrame (
     DataFrame (..),
     columnNames,
@@ -132,6 +137,11 @@ sortOrderComparator (Asc (Col name :: Expr a)) df =
                     (aj, oj, lj) = packedSlice p j
                  in sliceCmpBytes ai oi li aj oj lj
             Nothing -> \_ _ -> EQ
+        c@(MergedColumn _ _) -> case materializeMerged c of
+            BoxedColumn _ (v :: V.Vector b) -> case testEquality (typeRep @a) (typeRep @b) of
+                Just Refl -> \i j -> compare (v `V.unsafeIndex` i) (v `V.unsafeIndex` j)
+                Nothing -> \_ _ -> EQ
+            _ -> \_ _ -> EQ
 sortOrderComparator (Desc (Col name :: Expr a)) df =
     case unsafeGetColumn name df of
         BoxedColumn _ (v :: V.Vector b) -> case testEquality (typeRep @a) (typeRep @b) of
@@ -146,6 +156,11 @@ sortOrderComparator (Desc (Col name :: Expr a)) df =
                     (aj, oj, lj) = packedSlice p j
                  in sliceCmpBytes aj oj lj ai oi li
             Nothing -> \_ _ -> EQ
+        c@(MergedColumn _ _) -> case materializeMerged c of
+            BoxedColumn _ (v :: V.Vector b) -> case testEquality (typeRep @a) (typeRep @b) of
+                Just Refl -> \i j -> compare (v `V.unsafeIndex` j) (v `V.unsafeIndex` i)
+                Nothing -> \_ _ -> EQ
+            _ -> \_ _ -> EQ
 sortOrderComparator _ _ = error "Sorting on compound column"
 
 -- | Sort row indices using a comparator function.

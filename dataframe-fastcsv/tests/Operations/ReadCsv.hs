@@ -37,7 +37,14 @@ import DataFrame.Internal.DataFrame (
  )
 import DataFrame.Schema (Schema (..), SchemaType (..))
 import System.Directory (removeFile)
-import System.IO (IOMode (..), withFile)
+import System.IO (
+    IOMode (..),
+    hSetEncoding,
+    hSetNewlineMode,
+    noNewlineTranslation,
+    utf8,
+    withFile,
+ )
 import Test.HUnit
 import Type.Reflection (typeRep)
 
@@ -59,6 +66,8 @@ prettyPrintTsv = prettyPrintSeparated '\t'
 
 prettyPrintSeparated :: Char -> FilePath -> DataFrame -> IO ()
 prettyPrintSeparated sep filepath df = withFile filepath WriteMode $ \handle -> do
+    hSetEncoding handle utf8
+    hSetNewlineMode handle noNewlineTranslation
     let (rows, _) = dataframeDimensions df
     let headers = map fst (L.sortBy (compare `on` snd) (M.toList (columnIndices df)))
     TIO.hPutStrLn
@@ -85,6 +94,7 @@ getRowEscaped sep df i = V.ifoldr go [] (columns df)
   where
     go :: Int -> Column -> [T.Text] -> [T.Text]
     go idx c@(PackedText _ _) acc = go idx (DI.materializePacked c) acc
+    go idx c@(MergedColumn _ _) acc = go idx (DI.materializeMerged c) acc
     go _ (BoxedColumn bm (c :: V.Vector a)) acc = case c V.!? i of
         Just e -> escapeField sep textRep : acc
           where

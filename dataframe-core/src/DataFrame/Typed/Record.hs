@@ -38,6 +38,7 @@ import qualified DataFrame.Internal.Column as C
 import DataFrame.Internal.DataFrame (fromNamedColumns)
 import qualified DataFrame.Internal.DataFrame as D
 import DataFrame.Typed.Types (TypedDataFrame (..))
+import GHC.TypeLits
 
 {- | Bridge a Haskell record type @a@ to a typed-dataframe schema.
 
@@ -51,7 +52,7 @@ instances can pick it up from a 'GHC.Generics.Rep' computation (see
 @Left err@ if a column is missing or has the wrong type.
 -}
 class HasSchema a where
-    type Schema a :: [Type]
+    type Schema a :: [(Symbol, Type)]
     toColumns :: [a] -> [(T.Text, C.Column)]
     fromColumns :: D.DataFrame -> Either T.Text [a]
 

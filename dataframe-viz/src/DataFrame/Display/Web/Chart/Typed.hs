@@ -86,9 +86,10 @@ import DataFrame.Display.Internal.VegaLite (
 import qualified DataFrame.Display.Web.Chart as C
 import DataFrame.Internal.Column (Columnable)
 import DataFrame.Typed.Types (TExpr (..), TypedDataFrame (..))
+import GHC.TypeLits (Symbol)
 
 -- | A typed chart: a phantom-@cols@ wrapper over the untyped builder.
-newtype Chart (cols :: [Type]) = Chart C.Chart
+newtype Chart (cols :: [(Symbol, Type)]) = Chart C.Chart
 
 -- | Start a typed chart from a typed frame.
 chart :: TypedDataFrame cols -> Chart cols
@@ -167,10 +168,6 @@ toHtml (Chart c) = C.toHtml c
 -- | Render the chart to a temp file and open it in the default browser.
 showChart :: Chart cols -> IO ()
 showChart (Chart c) = C.showChart c
-
--- ---------------------------------------------------------------------------
--- One-shot convenience plots
--- ---------------------------------------------------------------------------
 
 -- | Scatter plot of two typed expressions.
 scatter ::

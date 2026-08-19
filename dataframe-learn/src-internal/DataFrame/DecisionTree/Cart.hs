@@ -18,15 +18,22 @@ module DataFrame.DecisionTree.Cart (
 ) where
 
 import DataFrame.DecisionTree.Types (Tree (..), TreeConfig (..))
+import DataFrame.Errors (DataFrameException (..), TypeErrorContext (..))
 import qualified DataFrame.Functions as F
 import DataFrame.Internal.Column
-import DataFrame.Internal.DataFrame (DataFrame, columnNames, unsafeGetColumn)
+import DataFrame.Internal.DataFrame (
+    DataFrame,
+    columnNames,
+    getColumn,
+    unsafeGetColumn,
+ )
 import DataFrame.Internal.Expression (Expr (..))
 import DataFrame.Internal.Interpreter (interpret)
 import DataFrame.Internal.Types
 import DataFrame.Operations.Core (nRows)
 import DataFrame.Operators
 
+import Control.Exception (throw)
 import Data.Either (fromRight)
 import Data.Function (on)
 import Data.List (foldl')
@@ -37,7 +44,7 @@ import Data.Type.Equality (testEquality, (:~:) (..))
 import qualified Data.Vector as V
 import qualified Data.Vector.Algorithms.Merge as VA
 import qualified Data.Vector.Unboxed as VU
-import Type.Reflection (typeRep)
+import Type.Reflection (TypeRep, typeRep)
 
 {- | A one-hot feature column: per-row Double values plus the sklearn LEFT
 predicate (@x <= threshold@) over the ORIGINAL DataFrame.
@@ -89,12 +96,25 @@ buildCartTree cfg target df =
             (maxTreeDepth cfg)
             (max 1 (minLeafSize cfg))
 
+{- | Read the target column at the type the tree is being fitted at. Names the
+column and both types on failure: a bare @fromIntegral@ defaults to 'Integer'
+and lands here, and the old message said only that something went wrong.
+-}
 cartLabels :: forall a. (Columnable a) => DataFrame -> T.Text -> V.Vector a
 cartLabels df target = case interpret @a df (Col target) of
-    Right (TColumn column) -> fromRight err (toVector @a column)
-    _ -> err
+    Right (TColumn column) -> fromRight (throw err) (toVector @a column)
+    Left e -> throw e
   where
-    err = error "buildCartTree: cannot interpret target column"
+    err =
+        TypeMismatchException
+            ( MkTypeErrorContext
+                (Right (typeRep @a))
+                ( Left (maybe "missing" columnTypeString (getColumn target df)) ::
+                    Either String (TypeRep a)
+                )
+                (Just (T.unpack target))
+                (Just "buildCartTree")
+            )
 
 cartClasses :: (Ord a) => V.Vector a -> V.Vector a
 cartClasses = V.fromList . Set.toList . Set.fromList . V.toList
@@ -253,6 +273,9 @@ featuresOfColumn df c = case unsafeGetColumn c df of
     pt@(PackedText _ _) -> case materializePacked pt of
         BoxedColumn _ (v :: V.Vector b) -> oneHotFeatures @b (nRows df) c v
         _ -> []
+    mc@(MergedColumn _ _) -> case materializeMerged mc of
+        BoxedColumn _ (v :: V.Vector b) -> oneHotFeatures @b (nRows df) c v
+        _ -> []
 
 numericFeature ::
     forall b. (Columnable b, VU.Unbox b) => T.Text -> VU.Vector b -> [CartFeature]
@@ -284,6 +307,11 @@ cartTargetLabels target df = case unsafeGetColumn target df of
         Nothing -> V.map (T.pack . show) v
     UnboxedColumn _ (v :: VU.Vector b) -> V.map (T.pack . show) (V.convert v)
     pt@(PackedText _ _) -> case materializePacked pt of
+        BoxedColumn _ (v :: V.Vector b) -> case testEquality (typeRep @b) (typeRep @T.Text) of
+            Just Refl -> v
+            Nothing -> V.map (T.pack . show) v
+        _ -> V.empty
+    mc@(MergedColumn _ _) -> case materializeMerged mc of
         BoxedColumn _ (v :: V.Vector b) -> case testEquality (typeRep @b) (typeRep @T.Text) of
             Just Refl -> v
             Nothing -> V.map (T.pack . show) v

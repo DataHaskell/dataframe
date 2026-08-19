@@ -8,7 +8,7 @@ The reader validates the file against a type-level schema as it loads, supplied
 by type application:
 
 @
-type Trips = '[Column \"id\" Int, Column \"fare\" Double]
+type Trips = '[ '(\"id\", Int), '(\"fare\", Double)]
 
 trips <- readParquet \@Trips \"trips.parquet\"   -- IO (TypedDataFrame Trips)
 @

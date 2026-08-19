@@ -200,7 +200,7 @@ typedParity :: Test
 typedParity = TestCase $ do
     let tdf =
             DT.unsafeFreeze numFrame ::
-                DT.TypedDataFrame '[DT.Column "a" Double, DT.Column "b" Double]
+                DT.TypedDataFrame '[ '("a", Double), '("b", Double)]
         specU =
             C.toVegaSpec
                 ( C.chart numFrame

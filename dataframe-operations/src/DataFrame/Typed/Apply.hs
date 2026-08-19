@@ -48,7 +48,7 @@ import DataFrame.Typed.Schema (
     Snoc,
     symbolVals,
  )
-import DataFrame.Typed.Types (Column, TExpr (..), TypedDataFrame (..))
+import DataFrame.Typed.Types (TExpr (..), TypedDataFrame (..))
 
 {- | Map a function over a column, rewriting its element type from @a@ to @b@.
 The schema's entry for @name@ is updated via 'SetColumnType'.
@@ -156,8 +156,8 @@ deriveWithExpr ::
     ) =>
     TExpr cols a ->
     TypedDataFrame cols ->
-    ( TExpr (Snoc cols (Column name a)) a
-    , TypedDataFrame (Snoc cols (Column name a))
+    ( TExpr (Snoc cols '(name, a)) a
+    , TypedDataFrame (Snoc cols '(name, a))
     )
 deriveWithExpr (TExpr expr) (TDF df) =
     let (e', df') = D.deriveWithExpr colName expr df
@@ -173,7 +173,7 @@ insertWithDefault ::
     , Foldable t
     , AssertAbsent name cols
     ) =>
-    a -> t a -> TypedDataFrame cols -> TypedDataFrame (Column name a ': cols)
+    a -> t a -> TypedDataFrame cols -> TypedDataFrame ('(name, a) ': cols)
 insertWithDefault def xs (TDF df) =
     unsafeFreeze (D.insertWithDefault def colName xs df)
   where
@@ -186,7 +186,7 @@ insertVectorWithDefault ::
     , Columnable a
     , AssertAbsent name cols
     ) =>
-    a -> V.Vector a -> TypedDataFrame cols -> TypedDataFrame (Column name a ': cols)
+    a -> V.Vector a -> TypedDataFrame cols -> TypedDataFrame ('(name, a) ': cols)
 insertVectorWithDefault def vec (TDF df) =
     unsafeFreeze (D.insertVectorWithDefault def colName vec df)
   where
@@ -200,7 +200,7 @@ insertUnboxedVector ::
     , VU.Unbox a
     , AssertAbsent name cols
     ) =>
-    VU.Vector a -> TypedDataFrame cols -> TypedDataFrame (Column name a ': cols)
+    VU.Vector a -> TypedDataFrame cols -> TypedDataFrame ('(name, a) ': cols)
 insertUnboxedVector vec (TDF df) =
     unsafeFreeze (D.insertUnboxedVector colName vec df)
   where

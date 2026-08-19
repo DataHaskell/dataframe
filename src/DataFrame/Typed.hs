@@ -24,7 +24,7 @@ of raw @Expr@. Column references are validated at compile time:
 {\-\# LANGUAGE DataKinds, TypeApplications, TypeOperators \#-\}
 import qualified DataFrame.Typed as T
 
-type People = '[T.Column \"name\" Text, T.Column \"age\" Int]
+type People = '[ '(\"name\", Text), '(\"age\", Int)]
 
 main = do
     raw <- D.readCsv \"people.csv\"
@@ -43,8 +43,8 @@ runtime exception.
 == filterAllJust tracks Maybe-stripping
 
 @
-df :: TypedDataFrame '[Column \"x\" (Maybe Double), Column \"y\" Int]
-T.filterAllJust df :: TypedDataFrame '[Column \"x\" Double, Column \"y\" Int]
+df :: TypedDataFrame '[ '(\"x\", Maybe Double), '(\"y\", Int)]
+T.filterAllJust df :: TypedDataFrame '[ '(\"x\", Double), '(\"y\", Int)]
 @
 
 == Typed aggregation
@@ -60,7 +60,6 @@ result = T.aggregate
 module DataFrame.Typed (
     -- * Core types
     TypedDataFrame,
-    Column,
     TypedGrouped,
     These (..),
 
@@ -394,7 +393,6 @@ import DataFrame.Typed.TH (
  )
 #endif
 import DataFrame.Typed.Types (
-    Column,
     TSortOrder (..),
     These (..),
     TypedDataFrame,

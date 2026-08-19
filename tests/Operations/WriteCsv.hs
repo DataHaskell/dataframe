@@ -4,10 +4,11 @@
 module Operations.WriteCsv where
 
 import qualified Data.Text as T
-import qualified Data.Text.IO as TIO
+import qualified Data.Text.IO.Utf8 as TIO
 import qualified DataFrame as D
 import qualified DataFrame.Internal.Column as DI
 import DataFrame.Internal.DataFrame (DataFrame (..), toCsv, toSeparated)
+import System.Directory (getTemporaryDirectory)
 import Test.HUnit
 
 -- Basic test: Int and Text columns produce correct CSV
@@ -81,7 +82,8 @@ toCsvRoundTrip = TestLabel "toCsv_roundTrip" $ TestCase $ do
                 , ("b", DI.fromList @T.Text ["hello", "world", "test"])
                 ]
     let csvText = toCsv df
-    let tmpPath = "/tmp/dataframe_test_toCsv_roundtrip.csv"
+    tmpDir <- getTemporaryDirectory
+    let tmpPath = tmpDir <> "/dataframe_test_toCsv_roundtrip.csv"
     TIO.writeFile tmpPath csvText
     df' <- D.readCsv tmpPath
     assertEqual

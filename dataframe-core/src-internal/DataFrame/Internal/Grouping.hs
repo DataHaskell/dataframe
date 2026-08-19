@@ -31,20 +31,27 @@ import DataFrame.Internal.Column (
     Bitmap,
     Column (..),
     bitmapTestBit,
+    materializeMerged,
  )
 import DataFrame.Internal.DataFrame (DataFrame (..), GroupedDataFrame (..))
 import DataFrame.Internal.DictEncode (dictEncodeColumnUpTo)
 import DataFrame.Internal.GroupingDirect (
     DirectGrouping (..),
+    directGroupThreshold,
     tryDirectGroupColumn,
  )
 import DataFrame.Internal.GroupingPar (parallelAssignGroups, shouldParallelize)
 import DataFrame.Internal.Hash
 import DataFrame.Internal.HashTable (htInsert, newHashTable)
 import DataFrame.Internal.PackedText (
-    PackedTextData,
+    PackedSel,
+    PackedTextData (..),
+    offAt,
+    offCount,
     packedLength,
     packedSlice,
+    selAt,
+    selLength,
     sliceEqBytes,
  )
 import DataFrame.Internal.RadixRank (rankByHash)
@@ -90,8 +97,51 @@ tryDirectGroup [name] df = do
     case tryDirectGroupColumn col of
         Just dg ->
             Just (Grouped df [name] (dgValueIndices dg) (dgOffsets dg) (dgRowToGroup dg))
-        Nothing -> tryDictGroup (nRows df) df [name] col
+        Nothing -> case col of
+            PackedText Nothing p -> dictCodesGroup df [name] p
+            _ -> tryDictGroup (nRows df) df [name] col
 tryDirectGroup _ _ = Nothing
+
+dictCodesGroup ::
+    DataFrame -> [T.Text] -> PackedTextData -> Maybe GroupedDataFrame
+dictCodesGroup df names p = do
+    sel <- ptSel p
+    guard (ptCanonicalSel p)
+    let offs = ptOffsets p
+        card = offCount offs - 1
+        n = selLength sel
+    guard (card > 0 && card <= directGroupThreshold && n > 0)
+    counts <- codeHistogram card sel
+    let occupied = VU.filter (\g -> VU.unsafeIndex counts g > 0) (VU.enumFromN 0 card)
+        nGroups = VU.length occupied
+        entryHash g =
+            let o = offAt offs g
+             in mixBytes fnvOffset (ptBytes p) o (offAt offs (g + 1) - o)
+        rank =
+            runST (rankByHash (pure . entryHash . VU.unsafeIndex occupied) nGroups)
+        remap = runST $ do
+            m <- VUM.new card
+            VU.imapM_ (\j g -> VUM.unsafeWrite m g (VU.unsafeIndex rank j)) occupied
+            VU.unsafeFreeze m
+        rtg = VU.generate n (VU.unsafeIndex remap . selAt sel)
+        (vis, os) = indicesFromGroups rtg nGroups
+    pure (Grouped df names vis os rtg)
+
+-- | Per-code occupancy counts; 'Nothing' as soon as any code is negative.
+codeHistogram :: Int -> PackedSel -> Maybe (VU.Vector Int)
+codeHistogram card sel = runST $ do
+    counts <- VUM.replicate card 0
+    let n = selLength sel
+        go i
+            | i >= n = Just <$> VU.unsafeFreeze counts
+            | otherwise = do
+                let c = selAt sel i
+                if c < 0 || c >= card
+                    then pure Nothing
+                    else do
+                        VUM.unsafeModify counts (+ 1) c
+                        go (i + 1)
+    go 0
 
 {- | Dictionary-encode a single text key to dense int codes, then derive
 @valueIndices@/@offsets@ by counting sort. Profiled slower than the fused hash
@@ -197,7 +247,8 @@ present one of the same bits.
 computeHashes :: DataFrame -> [Int] -> Int -> ST s (VU.Vector Int)
 computeHashes df indicesToGroup n = do
     mh <- VUM.replicate n fnvOffset
-    let selectedCols = map (columns df V.!) indicesToGroup
+    -- Merged key columns are exotic; hash their eager form.
+    let selectedCols = map (materializeMerged . (columns df V.!)) indicesToGroup
     forM_ selectedCols $ \case
         UnboxedColumn ubm (v :: VU.Vector a) ->
             case testEquality (typeRep @a) (typeRep @Int) of
@@ -238,6 +289,8 @@ computeHashes df indicesToGroup n = do
                         )
                         v
         PackedText bm p -> hashPacked mh bm p
+        MergedColumn _ _ ->
+            error "computeHashes: MergedColumn is normalized before hashing"
     VU.unsafeFreeze mh
 
 {- | Build the row-key equality predicate over the selected key columns.
@@ -255,6 +308,7 @@ eqKeyRow df indicesToGroup =
 when both are null, or both are valid and their values compare equal.
 -}
 colEqRow :: Column -> (Int -> Int -> Bool)
+colEqRow c@(MergedColumn _ _) = colEqRow (materializeMerged c)
 colEqRow (UnboxedColumn bm v) =
     let eqV a b = VU.unsafeIndex v a == VU.unsafeIndex v b
      in withNulls bm eqV

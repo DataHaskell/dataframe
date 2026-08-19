@@ -23,11 +23,13 @@ module DataFrame.Boosting.GBM (
     gbDecisionExpr,
 ) where
 
+import Control.Exception (throw)
 import Data.Either (fromRight)
 import qualified Data.Map.Strict as M
 import qualified Data.Text as T
 import qualified Data.Vector as V
 import qualified Data.Vector.Unboxed as VU
+import DataFrame.Errors (DataFrameException (..))
 
 import DataFrame.DecisionTree.Cart (cartFeatures)
 import DataFrame.DecisionTree.Fit (treeToExpr)
@@ -118,15 +120,31 @@ fitGBM cfg target@(Col name) df =
     boost !m fScores ts ss usageAcc
         | m >= gbNEstimators cfg = (ts, ss, usageAcc)
         | otherwise =
-            let grad = negGradient (gbLoss cfg) y fScores
-                tree = fitRegTreeOn rtCfg feats grad Nothing
+            let (target', weights) = newtonStep (gbLoss cfg) y fScores
+                tree = fitRegTreeOn rtCfg feats target' weights
                 pred = predictTree df tree
                 fScores' = VU.zipWith (\f p -> f + lr * p) fScores pred
                 score = lossValue (gbLoss cfg) y fScores'
                 usage' = foldr (\c -> M.insertWith (+) c 1) usageAcc (treeColumns tree)
              in boost (m + 1) fScores' (tree : ts) (score : ss) usage'
 fitGBM _ expr _ =
-    error ("fitGBM: target must be a column, got " ++ show expr)
+    throw (NonColumnReferenceException ("fitGBM: " <> T.pack (show expr)))
+
+newtonStep ::
+    GBLoss ->
+    VU.Vector Double ->
+    VU.Vector Double ->
+    (VU.Vector Double, Maybe (VU.Vector Double))
+newtonStep SquaredError y f = (negGradient SquaredError y f, Nothing)
+newtonStep LogisticDeviance y f = (z, Just h)
+  where
+    p = VU.map sigmoid f
+    h = VU.map (\pi' -> max hFloor (pi' * (1 - pi'))) p
+    z = VU.zipWith3 (\yi pi' hi -> (yi - pi') / hi) y p h
+
+-- | Floor on the Hessian, so a saturated row cannot produce an unbounded step.
+hFloor :: Double
+hFloor = 1e-6
 
 negGradient ::
     GBLoss -> VU.Vector Double -> VU.Vector Double -> VU.Vector Double
@@ -159,7 +177,7 @@ clamp01 p = max 1e-12 (min (1 - 1e-12) p)
 predictTree :: DataFrame -> Tree Double -> VU.Vector Double
 predictTree df t = case interpret @Double df (treeToExpr t) of
     Right (TColumn c) -> fromRight VU.empty (toVector @Double @VU.Vector c)
-    Left e -> error (show e)
+    Left e -> throw e
 
 treeColumns :: Tree Double -> [T.Text]
 treeColumns = getColumns . treeToExpr

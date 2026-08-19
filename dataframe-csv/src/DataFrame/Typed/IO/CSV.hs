@@ -9,7 +9,7 @@ fetch and gives their types, so these readers touch only the columns @cols@
 declares and never infer a type the schema already knows.
 
 @
-type Customer = '[Column \"customer_id\" Int, Column \"customer_name\" Text]
+type Customer = '[ '(\"customer_id\", Int), '(\"customer_name\", Text)]
 
 customers <- readCsv \@Customer \"customers.csv\"  -- reads 2 columns, whatever
                                                  -- else the file holds
@@ -55,7 +55,7 @@ Reads only the columns @cols@ names, typed as @cols@ says.
 
 ==== __Example__
 @
-ghci> type Customer = '[Column \"id\" Int, Column \"name\" Text]
+ghci> type Customer = '[ '(\"id\", Int), '(\"name\", Text)]
 ghci> customers <- readCsv \@Customer \"customers.csv\"
 @
 -}

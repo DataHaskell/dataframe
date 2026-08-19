@@ -19,6 +19,14 @@ cd "$(dirname "$0")/.."
 cabal build all
 cabal test all
 
+# Type errors that are part of the API contract (impute's nullable requirement).
+# cabal test cannot express "this must not compile", so it lives in its own gate.
+./scripts/check-should-fail.sh
+
+# The READMEs are runnable scripths notebooks built against the local tree, but
+# nothing compiled them, which is how a stale typed-schema example shipped.
+./scripts/check-readmes.sh
+
 # Build the meta-package library on its own with -Werror=unused-packages
 # (set in dataframe.cabal). Catches the case where a satellite is added to
 # build-depends but never re-exported, which haskell-ci would otherwise be

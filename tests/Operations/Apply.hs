@@ -255,28 +255,29 @@ imputeColumnNotFound =
 imputeOnNonOptional :: Test
 imputeOnNonOptional =
     TestCase
-        ( assertEqual
-            "impute is a no-op on a non-nullable column"
-            imputeData
-            (impute (F.col @(Maybe Int) "plain") 0 imputeData)
+        ( assertExpectException
+            "[Error Case]"
+            "impute"
+            (print $ impute (F.col @(Maybe Int) "plain") 0 imputeData)
         )
 
-imputePlainNoOp :: Test
-imputePlainNoOp =
+-- | Only a column reference can be imputed; a compound expression throws.
+imputeCompoundExprThrows :: Test
+imputeCompoundExprThrows =
     TestCase
-        ( assertEqual
-            "impute with non-Maybe expr is always a no-op"
-            imputeData
-            (impute (F.col @Int "plain") 0 imputeData)
+        ( assertExpectException
+            "[Error Case]"
+            "column reference"
+            (print $ impute (F.lit (Just (1 :: Int))) 0 imputeData)
         )
 
-imputeWithPlainNoOp :: Test
-imputeWithPlainNoOp =
+imputeWithCompoundExprThrows :: Test
+imputeWithCompoundExprThrows =
     TestCase
-        ( assertEqual
-            "imputeWith with non-Maybe expr is always a no-op"
-            imputeData
-            (imputeWith id (F.col @Int "plain") imputeData)
+        ( assertExpectException
+            "[Error Case]"
+            "column reference"
+            (print $ imputeWith id (F.lit (Just (1 :: Int))) imputeData)
         )
 
 tests :: [Test]
@@ -299,6 +300,6 @@ tests =
     , TestLabel "imputeHappyPath" imputeHappyPath
     , TestLabel "imputeColumnNotFound" imputeColumnNotFound
     , TestLabel "imputeOnNonOptional" imputeOnNonOptional
-    , TestLabel "imputePlainNoOp" imputePlainNoOp
-    , TestLabel "imputeWithPlainNoOp" imputeWithPlainNoOp
+    , TestLabel "imputeCompoundExprThrows" imputeCompoundExprThrows
+    , TestLabel "imputeWithCompoundExprThrows" imputeWithCompoundExprThrows
     ]

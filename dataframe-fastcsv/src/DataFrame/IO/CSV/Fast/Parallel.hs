@@ -22,8 +22,9 @@ import qualified Data.Text as T
 import qualified Data.Vector.Storable as VS
 
 import Control.Concurrent (getNumCapabilities)
-import Control.Exception (throwIO)
+import Control.Exception (evaluate, throwIO)
 import Data.Either (partitionEithers)
+import qualified Data.List as L
 import Debug.Trace (traceMarkerIO)
 import System.Mem (performMajorGC)
 
@@ -33,6 +34,8 @@ import DataFrame.IO.CSV.Fast.TextMerge (mergeTextChunksPar)
 import DataFrame.IO.CSV.Fast.Workers (pooledRun)
 import DataFrame.Internal.Column (Column, forceColumn)
 import DataFrame.Internal.ColumnBuilder (mergeColumns)
+import DataFrame.Internal.DictEncode (dictCompactColumn)
+import DataFrame.Operations.Typing (SafeReadMode)
 
 -- | Below this input size the fan-out overhead outweighs the parallelism.
 parallelThresholdBytes :: Int
@@ -77,12 +80,17 @@ buildAllColumns nChunks env wanted
         mapM (uncurry (buildColumn env)) wanted
     | otherwise = do
         width <- getNumCapabilities
-        let plans = [planColumn env name fieldIx | (name, fieldIx) <- wanted]
-            fields = map snd wanted
+        plans <-
+            mapM
+                (\(name, fieldIx) -> evaluate (planColumn env name fieldIx))
+                wanted
+        let fields = map snd wanted
             ranges = chunkRanges chunks (ceNumRow env)
         traceMarkerIO "fastcsv:fanout"
         perChunk <- pooledRun width [runChunk env (zip fields plans) r | r <- ranges]
         traceMarkerIO "fastcsv:join-done"
+        let byCol = L.transpose perChunk
+        mapM_ (mapM_ (\cc -> cc `seq` pure ())) byCol
         -- Reset the major-GC trigger here, where the copyable live set is
         -- small (chunk payloads are large objects). Otherwise the heap
         -- doubling crosses its threshold mid-merge and a ~0.5s gen-1
@@ -90,26 +98,53 @@ buildAllColumns nChunks env wanted
         performMajorGC
         -- Merge in parallel too (chunk-level inside each column, pooled
         -- across columns), forcing each spliced column here so no memcpy
-        -- is deferred to the final forceDataFrame walk.
-        merged <-
-            pooledRun
-                width
-                [ do
-                    r@(col, _) <-
-                        mergeColumn
-                            width
-                            env
-                            name
-                            plan
-                            fieldIx
-                            [(rng, cols !! slot) | (rng, cols) <- zip ranges perChunk]
-                    forceColumn col `seq` pure r
-                | (slot, ((name, fieldIx), plan)) <- zip [0 ..] (zip wanted plans)
-                ]
+        -- is deferred to the final forceDataFrame walk. 'evaluate' resolves
+        -- the plan dispatch now, so a schema task is a closure over its own
+        -- column's data only — never 'env'.
+        tasks <-
+            mapM
+                (\(wp, cps) -> evaluate (mergeTask width env ranges wp cps))
+                (zip (zip wanted plans) byCol)
+        merged <- pooledRun width tasks
         traceMarkerIO "fastcsv:merge-done"
         pure merged
   where
     chunks = min nChunks (ceNumRow env)
+
+mergeTask ::
+    Int ->
+    ColumnEnv ->
+    [(Int, Int)] ->
+    ((T.Text, Int), ColumnPlan) ->
+    [ChunkCol] ->
+    IO (Column, Bool)
+mergeTask width env ranges ((name, fieldIx), plan) colParts =
+    case plan of
+        PlanSchema mode _ t -> mergeSchema width name mode t parts
+        _ -> forced (mergeColumn width env name plan fieldIx parts)
+  where
+    parts = zip ranges colParts
+
+-- | Splice a schema column's chunks; no 'ColumnEnv' capture by design.
+mergeSchema ::
+    Int ->
+    T.Text ->
+    SafeReadMode ->
+    TargetType ->
+    [((Int, Int), ChunkCol)] ->
+    IO (Column, Bool)
+mergeSchema width name mode t parts =
+    case partitionEithers [r | (_, CCSchema r) <- parts] of
+        ([], cs) -> forced $ do
+            c <- mergePassCols width cs
+            pure (finishMode mode (dictCompactColumn c), False)
+        (failed, _) -> throwIO (schemaError name t (minimum failed))
+
+-- | Force the merged payload inside the task, not on the result walk.
+forced :: IO (Column, Bool) -> IO (Column, Bool)
+forced act = do
+    r@(col, _) <- act
+    forceColumn col `seq` pure r
 
 -- | Even split of @n@ rows into @k@ @(offset, length)@ ranges.
 chunkRanges :: Int -> Int -> [(Int, Int)]
@@ -155,15 +190,10 @@ mergeColumn ::
     IO (Column, Bool)
 mergeColumn width env name plan col parts = case plan of
     PlanLegacy mode pwt -> (,pwt) <$> legacyColumn env mode col
-    PlanSchema mode _ t ->
-        case partitionEithers [r | (_, CCSchema r) <- parts] of
-            ([], cs) -> do
-                c <- mergePassCols width cs
-                pure (finishMode mode c, False)
-            (failed, _) -> throwIO (schemaError name t (minimum failed))
+    PlanSchema mode _ t -> mergeSchema width name mode t parts
     PlanChain mode nspec steps _ -> do
         c <- mergeChain width env nspec steps col [(r, oc) | (r, CCChain oc) <- parts]
-        pure (finishMode mode c, False)
+        pure (finishMode mode (dictCompactColumn c), False)
 
 {- | Merge chain-plan chunks. The candidate type starts at the widest chunk
 resolution; any chunk that resolved narrower is re-parsed at the candidate

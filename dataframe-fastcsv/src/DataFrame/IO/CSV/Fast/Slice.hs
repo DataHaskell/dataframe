@@ -7,6 +7,8 @@ Text materialization used for headers, inference samples and cold paths.
 -}
 module DataFrame.IO.CSV.Fast.Slice (
     FieldCtx (..),
+    FieldLayout (..),
+    compactRows,
     withFieldSlice,
     withParseSlice,
     sliceBS,
@@ -21,12 +23,26 @@ import qualified Data.ByteString.Unsafe as BSU
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as TextEncoding
 import qualified Data.Vector.Storable as VS
+import qualified Data.Vector.Storable.Mutable as VSM
 
+import Control.Monad.ST (runST)
 import Data.Text (Text)
-import Data.Word (Word8)
+import Data.Word (Word16, Word8)
 import Foreign.C.Types (CSize)
 
 import DataFrame.IO.CSV.Fast.Index (cr, quote)
+
+-- | How @(row, col)@ resolves to delimiter byte positions.
+data FieldLayout
+    = {- | Flat delimiter positions + row-end ordinals: the shape the scanner
+      emits. Handles ragged and blank rows; 8 bytes per delimiter.
+      -}
+      LayoutFlat !(VS.Vector CSize) !(VS.Vector Int)
+    | {- | Uniform-stride rows: byte start per row plus 'Word16' deltas of
+      each field-end from its row start (@deltas ! (r*stride + col)@).
+      Built by 'compactRows'; ~3.5x smaller than the flat index.
+      -}
+      LayoutRows !(VS.Vector Int) !(VS.Vector Word16) !Int
 
 -- | Everything needed to resolve a field slice, shared by all columns.
 data FieldCtx = FieldCtx
@@ -34,14 +50,55 @@ data FieldCtx = FieldCtx
     -- ^ File content (BOM already stripped), no padding.
     , fcBS :: !BS.ByteString
     -- ^ Zero-copy 'BS.ByteString' view of 'fcFile'.
-    , fcDelims :: !(VS.Vector CSize)
-    -- ^ Delimiter byte positions (field and row terminators, flat).
-    , fcRowEnds :: !(VS.Vector Int)
-    -- ^ Indices into 'fcDelims' that terminate a row.
+    , fcLayout :: !FieldLayout
+    -- ^ Delimiter index (flat, or row-compacted by 'compactRows').
     , fcContentLen :: !Int
     , fcTrim :: !Bool
     -- ^ 'DataFrame.IO.CSV.fastCsvTrimUnquoted'.
     }
+
+compactRows ::
+    Int -> VS.Vector CSize -> VS.Vector Int -> Int -> Maybe FieldLayout
+compactRows contentLen delims rowEnds stride
+    | totalRows == 0 || stride <= 0 = Nothing
+    | VS.length delims < totalRows * stride = Nothing
+    | otherwise = runST $ do
+        starts <- VSM.unsafeNew totalRows
+        deltas <- VSM.unsafeNew (totalRows * stride)
+        let go !r !base !rowStart
+                | r >= totalRows = pure True
+                | VS.unsafeIndex rowEnds r /= base + stride - 1 = pure False
+                | otherwise = do
+                    let lastRaw =
+                            fromIntegral (VS.unsafeIndex delims (base + stride - 1))
+                        lastPos = min contentLen lastRaw
+                    if lastPos - rowStart > 65535
+                        then pure False
+                        else do
+                            VSM.unsafeWrite starts r rowStart
+                            let fill !j
+                                    | j >= stride = pure ()
+                                    | otherwise = do
+                                        let p =
+                                                min
+                                                    contentLen
+                                                    (fromIntegral (VS.unsafeIndex delims (base + j)))
+                                        VSM.unsafeWrite
+                                            deltas
+                                            (r * stride + j)
+                                            (fromIntegral (p - rowStart))
+                                        fill (j + 1)
+                            fill 0
+                            go (r + 1) (base + stride) (lastRaw + 1)
+        ok <- go 0 0 0
+        if ok
+            then do
+                s <- VS.unsafeFreeze starts
+                d <- VS.unsafeFreeze deltas
+                pure (Just (LayoutRows s d stride))
+            else pure Nothing
+  where
+    totalRows = VS.length rowEnds
 
 {- | Resolve field @col@ of row @r@ and continue with @k start end quoted@.
 Quoted fields yield the bytes between the outer quotes (embedded @\"\"@ is
@@ -51,36 +108,56 @@ loops never box the bounds.
 -}
 {-# INLINE withFieldSlice #-}
 withFieldSlice :: FieldCtx -> Int -> Int -> (Int -> Int -> Bool -> r) -> r
-withFieldSlice ctx r col k =
-    let rowEnds = fcRowEnds ctx
-        endIdx = VS.unsafeIndex rowEnds r
-        startIdx = if r == 0 then 0 else VS.unsafeIndex rowEnds (r - 1) + 1
-        numFields = endIdx - startIdx + 1
-     in if col >= numFields
+withFieldSlice ctx r col k = case fcLayout ctx of
+    LayoutRows starts deltas stride ->
+        if col >= stride
             then k 0 0 False
             else
-                let boundaryIdx = startIdx + col
-                    fieldEndRaw =
-                        fromIntegral (VS.unsafeIndex (fcDelims ctx) boundaryIdx) :: Int
-                    fieldEndClamped = min fieldEndRaw (fcContentLen ctx)
-                    fieldStart =
-                        if boundaryIdx == 0
-                            then 0
+                let !rowStart = VS.unsafeIndex starts r
+                    !fieldEndClamped =
+                        rowStart
+                            + fromIntegral (VS.unsafeIndex deltas (r * stride + col))
+                    !fieldStart =
+                        if col == 0
+                            then rowStart
                             else
-                                fromIntegral
-                                    (VS.unsafeIndex (fcDelims ctx) (boundaryIdx - 1))
+                                rowStart
+                                    + fromIntegral
+                                        (VS.unsafeIndex deltas (r * stride + col - 1))
                                     + 1
-                    file = fcFile ctx
-                    fieldEnd =
-                        if fieldEndClamped > fieldStart
-                            && VS.unsafeIndex file (fieldEndClamped - 1) == cr
-                            then fieldEndClamped - 1
-                            else fieldEndClamped
-                 in if fieldEnd - fieldStart >= 2
-                        && VS.unsafeIndex file fieldStart == quote
-                        && VS.unsafeIndex file (fieldEnd - 1) == quote
-                        then k (fieldStart + 1) (fieldEnd - 1) True
-                        else k fieldStart fieldEnd False
+                 in finish fieldStart fieldEndClamped
+    LayoutFlat delims rowEnds ->
+        let endIdx = VS.unsafeIndex rowEnds r
+            startIdx = if r == 0 then 0 else VS.unsafeIndex rowEnds (r - 1) + 1
+            numFields = endIdx - startIdx + 1
+         in if col >= numFields
+                then k 0 0 False
+                else
+                    let boundaryIdx = startIdx + col
+                        fieldEndRaw =
+                            fromIntegral (VS.unsafeIndex delims boundaryIdx) :: Int
+                        fieldEndClamped = min fieldEndRaw (fcContentLen ctx)
+                        fieldStart =
+                            if boundaryIdx == 0
+                                then 0
+                                else
+                                    fromIntegral
+                                        (VS.unsafeIndex delims (boundaryIdx - 1))
+                                        + 1
+                     in finish fieldStart fieldEndClamped
+  where
+    finish !fieldStart !fieldEndClamped =
+        let file = fcFile ctx
+            fieldEnd =
+                if fieldEndClamped > fieldStart
+                    && VS.unsafeIndex file (fieldEndClamped - 1) == cr
+                    then fieldEndClamped - 1
+                    else fieldEndClamped
+         in if fieldEnd - fieldStart >= 2
+                && VS.unsafeIndex file fieldStart == quote
+                && VS.unsafeIndex file (fieldEnd - 1) == quote
+                then k (fieldStart + 1) (fieldEnd - 1) True
+                else k fieldStart fieldEnd False
 
 {- | 'withFieldSlice' with the trim knob applied: when 'fcTrim' is set,
 unquoted slices have ASCII whitespace stripped from both ends before the
