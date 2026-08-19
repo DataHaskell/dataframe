@@ -17,7 +17,7 @@ module Operations.Record where
 import Data.Int (Int64)
 import qualified Data.Map.Strict as M
 import qualified Data.Text as T
-import qualified Data.Text.IO as TIO
+import qualified Data.Text.IO.Utf8 as TIO
 import GHC.Generics (Generic)
 
 import qualified DataFrame as D
@@ -27,6 +27,7 @@ import DataFrame.Operators
 import qualified DataFrame.Schema as IS
 import DataFrame.Typed (Schema)
 import qualified DataFrame.Typed as DT
+import System.Directory (getTemporaryDirectory)
 
 import Test.HUnit
 
@@ -289,7 +290,8 @@ deriveSchemaReadsCsv = TestCase $ do
                 , "2,eu,20.5"
                 , "3,ap,30.0"
                 ]
-        tmp = "/tmp/dataframe_test_deriveSchema.csv"
+    tmpDir <- getTemporaryDirectory
+    let tmp = tmpDir <> "/dataframe_test_deriveSchema.csv"
     TIO.writeFile tmp csv
     df <- D.readCsvWithSchema orderSchema tmp
     assertEqual

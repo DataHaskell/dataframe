@@ -1,0 +1,3 @@
+# git should not translate line endings on checkout.
+*.csv -text
+*.tsv -text
