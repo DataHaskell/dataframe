@@ -19,11 +19,14 @@ module DataFrame.IO.Utils.RandomAccess (
     mallocBuffer,
     BufferHandle,
     withFileBuffer,
+    appendByteString,
+    appendByteStringHandle,
 ) where
 
 import Control.Monad.IO.Class (MonadIO (..))
 import Data.ByteString.Internal (ByteString (PS))
 import qualified Data.Foldable as Foldable
+import qualified Data.ByteString.Unsafe as BU
 import qualified Data.Vector.Storable as VS
 import Data.Word (Word8)
 import DataFrame.IO.Parquet.Seeking (
@@ -42,10 +45,10 @@ import Data.Primitive.ByteArray (
     getSizeofMutableByteArray,
     mutableByteArrayContents,
     newPinnedByteArray,
-    resizeMutableByteArray,
+    withMutableByteArrayContents,
     writeByteArray,
  )
-import Foreign (castForeignPtr, plusPtr)
+import Foreign (castForeignPtr, castPtr, copyBytes, plusPtr)
 import System.IO (
     BufferMode (NoBuffering),
     Handle,
@@ -226,17 +229,35 @@ instance HasBuffer (ReaderIO MemoryBuffer) where
   flushTo (FileSink (WritableBinaryHandle h)) = ReaderIO $ \buffer -> do
     array <- readIORef buffer.arrayRef
     position <- readIORef buffer.positionRef
-    let ptr = mutableByteArrayContents array
-        chunkSize = 262144 -- 256 KiB
-        go offset
-          | offset >= position = pure ()
-          | otherwise = do
-              let n = min chunkSize (position - offset)
-              hPutBuf h (ptr `plusPtr` offset) n
-              go (offset + n)
-    go 0
+    withMutableByteArrayContents array $ \ptr -> do
+      let chunkSize = 262144
+          go offset
+            | offset >= position = pure ()
+            | otherwise = do
+                let n = min chunkSize (position - offset)
+                hPutBuf h (ptr `plusPtr` offset) n
+                go (offset + n)
+      go 0
     writeIORef buffer.positionRef 0
 
+-- We're using pinned ByteArrays so we must 
+-- not use the grow fuynction brovided by primitive
+-- instead we must alloocatie a new pinned byteArray.
+-- We might have been worried about heap fragmentation
+-- becasue a single pinned object in a 4KB GHC block can
+-- keep the whole plock alive but oyr buffers will tend to
+-- be much larger than that. 
+-- But the memory useage will temporarily spike to 2.5x the size of 
+-- the buffer, but it should be fine since the current writer is single threaded
+-- and grows *should* be rare (we also allocate a little extra space to
+-- begin with).
+-- If it becomes an issue we should start tracking an array of pointers
+-- to buffers intsead of replacing them wholesale so grwoing a buffer 
+-- is just a matter of adding a new buffer to the array (which we can 
+-- pre-allocate to three elements to begin with and grow it only on the
+-- off chance that a buffer required more than three grows). The extra 
+-- ceremony of handling writes and flushes can be encapsulated well in
+-- HasBuffer instances.
 ensureCapacity :: MemoryBuffer -> Int -> IO (MutableByteArray RealWorld)
 ensureCapacity buffer needed = do
   array <- readIORef buffer.arrayRef
@@ -244,10 +265,22 @@ ensureCapacity buffer needed = do
   if needed <= maxSize
   then pure array
   else do
-    grown <- resizeMutableByteArray array (needed + (needed `div` 2))
+    position <- readIORef buffer.positionRef
+    grown <- newPinnedByteArray (needed + (needed `div` 2))
+    copyMutableByteArray grown 0 array 0 position
     writeIORef buffer.arrayRef grown
     pure grown
     
+
+appendByteString :: MemoryBuffer -> ByteString -> IO ()
+appendByteString buffer bs =
+  BU.unsafeUseAsCStringLen bs $ \(source, len) -> do
+    position <- readIORef buffer.positionRef
+    array <- ensureCapacity buffer (position + len)
+    withMutableByteArrayContents array $ \dst ->
+      copyBytes (dst `plusPtr` position) (castPtr source) len
+    writeIORef buffer.positionRef (position + len)
+
 data BufferHandle = BufferHandle
   { bufferPath :: !FilePath
   , bufferHandle :: !WritableBinaryHandle
@@ -323,3 +356,12 @@ instance HasBuffer (ReaderIO BufferHandle) where
     writeIORef bh.flushedRef (offset + count)
 
 
+
+
+appendByteStringHandle :: BufferHandle -> ByteString -> IO ()
+appendByteStringHandle bh bs =
+  BU.unsafeUseAsCStringLen bs $ \(source, len) -> do
+    let WritableBinaryHandle h = bh.bufferHandle
+    hPutBuf h source len
+    position <- readIORef bh.residencyRef
+    writeIORef bh.residencyRef (position + len)
