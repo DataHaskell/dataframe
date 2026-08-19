@@ -120,7 +120,7 @@ mean expr df = case interpret df expr of
     Left e -> throw e
     Right (TColumn col) -> case toUnboxedVector @a col of
         Left e -> throw e
-        Right xs -> mean' xs
+        Right xs -> mean' (dropNulls (columnBitmap col) xs)
 
 meanMaybe ::
     forall a. (Columnable a, Real a) => Expr (Maybe a) -> DataFrame -> Double
@@ -137,13 +137,13 @@ meanMaybe expr df = case interpret @(Maybe a) df expr of
 median ::
     forall a. (Columnable a, Real a, VU.Unbox a) => Expr a -> DataFrame -> Double
 median (Col name) df = case columnAsUnboxedVector (Col @a name) df of
-    Right xs -> median' xs
+    Right xs -> median' (dropNulls (colBitmap name df) xs)
     Left e -> throw e
 median expr df = case interpret df expr of
     Left e -> throw e
     Right (TColumn col) -> case toUnboxedVector @a col of
         Left e -> throw e
-        Right xs -> median' xs
+        Right xs -> median' (dropNulls (columnBitmap col) xs)
 
 -- | Calculates the median of a given column (containing optional values) as a standalone value.
 medianMaybe ::
@@ -162,50 +162,50 @@ percentile ::
     forall a.
     (Columnable a, Real a, VU.Unbox a) => Int -> Expr a -> DataFrame -> Double
 percentile n (Col name) df = case columnAsUnboxedVector (Col @a name) df of
-    Right xs -> percentile' n xs
+    Right xs -> percentile' n (dropNulls (colBitmap name df) xs)
     Left e -> throw e
 percentile n expr df = case interpret df expr of
     Left e -> throw e
     Right (TColumn col) -> case toUnboxedVector @a col of
         Left e -> throw e
-        Right xs -> percentile' n xs
+        Right xs -> percentile' n (dropNulls (columnBitmap col) xs)
 
 -- | Calculates the nth percentile of a given column as a standalone value.
 genericPercentile ::
     forall a.
     (Columnable a, Ord a) => Int -> Expr a -> DataFrame -> a
 genericPercentile n (Col name) df = case columnAsVector (Col @a name) df of
-    Right xs -> percentileOrd' n xs
+    Right xs -> percentileOrd' n (dropNulls (colBitmap name df) xs)
     Left e -> throw e
 genericPercentile n expr df = case interpret df expr of
     Left e -> throw e
     Right (TColumn col) -> case toVector @a col of
         Left e -> throw e
-        Right xs -> percentileOrd' n xs
+        Right xs -> percentileOrd' n (dropNulls (columnBitmap col) xs)
 
 -- | Calculates the standard deviation of a given column as a standalone value.
 standardDeviation ::
     forall a. (Columnable a, Real a, VU.Unbox a) => Expr a -> DataFrame -> Double
 standardDeviation (Col name) df = case columnAsUnboxedVector (Col @a name) df of
-    Right xs -> (sqrt . variance') xs
+    Right xs -> (sqrt . variance') (dropNulls (colBitmap name df) xs)
     Left e -> throw e
 standardDeviation expr df = case interpret df expr of
     Left e -> throw e
     Right (TColumn col) -> case toUnboxedVector @a col of
         Left e -> throw e
-        Right xs -> (sqrt . variance') xs
+        Right xs -> (sqrt . variance') (dropNulls (columnBitmap col) xs)
 
 -- | Calculates the skewness of a given column as a standalone value.
 skewness ::
     forall a. (Columnable a, Real a, VU.Unbox a) => Expr a -> DataFrame -> Double
 skewness (Col name) df = case columnAsUnboxedVector (Col @a name) df of
-    Right xs -> skewness' xs
+    Right xs -> skewness' (dropNulls (colBitmap name df) xs)
     Left e -> throw e
 skewness expr df = case interpret df expr of
     Left e -> throw e
     Right (TColumn col) -> case toUnboxedVector @a col of
         Left e -> throw e
-        Right xs -> skewness' xs
+        Right xs -> skewness' (dropNulls (columnBitmap col) xs)
 
 -- | Calculates the variance of a given column as a standalone value.
 variance ::
@@ -217,36 +217,44 @@ variance expr df = case interpret df expr of
     Left e -> throw e
     Right (TColumn col) -> case toUnboxedVector @a col of
         Left e -> throw e
-        Right xs -> variance' xs
+        Right xs -> variance' (dropNulls (columnBitmap col) xs)
 
 -- | Calculates the inter-quartile range of a given column as a standalone value.
 interQuartileRange ::
     forall a. (Columnable a, Real a, VU.Unbox a) => Expr a -> DataFrame -> Double
 interQuartileRange (Col name) df = case columnAsUnboxedVector (Col @a name) df of
-    Right xs -> interQuartileRange' xs
+    Right xs -> interQuartileRange' (dropNulls (colBitmap name df) xs)
     Left e -> throw e
 interQuartileRange expr df = case interpret df expr of
     Left e -> throw e
     Right (TColumn col) -> case toUnboxedVector @a col of
         Left e -> throw e
-        Right xs -> interQuartileRange' xs
+        Right xs -> interQuartileRange' (dropNulls (columnBitmap col) xs)
 
 -- | Calculates the Pearson's correlation coefficient between two given columns as a standalone value.
 correlation :: T.Text -> T.Text -> DataFrame -> Maybe Double
 correlation first second df = do
-    f <- _getColumnAsDouble first df
-    s <- _getColumnAsDouble second df
+    -- Listwise deletion: a null in either column drops the pair.
+    let df' = filterJust first (filterJust second df)
+    f <- _getColumnAsDouble first df'
+    s <- _getColumnAsDouble second df'
     correlation' f s
+
+-- | Bitmap of a named column, if it has one.
+colBitmap :: T.Text -> DataFrame -> Maybe Bitmap
+colBitmap name df = columnBitmap =<< getColumn name df
 
 _getColumnAsDouble :: T.Text -> DataFrame -> Maybe (VU.Vector Double)
 _getColumnAsDouble name df = case getColumn name df of
-    Just (UnboxedColumn _ (f :: VU.Vector a)) -> case testEquality (typeRep @a) (typeRep @Double) of
-        Just Refl -> Just f
-        Nothing -> case sIntegral @a of
-            STrue -> Just (VU.map fromIntegral f)
-            SFalse -> case sFloating @a of
-                STrue -> Just (VU.map realToFrac f)
-                SFalse -> Nothing
+    Just (UnboxedColumn bm (f' :: VU.Vector a)) ->
+        let f = dropNulls bm f'
+         in case testEquality (typeRep @a) (typeRep @Double) of
+                Just Refl -> Just f
+                Nothing -> case sIntegral @a of
+                    STrue -> Just (VU.map fromIntegral f)
+                    SFalse -> case sFloating @a of
+                        STrue -> Just (VU.map realToFrac f)
+                        SFalse -> Nothing
     Nothing ->
         throw $
             ColumnsNotFoundException [name] "_getColumnAsDouble" (M.keys $ columnIndices df)
@@ -265,11 +273,11 @@ sum ::
     forall a. (Columnable a, Num a) => Expr a -> DataFrame -> a
 sum (Col name) df = case getColumn name df of
     Nothing -> throw $ ColumnsNotFoundException [name] "sum" (M.keys $ columnIndices df)
-    Just ((UnboxedColumn _ (column :: VU.Vector a'))) -> case testEquality (typeRep @a') (typeRep @a) of
-        Just Refl -> VG.sum column
+    Just ((UnboxedColumn bm (column :: VU.Vector a'))) -> case testEquality (typeRep @a') (typeRep @a) of
+        Just Refl -> VG.sum (dropNulls bm column)
         Nothing -> 0
-    Just ((BoxedColumn _ (column :: V.Vector a'))) -> case testEquality (typeRep @a') (typeRep @a) of
-        Just Refl -> VG.sum column
+    Just ((BoxedColumn bm (column :: V.Vector a'))) -> case testEquality (typeRep @a') (typeRep @a) of
+        Just Refl -> VG.sum (dropNulls bm column)
         Nothing -> 0
     Just (PackedText _ _) -> 0
     Just (MergedColumn _ _) -> 0 -- matches the old eager These column (type never Num)
@@ -277,7 +285,7 @@ sum expr df = case interpret df expr of
     Left e -> throw e
     Right (TColumn xs) -> case toVector @a @V.Vector xs of
         Left e -> throw e
-        Right xs' -> VG.sum xs'
+        Right xs' -> VG.sum (dropNulls (columnBitmap xs) xs')
 
 {- | /O(n)/ Impute missing values in a column using a derived scalar.
 

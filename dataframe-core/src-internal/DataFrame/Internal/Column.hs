@@ -39,7 +39,7 @@ import Data.Bits (
  )
 import Data.Kind (Type)
 import Data.Maybe
-import Data.Type.Equality (TestEquality (..))
+import Data.Type.Equality (TestEquality (..), type (:~~:) (HRefl))
 import Data.Word (Word8)
 import DataFrame.Errors
 import DataFrame.Internal.PackedText (
@@ -208,6 +208,22 @@ columnBitmap (BoxedColumn bm _) = bm
 columnBitmap (UnboxedColumn bm _) = bm
 columnBitmap (PackedText bm _) = bm
 columnBitmap (MergedColumn _ _) = Nothing
+
+{- | Drop the null slots of a payload-typed view of a nullable column: those
+slots hold a sentinel, not a value. A @Maybe@-typed view already encodes the
+nulls, so it is returned untouched. Backpermute never forces the kept-out
+slots, so boxed error thunks at null slots are safe.
+-}
+dropNulls ::
+    forall v a.
+    (Typeable a, VG.Vector v a, VG.Vector v Int) => Maybe Bitmap -> v a -> v a
+dropNulls Nothing xs = xs
+dropNulls (Just bm) xs = case typeRep @a of
+    App m _ | Just HRefl <- eqTypeRep m (typeRep @Maybe) -> xs
+    _ -> VG.backpermute xs keep
+  where
+    keep = VG.fromList [i | i <- [0 .. VG.length xs - 1], bitmapTestBit bm i]
+{-# INLINE dropNulls #-}
 
 {- | Decode a 'PackedText' into a @BoxedColumn Text@ (bit-identical to
 materializing at freeze). Identity on every other column.

@@ -6,6 +6,7 @@ module Operations.Statistics where
 
 import qualified Data.Vector.Unboxed as VU
 import qualified DataFrame as D
+import qualified DataFrame.Functions as F
 import qualified DataFrame.Internal.Column as DI
 import qualified DataFrame.Internal.Statistics as D
 
@@ -254,6 +255,168 @@ correlationMissingColumn =
             (print $ D.correlation "x" "missingcol" correlationDf)
         )
 
+-- Nullable columns: statistics must skip null slots, not read the sentinel
+-- stored there.
+
+nullableDf :: D.DataFrame
+nullableDf =
+    D.fromNamedColumns [("x", DI.fromList [Just (10 :: Double), Nothing, Just 20])]
+
+nullableIntDf :: D.DataFrame
+nullableIntDf =
+    D.fromNamedColumns [("n", DI.fromList [Just (10 :: Int), Nothing, Just 20])]
+
+nullableBoxedDf :: D.DataFrame
+nullableBoxedDf =
+    D.fromNamedColumns [("b", DI.fromList [Just (10 :: Integer), Nothing, Just 20])]
+
+meanIgnoresNulls :: Test
+meanIgnoresNulls =
+    TestCase
+        (assertEqual "mean skips nulls" 15.0 (D.mean (F.col @Double "x") nullableDf))
+
+meanExprIgnoresNulls :: Test
+meanExprIgnoresNulls =
+    TestCase
+        ( assertEqual
+            "mean over a derived nullable expression skips nulls"
+            30.0
+            (D.mean (F.lift (* 2) (F.col @Double "x")) nullableDf)
+        )
+
+medianIgnoresNulls :: Test
+medianIgnoresNulls =
+    TestCase
+        (assertEqual "median skips nulls" 15.0 (D.median (F.col @Double "x") nullableDf))
+
+percentileIgnoresNulls :: Test
+percentileIgnoresNulls =
+    TestCase
+        ( assertEqual
+            "percentile skips nulls"
+            15.0
+            (D.percentile 50 (F.col @Double "x") nullableDf)
+        )
+
+stdDevIgnoresNulls :: Test
+stdDevIgnoresNulls =
+    TestCase
+        ( assertBool
+            "standard deviation skips nulls"
+            ( abs (D.standardDeviation (F.col @Double "x") nullableDf - 7.0710678118654755)
+                < 1e-12
+            )
+        )
+
+varianceIgnoresNulls :: Test
+varianceIgnoresNulls =
+    TestCase
+        ( assertEqual
+            "variance skips nulls"
+            50.0
+            (D.variance (F.col @Double "x") nullableDf)
+        )
+
+varianceExprIgnoresNulls :: Test
+varianceExprIgnoresNulls =
+    TestCase
+        ( assertEqual
+            "variance over a derived nullable expression skips nulls"
+            200.0
+            (D.variance (F.lift (* 2) (F.col @Double "x")) nullableDf)
+        )
+
+iqrIgnoresNulls :: Test
+iqrIgnoresNulls =
+    TestCase
+        ( assertEqual
+            "inter-quartile range skips nulls"
+            5.0
+            (D.interQuartileRange (F.col @Double "x") nullableDf)
+        )
+
+skewnessIgnoresNulls :: Test
+skewnessIgnoresNulls =
+    TestCase
+        ( let skewDf =
+                D.fromNamedColumns
+                    [("s", DI.fromList [Just (10 :: Double), Nothing, Just 20, Just 100, Just 11])]
+           in assertBool
+                "skewness skips nulls"
+                ( abs
+                    ( D.skewness (F.col @Double "s") skewDf
+                        - D.skewness' (VU.fromList [10 :: Double, 20, 100, 11])
+                    )
+                    < 1e-12
+                )
+        )
+
+genericPercentileIgnoresNulls :: Test
+genericPercentileIgnoresNulls =
+    TestCase
+        ( assertEqual
+            "genericPercentile skips the sentinel"
+            10
+            (D.genericPercentile 10 (F.col @Int "n") nullableIntDf)
+        )
+
+genericPercentileBoxedNullableDoesNotThrow :: Test
+genericPercentileBoxedNullableDoesNotThrow =
+    TestCase
+        ( assertEqual
+            "genericPercentile on a boxed nullable column skips the error thunk"
+            20
+            (D.genericPercentile 100 (F.col @Integer "b") nullableBoxedDf)
+        )
+
+genericPercentileMaybeViewKeepsNothing :: Test
+genericPercentileMaybeViewKeepsNothing =
+    TestCase
+        ( assertEqual
+            "a Maybe-typed view still sees its Nothings"
+            (Nothing :: Maybe Int)
+            (D.genericPercentile 0 (F.col @(Maybe Int) "n") nullableIntDf)
+        )
+
+sumUnboxedNullable :: Test
+sumUnboxedNullable =
+    TestCase
+        (assertEqual "sum skips null slots" 30.0 (D.sum (F.col @Double "x") nullableDf))
+
+sumBoxedNullableDoesNotThrow :: Test
+sumBoxedNullableDoesNotThrow =
+    TestCase
+        ( assertEqual
+            "sum on a boxed nullable column skips the error thunk"
+            (30 :: Integer)
+            (D.sum (F.col @Integer "b") nullableBoxedDf)
+        )
+
+correlationIgnoresNullRows :: Test
+correlationIgnoresNullRows =
+    TestCase
+        ( let dfc =
+                D.fromNamedColumns
+                    [ ("a", DI.fromList [Just (1 :: Double), Nothing, Just 3])
+                    , ("c", DI.fromList [1 :: Double, 2, 3])
+                    ]
+           in case D.correlation "a" "c" dfc of
+                Nothing -> assertFailure "Expected Just 1.0, got Nothing"
+                Just r ->
+                    assertBool
+                        "null rows are dropped pairwise"
+                        (abs (r - 1.0) < 1e-10)
+        )
+
+frequenciesSkipsNulls :: Test
+frequenciesSkipsNulls =
+    TestCase
+        ( assertEqual
+            "frequencies has no sentinel category"
+            3 -- Statistic, 10 and 20
+            (D.nColumns (D.frequencies (F.col @Int "n") nullableIntDf))
+        )
+
 tests :: [Test]
 tests =
     [ TestLabel "medianOfOddLengthDataSet" medianOfOddLengthDataSet
@@ -281,4 +444,24 @@ tests =
     , TestLabel "correlationPerfectNegative" correlationPerfectNegative
     , TestLabel "correlationSelfIdentity" correlationSelfIdentity
     , TestLabel "correlationMissingColumn" correlationMissingColumn
+    , TestLabel "meanIgnoresNulls" meanIgnoresNulls
+    , TestLabel "meanExprIgnoresNulls" meanExprIgnoresNulls
+    , TestLabel "medianIgnoresNulls" medianIgnoresNulls
+    , TestLabel "percentileIgnoresNulls" percentileIgnoresNulls
+    , TestLabel "stdDevIgnoresNulls" stdDevIgnoresNulls
+    , TestLabel "varianceIgnoresNulls" varianceIgnoresNulls
+    , TestLabel "varianceExprIgnoresNulls" varianceExprIgnoresNulls
+    , TestLabel "iqrIgnoresNulls" iqrIgnoresNulls
+    , TestLabel "skewnessIgnoresNulls" skewnessIgnoresNulls
+    , TestLabel "genericPercentileIgnoresNulls" genericPercentileIgnoresNulls
+    , TestLabel
+        "genericPercentileBoxedNullableDoesNotThrow"
+        genericPercentileBoxedNullableDoesNotThrow
+    , TestLabel
+        "genericPercentileMaybeViewKeepsNothing"
+        genericPercentileMaybeViewKeepsNothing
+    , TestLabel "sumUnboxedNullable" sumUnboxedNullable
+    , TestLabel "sumBoxedNullableDoesNotThrow" sumBoxedNullableDoesNotThrow
+    , TestLabel "correlationIgnoresNullRows" correlationIgnoresNullRows
+    , TestLabel "frequenciesSkipsNulls" frequenciesSkipsNulls
     ]
