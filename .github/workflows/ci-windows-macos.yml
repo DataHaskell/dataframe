@@ -1,0 +1,44 @@
+# Windows + macOS lanes over the portable subset in cabal.project.ci
+# (skips packages needing libtorch, system C libs, or foreign-library).
+
+name: CI (Windows + macOS)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    name: ${{ matrix.os }} / GHC ${{ matrix.ghc }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-14]
+        ghc: ["9.6.7", "9.12.2"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up GHC ${{ matrix.ghc }}
+        id: setup
+        uses: haskell-actions/setup@v2
+        with:
+          ghc-version: ${{ matrix.ghc }}
+          cabal-version: latest
+
+      - name: Freeze
+        run: cabal freeze --project-file=cabal.project.ci
+
+      - name: Cache cabal store
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.setup.outputs.cabal-store }}
+          key: ${{ runner.os }}-ghc-${{ matrix.ghc }}-${{ hashFiles('cabal.project.ci.freeze') }}
+          restore-keys: ${{ runner.os }}-ghc-${{ matrix.ghc }}-
+
+      - name: Build (cabal.project.ci subset)
+        run: cabal build all --project-file=cabal.project.ci
+
+      - name: Test (cabal.project.ci subset)
+        run: cabal test all --project-file=cabal.project.ci
