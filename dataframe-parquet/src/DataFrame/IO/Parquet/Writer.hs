@@ -1,9 +1,56 @@
-{-# LANGUAGE TupleSections #-}
-{-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE OverloadedRecordDot #-}
+{-# LANGUAGE OverloadedStrings #-}
 
-module DataFrame.IO.Parquet.Writer (writeParquet, writeParquetWithOptions, defaultParquetWriteOptions) where
+module DataFrame.IO.Parquet.Writer (
+    writeParquet,
+    writeParquetWithOptions,
+    ParquetWriteOptions (..),
+    WriterStrategy (..),
+    defaultParquetWriteOptions,
+) where
 
-import DataFrame.Internal.DataFrame (DataFrame)
+import Control.Monad (when)
+import qualified Data.ByteString as BS
+import Data.Int (Int64)
+import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
+import Data.Maybe (fromJust)
+import qualified Data.Vector as VB
+import DataFrame.IO.Parquet.Thrift
+import DataFrame.IO.Parquet.Writer.ColumnChunkWriter (
+    ColumnChunkState (..),
+    bufferedSize,
+    finalizePage,
+    initColumnState,
+    maybeFinalizePage,
+    runColumnChunkWriter,
+    writeRow,
+ )
+import DataFrame.IO.Parquet.Writer.Encoder (Encoder (..))
+import DataFrame.IO.Parquet.Writer.Metadata (magic, rootSchemaElement)
+import DataFrame.IO.Parquet.Writer.Options (
+    ParquetWriteOptions (..),
+    WriterStrategy (..),
+    defaultParquetWriteOptions,
+ )
+import DataFrame.IO.Utils.RandomAccess (
+    WritableBinaryHandle,
+    bufferResidency,
+    flushBufferToFile,
+    mallocBuffer,
+    onBuffer,
+    putByteString,
+    putWord32LE,
+    withWritableBinaryFile,
+    writeByteStringToFile,
+ )
+import DataFrame.Internal.DataFrame (
+    DataFrame,
+    columnNames,
+    dataframeDimensions,
+    getColumn,
+ )
+import Pinch (enum, putField)
+import qualified Pinch
 
 --A Parquet file is a series of row groups followed by the file metadata (which contains the schema and the
 -- metadata for all the rowgroups, which, in turn, contain the metadata for each column chunk). Inside each
@@ -16,17 +63,6 @@ import DataFrame.Internal.DataFrame (DataFrame)
 -- factors to the user so they can tune the writer to have the behavior they want. (there are subtleties to
 -- this that are discussed further below)
 --
-
-data ParquetWriteOptions = ParquetWriteOptions
-    { pageSize :: Int
-    , rowGroupSize :: Int
-    , batchSize :: Int
-    }
-    deriving (Eq, Show)
-
-defaultParquetWriteOptions :: ParquetWriteOptions
-defaultParquetWriteOptions = undefined
-
 -- We'll set the default Page size to 1 MiB and the default rowGroupSize to 128MiB (of course users will be
 -- able to adjust these numbers through write options). We need to hold the entire RowGroup in memory as 
 -- we build is as the ColumnChunks need to be contiguous when written to disk. So we need to hold
@@ -45,16 +81,16 @@ defaultParquetWriteOptions = undefined
 --
 -- First we must consider the page size and row group sizes to be best effort. They could be slightly above
 -- or below the target. The characteristics of the parquet file will depend on both the write options and
--- the specific data being encoded. Second, we should run batches of rows through the writer, flushing when
--- we see that a page has met or exceeded its limit, and when a row group has done the same. So a row group
--- is flushed specifically only on batch boundaries and we get the same number of rows in every row group
--- except the last which will be smaller than the rest.
+-- the specific data being encoded. Arrow-rs runs batches of rows through the writer, flushing when
+-- they see that a page/rowgroup has met or exceeded its limit. 
 --
--- But we should also not overshoot page size egregiously if the user sets a large batch size, so we can
--- batch the batches (sub-batch) and make it configurable so that page sizes can be tuned if needed. Note:
--- arrow-rs had something similar but they ran into issues where some columns had really large values.
--- See https://github.com/apache/arrow-rs/issues/10061. We may need to implement this eventually, but
--- I'm too lazy to do it right now.
+-- So a row group is flushed specifically only on batch boundaries and we get the same number of rows in
+-- every row group except the last which will be smaller than the rest. They also use sub batching. so
+-- as to not overshoot page size egregiously if the user sets a large batch size. Note:
+-- arrow-rs had an issue where some columns had really large values.
+-- See https://github.com/apache/arrow-rs/issues/10061.
+--
+-- We may need to implement batching and sub batching eventually but I'm too lazy to do it right now.
 --
 -- If larger row groups are required (up to a gigabyte in size if not more), we should provide users who
 -- need to minimize memory usage an alternate two pass strategy where we first write to temporary files (one
@@ -64,87 +100,143 @@ defaultParquetWriteOptions = undefined
 -- user chooses the two pass strategy anyway, the temp files will tend to be held in the OS Page Cache (RAM)
 -- anyway.
 --
--- refer to DataFrame.IO.Utils.RandomAccess for the buffer implementation.
-
--- We need writers for each level of the Parquet file
-  
--- A RowGroupWriter that flushes into the file
-
-
--- The RowGroupWriter has in its env a Vector of ColumnChunkWriters
--- (which is essentially the row group buffer)
-
--- And the RowGroupWriter also needs a PageWriter
+-- Niceties like statistics and bloom filters and so on have not yet been implemented. We may need some 
+-- extra machinery to keep track of row ranges so we can use them with the dataframe to generate our
+-- statistics.
+--
+-- We haven't yet implemented all the encodings and compressions possible. The writer should first 
+-- be brought to parity with the reader, and then we should implement encodings and compressions in
+-- both together so neither lags behind the other.
 
 writeParquet :: FilePath -> DataFrame -> IO ()
 writeParquet = writeParquetWithOptions defaultParquetWriteOptions
 
 writeParquetWithOptions :: ParquetWriteOptions -> FilePath -> DataFrame -> IO ()
-writeParquetWithOptions _options _filepath _dataframe = undefined
+writeParquetWithOptions opts path df = do
+    when (opts.strategy == TwoPass) $
+        error "writeParquet: TwoPass strategy is not yet implemented"
+    let (nRows, _) = dataframeDimensions df
+        names = columnNames df
+    cols <- VB.fromList <$> mapM (\n -> initColumnState opts n (fromJust (getColumn n df))) names
+    withWritableBinaryFile path $ \out -> do
+        writeByteStringToFile out magic
+        fileOff <- newIORef 4
+        rowGroupsRef <- newIORef [] -- Row Group Metadata
+        rgRowsRef <- newIORef 0
+        let st = WriterState out cols fileOff rowGroupsRef rgRowsRef
+            interval = max 1 opts.batchRows
+            loop row
+                | row >= nRows = pure ()
+                | otherwise = do
+                    -- go row by row and append to a pgee
+                    -- When a page is full (frome the page size writer option) flush it to its ColumnChunk
+                    -- When all the columnChunks combined match or exceed the row group size option
+                    -- flush all the columnchunks to file one by one
+                    VB.forM_ cols (runColumnChunkWriter (writeRow row >> maybeFinalizePage opts))
+                    modifyIORef' rgRowsRef (+ 1)
+                    when ((row + 1) `mod` interval == 0) $ do
+                        size <- bufferedSize cols
+                        when (size >= opts.rowGroupSize) (finalizeRowGroup opts st)
+                    loop (row + 1)
+        loop 0
+        finalizeRowGroup opts st
+        writeFooter st nRows
 
--- I don't see how this scales to multiple reader/writer threads so we may have
--- to change this later
+data WriterState = WriterState
+    { wsOut :: !WritableBinaryHandle
+    , wsCols :: !(VB.Vector ColumnChunkState)
+    , wsFileOffset :: !(IORef Int64)
+    , wsRowGroups :: !(IORef [RowGroup])
+    , wsRgRows :: !(IORef Int)
+    }
 
+finalizeRowGroup :: ParquetWriteOptions -> WriterState -> IO ()
+finalizeRowGroup opts st = do
+    rgRows <- readIORef st.wsRgRows
+    when (rgRows > 0) $ do
+        VB.mapM_ (runColumnChunkWriter (finalizePage opts.compressionCodec)) st.wsCols
+        (chunksRev, total) <-
+            VB.foldM'
+                (\(acc, totalSize) cs -> do
+                    offset <- readIORef st.wsFileOffset
+                    size <- bufferResidency (ckBuffer cs)
+                    uncompressed <- readIORef (ckUncompressed cs)
+                    flushBufferToFile st.wsOut (ckBuffer cs)
+                    writeIORef st.wsFileOffset (offset + fromIntegral size)
+                    writeIORef (ckUncompressed cs) 0
+                    let chunk = mkColumnChunk opts offset size uncompressed rgRows cs
+                    pure (chunk : acc, totalSize + fromIntegral size)
+                )
+                ([], 0 :: Int64)
+                st.wsCols
+        modifyIORef' st.wsRowGroups (mkRowGroup (reverse chunksRev) total rgRows :)
+        writeIORef st.wsRgRows 0
 
+mkColumnChunk :: ParquetWriteOptions -> Int64 -> Int -> Int64 -> Int -> ColumnChunkState -> ColumnChunk
+mkColumnChunk opts offset size uncompressed rgRows cs =
+    ColumnChunk
+        { cc_file_path = putField Nothing
+        , cc_file_offset = putField offset
+        , cc_meta_data = putField (Just metadata)
+        , cc_offset_index_offset = putField Nothing
+        , cc_offset_index_length = putField Nothing
+        , cc_column_index_offset = putField Nothing
+        , cc_column_index_length = putField Nothing
+        , cc_crypto_metadata = putField Nothing
+        , cc_encrypted_column_metadata = putField Nothing
+        }
+  where
+    metadata =
+        ColumnMetaData
+            { cmd_type = putField (ckEncoder cs).encType
+            , cmd_encodings = putField [PLAIN enum, RLE enum]
+            , cmd_path_in_schema = putField [ckName cs]
+            , cmd_codec = putField opts.compressionCodec
+            , cmd_num_values = putField (fromIntegral rgRows)
+            , cmd_total_uncompressed_size = putField uncompressed
+            , cmd_total_compressed_size = putField (fromIntegral size)
+            , cmd_key_value_metadata = putField Nothing
+            , cmd_data_page_offset = putField offset
+            , cmd_index_page_offset = putField Nothing
+            , cmd_dictionary_page_offset = putField Nothing
+            , cmd_statistics = putField Nothing
+            , cmd_encoding_stats = putField Nothing
+            , cmd_bloom_filter_offset = putField Nothing
+            , cmd_bloom_filter_length = putField Nothing
+            }
 
+mkRowGroup :: [ColumnChunk] -> Int64 -> Int -> RowGroup
+mkRowGroup chunks total rgRows =
+    RowGroup
+        { rg_columns = putField chunks
+        , rg_total_byte_size = putField total
+        , rg_num_rows = putField (fromIntegral rgRows)
+        , rg_sorting_columns = putField Nothing
+        , rg_file_offset = putField Nothing
+        , rg_total_compressed_size = putField (Just total)
+        , rg_ordinal = putField Nothing
+        }
 
--- type WriterState a = State WriterStateRecord a
--- 
--- generateRowGroup :: DataFrame -> WriterState (Builder, RowGroup)
--- generateRowGroup dataframe = do
---   (builder, columns) <- foldChunks columns generateColumnChunk
---   --TODO big memory if big columns. Use vectors instead
---   let total_byte_size = sum . map (total_uncompressed_size . cc_meta_data) $ columns
---       num_rows = fst . dataframeDimensions $ dataframe
---       total_uncompressed_size = Just $ sum. map (total_uncompressed_size . cc_meta_data) $ columns
---       rowGroup = undefined --TODO
---   return (builder, rowGroup)
--- 
--- 
--- generateColumnChunk :: Column -> WriterState (Builder, ColumnChunk)
--- generateColumnChunk column = do
---   writerState <- get
---   put writerState{columnChunkState = initColumnChunkState column}
---   (builder, _) <- foldChunks (chunkColumn writerState.chunkSize column) generatePage
---   let file_path = Nothing
---       file_offset = 0
---       meta_data = undefined
---       offset_index_offset = Nothing
---       offset_index_length = Nothing
---       column_index_offset = Nothing
---       column_index_length = Nothing
---       crypto_metadata     = Nothing
---       encrypted_column_metadata = Nothing
---       columnChunk = undefined -- TODO
---   return (builder, columnChunk)
--- 
--- 
--- generatePage :: Column -> WriterState (Builder, PageHeader) -- PageHeader is also already in the builder
--- generatePage = undefined
--- 
--- generateSchema :: DataFrame -> [SchemaElement]
--- generateSchema = undefined
--- 
--- data Metadata = Metadata 
---   { schema :: [SchemaElement]
---   , rowGroups :: [RowGroup]
---   }
--- 
--- buildMetadata :: Metadata -> Builder
--- buildMetadata = undefined
--- 
--- chunkDataFrame :: Int -> DataFrame -> [DataFrame]
--- chunkDataFrame = undefined
--- 
--- chunkColumn :: Int -> Column -> [Column]
--- chunkColumn = undefined
--- 
--- -- TODO IF it becomes a problem, allocate an array ahead of time for storing the metadata
--- foldChunks :: [chunk] -> (chunk -> WriterState (Builder, metadata)) -> WriterState (Builder, Sequence metadata)
--- foldChunks chunks process = foldl' f (mempty, mempty) chunks
---   where
---     f (builder, metadata) chunk = let (nextBuilder, nextMetadata) = process chunk
---                                    in (builder <> nextBuilder, metadata <> nextMetadata)
---   state = State
---   
-
+writeFooter :: WriterState -> Int -> IO ()
+writeFooter st nRows = do
+    rowGroups <- reverse <$> readIORef st.wsRowGroups
+    let schemaElements = rootSchemaElement (VB.length st.wsCols) : VB.toList (VB.map ckSchema st.wsCols)
+        metadata =
+            FileMetadata
+                { version = putField 1
+                , schema = putField schemaElements
+                , num_rows = putField (fromIntegral nRows)
+                , row_groups = putField rowGroups
+                , key_value_metadata = putField Nothing
+                , created_by = putField (Just "dataframe-parquet")
+                , column_orders = putField Nothing
+                , encryption_algorithm = putField Nothing
+                , footer_signing_key_metadata = putField Nothing
+                }
+        footer = Pinch.encode Pinch.compactProtocol metadata
+    buffer <- mallocBuffer (BS.length footer + 8)
+    onBuffer buffer $ do
+        putByteString footer
+        putWord32LE (fromIntegral (BS.length footer))
+        putByteString magic
+    flushBufferToFile st.wsOut buffer

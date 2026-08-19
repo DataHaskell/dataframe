@@ -45,6 +45,12 @@ library
                         DataFrame.IO.Parquet.Time
                         DataFrame.IO.Parquet.Utils
                         DataFrame.IO.Parquet.Writer
+                        DataFrame.IO.Parquet.Writer.ColumnChunkWriter
+                        DataFrame.IO.Parquet.Writer.DefLevels
+                        DataFrame.IO.Parquet.Writer.Encoder
+                        DataFrame.IO.Parquet.Writer.Metadata
+                        DataFrame.IO.Parquet.Writer.Options
+                        DataFrame.IO.Parquet.Writer.PageWriter
                         DataFrame.IO.Utils.RandomAccess
                         DataFrame.Typed.IO.Parquet
     build-depends:      base >= 4 && < 5,

@@ -1,6 +1,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE ConstraintKinds #-}
 
 module DataFrame.IO.Utils.RandomAccess (
     uncurry3,
@@ -20,15 +21,40 @@ module DataFrame.IO.Utils.RandomAccess (
     BufferHandle,
     withFileBuffer,
     appendByteString,
+    appendGeneratedBytes,
     appendByteStringHandle,
+    writeWord8,
+    writeWord32LE,
+    writeWord64LE,
+    writeFloatLE,
+    writeDoubleLE,
+    bufferResidency,
+    bufferToByteString,
+    copyBufferInto,
+    resetPosition,
+    flushBufferToFile,
+    writeByteStringToFile,
+    MemoryWriter,
+    onBuffer,
+    putWord8,
+    putWord32LE,
+    putWord64LE,
+    putFloatLE,
+    putDoubleLE,
+    putByteString,
+    putGenerated,
+    copyBuffer,
 ) where
 
 import Control.Monad.IO.Class (MonadIO (..))
-import Data.ByteString.Internal (ByteString (PS))
+import Data.ByteString.Internal (ByteString (PS), create)
 import qualified Data.Foldable as Foldable
 import qualified Data.ByteString.Unsafe as BU
+import qualified Data.ByteString as BS
 import qualified Data.Vector.Storable as VS
-import Data.Word (Word8)
+import Data.Word (Word8, Word32, Word64)
+import Data.Bits (shiftR)
+import GHC.Float (castFloatToWord32, castDoubleToWord64)
 import DataFrame.IO.Parquet.Seeking (
     FileBufferedOrSeekable,
     fGet,
@@ -261,7 +287,7 @@ instance HasBuffer (ReaderIO MemoryBuffer) where
 ensureCapacity :: MemoryBuffer -> Int -> IO (MutableByteArray RealWorld)
 ensureCapacity buffer needed = do
   array <- readIORef buffer.arrayRef
-  maxSize <- getSizeofMutableByteArray array -- ensure sequencing in the presence of resizing
+  maxSize <- getSizeofMutableByteArray array
   if needed <= maxSize
   then pure array
   else do
@@ -280,6 +306,116 @@ appendByteString buffer bs =
     withMutableByteArrayContents array $ \dst ->
       copyBytes (dst `plusPtr` position) (castPtr source) len
     writeIORef buffer.positionRef (position + len)
+
+writeWord8 :: MemoryBuffer -> Word8 -> IO ()
+writeWord8 buffer b = do
+  position <- readIORef buffer.positionRef
+  array <- ensureCapacity buffer (position + 1)
+  writeByteArray array position b
+  writeIORef buffer.positionRef (position + 1)
+
+writeWord32LE :: MemoryBuffer -> Word32 -> IO ()
+writeWord32LE buffer w = do
+  position <- readIORef buffer.positionRef
+  array <- ensureCapacity buffer (position + 4)
+  writeByteArray array position (fromIntegral w :: Word8)
+  writeByteArray array (position + 1) (fromIntegral (w `shiftR` 8) :: Word8)
+  writeByteArray array (position + 2) (fromIntegral (w `shiftR` 16) :: Word8)
+  writeByteArray array (position + 3) (fromIntegral (w `shiftR` 24) :: Word8)
+  writeIORef buffer.positionRef (position + 4)
+
+writeWord64LE :: MemoryBuffer -> Word64 -> IO ()
+writeWord64LE buffer w = do
+  position <- readIORef buffer.positionRef
+  array <- ensureCapacity buffer (position + 8)
+  writeByteArray array position (fromIntegral w :: Word8)
+  writeByteArray array (position + 1) (fromIntegral (w `shiftR` 8) :: Word8)
+  writeByteArray array (position + 2) (fromIntegral (w `shiftR` 16) :: Word8)
+  writeByteArray array (position + 3) (fromIntegral (w `shiftR` 24) :: Word8)
+  writeByteArray array (position + 4) (fromIntegral (w `shiftR` 32) :: Word8)
+  writeByteArray array (position + 5) (fromIntegral (w `shiftR` 40) :: Word8)
+  writeByteArray array (position + 6) (fromIntegral (w `shiftR` 48) :: Word8)
+  writeByteArray array (position + 7) (fromIntegral (w `shiftR` 56) :: Word8)
+  writeIORef buffer.positionRef (position + 8)
+
+writeFloatLE :: MemoryBuffer -> Float -> IO ()
+writeFloatLE buffer = writeWord32LE buffer . castFloatToWord32
+
+writeDoubleLE :: MemoryBuffer -> Double -> IO ()
+writeDoubleLE buffer = writeWord64LE buffer . castDoubleToWord64
+
+copyBufferInto :: MemoryBuffer -> MemoryBuffer -> IO ()
+copyBufferInto destination source = do
+  sourceArray <- readIORef source.arrayRef
+  sourcePosition <- readIORef source.positionRef
+  destinationPosition <- readIORef destination.positionRef
+  destinationArray <- ensureCapacity destination (destinationPosition + sourcePosition)
+  copyMutableByteArray destinationArray destinationPosition sourceArray 0 sourcePosition
+  writeIORef destination.positionRef (destinationPosition + sourcePosition)
+
+bufferToByteString :: MemoryBuffer -> IO ByteString
+bufferToByteString buffer = do
+  array <- readIORef buffer.arrayRef
+  position <- readIORef buffer.positionRef
+  create position $ \dst ->
+    withMutableByteArrayContents array $ \src ->
+      copyBytes dst (castPtr src) position
+
+bufferResidency :: MemoryBuffer -> IO Int
+bufferResidency buffer = readIORef buffer.positionRef
+
+resetPosition :: MemoryBuffer -> IO ()
+resetPosition buffer = writeIORef buffer.positionRef 0
+
+appendGeneratedBytes :: MemoryBuffer -> Int -> (Int -> Word8) -> IO ()
+appendGeneratedBytes buffer count at
+  | count < 0 = ioError $ userError "appendGeneratedBytes: negative length"
+  | otherwise = do
+      position <- readIORef buffer.positionRef
+      array <- ensureCapacity buffer (position + count)
+      let go i
+            | i >= count = pure ()
+            | otherwise = writeByteArray array (position + i) (at i) >> go (i + 1)
+      go 0
+      writeIORef buffer.positionRef (position + count)
+
+flushBufferToFile :: WritableBinaryHandle -> MemoryBuffer -> IO ()
+flushBufferToFile handle = runReaderIO (flushTo (FileSink handle))
+
+writeByteStringToFile :: WritableBinaryHandle -> ByteString -> IO ()
+writeByteStringToFile handle bs = do
+  buffer <- mallocBuffer (max 1 (BS.length bs))
+  appendByteString buffer bs
+  flushBufferToFile handle buffer
+
+type MemoryWriter m = (HasBuffer m, Buffer m ~ MemoryBuffer, MonadIO m)
+
+onBuffer :: MonadIO m => MemoryBuffer -> ReaderIO MemoryBuffer a -> m a
+onBuffer buffer action = liftIO (runReaderIO action buffer)
+
+putWord8 :: MemoryWriter m => Word8 -> m ()
+putWord8 value = askBuffer >>= \buffer -> liftIO (writeWord8 buffer value)
+
+putWord32LE :: MemoryWriter m => Word32 -> m ()
+putWord32LE value = askBuffer >>= \buffer -> liftIO (writeWord32LE buffer value)
+
+putWord64LE :: MemoryWriter m => Word64 -> m ()
+putWord64LE value = askBuffer >>= \buffer -> liftIO (writeWord64LE buffer value)
+
+putFloatLE :: MemoryWriter m => Float -> m ()
+putFloatLE value = askBuffer >>= \buffer -> liftIO (writeFloatLE buffer value)
+
+putDoubleLE :: MemoryWriter m => Double -> m ()
+putDoubleLE value = askBuffer >>= \buffer -> liftIO (writeDoubleLE buffer value)
+
+putByteString :: MemoryWriter m => ByteString -> m ()
+putByteString bytes = askBuffer >>= \buffer -> liftIO (appendByteString buffer bytes)
+
+putGenerated :: MemoryWriter m => Int -> (Int -> Word8) -> m ()
+putGenerated count at = askBuffer >>= \buffer -> liftIO (appendGeneratedBytes buffer count at)
+
+copyBuffer :: MemoryWriter m => MemoryBuffer -> m ()
+copyBuffer source = askBuffer >>= \destination -> liftIO (copyBufferInto destination source)
 
 data BufferHandle = BufferHandle
   { bufferPath :: !FilePath
