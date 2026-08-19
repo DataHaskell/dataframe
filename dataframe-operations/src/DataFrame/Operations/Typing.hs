@@ -217,12 +217,12 @@ handleBoolAssumption isNull cols =
         (handleTextAssumption isNull cols)
 
 {- | Int columns: one fused pass with in-place Int -> Double promotion; a cell
-parsing as neither demotes the column to Text. 'readIntStrict' rejects overflow
+parsing as neither demotes the column to Text. 'readInt' rejects overflow
 so a huge integer promotes to 'Double' rather than wrapping.
 -}
 handleIntAssumption :: (T.Text -> Bool) -> V.Vector T.Text -> Column
 handleIntAssumption isNull cols =
-    case promoteIntColumn (\_ t -> isNull t) readIntStrict readDouble cols of
+    case promoteIntColumn (\_ t -> isNull t) readInt readDouble cols of
         Just col -> col
         Nothing -> handleTextAssumption isNull cols
 

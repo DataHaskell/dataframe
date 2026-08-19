@@ -43,6 +43,16 @@ testRegressionMetrics = TestCase $ do
     assertBool "rmse" (close 1e-9 (rmse p t) 0.5)
     assertBool "mae" (close 1e-9 (mae p t) 0.25)
     assertBool "r2 in range" (r2 p t <= 1)
+    -- zipWith truncates: the mean is over compared pairs, not all of truth.
+    assertBool
+        "mse averages over compared pairs"
+        (close 1e-9 (mse (VU.fromList [2, 2]) (VU.fromList [0, 0, 0, 0])) 4)
+    assertBool
+        "mae averages over compared pairs"
+        (close 1e-9 (mae (VU.fromList [2, 2]) (VU.fromList [0, 0, 0, 0])) 2)
+    assertBool
+        "no predictions is not a perfect score"
+        (isNaN (mse VU.empty (VU.fromList [5, 5, 5])))
 
 testMulticlassMetrics :: Test
 testMulticlassMetrics = TestCase $ do

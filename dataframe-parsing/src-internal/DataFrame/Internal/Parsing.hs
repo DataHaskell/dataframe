@@ -8,13 +8,15 @@ module DataFrame.Internal.Parsing where
 import qualified Data.ByteString.Char8 as C
 import qualified Data.Set as S
 import qualified Data.Text as T
+import qualified Data.Text.Encoding as TE
 import qualified Data.Text.IO as TIO
 
 import Control.Applicative (many, (<|>))
+import Control.Monad (guard)
 import Data.Attoparsec.Text hiding (decimal, double, signed)
-import Data.ByteString.Lex.Fractional
+import Data.Char (isDigit)
 import Data.Foldable (fold)
-import Data.Text.Read (decimal, double, signed)
+import Data.Text.Read (decimal, signed)
 import Data.Time (Day, defaultTimeLocale, parseTimeM)
 import GHC.Stack (HasCallStack)
 import System.IO (Handle, IOMode (..), hIsEOF, hTell, withFile)
@@ -61,11 +63,23 @@ readInteger s = case signed decimal (T.strip s) of
     Right (value, "") -> Just value
     Right (_value, _) -> Nothing
 
+{- | 'Data.Text.Read.decimal' at 'Int' wraps on overflow. Fields of <= 18
+chars cannot overflow and keep the fast path; longer (rare) ones go
+through 'Integer' with a range check, mirroring 'readByteStringInt'.
+-}
 readInt :: (HasCallStack) => T.Text -> Maybe Int
-readInt s = case signed decimal (T.strip s) of
-    Left _ -> Nothing
-    Right (value, "") -> Just value
-    Right (_value, _) -> Nothing
+readInt s
+    | T.length t <= 18 = case signed decimal t of
+        Right (value, "") -> Just value
+        _ -> Nothing
+    | otherwise = case signed decimal t :: Either String (Integer, T.Text) of
+        Right (value, "")
+            | value >= toInteger (minBound :: Int)
+            , value <= toInteger (maxBound :: Int) ->
+                Just (fromInteger value)
+        _ -> Nothing
+  where
+    t = T.strip s
 {-# INLINE readInt #-}
 
 readByteStringInt :: (HasCallStack) => C.ByteString -> Maybe Int
@@ -93,23 +107,68 @@ readByteStringInt s
 #endif
 {-# INLINE readByteStringInt #-}
 
+{- | Exact decimal -> 'Double': one correctly-rounded conversion, matching
+strtod\/'read' on every input, subnormals and overflow included. Also
+takes back the Infinity\/-Infinity tokens 'show' emits, so written CSV
+round-trips.
+-}
 readByteStringDouble :: (HasCallStack) => C.ByteString -> Maybe Double
-readByteStringDouble s =
-    let
-        readFunc = if C.any (\c -> c == 'e' || c == 'E') s then readExponential else readDecimal
-     in
-        case readSigned readFunc (C.strip s) of
-            Nothing -> Nothing
-            Just (value, "") -> Just value
-            Just (_value, _) -> Nothing
+readByteStringDouble s
+    | t == "Infinity" = Just (1 / 0)
+    | t == "-Infinity" = Just (-1 / 0)
+    | otherwise = parseDoubleExact t
+  where
+    t = C.strip s
 {-# INLINE readByteStringDouble #-}
 
+parseDoubleExact :: C.ByteString -> Maybe Double
+parseDoubleExact t0 = do
+    let (neg, t1) = case C.uncons t0 of
+            Just ('-', r) -> (True, r)
+            Just ('+', r) -> (False, r)
+            _ -> (False, t0)
+        (ws, t2) = C.span isDigit t1
+    guard (not (C.null ws))
+    (fs, t3) <- case C.uncons t2 of
+        Just ('.', r) ->
+            let (ds, rest) = C.span isDigit r
+             in if C.null ds then Nothing else Just (ds, rest)
+        _ -> Just (C.empty, t2)
+    e <- case C.uncons t3 of
+        Nothing -> Just 0
+        Just (c, r)
+            | c == 'e' || c == 'E' -> do
+                let (eneg, r1) = case C.uncons r of
+                        Just ('-', r') -> (True, r')
+                        Just ('+', r') -> (False, r')
+                        _ -> (False, r)
+                guard (maybe False (isDigit . fst) (C.uncons r1))
+                (ev, rest) <- C.readInteger r1
+                guard (C.null rest)
+                Just (if eneg then negate ev else ev)
+            | otherwise -> Nothing
+    let sigDigits = ws <> fs
+    (sig, _) <- C.readInteger sigDigits
+    let dexp = e - toInteger (C.length fs)
+        nd = toInteger (C.length (C.dropWhile (== '0') sigDigits))
+    Just (mkDouble neg sig nd dexp)
+
+{- | Nearest 'Double' for @sig * 10^dexp@ in ONE rounding step. The clamps
+bound the 'Rational' so an absurd exponent cannot allocate its 10^e.
+-}
+mkDouble :: Bool -> Integer -> Integer -> Integer -> Double
+mkDouble neg sig nd dexp
+    | sig == 0 = sgn 0
+    | dexp > 350 = sgn (1 / 0)
+    -- Even nd digits scaled this low sit under half the smallest denormal.
+    | nd + dexp < -350 = sgn 0
+    | otherwise =
+        sgn (fromRational (fromInteger sig * 10 ^^ (fromInteger dexp :: Int)))
+  where
+    sgn = if neg then negate else id
+
 readDouble :: (HasCallStack) => T.Text -> Maybe Double
-readDouble s =
-    case signed double s of
-        Left _ -> Nothing
-        Right (value, "") -> Just value
-        Right (_value, _) -> Nothing
+readDouble = readByteStringDouble . TE.encodeUtf8
 {-# INLINE readDouble #-}
 
 readIntegerEither :: (HasCallStack) => T.Text -> Either T.Text Integer
@@ -119,19 +178,24 @@ readIntegerEither s = case signed decimal (T.strip s) of
     Right (_value, _) -> Left s
 {-# INLINE readIntegerEither #-}
 
+-- | As 'readInt': overflow is a failed parse, not a wrapped value.
 readIntEither :: (HasCallStack) => T.Text -> Either T.Text Int
-readIntEither s = case signed decimal (T.strip s) of
-    Left _ -> Left s
-    Right (value, "") -> Right value
-    Right (_value, _) -> Left s
+readIntEither s
+    | T.length t <= 18 = case signed decimal t of
+        Right (value, "") -> Right value
+        _ -> Left s
+    | otherwise = case signed decimal t :: Either String (Integer, T.Text) of
+        Right (value, "")
+            | value >= toInteger (minBound :: Int)
+            , value <= toInteger (maxBound :: Int) ->
+                Right (fromInteger value)
+        _ -> Left s
+  where
+    t = T.strip s
 {-# INLINE readIntEither #-}
 
 readDoubleEither :: (HasCallStack) => T.Text -> Either T.Text Double
-readDoubleEither s =
-    case signed double s of
-        Left _ -> Left s
-        Right (value, "") -> Right value
-        Right (_value, _) -> Left s
+readDoubleEither s = maybe (Left s) Right (readDouble s)
 {-# INLINE readDoubleEither #-}
 
 -- ---------------------------------------------------------------------------

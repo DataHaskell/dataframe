@@ -28,7 +28,7 @@ import DataFrame.LinearModel
 import DataFrame.LinearSolver (sigmoid)
 import DataFrame.PCA
 
-import DataFrame.Internal.Statistics (correlation', variance')
+import DataFrame.Internal.Statistics (correlation', meanSquaredError, variance')
 
 import Test.HUnit
 
@@ -124,14 +124,13 @@ testVarianceConstant = TestCase $ do
     let v = variance' (VU.replicate 100 (7.0 :: Double))
     assertEqual "variance of constant column is 0" 0 v
 
-{- Variance of fewer than two samples is defined to be 0 (computeVariance guard),
-   not NaN from a /0. -}
+{- Sample variance of one observation is undefined: NaN, so a singleton
+   group can never look as tight as a genuinely constant column. -}
 testVarianceSingleton :: Test
 testVarianceSingleton = TestCase $ do
-    assertEqual
-        "variance of one sample is 0"
-        0
-        (variance' (VU.fromList [3.5 :: Double]))
+    assertBool
+        "variance of one sample is NaN"
+        (isNaN (variance' (VU.fromList [3.5 :: Double])))
 
 {- Correlation of a perfectly linear pair is exactly +1 (and -1 reversed),
    computed stably. y = 2x+1 over a spread of x. -}
@@ -168,6 +167,27 @@ testCorrelationTooFew = TestCase $ do
         "correlation of one point is Nothing"
         Nothing
         (correlation' (VU.fromList [1]) (VU.fromList [2]))
+
+{- meanSquaredError refuses length mismatches and empty inputs rather than
+   averaging over terms it never summed (or indexing out of bounds). -}
+testMeanSquaredErrorGuards :: Test
+testMeanSquaredErrorGuards = TestCase $ do
+    assertEqual
+        "mse of mismatched lengths is Nothing"
+        Nothing
+        (meanSquaredError (VU.fromList [0, 0, 0, 0]) (VU.fromList [2, 2]))
+    assertEqual
+        "mse with the longer prediction does not index out of bounds"
+        Nothing
+        (meanSquaredError (VU.fromList [1]) (VU.fromList [1, 2, 3]))
+    assertEqual
+        "mse of empty inputs is Nothing"
+        Nothing
+        (meanSquaredError VU.empty VU.empty)
+    assertEqual
+        "mse of equal-length inputs is the plain mean"
+        (Just 4.0)
+        (meanSquaredError (VU.fromList [0, 0]) (VU.fromList [2, 2]))
 
 -- ===========================================================================
 -- Category 8: stability inside the model expr layer
@@ -425,6 +445,7 @@ tests =
     , testCorrelationPerfect
     , testCorrelationConstantColumnIsNaN
     , testCorrelationTooFew
+    , testMeanSquaredErrorGuards
     , testLogisticProbsExtremeFeatures
     , testOLSOneRow
     , testLogisticSingleClass

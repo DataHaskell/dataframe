@@ -249,7 +249,7 @@ D.skewness (F.col @Double "median_house_value") df
 
 ```
 
-> 0.977668529406543
+> 0.9776922140978362
 
 So the median house value is moderately skewed to the left. That is, there are more houses that are cheaper than the mean values and a tail of expensive outliers. Having lived in California, I can confirm that this data reflects reality.
 

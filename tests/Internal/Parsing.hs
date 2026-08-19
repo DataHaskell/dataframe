@@ -153,6 +153,52 @@ readIntPartialSuffix =
             (readInt "42abc")
         )
 
+-- overflow must be a failed parse, not a wrapped value
+readIntOverflow :: Test
+readIntOverflow =
+    TestCase
+        ( assertEqual
+            "readInt \"9223372036854775808\" is Nothing"
+            Nothing
+            (readInt "9223372036854775808")
+        )
+
+readIntUnderflow :: Test
+readIntUnderflow =
+    TestCase
+        ( assertEqual
+            "readInt \"-9223372036854775809\" is Nothing"
+            Nothing
+            (readInt "-9223372036854775809")
+        )
+
+readIntWordWrap :: Test
+readIntWordWrap =
+    TestCase
+        ( assertEqual
+            "readInt \"18446744073709551616\" is Nothing"
+            Nothing
+            (readInt "18446744073709551616")
+        )
+
+readIntMaxBound :: Test
+readIntMaxBound =
+    TestCase
+        ( assertEqual
+            "readInt maxBound"
+            (Just (maxBound :: Int))
+            (readInt "9223372036854775807")
+        )
+
+readIntMinBound :: Test
+readIntMinBound =
+    TestCase
+        ( assertEqual
+            "readInt minBound"
+            (Just (minBound :: Int))
+            (readInt "-9223372036854775808")
+        )
+
 -- readDouble
 
 readDoublePositive :: Test
@@ -193,6 +239,48 @@ readDoublePartialSuffix =
             (readDouble "3.14abc")
         )
 
+-- correct rounding: parses must equal 'read' bit for bit
+readDoubleSubnormal :: Test
+readDoubleSubnormal =
+    TestCase
+        ( assertEqual
+            "readDouble on the smallest denormal"
+            (Just (read "4.9406564584124654e-324"))
+            (readDouble "4.9406564584124654e-324")
+        )
+
+readDoubleMaxFinite :: Test
+readDoubleMaxFinite =
+    TestCase
+        ( assertEqual
+            "readDouble on the largest finite double stays finite"
+            (Just (read "1.7976931348623157e308"))
+            (readDouble "1.7976931348623157e308")
+        )
+
+readDoubleOverflowIsInfinity :: Test
+readDoubleOverflowIsInfinity =
+    TestCase
+        (assertEqual "readDouble \"1e999\"" (Just (1 / 0)) (readDouble "1e999"))
+
+readDoubleInfinityToken :: Test
+readDoubleInfinityToken =
+    TestCase
+        ( assertEqual
+            "readDouble takes back what 'show' wrote"
+            (Just (-1 / 0))
+            (readDouble "-Infinity")
+        )
+
+readDoubleAbsurdExponent :: Test
+readDoubleAbsurdExponent =
+    TestCase
+        ( assertEqual
+            "readDouble \"1e18446744073709551617\" clamps, not allocates"
+            (Just (1 / 0))
+            (readDouble "1e18446744073709551617")
+        )
+
 tests :: [Test]
 tests =
     [ TestLabel "isNullishEmptyString" isNullishEmptyString
@@ -228,10 +316,20 @@ tests =
     , TestLabel "readIntText" readIntText
     , TestLabel "readIntEmpty" readIntEmpty
     , TestLabel "readIntPartialSuffix" readIntPartialSuffix
+    , TestLabel "readIntOverflow" readIntOverflow
+    , TestLabel "readIntUnderflow" readIntUnderflow
+    , TestLabel "readIntWordWrap" readIntWordWrap
+    , TestLabel "readIntMaxBound" readIntMaxBound
+    , TestLabel "readIntMinBound" readIntMinBound
     , TestLabel "readDoublePositive" readDoublePositive
     , TestLabel "readDoubleNegative" readDoubleNegative
     , TestLabel "readDoubleWholeNumber" readDoubleWholeNumber
     , TestLabel "readDoubleText" readDoubleText
     , TestLabel "readDoubleEmpty" readDoubleEmpty
     , TestLabel "readDoublePartialSuffix" readDoublePartialSuffix
+    , TestLabel "readDoubleSubnormal" readDoubleSubnormal
+    , TestLabel "readDoubleMaxFinite" readDoubleMaxFinite
+    , TestLabel "readDoubleOverflowIsInfinity" readDoubleOverflowIsInfinity
+    , TestLabel "readDoubleInfinityToken" readDoubleInfinityToken
+    , TestLabel "readDoubleAbsurdExponent" readDoubleAbsurdExponent
     ]
