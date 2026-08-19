@@ -19,8 +19,8 @@ module DataFrame.IO.Parquet.Writer.ColumnChunkWriter (
 import Control.Monad (when)
 import Control.Monad.IO.Class (MonadIO (..))
 import qualified Data.ByteString as BS
-import Data.Int (Int64)
 import Data.IORef (IORef, modifyIORef', newIORef)
+import Data.Int (Int64)
 import qualified Data.Text as T
 import qualified Data.Vector as VB
 import DataFrame.IO.Parquet.Thrift
@@ -89,11 +89,18 @@ page (PageWriter f) = ColumnChunkWriter (f . ckPage)
 askColumnChunk :: ColumnChunkWriter ColumnChunkState
 askColumnChunk = ColumnChunkWriter pure
 
-initColumnState :: ParquetWriteOptions -> T.Text -> Column -> IO ColumnChunkState
+initColumnState ::
+    ParquetWriteOptions -> T.Text -> Column -> IO ColumnChunkState
 initColumnState opts name col = do
     encoder <- buildEncoder col
     let nullable = hasMissing col
-        schemaElem = mkSchemaElem name encoder.encType nullable encoder.encConverted encoder.encLogical
+        schemaElem =
+            mkSchemaElem
+                name
+                encoder.encType
+                nullable
+                encoder.encConverted
+                encoder.encLogical
         cap = max 1 opts.pageSize
     chunk <- mallocBuffer cap
     uncompressed <- newIORef 0
@@ -154,7 +161,10 @@ writeDataPage codec rows body = do
             compressed <- liftIO (Snappy.compress <$> bufferToByteString body)
             pure (BS.length compressed, putByteString compressed)
         other -> error ("writeParquet: unsupported codec " <> show other)
-    let headerBytes = Pinch.encode Pinch.compactProtocol (mkDataPageHeader rows uncompressedSize compressedSize)
+    let headerBytes =
+            Pinch.encode
+                Pinch.compactProtocol
+                (mkDataPageHeader rows uncompressedSize compressedSize)
     putByteString headerBytes
     emit
     bumpUncompressed (fromIntegral (BS.length headerBytes + uncompressedSize))
@@ -165,7 +175,7 @@ bumpUncompressed n = ColumnChunkWriter (\st -> modifyIORef' (ckUncompressed st) 
 bufferedSize :: VB.Vector ColumnChunkState -> IO Int
 bufferedSize =
     VB.foldM'
-        (\total st -> do
+        ( \total st -> do
             chunk <- bufferResidency (ckBuffer st)
             values <- bufferResidency (psValues (ckPage st))
             defs <- bufferResidency (ckPage st).psDefs.dlBuf

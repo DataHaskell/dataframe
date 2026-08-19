@@ -1,7 +1,6 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 
 -- | Tests for the writer-buffer logic in "DataFrame.IO.Utils.RandomAccess".
-
 module Main where
 
 import Control.Monad (forM)
@@ -9,12 +8,11 @@ import qualified Data.ByteString as BS
 import Data.IORef (readIORef)
 import Data.Primitive.ByteArray (readByteArray)
 import Data.Word (Word8)
-import System.FilePath ((</>))
 import qualified System.Exit as Exit
+import System.FilePath ((</>))
 import System.IO.Temp (withSystemTempDirectory)
 import Test.HUnit
 
-import DataFrame.IO.Utils.RandomAccess
 import DataFrame.IO.Parquet (readParquet)
 import DataFrame.IO.Parquet.Writer (
     ParquetWriteOptions (..),
@@ -22,6 +20,7 @@ import DataFrame.IO.Parquet.Writer (
     writeParquet,
     writeParquetWithOptions,
  )
+import DataFrame.IO.Utils.RandomAccess
 
 withTempFileBuffer :: FilePath -> String -> (BufferHandle -> IO a) -> IO a
 withTempFileBuffer dir name = withFileBuffer (dir </> name)
@@ -285,15 +284,39 @@ tests =
         , TestLabel "memory buffer: flush empties for reuse" memFlushEmptiesForReuse
         , TestLabel "memory buffer: self-flush is a no-op" memSelfFlushIsNoop
         , TestLabel "memory buffer: flush large payload" memFlushLargePayload
-        , TestLabel "writer roundtrip: alltypes_plain" (writerRoundTrip "alltypes_plain" "tests/data/alltypes_plain.parquet")
-        , TestLabel "writer roundtrip: alltypes_plain.snappy" (writerRoundTrip "alltypes_plain.snappy" "tests/data/alltypes_plain.snappy.parquet")
-        , TestLabel "writer roundtrip: alltypes_dictionary" (writerRoundTrip "alltypes_dictionary" "tests/data/alltypes_dictionary.parquet")
-        , TestLabel "writer roundtrip: alltypes_tiny_pages" (writerRoundTrip "alltypes_tiny_pages" "tests/data/alltypes_tiny_pages.parquet")
-        , TestLabel "writer roundtrip: transactions" (writerRoundTrip "transactions" "tests/data/transactions.parquet")
-        , TestLabel "writer roundtrip: mtcars" (writerRoundTrip "mtcars" "tests/data/mtcars.parquet")
-        , TestLabel "writer roundtrip: int32_decimal" (writerRoundTrip "int32_decimal" "tests/data/int32_decimal.parquet")
-        , TestLabel "writer roundtrip: int64_decimal" (writerRoundTrip "int64_decimal" "tests/data/int64_decimal.parquet")
-        , TestLabel "writer roundtrip: alltypes_plain multi-page" (writerRoundTripTiny "alltypes_plain multi-page" "tests/data/alltypes_plain.parquet")
+        , TestLabel
+            "writer roundtrip: alltypes_plain"
+            (writerRoundTrip "alltypes_plain" "tests/data/alltypes_plain.parquet")
+        , TestLabel
+            "writer roundtrip: alltypes_plain.snappy"
+            ( writerRoundTrip
+                "alltypes_plain.snappy"
+                "tests/data/alltypes_plain.snappy.parquet"
+            )
+        , TestLabel
+            "writer roundtrip: alltypes_dictionary"
+            (writerRoundTrip "alltypes_dictionary" "tests/data/alltypes_dictionary.parquet")
+        , TestLabel
+            "writer roundtrip: alltypes_tiny_pages"
+            (writerRoundTrip "alltypes_tiny_pages" "tests/data/alltypes_tiny_pages.parquet")
+        , TestLabel
+            "writer roundtrip: transactions"
+            (writerRoundTrip "transactions" "tests/data/transactions.parquet")
+        , TestLabel
+            "writer roundtrip: mtcars"
+            (writerRoundTrip "mtcars" "tests/data/mtcars.parquet")
+        , TestLabel
+            "writer roundtrip: int32_decimal"
+            (writerRoundTrip "int32_decimal" "tests/data/int32_decimal.parquet")
+        , TestLabel
+            "writer roundtrip: int64_decimal"
+            (writerRoundTrip "int64_decimal" "tests/data/int64_decimal.parquet")
+        , TestLabel
+            "writer roundtrip: alltypes_plain multi-page"
+            ( writerRoundTripTiny
+                "alltypes_plain multi-page"
+                "tests/data/alltypes_plain.parquet"
+            )
         ]
 
 main :: IO ()

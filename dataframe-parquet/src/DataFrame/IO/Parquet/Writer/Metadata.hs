@@ -34,12 +34,19 @@ mkDataPageHeader rows uncompressedSize compressedSize =
             , dph_statistics = putField Nothing
             }
 
-mkSchemaElem :: T.Text -> ThriftType -> Bool -> Maybe ConvertedType -> Maybe LogicalType -> SchemaElement
+mkSchemaElem ::
+    T.Text ->
+    ThriftType ->
+    Bool ->
+    Maybe ConvertedType ->
+    Maybe LogicalType ->
+    SchemaElement
 mkSchemaElem elementName elementType nullable converted logical =
     SchemaElement
         { schematype = putField (Just elementType)
         , type_length = putField Nothing
-        , repetition_type = putField (Just (if nullable then OPTIONAL enum else REQUIRED enum))
+        , repetition_type =
+            putField (Just (if nullable then OPTIONAL enum else REQUIRED enum))
         , name = putField elementName
         , num_children = putField Nothing
         , converted_type = putField converted
