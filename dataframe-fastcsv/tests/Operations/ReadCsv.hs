@@ -66,10 +66,6 @@ prettyPrintTsv = prettyPrintSeparated '\t'
 
 prettyPrintSeparated :: Char -> FilePath -> DataFrame -> IO ()
 prettyPrintSeparated sep filepath df = withFile filepath WriteMode $ \handle -> do
-    -- Byte-exact UTF-8 output: a default handle uses the OS locale
-    -- encoding (crashes on non-ANSI text under a non-UTF-8 codepage)
-    -- and translates \n to \r\n on Windows, corrupting quoted embedded
-    -- newlines for the byte-level reader.
     hSetEncoding handle utf8
     hSetNewlineMode handle noNewlineTranslation
     let (rows, _) = dataframeDimensions df
