@@ -35,7 +35,9 @@ import qualified Data.ByteString.Lazy as BL
 import qualified Data.Map.Strict as M
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
-import qualified Data.Text.IO as TIO
+
+-- UTF-8 byte mode; locale handles corrupt output on Windows.
+import qualified Data.Text.IO.Utf8 as TIO
 
 import Control.Exception (SomeException, catch)
 import Data.Maybe (fromMaybe)

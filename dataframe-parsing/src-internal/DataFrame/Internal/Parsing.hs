@@ -17,7 +17,15 @@ import Data.Foldable (fold)
 import Data.Text.Read (decimal, double, signed)
 import Data.Time (Day, defaultTimeLocale, parseTimeM)
 import GHC.Stack (HasCallStack)
-import System.IO (Handle, IOMode (..), hIsEOF, hTell, withFile)
+import System.IO (
+    Handle,
+    IOMode (..),
+    hIsEOF,
+    hSetEncoding,
+    hTell,
+    utf8,
+    withFile,
+ )
 import Prelude hiding (takeWhile)
 
 isNullish :: T.Text -> Bool
@@ -187,7 +195,9 @@ lineEnd =
 
 -- | First pass to count rows for exact allocation.
 countRows :: Char -> FilePath -> IO Int
-countRows c path = withFile path ReadMode $! go 0 ""
+countRows c path = withFile path ReadMode $ \h ->
+    -- Decode UTF-8, not the locale.
+    hSetEncoding h utf8 >> go 0 "" h
   where
     go n input h = do
         isEOF <- hIsEOF h
