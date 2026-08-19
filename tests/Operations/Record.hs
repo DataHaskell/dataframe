@@ -17,10 +17,6 @@ module Operations.Record where
 import Data.Int (Int64)
 import qualified Data.Map.Strict as M
 import qualified Data.Text as T
-
--- UTF-8 byte-mode IO: the plain Data.Text.IO writer honours the
--- handle's text mode, which on Windows turns \n into \r\n and
--- corrupts inputs meant for byte-level parsers.
 import qualified Data.Text.IO.Utf8 as TIO
 import GHC.Generics (Generic)
 
