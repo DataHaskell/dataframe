@@ -4,7 +4,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
-{-# LANGUAGE TypeOperators #-}
 
 module DataFrame.IO.Parquet.Writer.Encoder (
     Encoder (..),
@@ -223,7 +222,7 @@ textEncoder col =
         | otherwise = pure False
     writePacked bitmap packed buffer row
         | isPresent bitmap row = do
-            let baseRow = maybe row (\selection -> selAt selection row) packed.ptSel
+            let baseRow = maybe row (`selAt` row) packed.ptSel
                 start = offAt packed.ptOffsets baseRow
                 end = offAt packed.ptOffsets (baseRow + 1)
             writeTextSlice buffer packed.ptBytes start (end - start)

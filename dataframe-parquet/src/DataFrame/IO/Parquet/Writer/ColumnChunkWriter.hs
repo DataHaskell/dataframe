@@ -80,8 +80,8 @@ instance HasBuffer ColumnChunkWriter where
     type Buffer ColumnChunkWriter = MemoryBuffer
     askBuffer = ColumnChunkWriter (pure . ckBuffer)
     residency = ColumnChunkWriter (bufferResidency . ckBuffer)
-    writeBytes bytes = ColumnChunkWriter (\cs -> runReaderIO (writeBytes bytes) (ckBuffer cs))
-    flushTo sink = ColumnChunkWriter (\cs -> runReaderIO (flushTo sink) (ckBuffer cs))
+    writeBytes bytes = ColumnChunkWriter (runReaderIO (writeBytes bytes) . ckBuffer)
+    flushTo sink = ColumnChunkWriter (runReaderIO (flushTo sink) . ckBuffer)
 
 page :: PageWriter a -> ColumnChunkWriter a
 page (PageWriter f) = ColumnChunkWriter (f . ckPage)

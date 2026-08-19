@@ -176,11 +176,10 @@ openWritableBinaryFile filepath = do
     pure . WritableBinaryHandle $ h
 
 withWritableBinaryFile :: FilePath -> (WritableBinaryHandle -> IO a) -> IO a
-withWritableBinaryFile filepath action =
+withWritableBinaryFile filepath =
     bracket
         (openWritableBinaryFile filepath)
         (hClose . unHandle)
-        action
 
 class (Monad m) => HasBuffer m where
     type Buffer m
@@ -445,8 +444,8 @@ data BufferHandle = BufferHandle
     }
 
 withFileBuffer :: FilePath -> (BufferHandle -> IO a) -> IO a
-withFileBuffer filepath action =
-    bracket open (hClose . unHandle . bufferHandle) action
+withFileBuffer filepath =
+    bracket open (hClose . unHandle . bufferHandle)
   where
     open = do
         h <- openBinaryFile filepath ReadWriteMode

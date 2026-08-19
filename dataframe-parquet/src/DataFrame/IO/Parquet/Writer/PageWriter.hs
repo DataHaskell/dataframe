@@ -77,8 +77,8 @@ instance HasBuffer PageWriter where
     type Buffer PageWriter = MemoryBuffer
     askBuffer = PageWriter (pure . psValues)
     residency = PageWriter (bufferResidency . psValues)
-    writeBytes bytes = PageWriter (\ps -> runReaderIO (writeBytes bytes) (psValues ps))
-    flushTo sink = PageWriter (\ps -> runReaderIO (flushTo sink) (psValues ps))
+    writeBytes bytes = PageWriter (runReaderIO (writeBytes bytes) . psValues)
+    flushTo sink = PageWriter (runReaderIO (flushTo sink) . psValues)
 
 askPage :: PageWriter PageState
 askPage = PageWriter pure
