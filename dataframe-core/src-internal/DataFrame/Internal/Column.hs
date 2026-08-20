@@ -25,7 +25,9 @@ import qualified Data.Vector.Mutable as VBM
 import qualified Data.Vector.Unboxed as VU
 import qualified Data.Vector.Unboxed.Mutable as VUM
 
-import Control.Exception (throw)
+import Control.Concurrent (forkIO, getNumCapabilities)
+import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar)
+import Control.Exception (SomeException, throw, throwIO, try)
 import Control.Monad (forM_, when)
 import Control.Monad.ST (ST, runST)
 import Data.Bits (
@@ -580,6 +582,56 @@ throwTypeMismatch =
                 , errorColumnName = Nothing
                 }
 
+{- | At least this many rows make the fork/coordination overhead of parallel
+element-wise kernels worth it. Below it the sequential single range is used.
+Matches 'DataFrame.Internal.RowHash.parRowHashThreshold' so the whole pipeline
+switches together.
+-}
+parColumnThreshold :: Int
+parColumnThreshold = 200000
+
+columnCapabilities :: Int
+columnCapabilities = unsafePerformIO getNumCapabilities
+{-# NOINLINE columnCapabilities #-}
+
+{- | Parallel unboxed 'VU.generate': splits the index space into one contiguous
+chunk per capability, evaluates each chunk into its disjoint slice of a single
+pre-allocated mutable vector, then freezes. Element @i@ depends only on @f i@,
+so the result is bit-identical to the sequential 'VU.generate' regardless of
+capability count. Falls back to 'VU.generate' below 'parColumnThreshold'.
+-}
+{-# SPECIALIZE parGenerateUnboxed ::
+    Int -> (Int -> Double) -> VU.Vector Double
+    #-}
+{-# SPECIALIZE parGenerateUnboxed ::
+    Int -> (Int -> Float) -> VU.Vector Float
+    #-}
+{-# SPECIALIZE parGenerateUnboxed :: Int -> (Int -> Int) -> VU.Vector Int #-}
+{-# SPECIALIZE parGenerateUnboxed :: Int -> (Int -> Bool) -> VU.Vector Bool #-}
+parGenerateUnboxed :: (VU.Unbox c) => Int -> (Int -> c) -> VU.Vector c
+parGenerateUnboxed n f
+    | n < parColumnThreshold || columnCapabilities <= 1 = VU.generate n f
+    | otherwise = unsafePerformIO $ do
+        mv <- VUM.unsafeNew n
+        let !caps = columnCapabilities
+            !per = (n + caps - 1) `div` caps
+            fill !i !hi
+                | i >= hi = pure ()
+                | otherwise = do
+                    VUM.unsafeWrite mv i (f i)
+                    fill (i + 1) hi
+            spawn w = do
+                var <- newEmptyMVar
+                let !lo = min n (w * per)
+                    !hi = min n (lo + per)
+                _ <- forkIO (try (fill lo hi) >>= putMVar var)
+                pure var
+        vars <- mapM spawn [0 .. caps - 1]
+        rs <- mapM takeMVar vars
+        mapM_ (either (throwIO @SomeException) pure) rs
+        VU.unsafeFreeze mv
+{-# NOINLINE parGenerateUnboxed #-}
+
 -- | An internal function to map a function over the values of a column.
 mapColumn ::
     forall b c.
@@ -600,7 +652,7 @@ mapColumn f = \case
             let !n = VB.length col
              in Right $ case sUnbox @c of
                     STrue -> UnboxedColumn Nothing $
-                        VU.generate n $ \i ->
+                        parGenerateUnboxed n $ \i ->
                             f
                                 ( if maybe True (`bitmapTestBit` i) bm
                                     then Just (VB.unsafeIndex col i)
@@ -616,7 +668,10 @@ mapColumn f = \case
         Nothing -> case testEquality (typeRep @a) (typeRep @b) of
             Just Refl ->
                 Right $ case sUnbox @c of
-                    STrue -> UnboxedColumn bm (VU.generate (VB.length col) (f . VB.unsafeIndex col))
+                    STrue ->
+                        UnboxedColumn
+                            bm
+                            (parGenerateUnboxed (VB.length col) (f . VB.unsafeIndex col))
                     SFalse -> case bm of
                         Nothing -> fromVector @c (VB.map f col)
                         Just _ -> BoxedColumn bm (VB.map f col)
@@ -631,7 +686,7 @@ mapColumn f = \case
             let !n = VU.length col
              in Right $ case sUnbox @c of
                     STrue -> UnboxedColumn Nothing $
-                        VU.generate n $ \i ->
+                        parGenerateUnboxed n $ \i ->
                             f
                                 ( if maybe True (`bitmapTestBit` i) bm
                                     then Just (VU.unsafeIndex col i)
@@ -646,7 +701,10 @@ mapColumn f = \case
                                 )
         Nothing -> case testEquality (typeRep @a) (typeRep @b) of
             Just Refl -> Right $ case sUnbox @c of
-                STrue -> UnboxedColumn bm (VU.map f col)
+                STrue ->
+                    UnboxedColumn
+                        bm
+                        (parGenerateUnboxed (VU.length col) (f . VU.unsafeIndex col))
                 SFalse -> case bm of
                     Nothing -> fromVector @c (VB.generate (VU.length col) (f . VU.unsafeIndex col))
                     Just _ -> BoxedColumn bm (VB.generate (VU.length col) (f . VU.unsafeIndex col))
@@ -1188,7 +1246,11 @@ zipWithColumns f (UnboxedColumn bmL (column :: VU.Vector d)) (UnboxedColumn bmR 
             | isNothing bmL
             , isNothing bmR ->
                 pure $ case sUnbox @c of
-                    STrue -> UnboxedColumn Nothing (VU.zipWith f column other)
+                    STrue ->
+                        let !n = min (VU.length column) (VU.length other)
+                         in UnboxedColumn Nothing $
+                                parGenerateUnboxed n $ \i ->
+                                    f (VU.unsafeIndex column i) (VU.unsafeIndex other i)
                     SFalse -> fromVector $ VB.zipWith f (VG.convert column) (VG.convert other)
         _ -> zipWithColumnsGeneral f (UnboxedColumn bmL column) (UnboxedColumn bmR other)
     Nothing -> zipWithColumnsGeneral f (UnboxedColumn bmL column) (UnboxedColumn bmR other)
@@ -1615,6 +1677,7 @@ toVector col = case col of
                                     , errorColumnName = Nothing
                                     }
                                 )
+{-# INLINEABLE toVector #-}
 
 -- Some common types we will use for numerical computing.
 

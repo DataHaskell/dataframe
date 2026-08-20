@@ -37,14 +37,16 @@ import DataFrame.Internal.DataFrame (DataFrame (..), GroupedDataFrame (..))
 import DataFrame.Internal.DictEncode (dictEncodeColumnUpTo)
 import DataFrame.Internal.GroupingDirect (
     DirectGrouping (..),
+    ascendingCodeGroups,
     directGroupThreshold,
+    groupCodesMaybe,
+    rangeOf,
     tryDirectGroupColumn,
  )
 import DataFrame.Internal.GroupingPar (parallelAssignGroups, shouldParallelize)
 import DataFrame.Internal.Hash
 import DataFrame.Internal.HashTable (htInsert, newHashTable)
 import DataFrame.Internal.PackedText (
-    PackedSel,
     PackedTextData (..),
     offAt,
     offCount,
@@ -89,8 +91,11 @@ groupBy names df
     !n = nRows df
 
 {- | Low-cardinality direct-indexed grouping fast path
-('DataFrame.Internal.GroupingDirect'): fires only for a single clean small-range
-@Int@ key. Returns 'Nothing' on any other key shape, falling back to the hash path.
+('DataFrame.Internal.GroupingDirect'): fires for a single clean small-range
+@Int@ key or canonical dict-encoded text key, and for multi-key lists where
+every key is one of those two shapes and the product of the key domains stays
+within 'directGroupThreshold' (the keys then fuse into one mixed-radix code).
+Returns 'Nothing' on any other key shape, falling back to the hash path.
 -}
 tryDirectGroup :: [T.Text] -> DataFrame -> Maybe GroupedDataFrame
 tryDirectGroup [name] df = do
@@ -101,6 +106,10 @@ tryDirectGroup [name] df = do
         Nothing -> case col of
             PackedText Nothing p -> dictCodesGroup df [name] p
             _ -> tryDictGroup (nRows df) df [name] col
+tryDirectGroup names@(_ : _ : _) df = do
+    cols <- traverse (\nm -> M.lookup nm (columnIndices df) >>= (columns df V.!?)) names
+    keys <- traverse fusedKey cols
+    fusedDirectGroup names df keys
 tryDirectGroup _ _ = Nothing
 
 dictCodesGroup ::
@@ -112,37 +121,144 @@ dictCodesGroup df names p = do
         card = offCount offs - 1
         n = selLength sel
     guard (card > 0 && card <= directGroupThreshold && n > 0)
-    counts <- codeHistogram card sel
-    let occupied = VU.filter (\g -> VU.unsafeIndex counts g > 0) (VU.enumFromN 0 card)
-        nGroups = VU.length occupied
-        entryHash g =
+    let entryHash g =
             let o = offAt offs g
              in mixBytes fnvOffset (ptBytes p) o (offAt offs (g + 1) - o)
+    dg <- groupCodesMaybe (selAt sel) n card (hashRankGroups entryHash)
+    pure (Grouped df names (dgValueIndices dg) (dgOffsets dg) (dgRowToGroup dg))
+
+{- | Group-order chooser for 'groupCodesMaybe': rank the occupied codes by the
+given per-code hash ('rankByHash', ties in first-appearance order of the code),
+making group order a deterministic function of the key set (not of row order,
+which dict-code order would leak).
+-}
+hashRankGroups :: (Int -> Int) -> VU.Vector Int -> (VU.Vector Int, Int)
+hashRankGroups entryHash counts =
+    let card = VU.length counts
+        occupied = VU.filter (\g -> VU.unsafeIndex counts g > 0) (VU.enumFromN 0 card)
+        nGroups = VU.length occupied
         rank =
             runST (rankByHash (pure . entryHash . VU.unsafeIndex occupied) nGroups)
         remap = runST $ do
             m <- VUM.new card
             VU.imapM_ (\j g -> VUM.unsafeWrite m g (VU.unsafeIndex rank j)) occupied
             VU.unsafeFreeze m
-        rtg = VU.generate n (VU.unsafeIndex remap . selAt sel)
-        (vis, os) = indicesFromGroups rtg nGroups
-    pure (Grouped df names vis os rtg)
+     in (remap, nGroups)
 
--- | Per-code occupancy counts; 'Nothing' as soon as any code is negative.
-codeHistogram :: Int -> PackedSel -> Maybe (VU.Vector Int)
-codeHistogram card sel = runST $ do
-    counts <- VUM.replicate card 0
-    let n = selLength sel
-        go i
-            | i >= n = Just <$> VU.unsafeFreeze counts
-            | otherwise = do
-                let c = selAt sel i
-                if c < 0 || c >= card
-                    then pure Nothing
-                    else do
-                        VUM.unsafeModify counts (+ 1) c
-                        go (i + 1)
-    go 0
+{- | One key column of a fused multi-key direct grouping: a per-row component
+code in @[0, fkDomain)@ (negative marks an invalid/corrupt code, which aborts
+the direct path), plus the hash mix of a component code used to give dict-keyed
+groupings a row-order-independent group order.
+-}
+data FusedKey = FusedKey
+    { fkCode :: Int -> Int
+    , fkDomain :: !Int
+    , fkMix :: Int -> Int -> Int
+    , fkDict :: !Bool
+    }
+
+{- | Classify a key column for the fused multi-key direct path: a clean non-null
+unboxed @Int@ of small range, or a non-null canonical dict-encoded text column
+of small dictionary. Anything else falls back to the hash group-by.
+-}
+fusedKey :: Column -> Maybe FusedKey
+fusedKey (UnboxedColumn Nothing (v :: VU.Vector a))
+    | Just Refl <- testEquality (typeRep @a) (typeRep @Int)
+    , not (VU.null v) =
+        let (!mn, !mx) = rangeOf v
+            !range = mx - mn + 1
+         in if range >= 1 && range <= directGroupThreshold
+                then
+                    Just
+                        ( FusedKey
+                            (\i -> VU.unsafeIndex v i - mn)
+                            range
+                            (\h c -> mixInt h (c + mn))
+                            False
+                        )
+                else Nothing
+fusedKey (PackedText Nothing p)
+    | Just sel <- ptSel p
+    , ptCanonicalSel p =
+        let offs = ptOffsets p
+            !card = offCount offs - 1
+         in if card >= 1 && card <= directGroupThreshold
+                then
+                    Just
+                        ( FusedKey
+                            (\i -> let c = selAt sel i in if c >= card then -1 else c)
+                            card
+                            ( \h c ->
+                                let o = offAt offs c
+                                 in mixBytes h (ptBytes p) o (offAt offs (c + 1) - o)
+                            )
+                            True
+                        )
+                else Nothing
+fusedKey _ = Nothing
+
+{- | Fuse the per-key codes into one mixed-radix code per row
+(@((k1*d2)+k2)*d3+...@) and feed the direct counting-sort machinery. Group
+order: ascending fused code (lexicographic in key order) for pure-@Int@ keys —
+mirroring the ascending-value order of the single-@Int@-key direct path — and
+hash rank of the key tuple when any dict key participates (see
+'hashRankGroups'; dict-code order is not a function of the key set).
+-}
+fusedDirectGroup :: [T.Text] -> DataFrame -> [FusedKey] -> Maybe GroupedDataFrame
+fusedDirectGroup names df keys = do
+    domain <- fusedDomain (map fkDomain keys)
+    let n = nRows df
+        mkGroups
+            | any fkDict keys = hashRankGroups (fusedEntryHash keys)
+            | otherwise = ascendingCodeGroups
+    dg <- groupCodesMaybe (fusedCodeAt keys) n domain mkGroups
+    Just (Grouped df names (dgValueIndices dg) (dgOffsets dg) (dgRowToGroup dg))
+
+{- | Product of the per-key domains, 'Nothing' once it (or any factor) passes
+'directGroupThreshold'. Factors are capped before multiplying, so the running
+product never exceeds @threshold^2@ and cannot overflow.
+-}
+fusedDomain :: [Int] -> Maybe Int
+fusedDomain = go 1
+  where
+    go !acc [] = Just acc
+    go !acc (d : ds)
+        | d < 1 || d > directGroupThreshold = Nothing
+        | acc * d > directGroupThreshold = Nothing
+        | otherwise = go (acc * d) ds
+
+{- | Per-row fused mixed-radix code; @-1@ when any component code is invalid
+(only possible for corrupt dict codes), making 'groupCodesMaybe' bail to the
+hash path. Valid components compose to a code in @[0, product of domains)@.
+-}
+fusedCodeAt :: [FusedKey] -> (Int -> Int)
+fusedCodeAt [] = const (-1)
+fusedCodeAt (k0 : ks0) = go (fkCode k0) ks0
+  where
+    go f [] = f
+    go f (k : ks) =
+        let !d = fkDomain k
+            g = fkCode k
+         in go
+                ( \i ->
+                    let a = f i
+                     in if a < 0
+                            then -1
+                            else let b = g i in if b < 0 then -1 else a * d + b
+                )
+                ks
+
+{- | Hash of the key tuple behind a fused code: decompose the code back into
+component codes and mix each component (dict keys by their string bytes, @Int@
+keys by value) in key order, mirroring how 'dictCodesGroup' hashes its entries.
+-}
+fusedEntryHash :: [FusedKey] -> Int -> Int
+fusedEntryHash keys code =
+    let comps = decompose code (reverse (map fkDomain keys)) []
+     in L.foldl' (\h (k, c) -> fkMix k h c) fnvOffset (zip keys comps)
+  where
+    decompose !_ [] acc = acc
+    decompose !c (d : ds) acc = decompose (c `div` d) ds ((c `mod` d) : acc)
 
 {- | Dictionary-encode a single text key to dense int codes, then derive
 @valueIndices@/@offsets@ by counting sort. Profiled slower than the fused hash

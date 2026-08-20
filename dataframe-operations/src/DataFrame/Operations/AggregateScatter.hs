@@ -16,9 +16,11 @@ Every reduction takes the Round-5 grouping layout @(valueIndices, offsets)@ so
 the parallel kernel can split the group-id range across capabilities with no
 cross-worker merge. Each group's rows stay in original-row order within one
 worker's range, so results are byte-identical to the sequential path at any @-N@.
-(The one exception is the direct streaming Double sum/mean above the small-group
-cutoff, whose deterministic chunked partials change the float summation order;
-see 'DataFrame.Internal.AggKernelDirect'.)
+(Two exceptions, both deterministic at a fixed @-N@: the direct streaming
+Double sum/mean above the small-group cutoff, whose chunked partials change the
+float summation order, and the direct var/std, which finalize from
+(count, sum, sumsq) partials rather than the gather kernel's row-order Welford
+recurrence; see 'DataFrame.Internal.AggKernelDirect'.)
 -}
 module DataFrame.Operations.AggregateScatter (runPlan, runMomentPlan) where
 
@@ -37,7 +39,11 @@ import DataFrame.Internal.AggKernelDirect (
     directReduce,
     directThreshold,
  )
-import DataFrame.Internal.AggKernelPar (momentScatterPar, scatterReducePar)
+import DataFrame.Internal.AggKernelPar (
+    maxMinusMinScatterPar,
+    momentScatterPar,
+    scatterReducePar,
+ )
 import DataFrame.Internal.AggPlan (AggPlan (..), MomentPlan (..), Moments (..))
 import DataFrame.Internal.Column (Column (..), fromUnboxedVector)
 import DataFrame.Internal.DataFrame (GroupedDataFrame (..), getColumn)
@@ -48,14 +54,16 @@ runPlan :: GroupedDataFrame -> VU.Vector Int -> Int -> AggPlan -> Column
 runPlan gdf rtg nGroups plan = case plan of
     PlanScatter red name -> scatterColumn red name
     PlanMaxMinusMin a b ->
-        {- min/max are order-independent, so the fused single-pass streaming
-        kernel is exactly the two gather extrema it replaces; anything it
-        rejects (mixed/unclean columns, wide domain) keeps the gather path. -}
+        {- min/max are order-independent, so both fused single-pass kernels
+        (the direct streaming one below the domain cap, the group-range gather
+        one above it) are exactly the two gather extrema they replace; anything
+        they reject (mixed/unclean columns, small inputs) keeps the two-pass
+        gather path. -}
         let ca = col a
             cb = col b
             direct
                 | nGroups <= directThreshold = directMaxMinusMin rtg nGroups ca cb
-                | otherwise = Nothing
+                | otherwise = maxMinusMinScatterPar vis offs nGroups ca cb
          in case direct of
                 Just out -> out
                 Nothing -> maxMinusMin vis offs nGroups ca cb
@@ -154,9 +162,12 @@ scatterExtremaDbl red vis offs nGroups c =
 {- | Holistic per-group median over a single unboxed Int/Double column. The
 @valueIndices@/@offsets@ layout already places each group's rows in a contiguous
 run, so we copy each group's values into a scratch buffer at its own offset and
-sort that slice in place — each group's slice is independent, so the per-group
-sorts split across capabilities by group range with no merge. Empty groups never
-occur, so the result is total.
+select the median-rank order statistics in that slice in place (O(len) per
+group rather than the O(len log len) full sort) — each group's slice is
+independent, so the per-group selections split across capabilities by group
+range with no merge. Order statistics are value-determined, so the result is
+identical to the sorting variant. Empty groups never occur, so the result is
+total.
 -}
 groupedMedian :: VU.Vector Int -> VU.Vector Int -> Int -> Column -> Column
 groupedMedian vis offs nGroups c = case scatterColumnToDouble c of
@@ -187,15 +198,20 @@ medianByGroup vis offs nGroups vals = unsafePerformIO $ do
                                 fill (pos + 1)
                     fill s
                     let slice = VUM.unsafeSlice s len buf
-                    VA.sort slice
-                    let mid = s + len `div` 2
-                    med <-
-                        if odd len
-                            then VUM.unsafeRead buf mid
-                            else do
-                                hi <- VUM.unsafeRead buf mid
-                                lo <- VUM.unsafeRead buf (mid - 1)
-                                pure ((hi + lo) / 2)
+                        !mid = len `div` 2
+                    {- Move the least mid+1 values to the front (in no
+                    particular order); the two largest of those are the order
+                    statistics at sorted positions mid and mid-1. -}
+                    VA.select slice (mid + 1)
+                    let scan !i !hi !lo
+                            | i > mid = pure (hi, lo)
+                            | otherwise = do
+                                x <- VUM.unsafeRead slice i
+                                if x > hi
+                                    then scan (i + 1) x hi
+                                    else scan (i + 1) hi (max lo x)
+                    (hi, lo) <- scan 0 (negate (1 / 0)) (negate (1 / 0))
+                    let med = if odd len then hi else (hi + lo) / 2
                     VUM.unsafeWrite out g med
                     grp (g + 1)
          in grp gs

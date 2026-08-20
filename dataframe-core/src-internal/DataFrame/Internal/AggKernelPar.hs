@@ -8,13 +8,13 @@
 -- | Parallel scatter-accumulate aggregation kernel.
 module DataFrame.Internal.AggKernelPar (
     scatterReducePar,
+    maxMinusMinScatterPar,
     momentScatterPar,
 ) where
 
 import Control.Concurrent (forkIO, getNumCapabilities)
 import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar)
 import Control.Exception (SomeException, throwIO, try)
-import Control.Monad (when)
 import Data.Type.Equality (TestEquality (..), type (:~:) (Refl))
 import qualified Data.Vector.Unboxed as VU
 import qualified Data.Vector.Unboxed.Mutable as VUM
@@ -88,13 +88,27 @@ scatterReducePar red vis offs nGroups col
     | otherwise = case col of
         UnboxedColumn Nothing (v :: VU.Vector a) ->
             case testEquality (typeRep @a) (typeRep @Int) of
-                Just Refl -> Just (reduceParTyped red vis offs nGroups v intIdent)
+                Just Refl -> Just (reduceParInt red vis offs nGroups v)
                 Nothing -> case testEquality (typeRep @a) (typeRep @Double) of
-                    Just Refl -> Just (reduceParTyped red vis offs nGroups v dblIdent)
+                    Just Refl -> Just (reduceParDouble red vis offs nGroups v)
                     Nothing -> Nothing
         p@(PackedText _ _) -> scatterReducePar red vis offs nGroups (materializePacked p)
         _ -> Nothing
 {-# NOINLINE scatterReducePar #-}
+
+{- | Monomorphic entry points: the 'testEquality' dispatch above only yields an
+unsafe coercion, so a direct call to the polymorphic 'reduceParTyped' there
+would stay at the abstract element type and never meet its SPECIALIZE rules;
+calling through these fixed-type wrappers (the coercion lands on the argument)
+does.
+-}
+reduceParInt ::
+    Reduction -> VU.Vector Int -> VU.Vector Int -> Int -> VU.Vector Int -> Column
+reduceParInt red vis offs nGroups v = reduceParTyped red vis offs nGroups v intIdent
+
+reduceParDouble ::
+    Reduction -> VU.Vector Int -> VU.Vector Int -> Int -> VU.Vector Double -> Column
+reduceParDouble red vis offs nGroups v = reduceParTyped red vis offs nGroups v dblIdent
 
 rtgFromVis :: VU.Vector Int -> VU.Vector Int -> Int -> VU.Vector Int
 rtgFromVis vis offs nGroups = VU.create $ do
@@ -132,6 +146,28 @@ reduceParTyped ::
     VU.Vector a ->
     Idents a ->
     Column
+{- The SPECIALIZE pragmas matter: without them the @realToFrac@ in the
+mean/var/top2 kernels survives to runtime as a dictionary call through
+'Rational' (the Double->Double/Int->Double rewrite rules only fire once the
+type is concrete), costing ~4x on the whole pass. -}
+{-# SPECIALIZE reduceParTyped ::
+    Reduction ->
+    VU.Vector Int ->
+    VU.Vector Int ->
+    Int ->
+    VU.Vector Int ->
+    Idents Int ->
+    Column
+    #-}
+{-# SPECIALIZE reduceParTyped ::
+    Reduction ->
+    VU.Vector Int ->
+    VU.Vector Int ->
+    Int ->
+    VU.Vector Double ->
+    Idents Double ->
+    Column
+    #-}
 reduceParTyped red vis offs nGroups v idents =
     let !caps = capabilities
         !bounds = groupRangeBounds offs nGroups caps
@@ -151,23 +187,37 @@ reduceParTyped red vis offs nGroups v idents =
             RStd ->
                 fromUnboxedVector (unsafePerformIO (varPar True vis offs nGroups v caps bounds))
             RTop2Sum -> fromUnboxedVector (unsafePerformIO (top2Par vis offs nGroups v caps bounds))
-{-# INLINE reduceParTyped #-}
+{-# INLINEABLE reduceParTyped #-}
 
--- | Iterate the rows of groups @[gs, ge)@ in @valueIndices@/group order.
-overGroups ::
-    VU.Vector Int -> VU.Vector Int -> Int -> Int -> (Int -> Int -> IO ()) -> IO ()
-overGroups vis offs gs ge step = grp gs
+{- | For each group in @[gs, ge)@, fold the group's rows (in @valueIndices@
+order, i.e. ascending original-row order) into an accumulator held in
+registers, then hand the final accumulator to @done@ exactly once. Keeping the
+running state out of memory leaves one write per group instead of a
+read-modify-write per row; the per-group fold order is unchanged, so results
+stay byte-identical to the row-wise variant.
+-}
+overGroupsAcc ::
+    VU.Vector Int ->
+    VU.Vector Int ->
+    Int ->
+    Int ->
+    acc ->
+    (acc -> Int -> acc) ->
+    (Int -> acc -> IO ()) ->
+    IO ()
+overGroupsAcc vis offs gs ge seed step done = grp gs
   where
     grp !g
         | g >= ge = pure ()
         | otherwise = do
             let !e = VU.unsafeIndex offs (g + 1)
-                inner !pos
-                    | pos >= e = pure ()
-                    | otherwise = step g (VU.unsafeIndex vis pos) >> inner (pos + 1)
-            inner (VU.unsafeIndex offs g)
+                inner !pos !acc
+                    | pos >= e = pure acc
+                    | otherwise = inner (pos + 1) (step acc (VU.unsafeIndex vis pos))
+            acc <- inner (VU.unsafeIndex offs g) seed
+            done g acc
             grp (g + 1)
-{-# INLINE overGroups #-}
+{-# INLINE overGroupsAcc #-}
 
 countPar ::
     VU.Vector Int ->
@@ -200,9 +250,8 @@ sumPar ::
 sumPar vis offs nGroups v caps bounds = do
     out <- VUM.replicate nGroups 0
     forEachRange bounds caps $ \gs ge ->
-        overGroups vis offs gs ge $ \g row -> do
-            cur <- VUM.unsafeRead out g
-            VUM.unsafeWrite out g (cur + VU.unsafeIndex v row)
+        overGroupsAcc vis offs gs ge 0 (\acc row -> acc + VU.unsafeIndex v row) $
+            VUM.unsafeWrite out
     VU.unsafeFreeze out
 {-# INLINE sumPar #-}
 
@@ -220,9 +269,8 @@ extremaPar ::
 extremaPar combine seed vis offs nGroups v caps bounds = do
     out <- VUM.replicate nGroups seed
     forEachRange bounds caps $ \gs ge ->
-        overGroups vis offs gs ge $ \g row -> do
-            cur <- VUM.unsafeRead out g
-            VUM.unsafeWrite out g (combine cur (VU.unsafeIndex v row))
+        overGroupsAcc vis offs gs ge seed (\acc row -> combine acc (VU.unsafeIndex v row)) $
+            VUM.unsafeWrite out
     VU.unsafeFreeze out
 {-# INLINE extremaPar #-}
 
@@ -236,24 +284,24 @@ meanPar ::
     VU.Vector Int ->
     IO (VU.Vector Double)
 meanPar vis offs nGroups v caps bounds = do
-    s <- VUM.replicate nGroups (0 :: Double)
-    cnt <- VUM.replicate nGroups (0 :: Int)
+    out <- VUM.replicate nGroups (0 :: Double)
     forEachRange bounds caps $ \gs ge ->
-        overGroups vis offs gs ge $ \g row -> do
-            let !x = realToFrac (VU.unsafeIndex v row)
-            cs <- VUM.unsafeRead s g
-            VUM.unsafeWrite s g (cs + x)
-            cc <- VUM.unsafeRead cnt g
-            VUM.unsafeWrite cnt g (cc + 1)
-    out <- VUM.new nGroups
-    let fin !k
-            | k >= nGroups = pure ()
-            | otherwise = do
-                sv <- VUM.unsafeRead s k
-                c <- VUM.unsafeRead cnt k
-                VUM.unsafeWrite out k (if c == 0 then 0 / 0 else sv / fromIntegral c)
-                fin (k + 1)
-    fin 0
+        let grp !g
+                | g >= ge = pure ()
+                | otherwise = do
+                    let !e = VU.unsafeIndex offs (g + 1)
+                        inner !pos !acc
+                            | pos >= e = acc
+                            | otherwise =
+                                inner
+                                    (pos + 1)
+                                    (acc + realToFrac (VU.unsafeIndex v (VU.unsafeIndex vis pos)))
+                        !s0 = VU.unsafeIndex offs g
+                        !total = inner s0 0
+                        !c = e - s0
+                    VUM.unsafeWrite out g (if c == 0 then 0 / 0 else total / fromIntegral c)
+                    grp (g + 1)
+         in grp gs
     VU.unsafeFreeze out
 {-# INLINE meanPar #-}
 
@@ -268,32 +316,29 @@ varPar ::
     VU.Vector Int ->
     IO (VU.Vector Double)
 varPar takeSqrt vis offs nGroups v caps bounds = do
-    cnt <- VUM.replicate nGroups (0 :: Int)
-    meanV <- VUM.replicate nGroups (0 :: Double)
-    m2 <- VUM.replicate nGroups (0 :: Double)
+    out <- VUM.replicate nGroups (0 :: Double)
     forEachRange bounds caps $ \gs ge ->
-        overGroups vis offs gs ge $ \g row -> do
-            let !x = realToFrac (VU.unsafeIndex v row)
-            c <- VUM.unsafeRead cnt g
-            mu <- VUM.unsafeRead meanV g
-            mm <- VUM.unsafeRead m2 g
-            let !c' = c + 1
-                !delta = x - mu
-                !mu' = mu + delta / fromIntegral c'
-                !mm' = mm + delta * (x - mu')
-            VUM.unsafeWrite cnt g c'
-            VUM.unsafeWrite meanV g mu'
-            VUM.unsafeWrite m2 g mm'
-    out <- VUM.new nGroups
-    let fin !k
-            | k >= nGroups = pure ()
-            | otherwise = do
-                c <- VUM.unsafeRead cnt k
-                mm <- VUM.unsafeRead m2 k
-                let var = if c < 2 then 0 else mm / fromIntegral (c - 1)
-                VUM.unsafeWrite out k (if takeSqrt then sqrt var else var)
-                fin (k + 1)
-    fin 0
+        -- Per-group Welford state (count, mean, M2) carried in registers; the
+        -- update order per group is the same ascending row order as before.
+        let grp !g
+                | g >= ge = pure ()
+                | otherwise = do
+                    let !e = VU.unsafeIndex offs (g + 1)
+                        inner !pos !c !mu !mm
+                            | pos >= e =
+                                let var = if c < 2 then 0 else mm / fromIntegral (c - 1)
+                                 in if takeSqrt then sqrt var else var
+                            | otherwise =
+                                let !x = realToFrac (VU.unsafeIndex v (VU.unsafeIndex vis pos))
+                                    !c' = c + 1
+                                    !delta = x - mu
+                                    !mu' = mu + delta / fromIntegral c'
+                                    !mm' = mm + delta * (x - mu')
+                                 in inner (pos + 1) c' mu' mm'
+                        !res = inner (VU.unsafeIndex offs g) (0 :: Int) 0 0
+                    VUM.unsafeWrite out g res
+                    grp (g + 1)
+         in grp gs
     VU.unsafeFreeze out
 {-# INLINE varPar #-}
 
@@ -308,31 +353,153 @@ top2Par ::
     IO (VU.Vector Double)
 top2Par vis offs nGroups v caps bounds = do
     let ninf = negate (1 / 0) :: Double
-    m1 <- VUM.replicate nGroups ninf
-    m2 <- VUM.replicate nGroups ninf
+    out <- VUM.replicate nGroups (0 :: Double)
     forEachRange bounds caps $ \gs ge ->
-        overGroups vis offs gs ge $ \g row -> do
-            let !x = realToFrac (VU.unsafeIndex v row)
-            a1 <- VUM.unsafeRead m1 g
-            if x > a1
-                then do
-                    VUM.unsafeWrite m1 g x
-                    VUM.unsafeWrite m2 g a1
-                else do
-                    a2 <- VUM.unsafeRead m2 g
-                    when (x > a2) (VUM.unsafeWrite m2 g x)
-    out <- VUM.new nGroups
-    let fin !k
-            | k >= nGroups = pure ()
-            | otherwise = do
-                a1 <- VUM.unsafeRead m1 k
-                a2 <- VUM.unsafeRead m2 k
-                let sm = (if isInfinite a1 then 0 else a1) + (if isInfinite a2 then 0 else a2)
-                VUM.unsafeWrite out k sm
-                fin (k + 1)
-    fin 0
+        -- The (largest, second-largest) pair carried in registers per group.
+        let grp !g
+                | g >= ge = pure ()
+                | otherwise = do
+                    let !e = VU.unsafeIndex offs (g + 1)
+                        inner !pos !a1 !a2
+                            | pos >= e =
+                                (if isInfinite a1 then 0 else a1)
+                                    + (if isInfinite a2 then 0 else a2)
+                            | otherwise =
+                                let !x = realToFrac (VU.unsafeIndex v (VU.unsafeIndex vis pos))
+                                 in if x > a1
+                                        then inner (pos + 1) x a1
+                                        else inner (pos + 1) a1 (max a2 x)
+                        !res = inner (VU.unsafeIndex offs g) ninf ninf
+                    VUM.unsafeWrite out g res
+                    grp (g + 1)
+         in grp gs
     VU.unsafeFreeze out
 {-# INLINE top2Par #-}
+
+-------------------------------------------------------------------------------
+-- Parallel fused max(a) - min(b) (Q7 at wide group domains)
+-------------------------------------------------------------------------------
+
+{- | Fused @max a - min b@ over the group-range layout: ONE traversal of
+@valueIndices@ accumulating both extrema, parallel by disjoint group range with
+no cross-worker merge. min/max are order-independent, so the result is
+byte-identical to running the two gather extrema passes separately; the fusion
+halves the index traffic. 'Nothing' below the parallel threshold or unless both
+columns are clean unboxed and same-typed (Int/Int keeps the Int result of the
+interpreter; Double/Double the Double one) — the caller then keeps its two-pass
+fallback.
+-}
+maxMinusMinScatterPar ::
+    VU.Vector Int -> VU.Vector Int -> Int -> Column -> Column -> Maybe Column
+maxMinusMinScatterPar vis offs nGroups ca cb
+    | not (shouldPar (VU.length vis)) || nGroups <= 1 = Nothing
+    | otherwise = case (ca, cb) of
+        ( UnboxedColumn Nothing (va :: VU.Vector x)
+            , UnboxedColumn Nothing (vb :: VU.Vector y)
+            )
+                | Just Refl <- testEquality (typeRep @x) (typeRep @Int)
+                , Just Refl <- testEquality (typeRep @y) (typeRep @Int) ->
+                    Just (maxMinusMinParInt vis offs nGroups va vb caps bounds)
+                | Just Refl <- testEquality (typeRep @x) (typeRep @Double)
+                , Just Refl <- testEquality (typeRep @y) (typeRep @Double) ->
+                    Just (maxMinusMinParDbl vis offs nGroups va vb caps bounds)
+        _ -> Nothing
+  where
+    !caps = capabilities
+    !bounds = groupRangeBounds offs nGroups caps
+{-# NOINLINE maxMinusMinScatterPar #-}
+
+{- | Monomorphic entry points (see 'reduceParInt' for why the 'testEquality'
+dispatch needs them).
+-}
+maxMinusMinParInt ::
+    VU.Vector Int ->
+    VU.Vector Int ->
+    Int ->
+    VU.Vector Int ->
+    VU.Vector Int ->
+    Int ->
+    VU.Vector Int ->
+    Column
+maxMinusMinParInt vis offs nGroups va vb caps bounds =
+    fromUnboxedVector
+        (unsafePerformIO (maxMinusMinPar minBound maxBound vis offs nGroups va vb caps bounds))
+{-# NOINLINE maxMinusMinParInt #-}
+
+maxMinusMinParDbl ::
+    VU.Vector Int ->
+    VU.Vector Int ->
+    Int ->
+    VU.Vector Double ->
+    VU.Vector Double ->
+    Int ->
+    VU.Vector Int ->
+    Column
+maxMinusMinParDbl vis offs nGroups va vb caps bounds =
+    fromUnboxedVector
+        ( unsafePerformIO
+            (maxMinusMinPar (negate (1 / 0)) (1 / 0) vis offs nGroups va vb caps bounds)
+        )
+{-# NOINLINE maxMinusMinParDbl #-}
+
+maxMinusMinPar ::
+    (VU.Unbox a, Num a, Ord a) =>
+    a ->
+    a ->
+    VU.Vector Int ->
+    VU.Vector Int ->
+    Int ->
+    VU.Vector a ->
+    VU.Vector a ->
+    Int ->
+    VU.Vector Int ->
+    IO (VU.Vector a)
+{-# SPECIALIZE maxMinusMinPar ::
+    Int ->
+    Int ->
+    VU.Vector Int ->
+    VU.Vector Int ->
+    Int ->
+    VU.Vector Int ->
+    VU.Vector Int ->
+    Int ->
+    VU.Vector Int ->
+    IO (VU.Vector Int)
+    #-}
+{-# SPECIALIZE maxMinusMinPar ::
+    Double ->
+    Double ->
+    VU.Vector Int ->
+    VU.Vector Int ->
+    Int ->
+    VU.Vector Double ->
+    VU.Vector Double ->
+    Int ->
+    VU.Vector Int ->
+    IO (VU.Vector Double)
+    #-}
+maxMinusMinPar maxSeed minSeed vis offs nGroups va vb caps bounds = do
+    out <- VUM.new nGroups
+    forEachRange bounds caps $ \gs ge ->
+        -- Both extrema carried in registers per group; one traversal of the
+        -- shared index slice reads both value columns.
+        let grp !g
+                | g >= ge = pure ()
+                | otherwise = do
+                    let !e = VU.unsafeIndex offs (g + 1)
+                        inner !pos !mx !mn
+                            | pos >= e = mx - mn
+                            | otherwise =
+                                let !row = VU.unsafeIndex vis pos
+                                 in inner
+                                        (pos + 1)
+                                        (max mx (VU.unsafeIndex va row))
+                                        (min mn (VU.unsafeIndex vb row))
+                        !res = inner (VU.unsafeIndex offs g) maxSeed minSeed
+                    VUM.unsafeWrite out g res
+                    grp (g + 1)
+         in grp gs
+    VU.unsafeFreeze out
 
 -------------------------------------------------------------------------------
 -- Parallel fused two-column moments (Q9)
@@ -371,17 +538,35 @@ momentPar vis offs nGroups xs ys caps bounds = do
     sxx <- VUM.replicate nGroups (0 :: Double)
     syy <- VUM.replicate nGroups (0 :: Double)
     sxy <- VUM.replicate nGroups (0 :: Double)
-    let bump arr g d = VUM.unsafeRead arr g >>= \c -> VUM.unsafeWrite arr g (c + d)
     forEachRange bounds caps $ \gs ge ->
-        overGroups vis offs gs ge $ \g row -> do
-            let !x = VU.unsafeIndex xs row
-                !y = VU.unsafeIndex ys row
-            VUM.unsafeRead cnt g >>= \c -> VUM.unsafeWrite cnt g (c + 1)
-            bump sx g x
-            bump sy g y
-            bump sxx g (x * x)
-            bump syy g (y * y)
-            bump sxy g (x * y)
+        -- The six running sums carried in registers per group, written once.
+        let grp !g
+                | g >= ge = pure ()
+                | otherwise = do
+                    let !e = VU.unsafeIndex offs (g + 1)
+                        inner !pos !ax !ay !axx !ayy !axy
+                            | pos >= e = do
+                                VUM.unsafeWrite sx g ax
+                                VUM.unsafeWrite sy g ay
+                                VUM.unsafeWrite sxx g axx
+                                VUM.unsafeWrite syy g ayy
+                                VUM.unsafeWrite sxy g axy
+                            | otherwise =
+                                let !row = VU.unsafeIndex vis pos
+                                    !x = VU.unsafeIndex xs row
+                                    !y = VU.unsafeIndex ys row
+                                 in inner
+                                        (pos + 1)
+                                        (ax + x)
+                                        (ay + y)
+                                        (axx + x * x)
+                                        (ayy + y * y)
+                                        (axy + x * y)
+                        !s0 = VU.unsafeIndex offs g
+                    VUM.unsafeWrite cnt g (e - s0)
+                    inner s0 0 0 0 0 0
+                    grp (g + 1)
+         in grp gs
     Moments . fromUnboxedVector
         <$> VU.unsafeFreeze cnt
         <*> (fromUnboxedVector <$> VU.unsafeFreeze sx)

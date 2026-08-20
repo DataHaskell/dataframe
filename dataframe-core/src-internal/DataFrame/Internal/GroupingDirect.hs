@@ -4,19 +4,26 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 
-{- | Low-cardinality direct-indexed grouping fast path: when the key is a single
-clean unboxed @Int@ column of small value range, the value itself indexes a dense
-accumulator (no hashing/probing). Emits groups in ascending value order.
+{- | Low-cardinality direct-indexed grouping fast path: when every row's key
+reduces to a dense @Int@ code in a small domain, the code itself indexes a dense
+accumulator (no hashing/probing). All O(n) passes run chunked across
+capabilities — per-chunk histograms feed prefix-summed disjoint write cursors —
+so the stable within-group row order of the sequential counting sort is
+reproduced exactly.
 -}
 module DataFrame.Internal.GroupingDirect (
     directGroupThreshold,
     tryDirectGroupColumn,
+    groupCodesMaybe,
+    ascendingCodeGroups,
+    rangeOf,
     DirectGrouping (..),
 ) where
 
 import Control.Concurrent (forkIO, getNumCapabilities)
 import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar)
 import Control.Exception (SomeException, throwIO, try)
+import Control.Monad.ST (runST)
 import Data.Type.Equality (TestEquality (..), type (:~:) (Refl))
 import qualified Data.Vector.Unboxed as VU
 import qualified Data.Vector.Unboxed.Mutable as VUM
@@ -25,9 +32,10 @@ import Type.Reflection (typeRep)
 
 import DataFrame.Internal.Column (Column (..))
 
-{- | Largest key value RANGE (max - min + 1) the direct grouping path accepts. A
-@2^20@-slot histogram is 8MB; the low-cardinality questions sit far below it
-(id4 range 100, id6 range 1e5). Wider ranges fall back to the hash group-by.
+{- | Largest key code DOMAIN (single-key value range, or the product of per-key
+domains for a fused multi-key code) the direct grouping path accepts. A @2^20@-slot
+histogram is 8MB; the low-cardinality questions sit far below it (id4 range 100,
+id6 range 1e5). Wider domains fall back to the hash group-by.
 -}
 directGroupThreshold :: Int
 directGroupThreshold = 1048576
@@ -60,7 +68,12 @@ tryDirectGroupColumn (UnboxedColumn Nothing (v :: VU.Vector a))
         let (!mn, !mx) = rangeOf v
             !range = mx - mn + 1
          in if range >= 1 && range <= directGroupThreshold
-                then Just (directGroup v mn range)
+                then
+                    groupCodesMaybe
+                        (\i -> VU.unsafeIndex v i - mn)
+                        (VU.length v)
+                        range
+                        ascendingCodeGroups
                 else Nothing
 tryDirectGroupColumn _ = Nothing
 
@@ -69,18 +82,8 @@ rangeOf :: VU.Vector Int -> (Int, Int)
 rangeOf v
     | not (shouldPar n) = rangeChunk v 0 n
     | otherwise = unsafePerformIO $ do
-        let !caps = capabilities
-            !per = (n + caps - 1) `div` caps
-            spawn w = do
-                var <- newEmptyMVar
-                let !lo = min n (w * per)
-                    !hi = min n (lo + per)
-                _ <- forkIO (try (pure $! rangeChunk v lo hi) >>= putMVar var)
-                pure var
-        vars <- mapM spawn [0 .. caps - 1]
-        rs <- mapM takeMVar vars
-        rs' <- mapM (either (throwIO @SomeException) pure) rs
-        pure (combineRanges (filter (\(a, _) -> a /= maxBound) rs'))
+        rs <- forkJoinResults [pure $! rangeChunk v lo hi | (lo, hi) <- rowChunks n]
+        pure (combineRanges (filter (\(a, _) -> a /= maxBound) rs))
   where
     !n = VU.length v
 {-# NOINLINE rangeOf #-}
@@ -101,134 +104,233 @@ combineRanges ((a0, b0) : rest) = foldr (\(a, b) (ma, mb) -> (min ma a, max mb b
 shouldPar :: Int -> Bool
 shouldPar n = n >= parThreshold && capabilities > 1
 
-{- | Build the grouping by counting sort on @value - min@: a (parallel) per-value
-histogram, compaction of non-empty values into ascending dense ids, a scan into
-offsets, then a stable placement pass building @valueIndices@ and @rowToGroup@.
+{- | Contiguous per-worker row (or code) ranges: one chunk per capability above
+the parallel threshold, a single chunk otherwise (the sequential fallback runs
+the same code on the calling thread).
 -}
-directGroup :: VU.Vector Int -> Int -> Int -> DirectGrouping
-directGroup v mn range = unsafePerformIO $ do
-    let !n = VU.length v
-    hist <- buildHistogram v mn range n
-    valToGroup <- VUM.replicate range (-1 :: Int)
-    grpCount <- VUM.new range
-    nGroups <- compact hist range valToGroup grpCount
-    offsM <- VUM.new (nGroups + 1)
-    cursor <- VUM.new nGroups
-    scanOffsets grpCount nGroups offsM cursor
-    rtg <- VUM.new n
-    vis <- VUM.new n
-    place v mn n valToGroup cursor rtg vis
-    frozenRtg <- VU.unsafeFreeze rtg
-    frozenVis <- VU.unsafeFreeze vis
-    frozenOffs <- VU.unsafeFreeze offsM
-    pure (DirectGrouping frozenRtg frozenVis frozenOffs nGroups)
-{-# NOINLINE directGroup #-}
+rowChunks :: Int -> [(Int, Int)]
+rowChunks n
+    | not (shouldPar n) = [(0, n)]
+    | otherwise = splitRange capabilities n
 
-{- | Parallel per-value histogram: each worker fills a private @range@-slot
-count over its row chunk, then the partials are summed (exact integers, so the
-merge order is irrelevant). Sequential single pass below 'parThreshold'.
+-- | @k@ near-equal contiguous subranges of @[0, n)@, empties dropped.
+splitRange :: Int -> Int -> [(Int, Int)]
+splitRange k n =
+    [ (lo, hi)
+    | w <- [0 .. k - 1]
+    , let lo = min n (w * per)
+    , let hi = min n (lo + per)
+    , lo < hi
+    ]
+  where
+    !per = (n + k - 1) `div` k
+
+-- | Like 'rowChunks' but over the code domain (parallel merge/seed passes).
+codeSlices :: Int -> [(Int, Int)]
+codeSlices card
+    | card < 4096 || capabilities <= 1 = [(0, card)]
+    | otherwise = splitRange capabilities card
+
+{- | Run each action on its own thread and collect the results in order;
+rethrow the first failure. A single action runs on the calling thread.
 -}
-buildHistogram :: VU.Vector Int -> Int -> Int -> Int -> IO (VUM.IOVector Int)
-buildHistogram v mn range n
-    | not (shouldPar n) = histChunk v mn range 0 n
-    | otherwise = do
-        let !caps = capabilities
-            !per = (n + caps - 1) `div` caps
-            spawn w = do
-                var <- newEmptyMVar
-                let !lo = min n (w * per)
-                    !hi = min n (lo + per)
-                _ <- forkIO (try (histChunk v mn range lo hi) >>= putMVar var)
-                pure var
-        vars <- mapM spawn [0 .. caps - 1]
-        rs <- mapM takeMVar vars
-        parts <- mapM (either (throwIO @SomeException) pure) rs
-        case parts of
-            [] -> VUM.replicate range 0
-            (p0 : rest) -> do
-                mapM_ (addInto p0 range) rest
-                pure p0
+forkJoinResults :: [IO a] -> IO [a]
+forkJoinResults [act] = fmap (: []) act
+forkJoinResults actions = do
+    vars <- mapM spawn actions
+    rs <- mapM takeMVar vars
+    mapM (either (throwIO @SomeException) pure) rs
+  where
+    spawn act = do
+        var <- newEmptyMVar
+        _ <- forkIO (try act >>= putMVar var)
+        pure var
 
-histChunk :: VU.Vector Int -> Int -> Int -> Int -> Int -> IO (VUM.IOVector Int)
-histChunk v mn range lo hi = do
-    acc <- VUM.replicate range (0 :: Int)
+{- | Build the grouping by counting sort on a per-row code in @[0, card)@:
+per-chunk (parallel) histograms with bounds validation, a caller-chosen
+code-to-dense-group mapping over the summed counts, a scan into offsets, then a
+stable placement pass building @valueIndices@ and @rowToGroup@ in parallel —
+each chunk owns a disjoint prefix-summed cursor per code, so rows keep original
+order within each group exactly as the sequential pass produced. Returns
+'Nothing' when any row's code falls outside @[0, card)@ (fall back to hashing).
+
+@mkGroups counts@ must return a dense group id for every code with a nonzero
+count (other slots are never read) and the group count; it decides group order.
+-}
+groupCodesMaybe ::
+    (Int -> Int) ->
+    Int ->
+    Int ->
+    (VU.Vector Int -> (VU.Vector Int, Int)) ->
+    Maybe DirectGrouping
+groupCodesMaybe codeAt n card mkGroups
+    | n <= 0 || card <= 0 = Nothing
+    | otherwise = unsafePerformIO $ do
+        let chunks = rowChunks n
+        -- Phase 1: per-chunk code histograms, validating every code.
+        parts <- forkJoinResults [histValidChunk codeAt card lo hi | (lo, hi) <- chunks]
+        if not (all snd parts)
+            then pure Nothing
+            else do
+                let partials = map fst parts
+                -- Phase 2: per-code totals, parallel over code slices.
+                totalsM <- VUM.new card
+                _ <-
+                    forkJoinResults
+                        [sumSlice partials totalsM lo hi | (lo, hi) <- codeSlices card]
+                counts <- VU.unsafeFreeze totalsM
+                let (!codeToGroup, !nGroups) = mkGroups counts
+                -- Phase 3: group offsets (O(card + nGroups), sequential).
+                offs <- scanOffsets counts codeToGroup nGroups
+                -- Phase 4: turn each partial histogram into its chunk's cursor:
+                -- cursor_w[c] = offs[group c] + Σ_{w'<w} partial_w'[c].
+                _ <-
+                    forkJoinResults
+                        [ seedSlice counts codeToGroup offs partials lo hi
+                        | (lo, hi) <- codeSlices card
+                        ]
+                -- Phase 5: stable placement, parallel over the same row chunks.
+                rtg <- VUM.new n
+                vis <- VUM.new n
+                _ <-
+                    forkJoinResults
+                        [ placeChunk codeAt codeToGroup cursor rtg vis lo hi
+                        | ((lo, hi), cursor) <- zip chunks partials
+                        ]
+                frozenRtg <- VU.unsafeFreeze rtg
+                frozenVis <- VU.unsafeFreeze vis
+                pure (Just (DirectGrouping frozenRtg frozenVis offs nGroups))
+{-# NOINLINE groupCodesMaybe #-}
+
+{- | Histogram one row chunk into a private @card@-slot count, reporting 'False'
+as soon as any code escapes @[0, card)@ (the counts are then abandoned).
+-}
+histValidChunk ::
+    (Int -> Int) -> Int -> Int -> Int -> IO (VUM.IOVector Int, Bool)
+histValidChunk codeAt card lo hi = do
+    acc <- VUM.replicate card (0 :: Int)
     let go !i
-            | i >= hi = pure ()
+            | i >= hi = pure True
             | otherwise = do
-                let !k = VU.unsafeIndex v i - mn
-                c <- VUM.unsafeRead acc k
-                VUM.unsafeWrite acc k (c + 1)
-                go (i + 1)
-    go lo
-    pure acc
+                let !c = codeAt i
+                if c < 0 || c >= card
+                    then pure False
+                    else do
+                        x <- VUM.unsafeRead acc c
+                        VUM.unsafeWrite acc c (x + 1)
+                        go (i + 1)
+    ok <- go lo
+    pure (acc, ok)
 
-addInto :: VUM.IOVector Int -> Int -> VUM.IOVector Int -> IO ()
-addInto dst range src = go 0
+-- | @totals[c] = Σ_w partial_w[c]@ over one code slice (exact integer sums).
+sumSlice :: [VUM.IOVector Int] -> VUM.IOVector Int -> Int -> Int -> IO ()
+sumSlice partials totals lo hi = go lo
   where
-    go !k
-        | k >= range = pure ()
+    go !c
+        | c >= hi = pure ()
         | otherwise = do
-            a <- VUM.unsafeRead dst k
-            b <- VUM.unsafeRead src k
-            VUM.unsafeWrite dst k (a + b)
-            go (k + 1)
+            let sumP [] !acc = pure acc
+                sumP (p : ps) !acc = do
+                    x <- VUM.unsafeRead p c
+                    sumP ps (acc + x)
+            s <- sumP partials 0
+            VUM.unsafeWrite totals c s
+            go (c + 1)
 
-{- | Walk the histogram in ascending value order, assigning a dense group id to
-each non-empty value and copying its count into @grpCount@ at that id. Returns
-the group count.
+{- | Exclusive prefix scan of per-group counts (gathered through @codeToGroup@)
+into the offsets array of length @nGroups + 1@.
 -}
-compact ::
-    VUM.IOVector Int -> Int -> VUM.IOVector Int -> VUM.IOVector Int -> IO Int
-compact hist range valToGroup grpCount = go 0 0
-  where
-    go !val !next
-        | val >= range = pure next
-        | otherwise = do
-            c <- VUM.unsafeRead hist val
-            if c == 0
-                then go (val + 1) next
-                else do
-                    VUM.unsafeWrite valToGroup val next
-                    VUM.unsafeWrite grpCount next c
-                    go (val + 1) (next + 1)
+scanOffsets :: VU.Vector Int -> VU.Vector Int -> Int -> IO (VU.Vector Int)
+scanOffsets counts codeToGroup nGroups = do
+    let !card = VU.length counts
+    grpCount <- VUM.new nGroups
+    let gather !c
+            | c >= card = pure ()
+            | otherwise = do
+                let !cnt = VU.unsafeIndex counts c
+                if cnt == 0
+                    then gather (c + 1)
+                    else do
+                        VUM.unsafeWrite grpCount (VU.unsafeIndex codeToGroup c) cnt
+                        gather (c + 1)
+    gather 0
+    offsM <- VUM.new (nGroups + 1)
+    let scan !g !acc
+            | g >= nGroups = VUM.unsafeWrite offsM nGroups acc
+            | otherwise = do
+                VUM.unsafeWrite offsM g acc
+                c <- VUM.unsafeRead grpCount g
+                scan (g + 1) (acc + c)
+    scan 0 0
+    VU.unsafeFreeze offsM
 
-{- | Exclusive prefix scan of group counts into @offsM@ (length nGroups+1) and
-seed the per-group write @cursor@ at each group's start offset.
+{- | Rewrite each chunk's partial histogram in place into its disjoint write
+cursor: chunk @w@ starts at the group offset plus everything earlier chunks
+will place there, keeping the counting sort stable across chunks.
 -}
-scanOffsets ::
-    VUM.IOVector Int -> Int -> VUM.IOVector Int -> VUM.IOVector Int -> IO ()
-scanOffsets grpCount nGroups offsM cursor = go 0 0
-  where
-    go !g !acc
-        | g >= nGroups = VUM.unsafeWrite offsM nGroups acc
-        | otherwise = do
-            VUM.unsafeWrite offsM g acc
-            VUM.unsafeWrite cursor g acc
-            c <- VUM.unsafeRead grpCount g
-            go (g + 1) (acc + c)
-
-{- | Stable placement pass: for each row in original order, look up its group id
-through the value map, write @rowToGroup@, and append the row to its group's run
-in @valueIndices@ via the advancing cursor (rows keep original order per group).
--}
-place ::
+seedSlice ::
     VU.Vector Int ->
+    VU.Vector Int ->
+    VU.Vector Int ->
+    [VUM.IOVector Int] ->
     Int ->
     Int ->
-    VUM.IOVector Int ->
-    VUM.IOVector Int ->
-    VUM.IOVector Int ->
-    VUM.IOVector Int ->
     IO ()
-place v mn n valToGroup cursor rtg vis = go 0
+seedSlice counts codeToGroup offs partials lo hi = go lo
+  where
+    go !c
+        | c >= hi = pure ()
+        | VU.unsafeIndex counts c == 0 = go (c + 1)
+        | otherwise = do
+            let !g = VU.unsafeIndex codeToGroup c
+                loop [] !_ = pure ()
+                loop (p : ps) !acc = do
+                    t <- VUM.unsafeRead p c
+                    VUM.unsafeWrite p c acc
+                    loop ps (acc + t)
+            loop partials (VU.unsafeIndex offs g)
+            go (c + 1)
+
+{- | Stable placement over one row chunk: for each row in original order, write
+@rowToGroup@ and append the row to its group's run in @valueIndices@ via the
+chunk's advancing cursor.
+-}
+placeChunk ::
+    (Int -> Int) ->
+    VU.Vector Int ->
+    VUM.IOVector Int ->
+    VUM.IOVector Int ->
+    VUM.IOVector Int ->
+    Int ->
+    Int ->
+    IO ()
+placeChunk codeAt codeToGroup cursor rtg vis lo hi = go lo
   where
     go !i
-        | i >= n = pure ()
+        | i >= hi = pure ()
         | otherwise = do
-            let !val = VU.unsafeIndex v i - mn
-            g <- VUM.unsafeRead valToGroup val
+            let !c = codeAt i
+                !g = VU.unsafeIndex codeToGroup c
             VUM.unsafeWrite rtg i g
-            pos <- VUM.unsafeRead cursor g
+            pos <- VUM.unsafeRead cursor c
             VUM.unsafeWrite vis pos i
-            VUM.unsafeWrite cursor g (pos + 1)
+            VUM.unsafeWrite cursor c (pos + 1)
             go (i + 1)
+
+{- | The ascending-code group order: walk the counts in code order, assigning a
+dense group id to each non-empty code (empty codes get no id and no output
+group). The single-Int-key path keeps its groups in ascending value order.
+-}
+ascendingCodeGroups :: VU.Vector Int -> (VU.Vector Int, Int)
+ascendingCodeGroups counts = runST $ do
+    let !card = VU.length counts
+    m <- VUM.new card
+    let go !c !next
+            | c >= card = pure next
+            | VU.unsafeIndex counts c > 0 = do
+                VUM.unsafeWrite m c next
+                go (c + 1) (next + 1)
+            | otherwise = go (c + 1) next
+    nGroups <- go 0 0
+    frozen <- VU.unsafeFreeze m
+    pure (frozen, nGroups)

@@ -29,21 +29,28 @@ import DataFrame.Internal.Column (
  )
 
 {- | Group-domain size at or below which the direct-indexed accumulator path is
-taken; wider domains keep the group-range kernel. At the 4M cap a per-worker
-accumulator array is 32MB (8 bytes per group), transient and bounded by the
-capability count, which stays far below the working set of the row data the
-pass streams over.
+taken; wider domains keep the group-range gather kernel. The direct path
+replicates its accumulator array per worker (capabilities x nGroups x 8-16
+bytes), so above this cap the accumulators overflow the shared cache and every
+row's update misses, while the merge adds O(capabilities x nGroups); the gather
+kernel splits the GROUP range across workers instead (disjoint outputs, no
+merge, one small hot accumulator per group). Measured on 1e8 rows at -N16 the
+crossover sits between 256k and 512k groups for both the one-array (sum) and
+two-array (top2) accumulators, so the cap takes the cache-safe end of it.
 -}
 directThreshold :: Int
-directThreshold = 4194304
+directThreshold = 262144
 
-{- | Group count at or below which the float (Double sum/mean/var/std) direct
+{- | Group count at or below which the float (Double sum/mean) direct
 reductions run as ONE sequential row-order pass: the accumulators fit in L2, the
 pass is memory-bandwidth bound, and adding each value to its group in ascending
 row order is exactly the order the group-range gather kernel uses (the grouping
 layer's @valueIndices@ is a stable counting sort), so the result is
 byte-identical to it. Above this the parallel chunked variant runs instead (see
-'sumDblDirect').
+'sumDblDirect'). Var/std are never taken directly: any chunked merge of
+variance state changes the float recurrence, and the group-range gather kernel
+already runs them in parallel while replaying the interpreter's per-group
+update order bit-for-bit.
 -}
 seqFloatGroups :: Int
 seqFloatGroups = 65536
@@ -78,8 +85,9 @@ directReduce red g nGroups col = case col of
 {- | The reductions admitted over an Int column. Sum/min/max/mean/count are
 exact in the Int domain (any merge order gives the same bits); top2sum selects
 the two largest values (order-independent as a multiset selection) and only
-adds them once at finalize; var/std take the sequential row-order pass, which
-replays the gather kernel's per-group update order exactly.
+adds them once at finalize. Var/std stay with the group-range gather kernel:
+its per-group Welford recurrence replays the interpreter's update order
+bit-for-bit, which no chunk-merged direct pass can.
 -}
 directInt :: Reduction -> VU.Vector Int -> Int -> VU.Vector Int -> Maybe Column
 directInt red g nGroups v = case red of
@@ -89,20 +97,13 @@ directInt red g nGroups v = case red of
     RMax -> Just (fromUnboxedVector (extremaIntDirect False g nGroups v))
     RMean -> Just (fromUnboxedVector (meanIntDirect g nGroups v))
     RTop2Sum -> Just (fromUnboxedVector (top2Direct g nGroups v))
-    RVar
-        | nGroups <= seqFloatGroups ->
-            Just (fromUnboxedVector (varSeqDirect False g nGroups v))
-    RStd
-        | nGroups <= seqFloatGroups ->
-            Just (fromUnboxedVector (varSeqDirect True g nGroups v))
     _ -> Nothing
 
 {- | The reductions admitted over a Double column. Count/min/max/top2sum are
 order-independent (exact per-worker merge, byte-identical at any @-N@). The
 float sum/mean run sequentially in row order below 'seqFloatGroups' (matching
 the gather kernel's per-group addition order exactly) and as deterministic
-chunked partials above it; var/std only below 'seqFloatGroups' (sequential,
-byte-identical), keeping the gather kernel above.
+chunked partials above it. Var/std keep the gather kernel (see 'directInt').
 -}
 directDouble ::
     Reduction -> VU.Vector Int -> Int -> VU.Vector Double -> Maybe Column
@@ -113,12 +114,6 @@ directDouble red g nGroups v = case red of
     RMin -> Just (fromUnboxedVector (extremaDblDirect True g nGroups v))
     RMax -> Just (fromUnboxedVector (extremaDblDirect False g nGroups v))
     RTop2Sum -> Just (fromUnboxedVector (top2Direct g nGroups v))
-    RVar
-        | nGroups <= seqFloatGroups ->
-            Just (fromUnboxedVector (varSeqDirect False g nGroups v))
-    RStd
-        | nGroups <= seqFloatGroups ->
-            Just (fromUnboxedVector (varSeqDirect True g nGroups v))
     _ -> Nothing
 
 {- | The fused @max a - min b@ direct pass: BOTH extrema accumulate in one
@@ -415,6 +410,18 @@ maxMinusMinDirect ::
     VU.Vector a ->
     VU.Vector a ->
     VU.Vector a
+{-# SPECIALIZE maxMinusMinDirect ::
+    Int -> Int -> VU.Vector Int -> Int -> VU.Vector Int -> VU.Vector Int -> VU.Vector Int
+    #-}
+{-# SPECIALIZE maxMinusMinDirect ::
+    Double ->
+    Double ->
+    VU.Vector Int ->
+    Int ->
+    VU.Vector Double ->
+    VU.Vector Double ->
+    VU.Vector Double
+    #-}
 maxMinusMinDirect maxSeed minSeed g nGroups va vb
     | not (shouldPar n) = unsafePerformIO $ do
         (mx, mn) <- maxMinusMinChunk maxSeed minSeed g va vb nGroups 0 n
@@ -426,7 +433,10 @@ maxMinusMinDirect maxSeed minSeed g nGroups va vb
         finalizeMaxMinusMin nGroups mx mn
   where
     !n = VU.length va
-{-# NOINLINE maxMinusMinDirect #-}
+{- INLINEABLE (not NOINLINE) so the SPECIALIZE pragmas above take effect; the
+kernel is a pure function of its arguments, so the usual unsafePerformIO
+sharing concern does not apply. -}
+{-# INLINEABLE maxMinusMinDirect #-}
 
 maxMinusMinChunk ::
     (VU.Unbox a, Ord a) =>
@@ -508,6 +518,12 @@ element and the @-inf -> 0@ guards at finalize.
 -}
 top2Direct ::
     (VU.Unbox a, Real a) => VU.Vector Int -> Int -> VU.Vector a -> VU.Vector Double
+{-# SPECIALIZE top2Direct ::
+    VU.Vector Int -> Int -> VU.Vector Int -> VU.Vector Double
+    #-}
+{-# SPECIALIZE top2Direct ::
+    VU.Vector Int -> Int -> VU.Vector Double -> VU.Vector Double
+    #-}
 top2Direct g nGroups v
     | not (shouldPar n) = unsafePerformIO $ do
         (m1, m2) <- top2Chunk g v nGroups 0 n
@@ -518,7 +534,9 @@ top2Direct g nGroups v
         finalizeTop2 nGroups m1 m2
   where
     !n = VU.length v
-{-# NOINLINE top2Direct #-}
+{- INLINEABLE (not NOINLINE) so the SPECIALIZE pragmas above take effect; pure
+function of its arguments, so unsafePerformIO sharing is not a concern. -}
+{-# INLINEABLE top2Direct #-}
 
 top2Chunk ::
     (VU.Unbox a, Real a) =>
@@ -591,54 +609,6 @@ finalizeTop2 nGroups m1 m2 = do
                 go (k + 1)
     go 0
     VU.unsafeFreeze out
-
--------------------------------------------------------------------------------
--- Variance / std (sequential row-order Welford, byte-identical to the kernel)
--------------------------------------------------------------------------------
-
-{- | Per-group Welford variance (std with @takeSqrt@) as ONE sequential pass in
-ascending row order. The gather kernel updates each group's state in exactly
-that row order (stable grouping), so this is byte-identical to it; there is no
-parallel variant (chunk merging would change the update recurrence), which is
-why the caller only admits it below 'seqFloatGroups'.
--}
-varSeqDirect ::
-    (VU.Unbox a, Real a) =>
-    Bool -> VU.Vector Int -> Int -> VU.Vector a -> VU.Vector Double
-varSeqDirect takeSqrt g nGroups v = unsafePerformIO $ do
-    cnt <- VUM.replicate nGroups (0 :: Int)
-    meanV <- VUM.replicate nGroups (0 :: Double)
-    m2 <- VUM.replicate nGroups (0 :: Double)
-    let n = VU.length v
-        go !i
-            | i >= n = pure ()
-            | otherwise = do
-                let !k = VU.unsafeIndex g i
-                    !x = realToFrac (VU.unsafeIndex v i)
-                c <- VUM.unsafeRead cnt k
-                mu <- VUM.unsafeRead meanV k
-                mm <- VUM.unsafeRead m2 k
-                let !c' = c + 1
-                    !delta = x - mu
-                    !mu' = mu + delta / fromIntegral c'
-                    !mm' = mm + delta * (x - mu')
-                VUM.unsafeWrite cnt k c'
-                VUM.unsafeWrite meanV k mu'
-                VUM.unsafeWrite m2 k mm'
-                go (i + 1)
-    go 0
-    out <- VUM.new nGroups
-    let fin !k
-            | k >= nGroups = pure ()
-            | otherwise = do
-                c <- VUM.unsafeRead cnt k
-                mm <- VUM.unsafeRead m2 k
-                let var = if c < 2 then 0 else mm / fromIntegral (c - 1)
-                VUM.unsafeWrite out k (if takeSqrt then sqrt var else var)
-                fin (k + 1)
-    fin 0
-    VU.unsafeFreeze out
-{-# NOINLINE varSeqDirect #-}
 
 -------------------------------------------------------------------------------
 -- Integer mean (exact integer sum + count, divided once -> order-independent)
