@@ -108,7 +108,6 @@ skewnessStep (SkewAcc !n !meanVal !m2 !m3) !x' =
 computeSkewness :: SkewAcc -> Double
 computeSkewness (SkewAcc n _ m2 m3)
     | n < 3 = 0 -- or error "skewness of <3 samples"
-    -- raw sums: g1 = sqrt n * m3 / m2^(3/2)
     | otherwise = (sqrt (fromIntegral n) * m3) / sqrt (m2 ^ (3 :: Int))
 {-# INLINE computeSkewness #-}
 

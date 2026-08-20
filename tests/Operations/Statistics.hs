@@ -408,13 +408,13 @@ correlationIgnoresNullRows =
                         (abs (r - 1.0) < 1e-10)
         )
 
-frequenciesSkipsNulls :: Test
-frequenciesSkipsNulls =
+frequenciesNullableAsMaybe :: Test
+frequenciesNullableAsMaybe =
     TestCase
         ( assertEqual
-            "frequencies has no sentinel category"
-            3 -- Statistic, 10 and 20
-            (D.nColumns (D.frequencies (F.col @Int "n") nullableIntDf))
+            "nulls are a Nothing category"
+            4 -- Statistic, Nothing, Just 10, Just 20
+            (D.nColumns (D.frequencies (F.col @(Maybe Int) "n") nullableIntDf))
         )
 
 tests :: [Test]
@@ -463,5 +463,5 @@ tests =
     , TestLabel "sumUnboxedNullable" sumUnboxedNullable
     , TestLabel "sumBoxedNullableDoesNotThrow" sumBoxedNullableDoesNotThrow
     , TestLabel "correlationIgnoresNullRows" correlationIgnoresNullRows
-    , TestLabel "frequenciesSkipsNulls" frequenciesSkipsNulls
+    , TestLabel "frequenciesNullableAsMaybe" frequenciesNullableAsMaybe
     ]

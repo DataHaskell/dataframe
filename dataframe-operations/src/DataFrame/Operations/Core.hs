@@ -69,7 +69,6 @@ import DataFrame.Internal.Column (
     TypedColumn (..),
     columnLength,
     columnTypeString,
-    dropNullsExceptMaybe,
     fromList,
     fromVector,
     materializeMerged,
@@ -689,29 +688,13 @@ valueCounts ::
     forall a. (Ord a, Columnable a) => Expr a -> DataFrame -> [(a, Int)]
 valueCounts expr df
     | null df = throw (EmptyDataSetException "valueCounts")
-    | otherwise = case nonNullElements expr df of
+    | otherwise = case columnAsVector expr df of
         Left e -> throw e
         Right column' ->
             let
                 column = V.foldl' (\m v -> MS.insertWith (+) v (1 :: Int) m) M.empty column'
              in
                 M.toAscList column
-
-{- | The column's present values: 'columnAsVector' after 'dropNulls'. Shorter
-than the column when it has nulls; a sentinel is not a category.
--}
-nonNullElements ::
-    forall a.
-    (Columnable a) => Expr a -> DataFrame -> Either DataFrameException (V.Vector a)
-nonNullElements expr df = case expr of
-    Col name -> case getColumn name df of
-        Just col -> withColumnName name (toVector (dropNullsExceptMaybe @a col))
-        Nothing ->
-            Left $
-                ColumnsNotFoundException [name] "valueCounts" (M.keys $ columnIndices df)
-    _ -> case interpret df expr of
-        Left e -> throw e
-        Right (TColumn col) -> toVector (dropNullsExceptMaybe @a col)
 
 {- | O (k * n) Shows the proportions of each value in a given column.
 
@@ -729,7 +712,7 @@ valueProportions ::
     forall a. (Ord a, Columnable a) => Expr a -> DataFrame -> [(a, Double)]
 valueProportions expr df
     | null df = throw (EmptyDataSetException "valueCounts")
-    | otherwise = case nonNullElements expr df of
+    | otherwise = case columnAsVector expr df of
         Left e -> throw e
         Right column' ->
             let
