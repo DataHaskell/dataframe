@@ -8,7 +8,7 @@
      Usage:
        cabal run lazy-bench [-- [OPTIONS]]        (+RTS -s -RTS for heap stats)
        --rows N     rows to generate (default 1_000_000_000)
-       --file PATH  output CSV path (default /tmp/lazy_1b.csv)
+       --file PATH  output CSV path (default: lazy_1b.csv in the system temp dir)
        --skip-gen   reuse the file if it already exists
 -}
 module Main where
@@ -22,7 +22,7 @@ import qualified DataFrame as D
 import qualified DataFrame.Lazy as L
 import DataFrame.Operators
 import DataFrame.Schema (Schema (..), schemaType)
-import System.Directory (doesFileExist, getFileSize)
+import System.Directory (doesFileExist, getFileSize, getTemporaryDirectory)
 import System.Environment (getArgs)
 import System.Exit (exitFailure)
 import System.IO (
@@ -42,8 +42,8 @@ import System.Random.Stateful
 defaultRows :: Int
 defaultRows = 1_000_000_000
 
-defaultFile :: FilePath
-defaultFile = "/tmp/lazy_1b.csv"
+defaultFile :: IO FilePath
+defaultFile = (<> "/lazy_1b.csv") <$> getTemporaryDirectory
 
 -- Rows written per Builder flush to disk.
 chunkSize :: Int
@@ -59,8 +59,8 @@ data Opts = Opts
     , optSkipGen :: Bool
     }
 
-parseArgs :: [String] -> Either String Opts
-parseArgs = go (Opts defaultRows defaultFile False)
+parseArgs :: FilePath -> [String] -> Either String Opts
+parseArgs defFile = go (Opts defaultRows defFile False)
   where
     go opts [] = Right opts
     go opts ("--rows" : n : rest) = case reads n of
@@ -170,7 +170,8 @@ main :: IO ()
 main = do
     hSetBuffering stdout LineBuffering
     args <- getArgs
-    opts <- case parseArgs args of
+    defFile <- defaultFile
+    opts <- case parseArgs defFile args of
         Left err -> putStrLn ("Error: " ++ err) >> exitFailure
         Right o -> return o
 

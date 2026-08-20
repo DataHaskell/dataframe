@@ -66,15 +66,17 @@ import Data.Char (chr)
 import qualified Data.List as L
 import qualified Data.Maybe
 import qualified Data.Text as T
-import qualified Data.Text.IO as T
+import qualified Data.Text.IO.Utf8 as T
 import GHC.Stack (HasCallStack)
 import Numeric (showFFloat)
 import System.Directory (getHomeDirectory)
 import System.Info (os)
 import System.Process (
+    CreateProcess,
     StdStream (NoStream),
     createProcess,
     proc,
+    shell,
     std_err,
     std_in,
     std_out,
@@ -458,6 +460,7 @@ plotBoxPlots ys = box (mkBox ys)
 -- Browser launcher
 -- ---------------------------------------------------------------------------
 
+-- | Windows launches via a shell: 'start' is a cmd builtin.
 showInDefaultBrowser :: String -> IO ()
 showInDefaultBrowser p = do
     plotId <- generateChartId
@@ -471,15 +474,15 @@ showInDefaultBrowser p = do
     putStrLn fullPath
     T.writeFile fullPath (T.pack p)
     case os of
-        "mingw32" -> openFileSilently "start" fullPath
-        "darwin" -> openFileSilently "open" fullPath
-        _ -> openFileSilently "xdg-open" fullPath
+        "mingw32" -> launchSilently (shell ("start \"\" \"" <> fullPath <> "\""))
+        "darwin" -> launchSilently (proc "open" [fullPath])
+        _ -> launchSilently (proc "xdg-open" [fullPath])
 
-openFileSilently :: FilePath -> FilePath -> IO ()
-openFileSilently program path = do
+launchSilently :: CreateProcess -> IO ()
+launchSilently cp = do
     (_, _, _, ph) <-
         createProcess
-            (proc program [path])
+            cp
                 { std_in = NoStream
                 , std_out = NoStream
                 , std_err = NoStream

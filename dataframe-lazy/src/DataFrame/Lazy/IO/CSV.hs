@@ -103,6 +103,7 @@ readSeparated c opts path = do
             Nothing -> (0, totalRows')
             Just (start, len'') -> (start, min len'' (totalRows' - rowsRead opts))
     withFile path ReadMode $ \handle -> do
+        hSetEncoding handle utf8
         firstRow <- fmap T.strip . parseSep c <$> TIO.hGetLine handle
         let columnNames =
                 if hasHeader opts
@@ -256,6 +257,7 @@ openCsvStream ::
 openCsvStream sep schema path = do
     handle <- openFile path ReadMode
     hSetBuffering handle (BlockBuffering (Just (8 * 1024 * 1024)))
+    hSetEncoding handle utf8
     headerLine <- TIO.hGetLine handle
     let headerCols = fmap (T.filter (/= '"') . T.strip) (parseSep sep headerLine)
     let schemaMap = elements schema
