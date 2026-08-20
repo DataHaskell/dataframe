@@ -248,7 +248,23 @@ sliceColumn start n (BoxedColumn bm xs) =
     BoxedColumn (fmap (bitmapSlice start n) bm) (VG.slice start n xs)
 sliceColumn start n (UnboxedColumn bm xs) =
     UnboxedColumn (fmap (bitmapSlice start n) bm) (VG.slice start n xs)
-sliceColumn start n c@(PackedText _ _) = sliceColumn start n (materializePacked c)
+sliceColumn start n (PackedText bm p)
+    -- packedGather decodes an out-of-range index as the empty string, where
+    -- the boxed and unboxed arms reject the slice, so check first.
+    | start < 0 || n < 0 || start + n > packedLength p =
+        errorWithoutStackTrace
+            ( "sliceColumn: invalid slice ("
+                ++ show start
+                ++ ","
+                ++ show n
+                ++ ","
+                ++ show (packedLength p)
+                ++ ")"
+            )
+    | otherwise =
+        PackedText
+            (fmap (bitmapSlice start n) bm)
+            (packedGather (VU.enumFromN start n) p)
 {-# INLINE sliceColumn #-}
 
 -- | O(n) Selects the elements at a given set of indices. Does not change the order.
