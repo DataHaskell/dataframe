@@ -34,6 +34,7 @@ module DataFrame.Internal.GroupingDirect (
     visFromRowToGroup,
     ascendingCodeGroups,
     rangeOf,
+    useTwoLevel,
     DirectGrouping (..),
 ) where
 
@@ -347,11 +348,29 @@ finishLayout codeAt n card mkGroups counts firstRow = do
     repLoop 0
     reps <- VU.unsafeFreeze repsM
     rtgM <- VUM.unsafeNew n
+    -- A fully occupied ascending domain maps every code to itself; skipping
+    -- the per-row random table lookup then leaves one sequential read+write.
+    let identity = isIdentityMap codeToGroup
     _ <-
         forkJoinResults
-            [rtgChunk codeAt codeToGroup rtgM lo hi | (lo, hi) <- rowChunks n]
+            [ ( if identity
+                    then rtgChunkIdentity codeAt rtgM lo hi
+                    else rtgChunk codeAt codeToGroup rtgM lo hi
+              )
+            | (lo, hi) <- rowChunks n
+            ]
     rtg <- VU.unsafeFreeze rtgM
     pure (Just (rtg, offs, reps, nGroups))
+
+-- | Whether @codeToGroup@ maps every code to itself (fully occupied domain).
+isIdentityMap :: VU.Vector Int -> Bool
+isIdentityMap m = go 0
+  where
+    !k = VU.length m
+    go !i
+        | i >= k = True
+        | VU.unsafeIndex m i /= i = False
+        | otherwise = go (i + 1)
 
 {- | Exclusive prefix scan of per-group counts (gathered through @codeToGroup@)
 into the offsets array of length @nGroups + 1@.
@@ -389,6 +408,16 @@ rtgChunk codeAt codeToGroup rtgM lo hi = go lo
         | otherwise = do
             let !c = codeAt i
             VUM.unsafeWrite rtgM i (VU.unsafeIndex codeToGroup c)
+            go (i + 1)
+
+-- | 'rtgChunk' without the remap lookup (codeToGroup is the identity).
+rtgChunkIdentity :: (Int -> Int) -> VUM.IOVector Int -> Int -> Int -> IO ()
+rtgChunkIdentity codeAt rtgM lo hi = go lo
+  where
+    go !i
+        | i >= hi = pure ()
+        | otherwise = do
+            VUM.unsafeWrite rtgM i (codeAt i)
             go (i + 1)
 
 -------------------------------------------------------------------------------

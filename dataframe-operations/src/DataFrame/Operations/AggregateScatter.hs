@@ -22,7 +22,11 @@ float summation order, and the direct var/std, which finalize from
 (count, sum, sumsq) partials rather than the gather kernel's row-order Welford
 recurrence; see 'DataFrame.Internal.AggKernelDirect'.)
 -}
-module DataFrame.Operations.AggregateScatter (runPlan, runMomentPlan) where
+module DataFrame.Operations.AggregateScatter (
+    runPlan,
+    runMomentPlan,
+    runMedianVarFused,
+) where
 
 import qualified Data.Text as T
 import qualified Data.Vector.Algorithms.Intro as VA
@@ -44,6 +48,7 @@ import DataFrame.Internal.AggKernelPar (
     momentScatterPar,
     momentStreamPar,
     scatterReducePar,
+    streamGroupCap,
  )
 import DataFrame.Internal.AggPlan (AggPlan (..), MomentPlan (..), Moments (..))
 import DataFrame.Internal.Column (Column (..), fromUnboxedVector)
@@ -56,14 +61,18 @@ runPlan gdf rtg nGroups plan = case plan of
     PlanScatter red name -> scatterColumn red name
     PlanMaxMinusMin a b ->
         {- min/max are order-independent, so both fused single-pass kernels
-        (the direct streaming one below the domain cap, the group-range gather
-        one above it) are exactly the two gather extrema they replace; anything
-        they reject (mixed/unclean columns, small inputs) keeps the two-pass
-        gather path. -}
+        (the direct streaming one up to 'streamGroupCap', the group-range
+        gather one above it) are exactly the two gather extrema they replace;
+        anything they reject (mixed/unclean columns, small inputs) keeps the
+        two-pass gather path. The streaming cap extends past 'directThreshold'
+        for the same reason as the fused multi-reduction pass: on a
+        direct-grouped frame it works off the eager @rowToGroup@ and skips the
+        deferred @valueIndices@ placement entirely (measured at 1e6 groups /
+        1e8 rows on -N16: stream 1.1s against placement 0.7s + gather 0.7s). -}
         let ca = col a
             cb = col b
             direct
-                | nGroups <= directThreshold = directMaxMinusMin rtg nGroups ca cb
+                | nGroups <= streamGroupCap = directMaxMinusMin rtg nGroups ca cb
                 | otherwise = maxMinusMinScatterPar vis offs nGroups ca cb
          in case direct of
                 Just out -> out
@@ -84,6 +93,16 @@ runPlan gdf rtg nGroups plan = case plan of
         let c = col name
             direct
                 | nGroups <= directThreshold = directReduce red rtg nGroups c
+                {- Top-2 selection merges exactly (a multiset selection, no
+                float adds until finalize), so like the fused passes it streams
+                off @rowToGroup@ up to 'streamGroupCap': on a direct-grouped
+                frame that skips the deferred @valueIndices@ placement, which
+                costs more than the accumulator cache misses it saves
+                (measured at 1e6 groups / 1e8 rows on -N16: stream 1.0s
+                against placement 0.7s + gather 0.4s). -}
+                | RTop2Sum <- red
+                , nGroups <= streamGroupCap =
+                    directReduce red rtg nGroups c
                 | otherwise = Nothing
          in case direct of
                 Just out -> out
@@ -169,6 +188,96 @@ scatterExtremaDbl red vis offs nGroups c =
             | Just Refl <- testEquality (typeRep @a) (typeRep @Double) -> v
             | Just Refl <- testEquality (typeRep @a) (typeRep @Int) -> VU.map fromIntegral v
         _ -> error "scatterExtremaDbl"
+
+-------------------------------------------------------------------------------
+-- Fused holistic median + var/std over one shared gather
+-------------------------------------------------------------------------------
+
+{- | Fused grouped median and variance family over the SAME column: one gather
+into the shared scratch buffer serves both. Returns
+@(median, variance, stddev)@ columns, or 'Nothing' on a non-numeric column
+(the caller keeps the separate per-expression kernels).
+
+The Welford fold runs over each gathered slice in ascending original-row order
+— exactly the recurrence, order and finalize of the var/std kernels
+('DataFrame.Internal.AggKernelPar.varPar' and the sequential @varScatter@,
+which agree bit-for-bit) — BEFORE the in-place median selection permutes the
+slice, and the selection then proceeds exactly as 'groupedMedian'. Both
+outputs are therefore bit-identical to the unfused paths; the second full
+gather pass is what the fusion saves (measured ~35% off the median+sd pair at
+1e4 groups / 1e8 rows on -N16).
+-}
+runMedianVarFused ::
+    GroupedDataFrame -> Int -> Column -> Maybe (Column, Column, Column)
+runMedianVarFused gdf nGroups c = do
+    vals <- scatterColumnToDouble c
+    let (med, var) =
+            medianVarByGroup (valueIndices gdf) (offsets gdf) nGroups vals
+    pure
+        ( fromUnboxedVector med
+        , fromUnboxedVector var
+        , fromUnboxedVector (VU.map sqrt var)
+        )
+
+medianVarByGroup ::
+    VU.Vector Int ->
+    VU.Vector Int ->
+    Int ->
+    VU.Vector Double ->
+    (VU.Vector Double, VU.Vector Double)
+medianVarByGroup vis offs nGroups vals = unsafePerformIO $ do
+    let !n = VU.length vis
+    buf <- VUM.new (max 1 n)
+    medOut <- VUM.new (max 1 nGroups)
+    varOut <- VUM.new (max 1 nGroups)
+    caps <- getNumCapabilities
+    let !bounds = groupRangeBounds offs nGroups caps
+    forEachRange bounds caps $ \gs ge ->
+        let grp !g
+                | g >= ge = pure ()
+                | otherwise = do
+                    let !s = VU.unsafeIndex offs g
+                        !e = VU.unsafeIndex offs (g + 1)
+                        !len = e - s
+                        fill !pos
+                            | pos >= e = pure ()
+                            | otherwise = do
+                                VUM.unsafeWrite buf pos (VU.unsafeIndex vals (VU.unsafeIndex vis pos))
+                                fill (pos + 1)
+                    fill s
+                    -- Welford over the gathered slice (still in row order).
+                    let welford !pos !c !mu !mm
+                            | pos >= e =
+                                pure (if c < 2 then 0 else mm / fromIntegral (c - 1))
+                            | otherwise = do
+                                x <- VUM.unsafeRead buf pos
+                                let !c' = c + 1
+                                    !delta = x - mu
+                                    !mu' = mu + delta / fromIntegral c'
+                                    !mm' = mm + delta * (x - mu')
+                                welford (pos + 1) c' mu' mm'
+                    var <- welford s (0 :: Int) 0 0
+                    VUM.unsafeWrite varOut g var
+                    -- Median selection, as in 'medianByGroup' (permutes the slice).
+                    let slice = VUM.unsafeSlice s len buf
+                        !mid = len `div` 2
+                    VA.select slice (mid + 1)
+                    let scan !i !hi !lo
+                            | i > mid = pure (hi, lo)
+                            | otherwise = do
+                                x <- VUM.unsafeRead slice i
+                                if x > hi
+                                    then scan (i + 1) x hi
+                                    else scan (i + 1) hi (max lo x)
+                    (hi, lo) <- scan 0 (negate (1 / 0)) (negate (1 / 0))
+                    let med = if odd len then hi else (hi + lo) / 2
+                    VUM.unsafeWrite medOut g med
+                    grp (g + 1)
+         in grp gs
+    med <- VU.unsafeFreeze (VUM.unsafeSlice 0 nGroups medOut)
+    var <- VU.unsafeFreeze (VUM.unsafeSlice 0 nGroups varOut)
+    pure (med, var)
+{-# NOINLINE medianVarByGroup #-}
 
 -------------------------------------------------------------------------------
 -- Parallel holistic median

@@ -14,6 +14,7 @@ module DataFrame.Operations.Aggregation (
     changingPoints,
 ) where
 
+import qualified Data.List as L
 import qualified Data.Map.Strict as MS
 import qualified Data.Text as T
 import qualified Data.Vector as V
@@ -28,6 +29,7 @@ import DataFrame.Internal.AggKernelPar (
     runGatherAggs,
     streamGroupCap,
  )
+import DataFrame.Internal.AggKernel (Reduction (..))
 import DataFrame.Internal.AggPlan (AggPlan (..), MomentPlan, planAgg, planMoments)
 import DataFrame.Internal.Column (
     Column (..),
@@ -45,7 +47,11 @@ import DataFrame.Internal.Expression
 import DataFrame.Internal.Grouping (buildRowToGroup, changingPoints, groupBy)
 import DataFrame.Internal.Interpreter
 import DataFrame.Internal.RowHash (computeRowHashesIO)
-import DataFrame.Operations.AggregateScatter (runMomentPlan, runPlan)
+import DataFrame.Operations.AggregateScatter (
+    runMedianVarFused,
+    runMomentPlan,
+    runPlan,
+ )
 import DataFrame.Operations.Core
 import DataFrame.Operations.Subset
 import System.IO.Unsafe (unsafePerformIO)
@@ -140,16 +146,44 @@ aggregate aggs gdf =
                                     )
                             else MS.empty
 
+        {- Fused median + std/var over one column (the Q6 shape): both are
+        holistic gathers over the same values, so one shared gather serves the
+        Welford fold and the median selection ('runMedianVarFused',
+        bit-identical to the separate kernels). Only built when a median and a
+        std/var on the same column appear together; empty-and-cheap otherwise
+        (same strictness caveat as 'fusedScatterCols'). -}
+        medianVarCols :: MS.Map T.Text Column
+        medianVarCols = case fusedMoments of
+            Just _ -> MS.empty
+            Nothing ->
+                let plans = [(name, plan) | (name, ue) <- aggs, Just plan <- [planAgg gdf ue]]
+                    medCols = L.nub [c | (_, PlanMedian c) <- plans]
+                 in MS.fromList
+                        [ kv
+                        | cname <- medCols
+                        , let stds = [nm | (nm, PlanScatter RStd c) <- plans, c == cname]
+                        , let vars = [nm | (nm, PlanScatter RVar c) <- plans, c == cname]
+                        , not (null stds && null vars)
+                        , Just c <- [getColumn cname df]
+                        , Just (medC, varC, stdC) <- [runMedianVarFused gdf nGroups c]
+                        , kv <-
+                            [(nm, medC) | (nm, PlanMedian c') <- plans, c' == cname]
+                                ++ map (\nm -> (nm, stdC)) stds
+                                ++ map (\nm -> (nm, varC)) vars
+                        ]
+
         -- Fast path: a recognised reduction scatters in one unboxed pass.
         -- Anything 'planAgg' rejects keeps the existing interpreter, so the
         -- general typed + DSL aggregate API stays correct for arbitrary
         -- expressions.
         f ne@(name, uexpr) d =
-            let value = case MS.lookup name fusedScatterCols of
+            let value = case MS.lookup name medianVarCols of
                     Just c -> c
-                    Nothing -> case planAgg gdf uexpr of
-                        Just plan -> runPlan gdf (rowToGroup gdf) nGroups plan
-                        Nothing -> interpretNamed gdf ne
+                    Nothing -> case MS.lookup name fusedScatterCols of
+                        Just c -> c
+                        Nothing -> case planAgg gdf uexpr of
+                            Just plan -> runPlan gdf (rowToGroup gdf) nGroups plan
+                            Nothing -> interpretNamed gdf ne
              in insertColumn name value d
 
         -- Fused fast path: the Q9 regression family (count + five moment sums

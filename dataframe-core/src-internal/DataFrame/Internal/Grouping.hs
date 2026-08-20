@@ -43,12 +43,12 @@ import DataFrame.Internal.GroupingDirect (
     directGroupThreshold,
     rangeOf,
  )
+import qualified DataFrame.Internal.GroupingDirect as GD
 import DataFrame.Internal.GroupingPar (parallelAssignGroups, shouldParallelize)
 import DataFrame.Internal.Hash
 import DataFrame.Internal.HashTable (htInsert, newHashTable)
 import DataFrame.Internal.PackedText (
     PackedTextData (..),
-    offAt,
     offCount,
     packedLength,
     packedSlice,
@@ -96,12 +96,14 @@ dict-encoded text column, and the product of the key domains stays within
 degenerates to its own code). Returns 'Nothing' on any other key shape, falling
 back to the hash path.
 
-The direct path builds @offsets@/@groupRepRows@ eagerly (histogram-sized work
-only) and leaves BOTH per-row outputs lazy: @valueIndices@ ('visFromCodes')
-only materializes for consumers that gather (median/top-k, wide-group fused
-gathers, set ops, interpreter slices), and @rowToGroup@ ('rtgFromCodes') only
-for the streaming scatter aggregations. Each aggregate therefore pays for
-exactly one O(n) output pass, not both.
+Narrow domains build @offsets@/@groupRepRows@ eagerly (histogram-sized work
+only) and leave BOTH per-row outputs lazy: @valueIndices@ ('visFromCodes')
+only materializes for consumers that gather (median/top-k, set ops,
+interpreter slices), and @rowToGroup@ ('rtgFromCodes') only for the streaming
+scatter aggregations — each aggregate pays for exactly one O(n) output pass,
+not both. Wide domains run the two-level radix engine instead
+('DataFrame.Internal.GroupingDirect.directLayoutLazy'): @rowToGroup@ eager,
+@valueIndices@ deferred (see 'fusedDirectGroup').
 -}
 tryDirectGroup :: [T.Text] -> DataFrame -> Maybe GroupedDataFrame
 tryDirectGroup [] _ = Nothing
@@ -113,34 +115,13 @@ tryDirectGroup names df = do
             ([name], [col]) -> tryDictGroup (nRows df) df [name] col
             _ -> Nothing
 
-{- | Group-order chooser for 'directLayoutLazy': rank the occupied codes by the
-given per-code hash ('rankByHash', ties in first-appearance order of the code),
-making group order a deterministic function of the key set (not of row order,
-which dict-code order would leak).
--}
-hashRankGroups :: (Int -> Int) -> VU.Vector Int -> (VU.Vector Int, Int)
-hashRankGroups entryHash counts =
-    let card = VU.length counts
-        occupied = VU.filter (\g -> VU.unsafeIndex counts g > 0) (VU.enumFromN 0 card)
-        nGroups = VU.length occupied
-        rank =
-            runST (rankByHash (pure . entryHash . VU.unsafeIndex occupied) nGroups)
-        remap = runST $ do
-            m <- VUM.new card
-            VU.imapM_ (\j g -> VUM.unsafeWrite m g (VU.unsafeIndex rank j)) occupied
-            VU.unsafeFreeze m
-     in (remap, nGroups)
-
 {- | One key column of a fused multi-key direct grouping: a per-row component
 code in @[0, fkDomain)@ (negative marks an invalid/corrupt code, which aborts
-the direct path), plus the hash mix of a component code used to give dict-keyed
-groupings a row-order-independent group order.
+the direct path).
 -}
 data FusedKey = FusedKey
     { fkCode :: Int -> Int
     , fkDomain :: !Int
-    , fkMix :: Int -> Int -> Int
-    , fkDict :: !Bool
     }
 
 {- | Classify a key column for the fused multi-key direct path: a clean non-null
@@ -154,14 +135,7 @@ fusedKey (UnboxedColumn Nothing (v :: VU.Vector a))
         let (!mn, !mx) = rangeOf v
             !range = mx - mn + 1
          in if range >= 1 && range <= directGroupThreshold
-                then
-                    Just
-                        ( FusedKey
-                            (\i -> VU.unsafeIndex v i - mn)
-                            range
-                            (\h c -> mixInt h (c + mn))
-                            False
-                        )
+                then Just (FusedKey (\i -> VU.unsafeIndex v i - mn) range)
                 else Nothing
 fusedKey (PackedText Nothing p)
     | Just sel <- ptSel p
@@ -174,46 +148,65 @@ fusedKey (PackedText Nothing p)
                         ( FusedKey
                             (\i -> let c = selAt sel i in if c >= card then -1 else c)
                             card
-                            ( \h c ->
-                                let o = offAt offs c
-                                 in mixBytes h (ptBytes p) o (offAt offs (c + 1) - o)
-                            )
-                            True
                         )
                 else Nothing
 fusedKey _ = Nothing
 
 {- | Fuse the per-key codes into one mixed-radix code per row
 (@((k1*d2)+k2)*d3+...@) and feed the direct counting-sort machinery. Group
-order: ascending fused code (lexicographic in key order) for pure-@Int@ keys —
-mirroring the ascending-value order the single-@Int@-key direct path always had
-— and hash rank of the key tuple when any dict key participates (see
-'hashRankGroups'; dict-code order is not a function of the key set).
+order: ascending fused code (lexicographic in key order) — ascending value
+order for @Int@ keys (mirroring the order the single-@Int@-key direct path
+always had) and ascending dictionary code for dict-encoded text keys (the
+dictionary's first-appearance order, a fixed property of the column). The
+ascending order keeps @codeToGroup@ an identity map whenever the domain is
+fully occupied, so the deferred @rowToGroup@ pass skips its per-row random
+remap lookup; ranking dict groups by string hash instead (the historical
+order) profiled ~0.6s slower per 1e8 rows at 1e6 groups.
 
-@valueIndices@ and @rowToGroup@ are passed to the constructor as unevaluated
-applications of 'visFromCodes' / 'rtgFromCodes' (constructor arguments are not
-forced even under @-XStrict@, and the fields are lazy at their definition
-site), so each per-row output pass is deferred until a consumer demands it.
+On the narrow-domain engine, @valueIndices@ and @rowToGroup@ are passed to the
+constructor as unevaluated applications of 'visFromCodes' / 'rtgFromCodes'
+(constructor arguments are not forced even under @-XStrict@, and the fields
+are lazy at their definition site), so each per-row output pass is deferred
+until a consumer demands it. The wide-domain engine defers only
+@valueIndices@ (see the branch comment below).
 -}
 fusedDirectGroup :: [T.Text] -> DataFrame -> [FusedKey] -> Maybe GroupedDataFrame
 fusedDirectGroup names df keys = do
     domain <- fusedDomain (map fkDomain keys)
     let n = nRows df
-        mkGroups
-            | any fkDict keys = hashRankGroups (fusedEntryHash keys)
-            | otherwise = ascendingCodeGroups
-    let codeAt' = fusedCodeAt keys
-    (offs, reps, counts, ctg, hists, nGroups) <-
-        directLayoutLazy codeAt' n domain mkGroups
-    Just
-        ( GroupedInternal
-            df
-            names
-            (visFromCodes codeAt' counts ctg offs hists n domain)
-            offs
-            (rtgFromCodes codeAt' ctg n)
-            reps
-        )
+        codeAt' = fusedCodeAt keys
+    if GD.useTwoLevel n domain
+        then do
+            {- Wide domains (> ~1024 codes at parallel scale): the two-level
+            radix engine — no pass random-writes a multi-megabyte table per
+            worker, unlike the per-chunk direct histograms below (measured ~2x
+            on the eager layout at 1e6 codes / 1e8 rows). It builds
+            @rowToGroup@ eagerly (the streaming aggregations force it first
+            thing anyway); only @valueIndices@ stays deferred, reconstructed
+            from @rowToGroup@ by the same engine on demand. -}
+            (rtg, offs, reps, nGroups) <-
+                GD.directLayoutLazy codeAt' n domain ascendingCodeGroups
+            Just
+                ( GroupedInternal
+                    df
+                    names
+                    (GD.visFromRowToGroup n nGroups offs rtg)
+                    offs
+                    rtg
+                    reps
+                )
+        else do
+            (offs, reps, counts, ctg, hists, nGroups) <-
+                directLayoutLazy codeAt' n domain ascendingCodeGroups
+            Just
+                ( GroupedInternal
+                    df
+                    names
+                    (visFromCodes codeAt' counts ctg offs hists n domain)
+                    offs
+                    (rtgFromCodes codeAt' ctg n)
+                    reps
+                )
 
 {- | Product of the per-key domains, 'Nothing' once it (or any factor) passes
 'directGroupThreshold'. Factors are capped before multiplying, so the running
@@ -248,18 +241,6 @@ fusedCodeAt (k0 : ks0) = go (fkCode k0) ks0
                             else let b = g i in if b < 0 then -1 else a * d + b
                 )
                 ks
-
-{- | Hash of the key tuple behind a fused code: decompose the code back into
-component codes and mix each component (dict keys by their string bytes, @Int@
-keys by value) in key order, mirroring how 'dictCodesGroup' hashes its entries.
--}
-fusedEntryHash :: [FusedKey] -> Int -> Int
-fusedEntryHash keys code =
-    let comps = decompose code (reverse (map fkDomain keys)) []
-     in L.foldl' (\h (k, c) -> fkMix k h c) fnvOffset (zip keys comps)
-  where
-    decompose !_ [] acc = acc
-    decompose !c (d : ds) acc = decompose (c `div` d) ds ((c `mod` d) : acc)
 
 {- | Dictionary-encode a single text key to dense int codes, then derive
 @valueIndices@/@offsets@ by counting sort. Profiled slower than the fused hash

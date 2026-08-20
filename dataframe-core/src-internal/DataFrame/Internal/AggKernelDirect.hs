@@ -130,16 +130,30 @@ directMaxMinusMin g nGroups ca cb = case (ca, cb) of
         )
             | Just Refl <- testEquality (typeRep @x) (typeRep @Int)
             , Just Refl <- testEquality (typeRep @y) (typeRep @Int) ->
-                Just
-                    (fromUnboxedVector (maxMinusMinDirect minBound maxBound g nGroups va vb))
+                Just (fromUnboxedVector (maxMinusMinDirectInt g nGroups va vb))
             | Just Refl <- testEquality (typeRep @x) (typeRep @Double)
             , Just Refl <- testEquality (typeRep @y) (typeRep @Double) ->
-                Just
-                    ( fromUnboxedVector
-                        (maxMinusMinDirect (negate (1 / 0)) (1 / 0) g nGroups va vb)
-                    )
+                Just (fromUnboxedVector (maxMinusMinDirectDbl g nGroups va vb))
     _ -> Nothing
 {-# INLINEABLE directMaxMinusMin #-}
+
+{- | Monomorphic entry points: the 'testEquality' dispatch above only yields an
+unsafe coercion, so a direct call to the polymorphic 'maxMinusMinDirect' there
+would stay at the abstract element type and never meet its SPECIALIZE rules
+(measured ~3x on the whole pass); calling through these fixed-type wrappers
+(the coercion lands on the argument) does.
+-}
+maxMinusMinDirectInt ::
+    VU.Vector Int -> Int -> VU.Vector Int -> VU.Vector Int -> VU.Vector Int
+maxMinusMinDirectInt g nGroups va vb =
+    maxMinusMinDirect minBound maxBound g nGroups va vb
+{-# NOINLINE maxMinusMinDirectInt #-}
+
+maxMinusMinDirectDbl ::
+    VU.Vector Int -> Int -> VU.Vector Double -> VU.Vector Double -> VU.Vector Double
+maxMinusMinDirectDbl g nGroups va vb =
+    maxMinusMinDirect (negate (1 / 0)) (1 / 0) g nGroups va vb
+{-# NOINLINE maxMinusMinDirectDbl #-}
 
 -- | Whether to fan out at this row count.
 shouldPar :: Int -> Bool
