@@ -252,10 +252,11 @@ interQuartileRange expr df = case interpret df expr of
         Left e -> throw e
         Right xs -> interQuartileRange' xs
 
--- | Calculates the Pearson's correlation coefficient between two given columns as a standalone value.
+{- | Calculates the Pearson's correlation coefficient between two given columns as a standalone value.
+Pairs with a null in either column are dropped.
+-}
 correlation :: T.Text -> T.Text -> DataFrame -> Maybe Double
 correlation first second df = do
-    -- Listwise deletion: a null in either column drops the pair.
     let df' = filterJust first (filterJust second df)
     f <- _getColumnAsDouble first df'
     s <- _getColumnAsDouble second df'
@@ -298,7 +299,7 @@ sum (Col name) df = case getColumn name df of
             Just Refl -> VG.sum column
             Nothing -> 0
         PackedText _ _ -> 0
-        MergedColumn _ _ -> 0 -- matches the old eager These column (type never Num)
+        MergedColumn _ _ -> 0 -- never numeric
 sum expr df = case interpret df expr of
     Left e -> throw e
     Right (TColumn xs) -> case toVector @a @V.Vector (dropNulls xs) of
@@ -443,7 +444,7 @@ summarize df =
 -- | Round a @Double@ to Specified Precision
 roundTo :: Int -> Double -> Double
 roundTo n x
-    -- 'round' on NaN yields garbage; keep NaN visible in summaries.
+    -- round on NaN is garbage
     | isNaN x = x
     | otherwise = fromInteger (round $ x * 10 ^ n) / 10.0 ^^ n
 

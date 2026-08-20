@@ -74,7 +74,7 @@ varianceStep (VarAcc !n !meanVal !m2) !x =
 computeVariance :: VarAcc -> Double
 computeVariance (VarAcc !n _ !m2)
     | n == 0 = throw $ EmptyDataSetException "variance"
-    -- Sample variance is undefined at n = 1: NaN, not a spurious 0.
+    -- undefined at n = 1: NaN, not 0
     | n < 2 = 0 / 0
     | otherwise = m2 / fromIntegral (n - 1)
 {-# INLINE computeVariance #-}
@@ -108,7 +108,7 @@ skewnessStep (SkewAcc !n !meanVal !m2 !m3) !x' =
 computeSkewness :: SkewAcc -> Double
 computeSkewness (SkewAcc n _ m2 m3)
     | n < 3 = 0 -- or error "skewness of <3 samples"
-    -- m2, m3 are raw sums, so population g1 = sqrt n * m3 / m2^(3/2).
+    -- raw sums: g1 = sqrt n * m3 / m2^(3/2)
     | otherwise = (sqrt (fromIntegral n) * m3) / sqrt (m2 ^ (3 :: Int))
 {-# INLINE computeSkewness #-}
 

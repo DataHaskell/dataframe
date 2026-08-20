@@ -109,8 +109,7 @@ aggParityFor n =
                 ]
             seqDf = D.aggregate aggs (groupBySeq ["ki", "kt"] df)
             parDf = D.aggregate aggs (groupByPar ["ki", "kt"] df)
-         in -- Rendered comparison: singleton-group stddev is NaN, which the
-            -- Eq instance treats as unequal.
+         in -- render: NaN /= NaN under Eq
             assertEqual
                 ("aggregate parity n=" ++ show n)
                 (D.toMarkdown seqDf)

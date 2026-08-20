@@ -57,7 +57,7 @@ skewnessOfSymmetricDataSet =
             0
         )
 
--- Population skewness g1, the form the docs define (matches scipy.stats.skew).
+-- g1, matching scipy.stats.skew
 skewnessOfSimpleDataSet :: Test
 skewnessOfSimpleDataSet =
     TestCase
@@ -256,8 +256,7 @@ correlationMissingColumn =
             (print $ D.correlation "x" "missingcol" correlationDf)
         )
 
--- Nullable columns: statistics must skip null slots, not read the sentinel
--- stored there.
+-- stats must skip null slots
 
 nullableDf :: D.DataFrame
 nullableDf =

@@ -84,7 +84,6 @@ nCompared preds truth = fromIntegral (min (VU.length preds) (VU.length truth))
 -- | Mean squared error.
 mse :: Metric
 mse preds truth
-    -- No compared pairs is not a score of any kind.
     | n == 0 = throw (EmptyDataSetException "mse")
     | otherwise =
         VU.sum (VU.zipWith (\p t -> (p - t) ^ (2 :: Int)) preds truth) / n
