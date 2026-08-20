@@ -16,6 +16,9 @@ Every reduction takes the Round-5 grouping layout @(valueIndices, offsets)@ so
 the parallel kernel can split the group-id range across capabilities with no
 cross-worker merge. Each group's rows stay in original-row order within one
 worker's range, so results are byte-identical to the sequential path at any @-N@.
+(The one exception is the direct streaming Double sum/mean above the small-group
+cutoff, whose deterministic chunked partials change the float summation order;
+see 'DataFrame.Internal.AggKernelDirect'.)
 -}
 module DataFrame.Operations.AggregateScatter (runPlan, runMomentPlan) where
 
@@ -29,7 +32,11 @@ import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar)
 import Control.Exception (SomeException, throwIO, try)
 import Data.Type.Equality (TestEquality (..), type (:~:) (Refl))
 import DataFrame.Internal.AggKernel (Reduction (..), scatterColumnToDouble)
-import DataFrame.Internal.AggKernelDirect (directReduce, directThreshold)
+import DataFrame.Internal.AggKernelDirect (
+    directMaxMinusMin,
+    directReduce,
+    directThreshold,
+ )
 import DataFrame.Internal.AggKernelPar (momentScatterPar, scatterReducePar)
 import DataFrame.Internal.AggPlan (AggPlan (..), MomentPlan (..), Moments (..))
 import DataFrame.Internal.Column (Column (..), fromUnboxedVector)
@@ -40,16 +47,30 @@ import Type.Reflection (typeRep)
 runPlan :: GroupedDataFrame -> VU.Vector Int -> Int -> AggPlan -> Column
 runPlan gdf rtg nGroups plan = case plan of
     PlanScatter red name -> scatterColumn red name
-    PlanMaxMinusMin a b -> maxMinusMin vis offs nGroups (col a) (col b)
+    PlanMaxMinusMin a b ->
+        {- min/max are order-independent, so the fused single-pass streaming
+        kernel is exactly the two gather extrema it replaces; anything it
+        rejects (mixed/unclean columns, wide domain) keeps the gather path. -}
+        let ca = col a
+            cb = col b
+            direct
+                | nGroups <= directThreshold = directMaxMinusMin rtg nGroups ca cb
+                | otherwise = Nothing
+         in case direct of
+                Just out -> out
+                Nothing -> maxMinusMin vis offs nGroups ca cb
     PlanMedian name -> groupedMedian vis offs nGroups (col name)
   where
     vis = valueIndices gdf
     offs = offsets gdf
     {- The low-cardinality DIRECT-INDEXED fast path: for a small dense domain the
     grouping layer's @rowToGroup@ already maps row -> group, so we scatter
-    straight off it (no @valueIndices@ gather). 'directReduce' only admits
-    order-independent reductions (so the merged parallel result is byte-identical
-    to -N1); anything it rejects keeps the order-preserving group-range kernel. -}
+    straight off it (no @valueIndices@ gather). 'directReduce' admits the
+    order-independent reductions (exact partial merge, byte-identical to -N1)
+    plus the streaming Double sum/mean/var/std variants (byte-identical
+    sequential row order at small group counts; deterministic chunked partials
+    for the large-domain sum/mean — see 'DataFrame.Internal.AggKernelDirect');
+    anything it rejects keeps the order-preserving group-range kernel. -}
     scatterColumn red name =
         let c = col name
             direct

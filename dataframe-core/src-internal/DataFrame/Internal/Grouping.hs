@@ -55,6 +55,7 @@ import DataFrame.Internal.PackedText (
     sliceEqBytes,
  )
 import DataFrame.Internal.RadixRank (rankByHash)
+import DataFrame.Internal.RowHash (computeRowHashesWithIO)
 import DataFrame.Internal.Types
 import System.IO.Unsafe (unsafePerformIO)
 import Type.Reflection (typeRep)
@@ -192,9 +193,15 @@ groupByPar :: [T.Text] -> DataFrame -> GroupedDataFrame
 groupByPar names df =
     let !n = nRows df
         indicesToGroup = keyColIndices names df
-        !hashes = runST (computeHashes df indicesToGroup n)
+        -- Merged key columns are exotic; hash their eager form.
+        selectedCols = map (materializeMerged . (columns df V.!)) indicesToGroup
         !eqRow = eqKeyRow df indicesToGroup
-        (rtg, vis, os) = unsafePerformIO (parallelAssignGroups n hashes eqRow)
+        (rtg, vis, os) = unsafePerformIO $ do
+            -- Parallel row-hash kernel, bit-identical to 'computeHashes' at the
+            -- same dict-code setting (grouping always hashes canonical dict
+            -- columns by code; see 'hashPacked').
+            hashes <- computeRowHashesWithIO True n selectedCols
+            parallelAssignGroups n hashes eqRow
      in Grouped df names vis os rtg
 {-# NOINLINE groupByPar #-}
 
@@ -316,10 +323,16 @@ colEqRow (BoxedColumn bm v) =
     let eqV a b = V.unsafeIndex v a == V.unsafeIndex v b
      in withNulls bm eqV
 colEqRow (PackedText bm p) =
-    let eqV a b =
-            let (arrA, oA, lA) = packedSlice p a
-                (arrB, oB, lB) = packedSlice p b
-             in sliceEqBytes arrA oA lA arrB oB lB
+    -- A canonical dictionary selection assigns equal strings the same code,
+    -- so two rows are byte-equal iff their codes agree.
+    let eqV = case ptSel p of
+            Just sel
+                | ptCanonicalSel p ->
+                    \a b -> selAt sel a == selAt sel b
+            _ -> \a b ->
+                let (arrA, oA, lA) = packedSlice p a
+                    (arrB, oB, lB) = packedSlice p b
+                 in sliceEqBytes arrA oA lA arrB oB lB
      in withNulls bm eqV
 {-# INLINE colEqRow #-}
 
@@ -412,11 +425,17 @@ hashUnboxed mh ubm mix v = case ubm of
 
 {- | Hash a packed-text column over its raw UTF-8 byte slices (no per-row
 'Data.Text.Text'), mixing 'nullSalt' for null rows. Shares 'mixBytes' with
-'mixText' so packed and boxed Text columns hash identically.
+'mixText' so packed and boxed Text columns hash identically. A canonical
+dict-encoded column (equal strings share a code) instead mixes its 'Int' code
+with one 'mixInt' per row; 'DataFrame.Internal.RowHash.packedRange' applies the
+same rule under the grouping setting so 'groupBySeq' and 'groupByPar' bucket
+identically.
 -}
 hashPacked ::
     VUM.MVector s Int -> Maybe Bitmap -> PackedTextData -> ST s ()
-hashPacked mh bm p = go 0
+hashPacked mh bm p = case ptSel p of
+    Just sel | ptCanonicalSel p -> goCodes sel 0
+    _ -> go 0
   where
     !n = packedLength p
     go !i
@@ -428,6 +447,15 @@ hashPacked mh bm p = go 0
                     _ -> let (arr, o, l) = packedSlice p i in mixBytes h arr o l
             VUM.unsafeWrite mh i h'
             go (i + 1)
+    goCodes !sel !i
+        | i >= n = pure ()
+        | otherwise = do
+            !h <- VUM.unsafeRead mh i
+            let h' = case bm of
+                    Just bm' | not (bitmapTestBit bm' i) -> mixInt h nullSalt
+                    _ -> mixInt h (selAt sel i)
+            VUM.unsafeWrite mh i h'
+            goCodes sel (i + 1)
 {-# INLINE hashPacked #-}
 
 -- Inline accessors to avoid depending on Operations.Core
