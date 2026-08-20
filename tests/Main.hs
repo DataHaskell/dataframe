@@ -143,6 +143,10 @@ main = do
                 mapM
                     (quickCheckWithResult stdArgs)
                     Operations.Subset.tests
+            subsetPropRes <-
+                mapM
+                    (quickCheckWithResult stdArgs)
+                    Operations.Subset.properties
             monadRes <- mapM (quickCheckWithResult stdArgs) Monad.tests
             cbRes <-
                 mapM
@@ -151,6 +155,7 @@ main = do
             propsRes <- mapM (quickCheckWithResult stdArgs) Properties.tests
             catRes <- mapM (quickCheckWithResult stdArgs) Properties.Categorical.tests
             if not (all isSuccessful propRes)
+                || not (all isSuccessful subsetPropRes)
                 || not (all isSuccessful cbRes)
                 || not (all isSuccessful monadRes)
                 || not (all isSuccessful propsRes)
