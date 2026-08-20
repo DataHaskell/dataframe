@@ -91,9 +91,44 @@ shuffleDoesNotAddOrDropIndices =
             , TestCase (assertEqual "There are no repeated indecis" computed actual)
             ]
 
+-- A one-row frame has exactly one permutation.
+shuffleSingleRow :: Test
+shuffleSingleRow =
+    TestCase
+        ( assertEqual
+            "shuffling one index yields that index"
+            (VU.fromList [0 :: Int])
+            (shuffledIndices (mkStdGen 7) 1)
+        )
+
+-- Each position keeps its own index with probability 1/n under a uniform
+-- shuffle. Bounds are wide enough that sampling noise cannot trip them, but
+-- narrow enough to catch a shuffle that only permutes part of the vector or
+-- that never leaves an element in place.
+shuffleDoesNotFavourAnyPosition :: Test
+shuffleDoesNotFavourAnyPosition =
+    let n = 10
+        trials = 400
+        samples =
+            [VU.toList (shuffledIndices (mkStdGen s) n) | s <- [1 .. trials]]
+        fixedAt p = length [() | xs <- samples, xs !! p == p]
+        lo = trials `div` (4 * n)
+        hi = 3 * trials `div` n
+        outliers = [p | p <- [0 .. n - 1], fixedAt p < lo || fixedAt p > hi]
+     in TestCase
+            ( assertEqual
+                "every position keeps its index at roughly the same rate"
+                []
+                outliers
+            )
+
 tests :: [Test]
 tests =
-    [ TestLabel "shuffleShuffles" shuffleShuffles
+    [ TestLabel "shuffleSingleRow" shuffleSingleRow
+    , TestLabel
+        "shuffleDoesNotFavourAnyPosition"
+        shuffleDoesNotFavourAnyPosition
+    , TestLabel "shuffleShuffles" shuffleShuffles
     , TestLabel "shufflePreservesData" shufflePreservesData
     , TestLabel "shufflePreservesColumnNames" shufflePreservesColumnNames
     , TestLabel "shuffleSameSeedIsSameShuffle" shuffleSameSeedIsSameShuffle
