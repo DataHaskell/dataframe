@@ -14,13 +14,21 @@ module DataFrame.Operations.Aggregation (
     changingPoints,
 ) where
 
+import qualified Data.Map.Strict as MS
 import qualified Data.Text as T
 import qualified Data.Vector as V
 import qualified Data.Vector.Unboxed as VU
 
 import Control.Exception (throw)
 import DataFrame.Errors
-import DataFrame.Internal.AggPlan (MomentPlan, planAgg, planMoments)
+import DataFrame.Internal.AggKernelPar (
+    mkFusedAgg,
+    mkGatherAgg,
+    runFusedAggs,
+    runGatherAggs,
+    streamGroupCap,
+ )
+import DataFrame.Internal.AggPlan (AggPlan (..), MomentPlan, planAgg, planMoments)
 import DataFrame.Internal.Column (
     Column (..),
     TypedColumn (..),
@@ -30,6 +38,7 @@ import DataFrame.Internal.DataFrame (
     DataFrame (..),
     GroupedDataFrame (..),
     columnNames,
+    getColumn,
     insertColumn,
  )
 import DataFrame.Internal.Expression
@@ -55,25 +64,92 @@ computeRowHashes indices df =
 
 {- | Aggregate a grouped dataframe using the expressions given.
 All ungrouped columns will be dropped.
+
+NOTE: this function deliberately never pattern-matches or strictly binds the
+'Grouped' per-row fields (this module is compiled with @-XStrict@, whose strict
+patterns and bindings would force them): on direct-grouped frames BOTH
+'valueIndices' (the placement permutation) and 'rowToGroup' are deferred
+thunks, and each aggregation path needs at most one of them — always passed as
+un-forced argument expressions. Key columns materialize through 'groupRepRows'
+(one representative row per group) instead of gathering
+@valueIndices[offsets[g]]@.
 -}
 aggregate :: [NamedExpr] -> GroupedDataFrame -> DataFrame
-aggregate aggs gdf@(Grouped df groupingColumns valIndices offs rowToGroupV) =
+aggregate aggs gdf =
     let
-        df' =
-            selectIndices
-                (VU.map (valIndices VU.!) (VU.init offs))
-                (select groupingColumns df)
+        df = fullDataframe gdf
+        offs = offsets gdf
+
+        df' = selectIndices (groupRepRows gdf) (select (groupedColumns gdf) df)
 
         !nGroups = VU.length offs - 1
+        !nRows' = fst (dataframeDimensions df)
+
+        {- Fused multi-reduction fast path (Q3/Q4/Q5-shaped aggregates): every
+        recognised simple scatter reduction (sum/mean/count/min/max over a clean
+        unboxed Int/Double column) in this aggregate runs in ONE pass instead of
+        one full pass per expression. At or below 'streamGroupCap' groups that
+        pass streams over (rowToGroup, columns) with per-worker accumulators —
+        never touching the (possibly lazy) valueIndices; above it (necessarily a
+        hash-path grouping, whose valueIndices is already eager) the accumulator
+        arrays would thrash, so the pass gathers by disjoint group range instead
+        (register accumulators, bit-identical to the unfused gather kernels,
+        one traversal instead of one per expression). Only taken when at
+        least two reductions fuse; non-fusable expressions (median, var/std,
+        max-min, arbitrary DSL) keep their per-expression path below. -}
+        {- This binding is strict (-XStrict), so it must stay empty-and-cheap
+        whenever the moment path below already covers the aggregate — otherwise
+        the pass would run redundantly before the moment result is consulted. -}
+        fusedScatterCols :: MS.Map T.Text Column
+        fusedScatterCols = case fusedMoments of
+            Just _ -> MS.empty
+            Nothing
+                | nGroups <= streamGroupCap ->
+                    let cands =
+                            [ (name, fa)
+                            | (name, ue) <- aggs
+                            , Just (PlanScatter red cname) <- [planAgg gdf ue]
+                            , Just c <- [getColumn cname df]
+                            , Just fa <- [mkFusedAgg nGroups (rowToGroup gdf) red c]
+                            ]
+                     in if length cands >= 2
+                            then
+                                MS.fromList
+                                    (zip (map fst cands) (runFusedAggs nRows' nGroups (map snd cands)))
+                            else MS.empty
+                | otherwise ->
+                    let cands =
+                            [ (name, ga)
+                            | (name, ue) <- aggs
+                            , Just (PlanScatter red cname) <- [planAgg gdf ue]
+                            , Just c <- [getColumn cname df]
+                            , Just ga <-
+                                [mkGatherAgg nGroups (valueIndices gdf) offs red c]
+                            ]
+                     in if length cands >= 2
+                            then
+                                MS.fromList
+                                    ( zip
+                                        (map fst cands)
+                                        ( runGatherAggs
+                                            (valueIndices gdf)
+                                            offs
+                                            nGroups
+                                            (map snd cands)
+                                        )
+                                    )
+                            else MS.empty
 
         -- Fast path: a recognised reduction scatters in one unboxed pass.
         -- Anything 'planAgg' rejects keeps the existing interpreter, so the
         -- general typed + DSL aggregate API stays correct for arbitrary
         -- expressions.
         f ne@(name, uexpr) d =
-            let value = case planAgg gdf uexpr of
-                    Just plan -> runPlan gdf rowToGroupV nGroups plan
-                    Nothing -> interpretNamed gdf ne
+            let value = case MS.lookup name fusedScatterCols of
+                    Just c -> c
+                    Nothing -> case planAgg gdf uexpr of
+                        Just plan -> runPlan gdf (rowToGroup gdf) nGroups plan
+                        Nothing -> interpretNamed gdf ne
              in insertColumn name value d
 
         -- Fused fast path: the Q9 regression family (count + five moment sums
@@ -107,4 +183,6 @@ selectIndices xs df =
 distinct :: DataFrame -> DataFrame
 distinct df = selectIndices (VU.map (indices VU.!) (VU.init os)) df
   where
-    (Grouped _ _ indices os _rtg) = groupBy (columnNames df) df
+    -- The trailing field stays a wildcard: under -XStrict a named pattern
+    -- variable would force the (possibly deferred) rowToGroup thunk.
+    (Grouped _ _ indices os _) = groupBy (columnNames df) df

@@ -42,6 +42,7 @@ import DataFrame.Internal.AggKernelDirect (
 import DataFrame.Internal.AggKernelPar (
     maxMinusMinScatterPar,
     momentScatterPar,
+    momentStreamPar,
     scatterReducePar,
  )
 import DataFrame.Internal.AggPlan (AggPlan (..), MomentPlan (..), Moments (..))
@@ -97,12 +98,26 @@ runPlan gdf rtg nGroups plan = case plan of
 two base columns, returning each output name bound to its moment field. The six
 sufficient statistics (count, Sx, Sy, Sxx, Syy, Sxy) come out of a single pass,
 replacing the three derive passes and six independent scatters of the
-per-expression path. Byte-identical to the sequential kernel at any @-N@.
+per-expression path. The streaming kernel's count is exact; its five Double
+sums accumulate per worker chunk in original row order and merge in fixed
+worker order — deterministic at a fixed @-N@, float summation order chunk-major
+rather than per-group (see 'momentStreamPar'). The gather fallback remains
+byte-identical to the sequential kernel at any @-N@.
 -}
 runMomentPlan ::
     GroupedDataFrame -> Int -> MomentPlan -> Maybe [(T.Text, Column)]
 runMomentPlan gdf nGroups mp = do
-    ms <- momentScatterPar vis offs nGroups (col (mpColX mp)) (col (mpColY mp))
+    let cx = col (mpColX mp)
+        cy = col (mpColY mp)
+        {- Preferred: the streaming kernel — one fused pass over rowToGroup and
+        the TYPED base columns (no sequential Int->Double materialization, no
+        valueIndices gather, so a direct-grouped frame never runs its placement
+        pass). Falls back to the gather kernel above 'streamGroupCap' or on
+        unclean columns. -}
+        streamed = momentStreamPar (rowToGroup gdf) nGroups cx cy
+    ms <- case streamed of
+        Just m -> Just m
+        Nothing -> momentScatterPar vis offs nGroups cx cy
     pure
         [ (mpNName mp, mN ms)
         , (mpSxName mp, mSx ms)
