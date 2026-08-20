@@ -477,20 +477,27 @@ sliceGroups col os indices = case col of
                 V.generate
                     (VU.length indices)
                     ((vec `V.unsafeIndex`) . (indices `VU.unsafeIndex`))
+            !sortedBm = permuteBitmap bm
          in V.generate nGroups $ \i ->
                 BoxedColumn
-                    (fmap (bitmapSlice (start i) (len i)) bm)
+                    (fmap (bitmapSlice (start i) (len i)) sortedBm)
                     (V.unsafeSlice (start i) (len i) sorted)
     UnboxedColumn bm vec ->
         let !sorted = VU.unsafeBackpermute vec indices
+            !sortedBm = permuteBitmap bm
          in V.generate nGroups $ \i ->
                 UnboxedColumn
-                    (fmap (bitmapSlice (start i) (len i)) bm)
+                    (fmap (bitmapSlice (start i) (len i)) sortedBm)
                     (VU.unsafeSlice (start i) (len i) sorted)
   where
     !nGroups = VU.length os - 1
     start i = os `VU.unsafeIndex` i
     len i = os `VU.unsafeIndex` (i + 1) - start i
+    permuteBitmap = fmap $ \bm ->
+        buildBitmapFromValid $
+            VU.map
+                (\r -> if bitmapTestBit bm r then 1 else 0)
+                indices
 {-# INLINE sliceGroups #-}
 
 numGroups :: GroupedDataFrame -> Int
