@@ -39,13 +39,17 @@ import Data.Bits (
     testBit,
     (.&.),
  )
+import Data.Int (Int32)
 import Data.Kind (Type)
 import Data.Maybe
 import Data.Type.Equality (TestEquality (..))
 import Data.Word (Word8)
 import DataFrame.Errors
 import DataFrame.Internal.PackedText (
+    PackedOffsets (..),
+    PackedSel (..),
     PackedTextData (..),
+    offCount,
     packedGather,
     packedIndexText,
     packedLength,
@@ -645,6 +649,273 @@ parBackpermuteUnboxed v ix =
     parGenerateUnboxed (VU.length ix) (\i -> VU.unsafeIndex v (VU.unsafeIndex ix i))
 {-# INLINE parBackpermuteUnboxed #-}
 
+{- | 'parGenerateUnboxed' with an INLINE body: each monomorphic NOINLINE
+wrapper below gets its own copy of the fill loop with @f@ inlined, so the
+per-element unknown closure call (and the boxed result it returns) disappears
+— on a 1e8-row gather that call+alloc dominated the whole pass. Same chunking,
+bit-identical results; wrappers must stay NOINLINE so the 'unsafePerformIO'
+runs once per call.
+-}
+parGenerateUnboxedInline :: (VU.Unbox c) => Int -> (Int -> c) -> VU.Vector c
+parGenerateUnboxedInline n f
+    | n < parColumnThreshold || columnCapabilities <= 1 = VU.generate n f
+    | otherwise = unsafePerformIO $ do
+        mv <- VUM.unsafeNew n
+        let !caps = columnCapabilities
+            !per = (n + caps - 1) `div` caps
+            fill !i !hi
+                | i >= hi = pure ()
+                | otherwise = do
+                    VUM.unsafeWrite mv i (f i)
+                    fill (i + 1) hi
+            spawn w = do
+                var <- newEmptyMVar
+                let !lo = min n (w * per)
+                    !hi = min n (lo + per)
+                _ <- forkIO (try (fill lo hi) >>= putMVar var)
+                pure var
+        vars <- mapM spawn [0 .. caps - 1]
+        rs <- mapM takeMVar vars
+        mapM_ (either (throwIO @SomeException) pure) rs
+        VU.unsafeFreeze mv
+{-# INLINE parGenerateUnboxedInline #-}
+
+-- | Closure-free parallel 'Int' gather: @out!i = v ! (ix!i)@.
+parBackpermuteInt :: VU.Vector Int -> VU.Vector Int -> VU.Vector Int
+parBackpermuteInt v ix =
+    parGenerateUnboxedInline (VU.length ix) (\i -> VU.unsafeIndex v (VU.unsafeIndex ix i))
+{-# NOINLINE parBackpermuteInt #-}
+
+-- | Closure-free parallel 'Double' gather: @out!i = v ! (ix!i)@.
+parBackpermuteDouble :: VU.Vector Double -> VU.Vector Int -> VU.Vector Double
+parBackpermuteDouble v ix =
+    parGenerateUnboxedInline (VU.length ix) (\i -> VU.unsafeIndex v (VU.unsafeIndex ix i))
+{-# NOINLINE parBackpermuteDouble #-}
+
+{- | Closure-free double-indirection gather: @out!g = vis ! (offs!g)@ over
+@length offs - 1@ groups (the representative-row build of the 'Grouped'
+pattern).
+-}
+parBackpermute2Int :: VU.Vector Int -> VU.Vector Int -> VU.Vector Int
+parBackpermute2Int vis offs =
+    parGenerateUnboxedInline
+        (max 0 (VU.length offs - 1))
+        (\g -> VU.unsafeIndex vis (VU.unsafeIndex offs g))
+{-# NOINLINE parBackpermute2Int #-}
+
+-------------------------------------------------------------------------------
+-- Fused multi-column gather
+-------------------------------------------------------------------------------
+
+{- | Gather ONE in-bounds index vector through several columns in a single
+parallel pass. Result columns are identical to @map (atIndicesStable ixs)@;
+columns whose shape the fused kernel does not cover (bitmapped, boxed, merged,
+unusual element types) fall back to per-column 'atIndicesStable'. All fused
+outputs are backed by one shared deferred computation: forcing ANY of them
+runs the single pass that fills ALL of them. The pass reads the index vector
+once per block instead of once per column, and every iteration of a block
+issues each column's independent random load back-to-back, so their cache/TLB
+misses overlap instead of forming one latency chain per column (the aggregate
+key materialization of a 1e8-group result was 6 sequential latency-bound
+passes without this).
+-}
+atIndicesStableMulti :: VU.Vector Int -> [Column] -> [Column]
+atIndicesStableMulti ixs cols =
+    let specs = map mgClassify cols
+        nFused = length [() | Just _ <- specs]
+     in if nFused < 2
+            then map (atIndicesStable ixs) cols
+            else
+                let fused = multiGatherRun ixs [s | Just s <- specs]
+                    go [] _ = []
+                    go (Nothing : ss) !k = atIndicesStable ixs (cols !! k) : go ss (k + 1)
+                    go (Just _ : ss) !k =
+                        let !r = mgRank k
+                         in (fused VB.! r) : go ss (k + 1)
+                    -- fused-output rank of column position k.
+                    mgRank k = length [() | Just _ <- take k specs]
+                 in go specs 0
+
+-- | One fusable source column shape (all bitmap-free).
+data MGSpec
+    = -- | Clean unboxed 'Int' payload.
+      MGInt !(VU.Vector Int)
+    | -- | Clean unboxed 'Double' payload.
+      MGDouble !(VU.Vector Double)
+    | -- | Packed text with an 'Int32' selector (base row count necessarily
+      -- fits 'Int32'); carries the payload for rebuilding and the canon flag.
+      MGSel32 !PackedTextData !(VU.Vector Int32)
+    | -- | Packed text with an 'Int' selector and an 'Int32'-sized base.
+      MGSel64To32 !PackedTextData !(VU.Vector Int)
+    | -- | Packed text with an 'Int' selector and a wide base.
+      MGSel64To64 !PackedTextData !(VU.Vector Int)
+
+mgClassify :: Column -> Maybe MGSpec
+mgClassify (UnboxedColumn Nothing (v :: VU.Vector a)) =
+    case testEquality (typeRep @a) (typeRep @Int) of
+        Just Refl -> Just (MGInt v)
+        Nothing -> case testEquality (typeRep @a) (typeRep @Double) of
+            Just Refl -> Just (MGDouble v)
+            Nothing -> Nothing
+mgClassify (PackedText Nothing p) = case ptSel p of
+    Just (Sel32 s) -> Just (MGSel32 p s)
+    Just (Sel64 s)
+        | offCount (ptOffsets p) - 1 <= mgInt32Max -> Just (MGSel64To32 p s)
+        | otherwise -> Just (MGSel64To64 p s)
+    Nothing -> Nothing
+mgClassify _ = Nothing
+
+mgInt32Max :: Int
+mgInt32Max = fromIntegral (maxBound :: Int32)
+
+{- | Run the fused pass over the fusable specs; element @r@ of the result is
+spec @r@'s gathered column. Deferred as one shared thunk (see
+'atIndicesStableMulti'). Pure w.r.t. its immutable inputs, so the
+'unsafePerformIO' is safe.
+-}
+multiGatherRun :: VU.Vector Int -> [MGSpec] -> VB.Vector Column
+multiGatherRun ixs specs = unsafePerformIO $ do
+    let !n = VU.length ixs
+    opened <- mapM (mgOpen n ixs) specs
+    let fills = map fst opened
+        !caps = columnCapabilities
+        !per = (n + caps - 1) `div` max 1 caps
+        !block = 4096
+        worker !lo !hi
+            | lo >= hi = pure ()
+            | otherwise = do
+                let !e = min hi (lo + block)
+                mapM_ (\fill -> fill lo e) fills
+                worker e hi
+        spawn w = do
+            var <- newEmptyMVar
+            let !lo = min n (w * per)
+                !hi = min n (lo + per)
+            _ <- forkIO (try (worker lo hi) >>= putMVar var)
+            pure var
+    vars <- mapM spawn [0 .. caps - 1]
+    rs <- mapM takeMVar vars
+    mapM_ (either (throwIO @SomeException) pure) rs
+    VB.fromList <$> mapM snd opened
+{-# NOINLINE multiGatherRun #-}
+
+{- | Allocate a spec's destination; return its block-fill action and its
+finalizer. Selector gathers reproduce 'packedGather' exactly (composition
+clamps against the source selector length and base row count); unboxed gathers
+reproduce the unclamped 'parBackpermuteUnboxed'.
+-}
+mgOpen :: Int -> VU.Vector Int -> MGSpec -> IO (Int -> Int -> IO (), IO Column)
+mgOpen n ixs spec = case spec of
+    MGInt v -> do
+        mv <- VUM.unsafeNew n
+        pure
+            ( mgFillInt ixs v mv
+            , UnboxedColumn Nothing <$> VU.unsafeFreeze mv
+            )
+    MGDouble v -> do
+        mv <- VUM.unsafeNew n
+        pure
+            ( mgFillDouble ixs v mv
+            , UnboxedColumn Nothing <$> VU.unsafeFreeze mv
+            )
+    MGSel32 p s -> do
+        mv <- VUM.unsafeNew n
+        pure
+            ( mgFillSel32 ixs s (offCount (ptOffsets p) - 1) mv
+            , (\out -> PackedText Nothing p{ptSel = Just (Sel32 out)}) <$> VU.unsafeFreeze mv
+            )
+    MGSel64To32 p s -> do
+        mv <- VUM.unsafeNew n
+        pure
+            ( mgFillSel64To32 ixs s (offCount (ptOffsets p) - 1) mv
+            , (\out -> PackedText Nothing p{ptSel = Just (Sel32 out)}) <$> VU.unsafeFreeze mv
+            )
+    MGSel64To64 p s -> do
+        mv <- VUM.unsafeNew n
+        pure
+            ( mgFillSel64To64 ixs s (offCount (ptOffsets p) - 1) mv
+            , (\out -> PackedText Nothing p{ptSel = Just (Sel64 out)}) <$> VU.unsafeFreeze mv
+            )
+
+mgFillInt ::
+    VU.Vector Int -> VU.Vector Int -> VUM.IOVector Int -> Int -> Int -> IO ()
+mgFillInt ixs v dst lo hi = go lo
+  where
+    go !i
+        | i >= hi = pure ()
+        | otherwise = do
+            VUM.unsafeWrite dst i (VU.unsafeIndex v (VU.unsafeIndex ixs i))
+            go (i + 1)
+{-# NOINLINE mgFillInt #-}
+
+mgFillDouble ::
+    VU.Vector Int -> VU.Vector Double -> VUM.IOVector Double -> Int -> Int -> IO ()
+mgFillDouble ixs v dst lo hi = go lo
+  where
+    go !i
+        | i >= hi = pure ()
+        | otherwise = do
+            VUM.unsafeWrite dst i (VU.unsafeIndex v (VU.unsafeIndex ixs i))
+            go (i + 1)
+{-# NOINLINE mgFillDouble #-}
+
+mgFillSel32 ::
+    VU.Vector Int -> VU.Vector Int32 -> Int -> VUM.IOVector Int32 -> Int -> Int -> IO ()
+mgFillSel32 ixs s !base dst lo hi = go lo
+  where
+    !sn = VU.length s
+    go !i
+        | i >= hi = pure ()
+        | otherwise = do
+            let !j = VU.unsafeIndex ixs i
+                !out =
+                    if j >= 0 && j < sn
+                        then
+                            let !r = fromIntegral (VU.unsafeIndex s j) :: Int
+                             in if r >= 0 && r < base then fromIntegral r else -1
+                        else -1
+            VUM.unsafeWrite dst i out
+            go (i + 1)
+{-# NOINLINE mgFillSel32 #-}
+
+mgFillSel64To32 ::
+    VU.Vector Int -> VU.Vector Int -> Int -> VUM.IOVector Int32 -> Int -> Int -> IO ()
+mgFillSel64To32 ixs s !base dst lo hi = go lo
+  where
+    !sn = VU.length s
+    go !i
+        | i >= hi = pure ()
+        | otherwise = do
+            let !j = VU.unsafeIndex ixs i
+                !out =
+                    if j >= 0 && j < sn
+                        then
+                            let !r = VU.unsafeIndex s j
+                             in if r >= 0 && r < base then fromIntegral r else -1
+                        else -1
+            VUM.unsafeWrite dst i out
+            go (i + 1)
+{-# NOINLINE mgFillSel64To32 #-}
+
+mgFillSel64To64 ::
+    VU.Vector Int -> VU.Vector Int -> Int -> VUM.IOVector Int -> Int -> Int -> IO ()
+mgFillSel64To64 ixs s !base dst lo hi = go lo
+  where
+    !sn = VU.length s
+    go !i
+        | i >= hi = pure ()
+        | otherwise = do
+            let !j = VU.unsafeIndex ixs i
+                !out =
+                    if j >= 0 && j < sn
+                        then
+                            let !r = VU.unsafeIndex s j
+                             in if r >= 0 && r < base then r else -1
+                        else -1
+            VUM.unsafeWrite dst i out
+            go (i + 1)
+{-# NOINLINE mgFillSel64To64 #-}
+
 {- | Parallel boxed gather. The read side uses 'VB.unsafeIndexM' so the array
 slot is fetched eagerly (element pointers are shared, elements themselves stay
 un-forced, exactly as the sequential 'VB.generate' gather). Bit-identical
@@ -849,7 +1120,7 @@ atIndicesStable indexes (BoxedColumn bm column) =
             bm
         )
         (parBackpermuteBoxed column indexes)
-atIndicesStable indexes (UnboxedColumn bm column) =
+atIndicesStable indexes (UnboxedColumn bm (column :: VU.Vector a)) =
     UnboxedColumn
         ( fmap
             ( \bm0 ->
@@ -858,7 +1129,14 @@ atIndicesStable indexes (UnboxedColumn bm column) =
             )
             bm
         )
-        (parBackpermuteUnboxed column indexes)
+        -- Int/Double hit the closure-free monomorphic kernels; anything else
+        -- keeps the generic (per-element closure call) path.
+        ( case testEquality (typeRep @a) (typeRep @Int) of
+            Just Refl -> parBackpermuteInt column indexes
+            Nothing -> case testEquality (typeRep @a) (typeRep @Double) of
+                Just Refl -> parBackpermuteDouble column indexes
+                Nothing -> parBackpermuteUnboxed column indexes
+        )
 atIndicesStable indexes (MergedColumn a b) =
     MergedColumn (atIndicesStable indexes a) (atIndicesStable indexes b)
 atIndicesStable indexes (PackedText bm p) =

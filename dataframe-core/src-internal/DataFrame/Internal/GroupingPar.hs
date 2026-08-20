@@ -8,6 +8,7 @@ Output is bit-for-bit identical to the sequential 'DataFrame.Internal.Grouping.g
 -}
 module DataFrame.Internal.GroupingPar (
     parallelAssignGroups,
+    rtgFromVisOffs,
     shouldParallelize,
     parThreshold,
     numPartitionsFor,
@@ -62,15 +63,30 @@ partIx shift h = fromIntegral (key h `unsafeShiftR` shift)
 {-# INLINE partIx #-}
 
 {- | Number of partitions: a power of two, at least @4 * caps@ (P >> cores for
-skew tolerance), floored at 256.
+skew tolerance), floored at 256 — and grown with the row count (up to
+'maxPartitions') so a partition's worst-case hash table (every row a distinct
+group: @nextPow2Above (2 * rows/p)@ slots x 3 arrays) stays cache-resident
+instead of thrashing DRAM. Partitioning is by the top hash bits and canonical
+ranking is ascending unsigned key both across and within partitions, so the
+grouping output is bit-for-bit identical at ANY partition count; only the
+constant matters for speed.
 -}
-numPartitionsFor :: Int -> Int
-numPartitionsFor caps = go 1
+numPartitionsFor :: Int -> Int -> Int
+numPartitionsFor caps n = go 1
   where
-    target = max 256 (4 * caps)
+    base = max 256 (4 * caps)
     go p
-        | p >= target = p
-        | otherwise = go (p * 2)
+        | p < base = go (p * 2)
+        | p < maxPartitions && n > p * partRowTarget = go (p * 2)
+        | otherwise = p
+
+-- | Cap on partition count (scatter-pass stream count stays manageable).
+maxPartitions :: Int
+maxPartitions = 4096
+
+-- | Target rows per partition (~24k rows -> 64k-slot table, ~1.5MB).
+partRowTarget :: Int
+partRowTarget = 24576
 
 -- | @floor (log2 x)@ for a power-of-two @x@.
 intLog2 :: Int -> Int
@@ -78,19 +94,21 @@ intLog2 x = 63 - countLeadingZeros x
 {-# INLINE intLog2 #-}
 
 {- | Parallel group assignment. @parallelAssignGroups n hashes eqRow@ returns
-@(rowToGroup, valueIndices, offsets)@ in canonical group order. @eqRow a b@ must
-report whether rows @a@ and @b@ share all key columns (null-aware).
+@(valueIndices, offsets)@ in canonical group order. @eqRow a b@ must report
+whether rows @a@ and @b@ share all key columns (null-aware). @rowToGroup@ is
+NOT built here any more: gather-style aggregation over huge group counts never
+reads it, so callers derive it on demand with 'rtgFromVisOffs'.
 -}
 parallelAssignGroups ::
     Int ->
     VU.Vector Int ->
     (Int -> Int -> Bool) ->
-    IO (VU.Vector Int, VU.Vector Int, VU.Vector Int)
+    IO (VU.Vector Int, VU.Vector Int)
 parallelAssignGroups n hashes eqRow = do
     caps <- getNumCapabilities
-    let !p = numPartitionsFor caps
+    let !p = numPartitionsFor caps n
         !shift = 64 - intLog2 p
-    (partStart, sortedRows) <- partitionRows n hashes p shift
+    (partStart, sortedRows, sortedHash) <- partitionRows n hashes p shift
     localGid <- VUM.new (max 1 n)
     canonBoxes <- VM.replicate p (VU.empty :: VU.Vector Int)
     nLocalGroups <- VUM.replicate p (0 :: Int)
@@ -99,7 +117,7 @@ parallelAssignGroups n hashes eqRow = do
         p
         partStart
         sortedRows
-        hashes
+        sortedHash
         eqRow
         localGid
         canonBoxes
@@ -112,8 +130,10 @@ parallelAssignGroups n hashes eqRow = do
 -------------------------------------------------------------------------------
 
 {- | Bucket every row index into its partition by a counting sort. Returns the
-exclusive prefix-sum @partStart@ (length @p+1@, @partStart[p] == n@) and the row
-indices laid out partition-by-partition in @sortedRows@.
+exclusive prefix-sum @partStart@ (length @p+1@, @partStart[p] == n@), the row
+indices laid out partition-by-partition in @sortedRows@, and each sorted
+position's hash in @sortedHash@ (same layout) so the grouping loop reads its
+hashes sequentially instead of a random @hashes[row]@ per row.
 
 Runs chunked across capabilities: per-chunk partition histograms are prefix
 summed (in chunk order) into disjoint per-chunk write cursors, so the scatter
@@ -121,7 +141,7 @@ threads never contend and each partition keeps its rows in ascending original
 row order — bit-for-bit the sequential counting sort's layout.
 -}
 partitionRows ::
-    Int -> VU.Vector Int -> Int -> Int -> IO (VU.Vector Int, VU.Vector Int)
+    Int -> VU.Vector Int -> Int -> Int -> IO (VU.Vector Int, VU.Vector Int, VU.Vector Int)
 partitionRows n hashes p shift = do
     caps <- getNumCapabilities
     let chunks = rowChunks caps n
@@ -142,13 +162,15 @@ partitionRows n hashes p shift = do
                 seed (pp + 1) acc'
     seed 0 0
     sortedM <- VUM.new (max 1 n)
+    sortedHashM <- VUM.new (max 1 n)
     forkJoin_
-        [ scatterChunk hashes shift cur sortedM lo hi
+        [ scatterChunk hashes shift cur sortedM sortedHashM lo hi
         | ((lo, hi), cur) <- zip chunks cursors
         ]
     partStart <- VU.unsafeFreeze partStartM
     sortedRows <- VU.unsafeFreeze sortedM
-    pure (partStart, sortedRows)
+    sortedHash <- VU.unsafeFreeze sortedHashM
+    pure (partStart, sortedRows, sortedHash)
 
 -- | Contiguous near-equal row chunks, one per capability; empties dropped.
 rowChunks :: Int -> Int -> [(Int, Int)]
@@ -175,17 +197,28 @@ histChunk hashes p shift lo hi = do
                 go (i + 1)
     go lo
 
--- | Scatter one row chunk into @sortedM@ through the chunk's private cursor.
+{- | Scatter one row chunk into @sortedM@/@sortedHashM@ through the chunk's
+private cursor.
+-}
 scatterChunk ::
-    VU.Vector Int -> Int -> VUM.IOVector Int -> VUM.IOVector Int -> Int -> Int -> IO ()
-scatterChunk hashes shift cursor sortedM lo hi = go lo
+    VU.Vector Int ->
+    Int ->
+    VUM.IOVector Int ->
+    VUM.IOVector Int ->
+    VUM.IOVector Int ->
+    Int ->
+    Int ->
+    IO ()
+scatterChunk hashes shift cursor sortedM sortedHashM lo hi = go lo
   where
     go !i
         | i >= hi = pure ()
         | otherwise = do
-            let !pp = partIx shift (VU.unsafeIndex hashes i)
+            let !h = VU.unsafeIndex hashes i
+                !pp = partIx shift h
             pos <- VUM.unsafeRead cursor pp
             VUM.unsafeWrite sortedM pos i
+            VUM.unsafeWrite sortedHashM pos h
             VUM.unsafeWrite cursor pp (pos + 1)
             go (i + 1)
 
@@ -208,7 +241,7 @@ runPartitions ::
     VM.IOVector (VU.Vector Int) ->
     VUM.IOVector Int ->
     IO ()
-runPartitions caps p partStart sortedRows hashes eqRow localGid canonBoxes nLocalGroups = do
+runPartitions caps p partStart sortedRows sortedHash eqRow localGid canonBoxes nLocalGroups = do
     next <- newIORef 0
     let groupPartition !pp = do
             let !s = VU.unsafeIndex partStart pp
@@ -221,7 +254,7 @@ runPartitions caps p partStart sortedRows hashes eqRow localGid canonBoxes nLoca
                         | pos >= e = pure nextGid
                         | otherwise = do
                             let !row = VU.unsafeIndex sortedRows pos
-                                !h = VU.unsafeIndex hashes row
+                                !h = VU.unsafeIndex sortedHash pos
                             (gid, isNew) <- htInsert ht eqRow nextGid row h
                             VUM.unsafeWrite localGid pos gid
                             if isNew
@@ -264,9 +297,11 @@ canonicalize p canonBoxes nLocalGroups = do
     canonOf <- V.unsafeFreeze canonBoxes
     pure (globalBase, canonOf, total)
 
-{- | Build the final @(rowToGroup, valueIndices, offsets)@: the global group id of a
+{- | Build the final @(valueIndices, offsets)@: the global group id of a
 sorted position is @globalBase[pp] + canonOf[pp][localGid]@. @valueIndices@ orders
-rows by group, @offsets@ the boundaries, @rowToGroup@ the inverse per original row.
+rows by group, @offsets@ the boundaries. (@rowToGroup@, the per-original-row
+inverse, is no longer built here — 'rtgFromVisOffs' derives it on demand, so
+aggregations that never read it skip its full random-write pass.)
 
 Each partition owns a disjoint @sortedRows@ range and a disjoint global group-id
 range, and its rows are exactly its groups' rows — so its first group's offset is
@@ -284,10 +319,9 @@ assemble ::
     VU.Vector Int ->
     V.Vector (VU.Vector Int) ->
     Int ->
-    IO (VU.Vector Int, VU.Vector Int, VU.Vector Int)
+    IO (VU.Vector Int, VU.Vector Int)
 assemble n p partStart sortedRows localGid globalBase canonOf nGroups = do
     caps <- getNumCapabilities
-    rtgM <- VUM.new (max 1 n)
     gidAt <- VUM.new (max 1 n)
     counts <- VUM.new (max 1 nGroups)
     offsM <- VUM.new (nGroups + 1)
@@ -303,15 +337,13 @@ assemble n p partStart sortedRows localGid globalBase canonOf nGroups = do
                     | g >= gEnd = pure ()
                     | otherwise = VUM.unsafeWrite counts g 0 >> zero (g + 1)
             zero base
-            -- Pass 1: global group ids, rowToGroup, per-group counts.
+            -- Pass 1: global group ids and per-group counts.
             let pass1 !pos
                     | pos >= e = pure ()
                     | otherwise = do
                         lg <- VUM.unsafeRead localGid pos
                         let !g = base + VU.unsafeIndex canon lg
-                            !row = VU.unsafeIndex sortedRows pos
                         VUM.unsafeWrite gidAt pos g
-                        VUM.unsafeWrite rtgM row g
                         c <- VUM.unsafeRead counts g
                         VUM.unsafeWrite counts g (c + 1)
                         pass1 (pos + 1)
@@ -342,10 +374,52 @@ assemble n p partStart sortedRows localGid globalBase canonOf nGroups = do
             when (i < p) $ doPartition i >> worker
     forkJoin_ (replicate caps worker)
     VUM.unsafeWrite offsM nGroups n
-    rtg <- VU.unsafeFreeze rtgM
     offs <- VU.unsafeFreeze offsM
     vis <- VU.unsafeFreeze visM
-    pure (rtg, vis, offs)
+    pure (vis, offs)
+
+{- | Deferred @rowToGroup@ from @(valueIndices, offsets)@:
+@rtg[vis[i]] = g@ for every @i@ in group @g@'s range. @vis@ is a permutation,
+so any split of the position space writes disjoint slots; each worker binary
+searches its first group and then walks group ranges. Values are identical to
+the @rowToGroup@ the assembly pass used to build inline. Pure w.r.t. its
+immutable inputs, so the 'unsafePerformIO' is safe.
+-}
+rtgFromVisOffs :: Int -> VU.Vector Int -> VU.Vector Int -> VU.Vector Int
+rtgFromVisOffs n vis offs = unsafePerformIO $ do
+    let !caps = capabilities
+        !nGroups = VU.length offs - 1
+    rtgM <- VUM.new (max 1 n)
+    let -- Largest g with offs[g] <= i (offsets are non-decreasing).
+        findGroup !i = go2 0 nGroups
+          where
+            go2 !lo !hi
+                | lo >= hi = lo - 1
+                | otherwise =
+                    let !mid = (lo + hi) `div` 2
+                     in if VU.unsafeIndex offs mid <= i
+                            then go2 (mid + 1) hi
+                            else go2 lo mid
+        fill !i !hi !g
+            | i >= hi = pure ()
+            | otherwise = do
+                let !g' = advance g
+                    advance !gg =
+                        if VU.unsafeIndex offs (gg + 1) <= i
+                            then advance (gg + 1)
+                            else gg
+                VUM.unsafeWrite rtgM (VU.unsafeIndex vis i) g'
+                fill (i + 1) hi g'
+        !per = (n + caps - 1) `div` max 1 caps
+    forkJoin_
+        [ fill lo hi (findGroup lo)
+        | w <- [0 .. caps - 1]
+        , let lo = min n (w * per)
+        , let hi = min n (lo + per)
+        , lo < hi
+        ]
+    VU.unsafeFreeze rtgM
+{-# NOINLINE rtgFromVisOffs #-}
 
 -------------------------------------------------------------------------------
 -- Thread fan-out (plain forkIO + MVar join, no sparks)

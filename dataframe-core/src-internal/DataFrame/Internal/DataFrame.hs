@@ -134,10 +134,7 @@ pattern Grouped df cols vis offs rtg <- GroupedInternal df cols vis offs rtg _
                 in-bounds by construction: offs has nGroups+1 entries and
                 offs!g < length vis for every non-empty group. Values are
                 identical to the historical @VU.map (vis !) (VU.init offs)@. -}
-                ( parGenerateUnboxed
-                    (max 0 (VU.length offs - 1))
-                    (\g -> VU.unsafeIndex vis (VU.unsafeIndex offs g))
-                )
+                (parBackpermute2Int vis offs)
 
 {-# COMPLETE Grouped #-}
 

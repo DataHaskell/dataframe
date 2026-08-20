@@ -35,6 +35,7 @@ import DataFrame.Internal.Column (
     Column (..),
     TypedColumn (..),
     atIndicesStable,
+    atIndicesStableMulti,
  )
 import DataFrame.Internal.DataFrame (
     DataFrame (..),
@@ -86,7 +87,23 @@ aggregate aggs gdf =
         df = fullDataframe gdf
         offs = offsets gdf
 
-        df' = selectIndices (groupRepRows gdf) (select (groupedColumns gdf) df)
+        {- Key columns materialize through ONE fused parallel gather over the
+        representative rows ('atIndicesStableMulti'): the 1e8-group Q10 result
+        was six sequential latency-bound random-gather passes as per-column
+        'selectIndices'. Each result column is still identical to (and as
+        deferred as) the per-column gather; the row-count field uses the eager
+        @offsets@ so nothing here forces 'groupRepRows' early. -}
+        df' =
+            let sub = select (groupedColumns gdf) df
+             in sub
+                    { columns =
+                        V.fromList
+                            ( atIndicesStableMulti
+                                (groupRepRows gdf)
+                                (V.toList (columns sub))
+                            )
+                    , dataframeDimensions = (nGroups, snd (dataframeDimensions sub))
+                    }
 
         !nGroups = VU.length offs - 1
         !nRows' = fst (dataframeDimensions df)
@@ -132,7 +149,14 @@ aggregate aggs gdf =
                             , Just ga <-
                                 [mkGatherAgg nGroups (valueIndices gdf) offs red c]
                             ]
-                     in if length cands >= 2
+                     in {- Unlike the stream branch, a SINGLE candidate also
+                        takes this path: the per-expression fallback is a
+                        scatter over rowToGroup, which on a hash-path grouping
+                        is now a deferred thunk — the gather kernel (documented
+                        bit-identical to the unfused kernels) works off the
+                        already-eager valueIndices instead and skips that whole
+                        random-write pass. -}
+                        if not (null cands)
                             then
                                 MS.fromList
                                     ( zip

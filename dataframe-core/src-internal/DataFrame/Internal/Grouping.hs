@@ -44,7 +44,7 @@ import DataFrame.Internal.GroupingDirect (
     rangeOf,
  )
 import qualified DataFrame.Internal.GroupingDirect as GD
-import DataFrame.Internal.GroupingPar (parallelAssignGroups, shouldParallelize)
+import DataFrame.Internal.GroupingPar (parallelAssignGroups, rtgFromVisOffs, shouldParallelize)
 import DataFrame.Internal.Hash
 import DataFrame.Internal.HashTable (htInsert, newHashTable)
 import DataFrame.Internal.PackedText (
@@ -294,13 +294,17 @@ groupByPar names df =
         -- Merged key columns are exotic; hash their eager form.
         selectedCols = map (materializeMerged . (columns df V.!)) indicesToGroup
         !eqRow = eqKeyRow df indicesToGroup
-        (rtg, vis, os) = unsafePerformIO $ do
+        (vis, os) = unsafePerformIO $ do
             -- Parallel row-hash kernel, bit-identical to 'computeHashes' at the
             -- same dict-code setting (grouping always hashes canonical dict
             -- columns by code; see 'hashPacked').
             hashes <- computeRowHashesWithIO True n selectedCols
             parallelAssignGroups n hashes eqRow
-     in Grouped df names vis os rtg
+     in -- rowToGroup is passed as an UNFORCED constructor argument (this module
+        -- is -XStrict, so it must not be let-bound): gather-style aggregation
+        -- over huge group counts never reads it, and the deferred pass writes
+        -- values identical to the eager build.
+        Grouped df names vis os (rtgFromVisOffs n vis os)
 {-# NOINLINE groupByPar #-}
 
 -- | Column indices of the requested key columns, in column order.
