@@ -51,69 +51,6 @@ import DataFrame.Internal.DataFrame (
 import Pinch (enum, putField)
 import qualified Pinch
 
--- A Parquet file is a series of row groups followed by the file metadata (which contains the schema and the
--- metadata for all the rowgroups, which, in turn, contain the metadata for each column chunk). Inside each
--- rowgroup is a series of column chunks. Column chunks consist of a series of pages. Pages are the PageHeader
--- followed by RLE encoded definition levels (if they exist), RLE encoded repetition levels (if they exist),
--- and finally the encoded and then compressed data. I forgot about magic bytes. Those are there too.
---
--- For a parquet file to acheive efficient compression we tend to desirc row groupts of a specific size and
--- for each of our column chunks to have pages that are of a specific size. So we must expose these fiddle
--- factors to the user so they can tune the writer to have the behavior they want. (there are subtleties to
--- this that are discussed further below)
---
--- We'll set the default Page size to 1 MiB and the default rowGroupSize to 128MiB (of course users will be
--- able to adjust these numbers through write options). We need to hold the entire RowGroup in memory as
--- we build is as the ColumnChunks need to be contiguous when written to disk. So we need to hold
--- buffers for each individual columnChunk as we go row by row and build them; the columnChunks cannot be
--- interleaved.
-
--- Since dataframe is columnar to begin with, we could, in theory, go golumn by column by estimating the size
--- of a certain slice of a column, but I don't yet see a good way of doing this given we must run the gamut
--- of encodings and compressions applied to each of those ColumnChunks (and those compression libraries have
--- their own multifarious strategies for various kinds of data)
---
--- Each row group has to be a certain size, but each column in a  row group must contain the same number
--- of rows, even though each column may very well fit the same number of rows in very different amounts
--- of space. So how do we ensure that we both hit our page size target, our record size target, and have
--- the same number of rows in each column?
---
--- We must consider the page size and row group sizes to be best effort. They could be slightly above
--- or below the target. The characteristics of the parquet file will depend on both the write options and
--- the specific data being encoded. Arrow-rs runs batches of rows through the writer, flushing when
--- they see that a page/rowgroup has met or exceeded its limit.
---
--- So a row group is flushed specifically only on batch boundaries and we get the same number of rows in
--- every row group except the last which will be smaller than the rest. They also use sub batching. so
--- as to not overshoot page size egregiously if the user sets a large batch size. Note:
--- arrow-rs had an issue where some columns had really large values.
--- See https://github.com/apache/arrow-rs/issues/10061.
---
--- We may need to implement batching and sub batching eventually but I'm too lazy to do it right now.
---
--- If larger row groups are required (up to a gigabyte in size if not more), we should provide users who
--- need to minimize memory usage an alternate two pass strategy where we first write to temporary files (one
--- per columnChunk) until the temporary files have grown to the size of what a rowgroup should actually be
--- and pipe the temporary files into the output. Essentially our rowgroup buffer is on disk instead of in
--- memory. This is slower but should use less memory. In cases where there is extra RAM available but the
--- user chooses the two pass strategy anyway, the temp files will tend to be held in the OS Page Cache (RAM)
--- anyway.
---
--- Niceties like statistics and bloom filters and so on have not yet been implemented. We may need some
--- extra machinery to keep track of row ranges so we can use them with the dataframe to generate our
--- statistics.
---
--- We haven't yet implemented all the encodings and compressions possible. The writer should first
--- be brought to parity with the reader, and then we should implement encodings and compressions in
--- both together so neither lags behind the other.
---
--- We also don't yet support a way to have different compressions/endodings per page, and I imagine
--- we would use some kind of heuristid to select these things, if we should want such a thing at all
---
--- Repetition levels and Definitions levlels above 1 are also not yet supported, but that may come hand
--- in hand with bigger work where we work out the best way to support arbitraritly nested rows in
--- dataframe in a general way (as opposed to what we have today)
-
 writeParquet :: FilePath -> DataFrame -> IO ()
 writeParquet = writeParquetWithOptions defaultParquetWriteOptions
 
