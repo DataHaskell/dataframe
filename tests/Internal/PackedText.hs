@@ -14,6 +14,7 @@ import qualified Data.Text as T
 import qualified Data.Text.Array as A
 import qualified Data.Vector.Unboxed as VU
 
+import Control.Exception (SomeException, evaluate, try)
 import Control.Monad (zipWithM_)
 import qualified Data.ByteString as B
 import Data.Text.Encoding (encodeUtf8)
@@ -169,6 +170,40 @@ leftJoinSentinelPreservesPacked = TestCase $ do
         (DI.isPackedText (unsafeGetColumn "v" joinedP))
     assertBool "left join packed == boxed" (joinedP == joinedB)
 
+-- A slice of a packed column stays packed: decoding to Text would make a
+-- ten-row slice cost the whole frame.
+slicePreservesPacked :: Test
+slicePreservesPacked = TestCase $ do
+    let sp = DI.sliceColumn 3 4 packedCol
+        sb = DI.sliceColumn 3 4 boxedCol
+    assertBool "sliced packed stays PackedText" (DI.isPackedText sp)
+    assertBool "sliced packed == sliced boxed" (sp == sb)
+    assertEqual
+        "sliced packed toList == boxed"
+        (DI.toList @T.Text sb)
+        (DI.toList @T.Text sp)
+
+-- takeLastColumn is sliceColumn from an offset, so it must stay packed too.
+takeLastPreservesPacked :: Test
+takeLastPreservesPacked = TestCase $ do
+    let tp = DI.takeLastColumn 3 packedCol
+        tb = DI.takeLastColumn 3 boxedCol
+    assertBool "takeLast packed stays PackedText" (DI.isPackedText tp)
+    assertEqual
+        "takeLast packed toList == boxed"
+        (DI.toList @T.Text tb)
+        (DI.toList @T.Text tp)
+
+-- Every other representation rejects a slice running past the end; the packed
+-- arm must not quietly decode the overrun as empty strings.
+sliceRejectsInvalidBounds :: Test
+sliceRejectsInvalidBounds = TestCase $ do
+    r <- try (evaluate (DI.columnLength (DI.sliceColumn 8 5 packedCol)))
+    case r :: Either SomeException Int of
+        Left _ -> pure ()
+        Right len ->
+            assertFailure ("expected an invalid slice, got length " ++ show len)
+
 tests :: [Test]
 tests =
     [ TestLabel "PackedText display parity" displayParity
@@ -183,4 +218,7 @@ tests =
     , TestLabel
         "PackedText left-join sentinel preserves packed"
         leftJoinSentinelPreservesPacked
+    , TestLabel "PackedText slice preserves packed" slicePreservesPacked
+    , TestLabel "PackedText takeLast preserves packed" takeLastPreservesPacked
+    , TestLabel "PackedText slice rejects bad bounds" sliceRejectsInvalidBounds
     ]
