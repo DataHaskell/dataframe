@@ -25,7 +25,6 @@ import qualified Data.Text as T
 import qualified Data.Vector as VB
 import qualified Data.Vector.Unboxed as VU
 
-import Data.Bits (popCount)
 import Data.Kind (Type)
 import Data.Maybe (isJust)
 import Data.Type.Equality (TestEquality (..))
@@ -64,9 +63,12 @@ hasMissing _ = False
 
 -- | Checks if a column contains only missing values.
 allMissing :: Column -> Bool
-allMissing (BoxedColumn (Just bm) col) = VU.all (== 0) bm && not (VB.null col)
-allMissing (UnboxedColumn (Just bm) col) = VU.all (== 0) bm && not (VU.null col)
-allMissing (PackedText (Just bm) p) = VU.all (== 0) bm && packedLength p > 0
+allMissing (BoxedColumn (Just bm) col) =
+    not (VB.null col) && popCountUpTo (VB.length col) bm == 0
+allMissing (UnboxedColumn (Just bm) col) =
+    not (VU.null col) && popCountUpTo (VU.length col) bm == 0
+allMissing (PackedText (Just bm) p) =
+    packedLength p > 0 && popCountUpTo (packedLength p) bm == 0
 allMissing _ = False
 
 -- | Checks if a column contains numeric values.
@@ -143,9 +145,9 @@ columnElemIsNull _ _ = False
 numElements :: Column -> Int
 numElements (MergedColumn a b) = min (columnLength a) (columnLength b)
 numElements (BoxedColumn Nothing xs) = VB.length xs
-numElements (BoxedColumn (Just bm) _xs) = VU.foldl' (\acc b -> acc + popCount b) 0 bm
+numElements (BoxedColumn (Just bm) xs) = popCountUpTo (VB.length xs) bm
 numElements (UnboxedColumn Nothing xs) = VU.length xs
-numElements (UnboxedColumn (Just bm) _xs) = VU.foldl' (\acc b -> acc + popCount b) 0 bm
+numElements (UnboxedColumn (Just bm) xs) = popCountUpTo (VU.length xs) bm
 numElements (PackedText Nothing p) = packedLength p
-numElements (PackedText (Just bm) _p) = VU.foldl' (\acc b -> acc + popCount b) 0 bm
+numElements (PackedText (Just bm) p) = popCountUpTo (packedLength p) bm
 {-# INLINE numElements #-}
