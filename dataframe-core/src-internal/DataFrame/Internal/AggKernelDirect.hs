@@ -97,6 +97,7 @@ directInt red g nGroups v = case red of
     RMax -> Just (fromUnboxedVector (extremaIntDirect False g nGroups v))
     RMean -> Just (fromUnboxedVector (meanIntDirect g nGroups v))
     RTop2Sum -> Just (fromUnboxedVector (top2Direct g nGroups v))
+    RTop2Snd -> Just (fromUnboxedVector (top2SndDirect g nGroups v))
     _ -> Nothing
 
 {- | The reductions admitted over a Double column. Count/min/max/top2sum are
@@ -114,6 +115,7 @@ directDouble red g nGroups v = case red of
     RMin -> Just (fromUnboxedVector (extremaDblDirect True g nGroups v))
     RMax -> Just (fromUnboxedVector (extremaDblDirect False g nGroups v))
     RTop2Sum -> Just (fromUnboxedVector (top2Direct g nGroups v))
+    RTop2Snd -> Just (fromUnboxedVector (top2SndDirect g nGroups v))
     _ -> Nothing
 
 {- | The fused @max a - min b@ direct pass: BOTH extrema accumulate in one
@@ -552,6 +554,35 @@ top2Direct g nGroups v
 function of its arguments, so unsafePerformIO sharing is not a concern. -}
 {-# INLINEABLE top2Direct #-}
 
+{- | Second-largest value per group: the exact same per-worker
+(largest, second-largest) accumulator and merge as 'top2Direct'
+('top2Chunk'/'mergeTop2'), finalized to the second max alone. A group of
+size < 2 finalizes its @-inf@ seed to NaN — documented behaviour (the
+db-benchmark Q8 data has no size-1 @id6@ groups). Order-independent multiset
+selection, so byte-identical at any @-N@.
+-}
+top2SndDirect ::
+    (VU.Unbox a, Real a) => VU.Vector Int -> Int -> VU.Vector a -> VU.Vector Double
+{-# SPECIALIZE top2SndDirect ::
+    VU.Vector Int -> Int -> VU.Vector Int -> VU.Vector Double
+    #-}
+{-# SPECIALIZE top2SndDirect ::
+    VU.Vector Int -> Int -> VU.Vector Double -> VU.Vector Double
+    #-}
+top2SndDirect g nGroups v
+    | not (shouldPar n) = unsafePerformIO $ do
+        (m1, m2) <- top2Chunk g v nGroups 0 n
+        finalizeTop2Snd nGroups m1 m2
+    | otherwise = unsafePerformIO $ do
+        parts <- runPartialsOver n capabilities (top2Chunk g v nGroups)
+        (m1, m2) <- mergeTop2 nGroups parts
+        finalizeTop2Snd nGroups m1 m2
+  where
+    !n = VU.length v
+{- INLINEABLE (not NOINLINE) so the SPECIALIZE pragmas above take effect; pure
+function of its arguments, so unsafePerformIO sharing is not a concern. -}
+{-# INLINEABLE top2SndDirect #-}
+
 top2Chunk ::
     (VU.Unbox a, Real a) =>
     VU.Vector Int ->
@@ -620,6 +651,19 @@ finalizeTop2 nGroups m1 m2 = do
                 a2 <- VUM.unsafeRead m2 k
                 let s = (if isInfinite a1 then 0 else a1) + (if isInfinite a2 then 0 else a2)
                 VUM.unsafeWrite out k s
+                go (k + 1)
+    go 0
+    VU.unsafeFreeze out
+
+finalizeTop2Snd ::
+    Int -> VUM.IOVector Double -> VUM.IOVector Double -> IO (VU.Vector Double)
+finalizeTop2Snd nGroups _m1 m2 = do
+    out <- VUM.new nGroups
+    let go !k
+            | k >= nGroups = pure ()
+            | otherwise = do
+                a2 <- VUM.unsafeRead m2 k
+                VUM.unsafeWrite out k (if isInfinite a2 then 0 / 0 else a2)
                 go (k + 1)
     go 0
     VU.unsafeFreeze out

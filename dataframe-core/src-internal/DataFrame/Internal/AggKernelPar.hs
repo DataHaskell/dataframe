@@ -195,6 +195,7 @@ reduceParTyped red vis offs nGroups v idents =
             RStd ->
                 fromUnboxedVector (unsafePerformIO (varPar True vis offs nGroups v caps bounds))
             RTop2Sum -> fromUnboxedVector (unsafePerformIO (top2Par vis offs nGroups v caps bounds))
+            RTop2Snd -> fromUnboxedVector (unsafePerformIO (top2SndPar vis offs nGroups v caps bounds))
 {-# INLINEABLE reduceParTyped #-}
 
 {- | For each group in @[gs, ge)@, fold the group's rows (in @valueIndices@
@@ -383,6 +384,43 @@ top2Par vis offs nGroups v caps bounds = do
          in grp gs
     VU.unsafeFreeze out
 {-# INLINE top2Par #-}
+
+{- | Second-largest value per group: the same (largest, second-largest)
+register pair as 'top2Par', finalized to the second max alone. Size-1 groups
+finalize the @-inf@ seed to NaN (documented; see
+'DataFrame.Internal.AggKernel.top2SndScatter').
+-}
+top2SndPar ::
+    (VU.Unbox a, Real a) =>
+    VU.Vector Int ->
+    VU.Vector Int ->
+    Int ->
+    VU.Vector a ->
+    Int ->
+    VU.Vector Int ->
+    IO (VU.Vector Double)
+top2SndPar vis offs nGroups v caps bounds = do
+    let ninf = negate (1 / 0) :: Double
+    out <- VUM.replicate nGroups (0 :: Double)
+    forEachRange bounds caps $ \gs ge ->
+        -- The (largest, second-largest) pair carried in registers per group.
+        let grp !g
+                | g >= ge = pure ()
+                | otherwise = do
+                    let !e = VU.unsafeIndex offs (g + 1)
+                        inner !pos !a1 !a2
+                            | pos >= e = if isInfinite a2 then 0 / 0 else a2
+                            | otherwise =
+                                let !x = realToFrac (VU.unsafeIndex v (VU.unsafeIndex vis pos))
+                                 in if x > a1
+                                        then inner (pos + 1) x a1
+                                        else inner (pos + 1) a1 (max a2 x)
+                        !res = inner (VU.unsafeIndex offs g) ninf ninf
+                    VUM.unsafeWrite out g res
+                    grp (g + 1)
+         in grp gs
+    VU.unsafeFreeze out
+{-# INLINE top2SndPar #-}
 
 -------------------------------------------------------------------------------
 -- Parallel fused max(a) - min(b) (Q7 at wide group domains)
@@ -834,6 +872,10 @@ mkFusedAgg nGroups rtg red col
                             Just (meanDblFusedAgg nGroups rtg v)
                     RMin -> Just (extremaDblFusedAgg True nGroups rtg v)
                     RMax -> Just (extremaDblFusedAgg False nGroups rtg v)
+                    -- Top-2 selection is an exact multiset selection (no float
+                    -- arithmetic before finalize), so its per-worker merge is
+                    -- byte-identical to the per-expression kernels at any -N.
+                    RTop2Snd -> Just (top2SndDblFusedAgg nGroups rtg v)
                     _ -> Nothing
         _ -> Nothing
 
@@ -1097,6 +1139,80 @@ extremaStepDbl isMin rtg v acc lo hi = go lo
             c <- VUM.unsafeRead acc k
             VUM.unsafeWrite acc k (if isMin then min c x else max c x)
             go (i + 1)
+
+{- | Fused second-largest over a Double column. The per-group
+(largest, second-largest) pair is INTERLEAVED at slots @2g@/@2g+1@ (one cache
+line per group, as 'meanDblFusedAgg'); the update is the same top-2 selection
+as every other top2 kernel, the merge keeps the top two of the four candidates
+per group (exact — no float arithmetic), and the finalize returns the second
+max, NaN for a group of size < 2 (the @-inf@ seed; see
+'DataFrame.Internal.AggKernel.top2SndScatter').
+-}
+top2SndDblFusedAgg :: Int -> VU.Vector Int -> VU.Vector Double -> FusedAgg
+top2SndDblFusedAgg nGroups rtg v =
+    FusedAgg
+        (VUM.replicate (2 * nGroups) (negate (1 / 0) :: Double))
+        (top2SndStepDbl rtg v)
+        mergeTop2Range
+        ( \s -> do
+            sv <- VU.unsafeFreeze s
+            pure
+                ( fromUnboxedVector
+                    ( VU.generate
+                        nGroups
+                        ( \g ->
+                            let !a2 = VU.unsafeIndex sv (2 * g + 1)
+                             in if isInfinite a2 then 0 / 0 else a2
+                        )
+                    )
+                )
+        )
+
+top2SndStepDbl ::
+    VU.Vector Int ->
+    VU.Vector Double ->
+    VUM.IOVector Double ->
+    Int ->
+    Int ->
+    IO ()
+top2SndStepDbl rtg v s lo hi = go lo
+  where
+    go !i
+        | i >= hi = pure ()
+        | otherwise = do
+            let !k2 = 2 * VU.unsafeIndex rtg i
+                !x = VU.unsafeIndex v i
+            a1 <- VUM.unsafeRead s k2
+            if x > a1
+                then do
+                    VUM.unsafeWrite s k2 x
+                    VUM.unsafeWrite s (k2 + 1) a1
+                else do
+                    a2 <- VUM.unsafeRead s (k2 + 1)
+                    if x > a2
+                        then VUM.unsafeWrite s (k2 + 1) x
+                        else pure ()
+            go (i + 1)
+
+-- | Top two of the four candidates per group (pairs already ordered m1 >= m2).
+mergeTop2Range ::
+    VUM.IOVector Double -> VUM.IOVector Double -> Int -> Int -> IO ()
+mergeTop2Range a b lo hi = go lo
+  where
+    go !g
+        | g >= hi = pure ()
+        | otherwise = do
+            let !g2 = 2 * g
+            a1 <- VUM.unsafeRead a g2
+            a2 <- VUM.unsafeRead a (g2 + 1)
+            b1 <- VUM.unsafeRead b g2
+            b2 <- VUM.unsafeRead b (g2 + 1)
+            if b1 > a1
+                then do
+                    VUM.unsafeWrite a g2 b1
+                    VUM.unsafeWrite a (g2 + 1) (max a1 b2)
+                else VUM.unsafeWrite a (g2 + 1) (max a2 b1)
+            go (g + 1)
 
 addIntRange :: VUM.IOVector Int -> VUM.IOVector Int -> Int -> Int -> IO ()
 addIntRange a b lo hi = go lo

@@ -40,6 +40,7 @@ data Reduction
     | RStd
     | RVar
     | RTop2Sum
+    | RTop2Snd
     deriving (Eq, Show)
 
 {- | Coerce an unboxed Int or Double column to an unboxed Double vector for the
@@ -92,6 +93,7 @@ reduceTyped red g nGroups v idents = case red of
     RVar -> fromUnboxedVector (varScatter False g nGroups v)
     RStd -> fromUnboxedVector (varScatter True g nGroups v)
     RTop2Sum -> fromUnboxedVector (top2Scatter g nGroups v)
+    RTop2Snd -> fromUnboxedVector (top2SndScatter g nGroups v)
 {-# INLINE reduceTyped #-}
 
 countScatter :: VU.Vector Int -> Int -> VU.Vector Int
@@ -258,3 +260,43 @@ top2Scatter g nGroups v = runST $ do
     fin 0
     VU.unsafeFreeze out
 {-# INLINE top2Scatter #-}
+
+{- | Second-largest value per group: the same (largest, second-largest)
+accumulator pair as 'top2Scatter', but the finalize returns the second max
+alone. A group of size 1 (or 0) leaves the @-inf@ seed in the second slot, so
+its output is NaN — documented behaviour (the db-benchmark Q8 data has no
+size-1 @id6@ groups). Like 'top2Scatter''s @-inf -> 0@ guard, an actual
+infinite data value in the second slot is indistinguishable from the seed.
+-}
+top2SndScatter ::
+    (VU.Unbox a, Real a) => VU.Vector Int -> Int -> VU.Vector a -> VU.Vector Double
+top2SndScatter g nGroups v = runST $ do
+    let ninf = negate (1 / 0) :: Double
+    m1 <- VUM.replicate nGroups ninf
+    m2 <- VUM.replicate nGroups ninf
+    let n = VU.length v
+        go !i
+            | i >= n = pure ()
+            | otherwise = do
+                let !k = VU.unsafeIndex g i
+                    !x = realToFrac (VU.unsafeIndex v i)
+                a1 <- VUM.unsafeRead m1 k
+                if x > a1
+                    then do
+                        VUM.unsafeWrite m1 k x
+                        VUM.unsafeWrite m2 k a1
+                    else do
+                        a2 <- VUM.unsafeRead m2 k
+                        when (x > a2) (VUM.unsafeWrite m2 k x)
+                go (i + 1)
+    go 0
+    out <- VUM.new nGroups
+    let fin !k
+            | k >= nGroups = pure ()
+            | otherwise = do
+                a2 <- VUM.unsafeRead m2 k
+                VUM.unsafeWrite out k (if isInfinite a2 then 0 / 0 else a2)
+                fin (k + 1)
+    fin 0
+    VU.unsafeFreeze out
+{-# INLINE top2SndScatter #-}

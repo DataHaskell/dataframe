@@ -632,6 +632,52 @@ parGenerateUnboxed n f
         VU.unsafeFreeze mv
 {-# NOINLINE parGenerateUnboxed #-}
 
+{- | Parallel unboxed gather: element @i@ of the result is
+@v ! (ix ! i)@ (unsafe indexing — callers pass in-bounds index vectors, e.g.
+grouping-produced representative rows). Same chunking as 'parGenerateUnboxed'
+(one contiguous chunk per capability into disjoint slices of one buffer), so
+the result is bit-identical to the sequential backpermute at any capability
+count; falls back to a sequential loop below 'parColumnThreshold'.
+-}
+parBackpermuteUnboxed ::
+    (VU.Unbox a) => VU.Vector a -> VU.Vector Int -> VU.Vector a
+parBackpermuteUnboxed v ix =
+    parGenerateUnboxed (VU.length ix) (\i -> VU.unsafeIndex v (VU.unsafeIndex ix i))
+{-# INLINE parBackpermuteUnboxed #-}
+
+{- | Parallel boxed gather. The read side uses 'VB.unsafeIndexM' so the array
+slot is fetched eagerly (element pointers are shared, elements themselves stay
+un-forced, exactly as the sequential 'VB.generate' gather). Bit-identical
+element values; sequential below 'parColumnThreshold'.
+-}
+parBackpermuteBoxed :: VB.Vector a -> VU.Vector Int -> VB.Vector a
+parBackpermuteBoxed v ix
+    | n < parColumnThreshold || columnCapabilities <= 1 =
+        VB.generate n ((v `VB.unsafeIndex`) . (ix `VU.unsafeIndex`))
+    | otherwise = unsafePerformIO $ do
+        mv <- VBM.unsafeNew n
+        let !caps = columnCapabilities
+            !per = (n + caps - 1) `div` caps
+            fill !i !hi
+                | i >= hi = pure ()
+                | otherwise = do
+                    x <- VB.unsafeIndexM v (VU.unsafeIndex ix i)
+                    VBM.unsafeWrite mv i x
+                    fill (i + 1) hi
+            spawn w = do
+                var <- newEmptyMVar
+                let !lo = min n (w * per)
+                    !hi = min n (lo + per)
+                _ <- forkIO (try (fill lo hi) >>= putMVar var)
+                pure var
+        vars <- mapM spawn [0 .. caps - 1]
+        rs <- mapM takeMVar vars
+        mapM_ (either (throwIO @SomeException) pure) rs
+        VB.unsafeFreeze mv
+  where
+    !n = VU.length ix
+{-# NOINLINE parBackpermuteBoxed #-}
+
 -- | An internal function to map a function over the values of a column.
 mapColumn ::
     forall b c.
@@ -802,10 +848,7 @@ atIndicesStable indexes (BoxedColumn bm column) =
             )
             bm
         )
-        ( VB.generate
-            (VU.length indexes)
-            ((column `VB.unsafeIndex`) . (indexes `VU.unsafeIndex`))
-        )
+        (parBackpermuteBoxed column indexes)
 atIndicesStable indexes (UnboxedColumn bm column) =
     UnboxedColumn
         ( fmap
@@ -815,7 +858,7 @@ atIndicesStable indexes (UnboxedColumn bm column) =
             )
             bm
         )
-        (VU.unsafeBackpermute column indexes)
+        (parBackpermuteUnboxed column indexes)
 atIndicesStable indexes (MergedColumn a b) =
     MergedColumn (atIndicesStable indexes a) (atIndicesStable indexes b)
 atIndicesStable indexes (PackedText bm p) =

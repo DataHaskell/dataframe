@@ -99,8 +99,9 @@ runPlan gdf rtg nGroups plan = case plan of
                 frame that skips the deferred @valueIndices@ placement, which
                 costs more than the accumulator cache misses it saves
                 (measured at 1e6 groups / 1e8 rows on -N16: stream 1.0s
-                against placement 0.7s + gather 0.4s). -}
-                | RTop2Sum <- red
+                against placement 0.7s + gather 0.4s). RTop2Snd shares the
+                same accumulator machinery and merge-exactness. -}
+                | red == RTop2Sum || red == RTop2Snd
                 , nGroups <= streamGroupCap =
                     directReduce red rtg nGroups c
                 | otherwise = Nothing

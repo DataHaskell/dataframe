@@ -31,11 +31,16 @@ module DataFrame.Internal.PackedText (
 import qualified Data.Text as T
 import qualified Data.Text.Array as A
 import qualified Data.Vector.Unboxed as VU
+import qualified Data.Vector.Unboxed.Mutable as VUM
 
+import Control.Concurrent (forkIO, getNumCapabilities)
+import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar)
+import Control.Exception (SomeException, throwIO, try)
 import Data.Int (Int32)
 import Data.Ord (comparing)
 import Data.Text.Internal (Text (Text))
 import DataFrame.Internal.Utf8 (isValidUtf8Slice, lenientDecodeSlice)
+import System.IO.Unsafe (unsafePerformIO)
 
 {- | Row byte-offsets, physically 'Int32' when every value fits (total buffer
 bytes < 2^31) and 'Int' otherwise. Values are non-negative byte positions.
@@ -131,18 +136,68 @@ over the unselected base.
 packedGather :: VU.Vector Int -> PackedTextData -> PackedTextData
 packedGather indices (PackedTextData arr offs msel canon) =
     let !base = offCount offs - 1
+        !n = VU.length indices
         clamp r = if r >= 0 && r < base then r else -1
-        (sel', canon') = case msel of
-            Nothing -> (VU.map clamp indices, False)
+        -- Base row for logical output row i: composes any existing selection.
+        -- Only the SELECTOR is rebuilt; the dictionary/byte buffer and offsets
+        -- are shared untouched (a canonical dict column keeps its bytes).
+        pick = case msel of
+            Nothing -> \i -> clamp (VU.unsafeIndex indices i)
             Just s ->
                 let !sn = selLength s
-                 in ( VU.map
-                        (\i -> if i >= 0 && i < sn then clamp (selAt s i) else -1)
-                        indices
-                    , canon
-                    )
-     in PackedTextData arr offs (Just (mkSel base sel')) canon'
-{-# INLINE packedGather #-}
+                 in \i ->
+                        let !j = VU.unsafeIndex indices i
+                         in if j >= 0 && j < sn then clamp (selAt s j) else -1
+        canon' = case msel of
+            Nothing -> False
+            Just _ -> canon
+        {- Fused with the 'mkSel' width narrowing: the selector is generated
+        directly at its final width (one parallel pass) instead of an Int
+        vector map followed by a second narrowing map. Same values, same
+        widths, bit-identical to the sequential two-pass build. -}
+        sel'
+            | base <= int32Max = Sel32 (parGenSel n (\i -> fromIntegral (pick i)))
+            | otherwise = Sel64 (parGenSel n pick)
+     in PackedTextData arr offs (Just sel') canon'
+
+{- | Threshold/capability policy mirrors
+'DataFrame.Internal.Column.parGenerateUnboxed' (that module sits above this
+one, so the kernel is duplicated here): one contiguous index chunk per
+capability written into disjoint slices of one buffer — element @i@ depends
+only on @f i@, so the result is bit-identical to 'VU.generate' at any @-N@.
+-}
+parGenSel :: (VU.Unbox c) => Int -> (Int -> c) -> VU.Vector c
+{-# SPECIALIZE parGenSel :: Int -> (Int -> Int32) -> VU.Vector Int32 #-}
+{-# SPECIALIZE parGenSel :: Int -> (Int -> Int) -> VU.Vector Int #-}
+parGenSel n f
+    | n < selParThreshold || selCapabilities <= 1 = VU.generate n f
+    | otherwise = unsafePerformIO $ do
+        mv <- VUM.unsafeNew n
+        let !caps = selCapabilities
+            !per = (n + caps - 1) `div` caps
+            fill !i !hi
+                | i >= hi = pure ()
+                | otherwise = do
+                    VUM.unsafeWrite mv i (f i)
+                    fill (i + 1) hi
+            spawn w = do
+                var <- newEmptyMVar
+                let !lo = min n (w * per)
+                    !hi = min n (lo + per)
+                _ <- forkIO (try (fill lo hi) >>= putMVar var)
+                pure var
+        vars <- mapM spawn [0 .. caps - 1]
+        rs <- mapM takeMVar vars
+        mapM_ (either (throwIO :: SomeException -> IO ()) pure) rs
+        VU.unsafeFreeze mv
+{-# NOINLINE parGenSel #-}
+
+selParThreshold :: Int
+selParThreshold = 200000
+
+selCapabilities :: Int
+selCapabilities = unsafePerformIO getNumCapabilities
+{-# NOINLINE selCapabilities #-}
 
 {- | Take the first @k@ logical rows, sharing the byte buffer via a capped
 selection layer. O(k), no byte copy or decode — cheap @take@/display on a
