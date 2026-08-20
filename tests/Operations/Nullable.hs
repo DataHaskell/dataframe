@@ -5,9 +5,11 @@
 
 module Operations.Nullable where
 
+import Data.Function ((&))
+import qualified Data.Text as T
 import qualified Data.Vector as V
 import qualified DataFrame as D
-import DataFrame.Expression.Operators ((.*), (.+), (.-), (./), (.==))
+import DataFrame.Expression.Operators (as, (.*), (.+), (.-), (./), (.==))
 import qualified DataFrame.Functions as F
 import qualified DataFrame.Internal.Column as DI
 import qualified DataFrame.Internal.DataFrame as DI
@@ -723,9 +725,75 @@ applyPlainInt =
             )
         )
 
+-- ---------------------------------------------------------------------------
+-- Grouped aggregation over nullable columns
+-- ---------------------------------------------------------------------------
+
+-- | Interleaved, so grouping's row permutation is not the identity.
+interleavedKeys :: [T.Text]
+interleavedKeys = ["a", "b", "a", "b", "a", "b", "a", "b"]
+
+-- | Group @a@ holds 1,2,3,4; group @b@ is entirely null.
+nullsInOneGroupValues :: [Maybe Double]
+nullsInOneGroupValues =
+    [Just 1, Nothing, Just 2, Nothing, Just 3, Nothing, Just 4, Nothing]
+
+nullsInOneGroup :: D.DataFrame
+nullsInOneGroup =
+    D.fromNamedColumns
+        [ ("k", DI.fromList interleavedKeys)
+        , ("v", DI.fromVector (V.fromList nullsInOneGroupValues))
+        ]
+
+-- | Group @a@ sums to 7, group @b@ to 40.
+nullsInBothGroupsValues :: [Maybe Double]
+nullsInBothGroupsValues =
+    [Just 1, Just 10, Just 2, Nothing, Nothing, Just 30, Just 4, Nothing]
+
+nullsInBothGroups :: D.DataFrame
+nullsInBothGroups =
+    D.fromNamedColumns
+        [ ("k", DI.fromList interleavedKeys)
+        , ("v", DI.fromVector (V.fromList nullsInBothGroupsValues))
+        ]
+
+sumGroupedNullable :: D.DataFrame -> D.DataFrame
+sumGroupedNullable df =
+    df
+        & D.groupBy ["k"]
+        & D.aggregate [F.sumMaybe (F.col @(Maybe Double) "v") `as` "s"]
+        & D.sortBy [D.Asc (F.col @T.Text "k")]
+
+expectedGroupSums :: [Double] -> D.DataFrame
+expectedGroupSums sums =
+    D.fromNamedColumns
+        [ ("k", DI.fromList (["a", "b"] :: [T.Text]))
+        , ("s", DI.fromList sums)
+        ]
+
+sumMaybeOverInterleavedGroups :: Test
+sumMaybeOverInterleavedGroups =
+    TestCase
+        ( assertEqual
+            "sumMaybe sums each group's own non-null values"
+            (expectedGroupSums [10.0, 0.0])
+            (sumGroupedNullable nullsInOneGroup)
+        )
+
+sumMaybeWithNullsInEveryGroup :: Test
+sumMaybeWithNullsInEveryGroup =
+    TestCase
+        ( assertEqual
+            "sumMaybe skips nulls in every group, not just one"
+            (expectedGroupSums [7.0, 40.0])
+            (sumGroupedNullable nullsInBothGroups)
+        )
+
 tests :: [Test]
 tests =
-    [ TestLabel "addIntMaybeInt" addIntMaybeInt
+    [ TestLabel "sumMaybeOverInterleavedGroups" sumMaybeOverInterleavedGroups
+    , TestLabel "sumMaybeWithNullsInEveryGroup" sumMaybeWithNullsInEveryGroup
+    , TestLabel "addIntMaybeInt" addIntMaybeInt
     , TestLabel "addMaybeIntInt" addMaybeIntInt
     , TestLabel "addIntInt" addIntInt
     , TestLabel "addMaybeMaybe" addMaybeMaybe
