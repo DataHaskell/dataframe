@@ -176,12 +176,16 @@ dropLast n d =
 range :: (Int, Int) -> DataFrame -> DataFrame
 range (start, end) d =
     d
-        { columns = V.map (sliceColumn (clip start 0 r) n') (columns d)
+        { columns = V.map (sliceColumn start' n') (columns d)
         , dataframeDimensions = (n', c)
         }
   where
     (r, c) = dataframeDimensions d
-    n' = clip (end - start) 0 r
+    start' = clip start 0 r
+    -- Clamp both endpoints before subtracting: end - start' on an unclamped
+    -- end wraps for very negative values and reopens the range.
+    end' = clip end start' r
+    n' = end' - start'
 
 clip :: Int -> Int -> Int -> Int
 clip n left right = min right $ max n left
