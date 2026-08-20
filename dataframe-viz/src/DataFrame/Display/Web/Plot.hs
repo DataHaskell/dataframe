@@ -66,8 +66,6 @@ import Data.Char (chr)
 import qualified Data.List as L
 import qualified Data.Maybe
 import qualified Data.Text as T
-
--- UTF-8 byte mode; locale handles corrupt output on Windows.
 import qualified Data.Text.IO.Utf8 as T
 import GHC.Stack (HasCallStack)
 import Numeric (showFFloat)
@@ -462,6 +460,7 @@ plotBoxPlots ys = box (mkBox ys)
 -- Browser launcher
 -- ---------------------------------------------------------------------------
 
+-- | Windows launches via a shell: 'start' is a cmd builtin.
 showInDefaultBrowser :: String -> IO ()
 showInDefaultBrowser p = do
     plotId <- generateChartId
@@ -475,7 +474,6 @@ showInDefaultBrowser p = do
     putStrLn fullPath
     T.writeFile fullPath (T.pack p)
     case os of
-        -- 'start' is a cmd builtin; it needs a shell.
         "mingw32" -> launchSilently (shell ("start \"\" \"" <> fullPath <> "\""))
         "darwin" -> launchSilently (proc "open" [fullPath])
         _ -> launchSilently (proc "xdg-open" [fullPath])

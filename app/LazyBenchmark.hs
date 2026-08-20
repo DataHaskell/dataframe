@@ -42,7 +42,6 @@ import System.Random.Stateful
 defaultRows :: Int
 defaultRows = 1_000_000_000
 
--- /tmp does not exist on Windows.
 defaultFile :: IO FilePath
 defaultFile = (<> "/lazy_1b.csv") <$> getTemporaryDirectory
 

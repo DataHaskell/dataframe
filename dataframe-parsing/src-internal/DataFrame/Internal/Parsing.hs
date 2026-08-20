@@ -196,7 +196,6 @@ lineEnd =
 -- | First pass to count rows for exact allocation.
 countRows :: Char -> FilePath -> IO Int
 countRows c path = withFile path ReadMode $ \h ->
-    -- Decode UTF-8, not the locale.
     hSetEncoding h utf8 >> go 0 "" h
   where
     go n input h = do

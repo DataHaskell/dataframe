@@ -103,7 +103,6 @@ readSeparated c opts path = do
             Nothing -> (0, totalRows')
             Just (start, len'') -> (start, min len'' (totalRows' - rowsRead opts))
     withFile path ReadMode $ \handle -> do
-        -- Decode UTF-8, not the locale.
         hSetEncoding handle utf8
         firstRow <- fmap T.strip . parseSep c <$> TIO.hGetLine handle
         let columnNames =
