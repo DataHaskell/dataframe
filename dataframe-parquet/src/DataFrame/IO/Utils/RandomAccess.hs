@@ -81,7 +81,7 @@ import GHC.Float (castDoubleToWord64, castFloatToWord32)
 import System.IO (
     BufferMode (NoBuffering),
     Handle,
-    IOMode (AppendMode, ReadWriteMode),
+    IOMode (ReadWriteMode, WriteMode),
     SeekMode (AbsoluteSeek),
     hClose,
     hGetBuf,
@@ -170,7 +170,7 @@ newtype WritableBinaryHandle = WritableBinaryHandle {unHandle :: Handle}
 
 openWritableBinaryFile :: FilePath -> IO WritableBinaryHandle
 openWritableBinaryFile filepath = do
-    h <- openBinaryFile filepath AppendMode
+    h <- openBinaryFile filepath WriteMode
     hSetBinaryMode h True
     hSetBuffering h NoBuffering
     pure . WritableBinaryHandle $ h
