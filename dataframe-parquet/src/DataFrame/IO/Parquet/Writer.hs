@@ -99,22 +99,28 @@ finalizeRowGroup :: ParquetWriteOptions -> WriterState -> IO ()
 finalizeRowGroup opts st = do
     rgRows <- readIORef st.wsRgRows
     when (rgRows > 0) $ do
+        -- flush the page buffer of each columnChunk into their respective ColumnChunk Buffer
+        -- before flushing the entire row group
         VB.mapM_ (runColumnChunkWriter (finalizePage opts.compressionCodec)) st.wsCols
-        (chunksRev, total) <-
+        (chunksRev, totalCompressed, totalUncompressed) <-
             VB.foldM'
-                ( \(acc, totalSize) cs -> do
+                ( \(acc, totalCompressedSize, totalUncompressedSize) cs -> do
                     offset <- readIORef st.wsFileOffset
-                    size <- bufferResidency (ckBuffer cs)
-                    uncompressed <- readIORef (ckUncompressed cs)
+                    compressedSize <- bufferResidency (ckBuffer cs)
+                    uncompressedSize <- readIORef (ckUncompressed cs)
                     flushBufferToFile st.wsOut (ckBuffer cs)
-                    writeIORef st.wsFileOffset (offset + fromIntegral size)
+                    writeIORef st.wsFileOffset (offset + fromIntegral compressedSize)
                     writeIORef (ckUncompressed cs) 0
-                    let chunk = mkColumnChunk opts offset size uncompressed rgRows cs
-                    pure (chunk : acc, totalSize + fromIntegral size)
+                    let chunk = mkColumnChunk opts offset compressedSize uncompressedSize rgRows cs
+                    pure (
+                      chunk : acc,
+                      totalCompressedSize + fromIntegral compressedSize,
+                      totalUncompressedSize + fromIntegral uncompressedSize
+                     )
                 )
-                ([], 0 :: Int64)
+                ([], 0 :: Int64, 0 :: Int64)
                 st.wsCols
-        modifyIORef' st.wsRowGroups (mkRowGroup (reverse chunksRev) total rgRows :)
+        modifyIORef' st.wsRowGroups (mkRowGroup (reverse chunksRev) totalCompressed totalUncompressed rgRows :)
         writeIORef st.wsRgRows 0
 
 mkColumnChunk ::
@@ -125,7 +131,7 @@ mkColumnChunk ::
     Int ->
     ColumnChunkState ->
     ColumnChunk
-mkColumnChunk opts offset size uncompressed rgRows cs =
+mkColumnChunk opts offset compressedSize uncompressedSize rgRows cs =
     ColumnChunk
         { cc_file_path = putField Nothing
         , cc_file_offset = putField offset
@@ -145,8 +151,8 @@ mkColumnChunk opts offset size uncompressed rgRows cs =
             , cmd_path_in_schema = putField [ckName cs]
             , cmd_codec = putField opts.compressionCodec
             , cmd_num_values = putField (fromIntegral rgRows)
-            , cmd_total_uncompressed_size = putField uncompressed
-            , cmd_total_compressed_size = putField (fromIntegral size)
+            , cmd_total_uncompressed_size = putField uncompressedSize
+            , cmd_total_compressed_size = putField (fromIntegral compressedSize)
             , cmd_key_value_metadata = putField Nothing
             , cmd_data_page_offset = putField offset
             , cmd_index_page_offset = putField Nothing
@@ -157,15 +163,15 @@ mkColumnChunk opts offset size uncompressed rgRows cs =
             , cmd_bloom_filter_length = putField Nothing
             }
 
-mkRowGroup :: [ColumnChunk] -> Int64 -> Int -> RowGroup
-mkRowGroup chunks total rgRows =
+mkRowGroup :: [ColumnChunk] -> Int64 -> Int64 -> Int -> RowGroup
+mkRowGroup chunks totalCompressed totalUncompressed rgRows =
     RowGroup
         { rg_columns = putField chunks
-        , rg_total_byte_size = putField total
+        , rg_total_byte_size = putField totalUncompressed
         , rg_num_rows = putField (fromIntegral rgRows)
         , rg_sorting_columns = putField Nothing
         , rg_file_offset = putField Nothing
-        , rg_total_compressed_size = putField (Just total)
+        , rg_total_compressed_size = putField (Just totalCompressed)
         , rg_ordinal = putField Nothing
         }
 
