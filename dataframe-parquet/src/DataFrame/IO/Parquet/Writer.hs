@@ -112,15 +112,17 @@ finalizeRowGroup opts st = do
                     writeIORef st.wsFileOffset (offset + fromIntegral compressedSize)
                     writeIORef (ckUncompressed cs) 0
                     let chunk = mkColumnChunk opts offset compressedSize uncompressedSize rgRows cs
-                    pure (
-                      chunk : acc,
-                      totalCompressedSize + fromIntegral compressedSize,
-                      totalUncompressedSize + fromIntegral uncompressedSize
-                     )
+                    pure
+                        ( chunk : acc
+                        , totalCompressedSize + fromIntegral compressedSize
+                        , totalUncompressedSize + fromIntegral uncompressedSize
+                        )
                 )
                 ([], 0 :: Int64, 0 :: Int64)
                 st.wsCols
-        modifyIORef' st.wsRowGroups (mkRowGroup (reverse chunksRev) totalCompressed totalUncompressed rgRows :)
+        modifyIORef'
+            st.wsRowGroups
+            (mkRowGroup (reverse chunksRev) totalCompressed totalUncompressed rgRows :)
         writeIORef st.wsRgRows 0
 
 mkColumnChunk ::

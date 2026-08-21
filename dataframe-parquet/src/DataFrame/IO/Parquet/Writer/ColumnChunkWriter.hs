@@ -9,9 +9,7 @@ module DataFrame.IO.Parquet.Writer.ColumnChunkWriter (
     page,
     askColumnChunk,
     initColumnState,
-    writeRow,
     writeRowAndMaybeFinalize,
-    maybeFinalizePage,
     finalizePage,
     bufferedSize,
 ) where
@@ -19,7 +17,7 @@ module DataFrame.IO.Parquet.Writer.ColumnChunkWriter (
 import Control.Monad (when)
 import Control.Monad.IO.Class (MonadIO (..))
 import qualified Data.ByteString as BS
-import Data.IORef (IORef, modifyIORef', newIORef)
+import Data.IORef (IORef, modifyIORef', newIORef, readIORef)
 import Data.Int (Int64)
 import qualified Data.Text as T
 import qualified Data.Vector as VB
@@ -38,9 +36,8 @@ import DataFrame.IO.Parquet.Writer.PageWriter (
  )
 import DataFrame.IO.Utils.RandomAccess (
     HasBuffer (..),
-    MemoryBuffer,
+    MemoryBuffer (..),
     ReaderIO (runReaderIO),
-    Sink (..),
     bufferResidency,
     bufferToByteString,
     copyBuffer,
@@ -116,9 +113,6 @@ initColumnState opts name col = do
             , ckPage = pageState
             }
 
-writeRow :: Int -> ColumnChunkWriter ()
-writeRow row = ColumnChunkWriter (writeRowIO row)
-
 writeRowIO :: Int -> ColumnChunkState -> IO ()
 writeRowIO row st = do
     let pageState = ckPage st
@@ -131,16 +125,13 @@ writeRowAndMaybeFinalize ::
     ParquetWriteOptions -> Int -> ColumnChunkState -> IO ()
 writeRowAndMaybeFinalize opts row st = do
     writeRowIO row st
-    size <- bufferResidency st.ckPage.psValues
+    valuesSize <- bufferResidency st.ckPage.psValues
+    levelsSize <- bufferResidency st.ckPage.psDefs.dlBuf
+    let size = valuesSize + levelsSize
     when
         (size >= opts.pageSize)
         (runColumnChunkWriter (finalizePage opts.compressionCodec) st)
 {-# INLINE writeRowAndMaybeFinalize #-}
-
-maybeFinalizePage :: ParquetWriteOptions -> ColumnChunkWriter ()
-maybeFinalizePage opts = do
-    size <- page residency
-    when (size >= opts.pageSize) (finalizePage opts.compressionCodec)
 
 finalizePage :: CompressionCodec -> ColumnChunkWriter ()
 finalizePage codec = do
