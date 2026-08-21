@@ -1151,64 +1151,81 @@ atIndicesStable indexes (PackedText bm p) =
         (packedGather indexes p)
 {-# INLINE atIndicesStable #-}
 
+{- | Clamp sentinel (negative) indices to 0 in one closure-free parallel pass.
+The clamped rows read row 0's value; callers mask them via the sentinel bitmap.
+-}
+parClampNonNeg :: VU.Vector Int -> VU.Vector Int
+parClampNonNeg ix =
+    parGenerateUnboxedInline
+        (VU.length ix)
+        (\i -> let !x = VU.unsafeIndex ix i in if x < 0 then 0 else x)
+{-# NOINLINE parClampNonNeg #-}
+
+{- | Validity bitmap from sentinel indices (bit @i@ valid iff @ix!i >= 0@),
+built one byte (8 rows) per element in parallel.
+-}
+parBitmapNonNeg :: VU.Vector Int -> Bitmap
+parBitmapNonNeg ix =
+    let !n = VU.length ix
+        !nBytes = (n + 7) `shiftR` 3
+     in parGenerateUnboxedInline nBytes $ \b ->
+            let !base = b `shiftL` 3
+                go !acc !bit
+                    | bit >= 8 = acc
+                    | otherwise =
+                        let !idx = base + bit
+                            !acc' =
+                                if idx < n && VU.unsafeIndex ix idx >= 0
+                                    then setBit acc bit
+                                    else acc
+                         in go acc' (bit + 1)
+             in go (0 :: Word8) 0
+{-# NOINLINE parBitmapNonNeg #-}
+
 {- | Like 'atIndicesStable' but treats negative indices as null.
 Keeps the index vector fully unboxed (no @VB.Vector (Maybe Int)@).
+Data rides the parallel 'atIndicesStable' kernels (a 1e8-row left join spent
+~6s in the old sequential per-column loops); the sentinel bitmap is built in
+parallel by 'parBitmapNonNeg'.
 -}
 gatherWithSentinel :: VU.Vector Int -> Column -> Column
 gatherWithSentinel indices c@(MergedColumn _ _) =
     gatherWithSentinel indices (materializeMerged c)
 gatherWithSentinel indices col =
     let !n = VU.length indices
-        newBm = buildBitmapFromValid $ VU.generate n $ \i ->
-            if VU.unsafeIndex indices i < 0 then 0 else 1
+        !newBm = parBitmapNonNeg indices
+        withBm gbm = case gbm of
+            Nothing -> Just newBm
+            Just gb -> Just (mergeBitmaps newBm gb)
+        -- Sequential fallback: gather an existing source bitmap through the
+        -- raw indices (negative-guarded). Only runs when the source side is
+        -- itself nullable, which join build sides normally are not.
+        gatherSrcBm sb =
+            buildBitmapFromValid $ VU.generate n $ \i ->
+                let idx = VU.unsafeIndex indices i
+                 in if idx >= 0 && bitmapTestBit sb idx then 1 else 0
      in case col of
+            -- packedGather composes -1 sentinels into the selector natively
+            -- (and shares the byte buffers), so text takes the raw indices.
             PackedText srcBm p ->
                 let bm = case srcBm of
                         Nothing -> Just newBm
-                        Just sb ->
-                            Just
-                                ( mergeBitmaps
-                                    newBm
-                                    ( buildBitmapFromValid $ VU.generate n $ \i ->
-                                        let idx = VU.unsafeIndex indices i
-                                         in if idx >= 0 && bitmapTestBit sb idx then 1 else 0
-                                    )
-                                )
+                        Just sb -> Just (mergeBitmaps newBm (gatherSrcBm sb))
                  in PackedText bm (packedGather indices p)
             BoxedColumn srcBm v ->
-                let dat = VB.generate n $ \i ->
-                        let !idx = VU.unsafeIndex indices i
-                         in if idx < 0 then VB.unsafeIndex v 0 else VB.unsafeIndex v idx
-                    bm = case srcBm of
+                let bm = case srcBm of
                         Nothing -> Just newBm
-                        Just sb ->
-                            Just
-                                ( mergeBitmaps
-                                    newBm
-                                    ( buildBitmapFromValid $ VU.generate n $ \i ->
-                                        let idx = VU.unsafeIndex indices i
-                                         in if idx >= 0 && bitmapTestBit sb idx then 1 else 0
-                                    )
-                                )
-                 in BoxedColumn bm dat
+                        Just sb -> Just (mergeBitmaps newBm (gatherSrcBm sb))
+                 in BoxedColumn bm (parBackpermuteBoxed v (parClampNonNeg indices))
             UnboxedColumn srcBm v ->
-                let dat = runST $ do
-                        mv <- VUM.new n
-                        VG.iforM_ indices $ \i idx ->
-                            when (idx >= 0) $ VUM.unsafeWrite mv i (VU.unsafeIndex v idx)
-                        VU.unsafeFreeze mv
-                    bm = case srcBm of
+                let bm = case srcBm of
                         Nothing -> Just newBm
-                        Just sb ->
-                            Just
-                                ( mergeBitmaps
-                                    newBm
-                                    ( buildBitmapFromValid $ VU.generate n $ \i ->
-                                        let idx = VU.unsafeIndex indices i
-                                         in if idx >= 0 && bitmapTestBit sb idx then 1 else 0
-                                    )
-                                )
-                 in UnboxedColumn bm dat
+                        Just sb -> Just (mergeBitmaps newBm (gatherSrcBm sb))
+                 in -- Reuse atIndicesStable's Int/Double monomorphic kernel
+                    -- dispatch for the payload; the bitmap is replaced below.
+                    case atIndicesStable (parClampNonNeg indices) (UnboxedColumn Nothing v) of
+                        UnboxedColumn _ dat -> UnboxedColumn bm dat
+                        other -> other
 {-# INLINE gatherWithSentinel #-}
 
 -- | Internal helper to get indices in a boxed vector.
