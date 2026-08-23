@@ -34,12 +34,14 @@ import DataFrame.IO.Utils.RandomAccess (
     writeWord8,
  )
 import DataFrame.Internal.Column (
-    Bitmap,
     Column (..),
     Columnable,
-    bitmapTestBit,
     columnTypeString,
     hasElemType,
+ )
+import DataFrame.Internal.Column.Bitmap (
+    Bitmap,
+    bitmapTestBit,
  )
 import DataFrame.Internal.PackedText (
     PackedTextData (..),
