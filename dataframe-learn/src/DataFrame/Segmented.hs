@@ -39,6 +39,7 @@ import DataFrame.Internal.Column (
     Column (..),
     Columnable,
     columnBitmap,
+    columnToTextVec,
     hasElemType,
  )
 import DataFrame.Internal.Column.Bitmap (bitmapTestBit)
@@ -54,7 +55,7 @@ import DataFrame.LinearModel.Regression (
  )
 import DataFrame.Model
 import DataFrame.Operations.Core (nRows)
-import DataFrame.Operations.Subset (columnToTextVec, exclude, rowsAtIndices)
+import DataFrame.Operations.Subset (exclude, rowsAtIndices)
 import DataFrame.Operators ((.&&.), (.==.))
 import DataFrame.SymbolicRegression (SRConfig)
 

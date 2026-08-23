@@ -5,6 +5,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
@@ -48,7 +49,6 @@ module DataFrame.Operations.Subset (
     stratifiedSplit,
 
     -- * Label helpers (exported for satellite packages)
-    columnToTextVec,
     rowsAtIndices,
 ) where
 
@@ -79,6 +79,7 @@ import DataFrame.Internal.Column (
     Columnable,
     TypedColumn (TColumn),
     atIndicesStable,
+    columnToTextVec,
     findIndices,
     hasMissing,
     materializeMerged,
@@ -99,15 +100,27 @@ import DataFrame.Internal.DataFrame (
     insertColumn,
     unsafeGetColumn,
  )
-import DataFrame.Internal.Expression
-import DataFrame.Internal.Interpreter
-import DataFrame.Internal.PackedText (packedIndexText, packedLength)
+import DataFrame.Internal.Expression (Expr (Col, Lit), normalize)
+import DataFrame.Internal.Interpreter (interpret)
 import DataFrame.Operations.Core ()
 import DataFrame.Operations.Merge ()
 import DataFrame.Operations.Transformations (apply)
-import DataFrame.Operators
-import System.Random
-import Type.Reflection
+import DataFrame.Operators (
+    col,
+    name,
+    (.<.),
+    (.<=.),
+    (.>.),
+    (.>=.),
+ )
+import System.Random (RandomGen, SplitGen (..))
+import Type.Reflection (
+    eqTypeRep,
+    typeRep,
+    pattern App,
+    type (:~:) (Refl),
+    type (:~~:) (HRefl),
+ )
 import Prelude hiding (drop, filter, take)
 
 #if MIN_VERSION_random(1,3,0)
@@ -532,27 +545,6 @@ kFolds pureGen folds df =
                 d' : go (n - 1) d''
      in
         map (exclude [name cRand]) (go (folds - 1) withRand)
-
--- | Convert any Column to a vector of Text labels (one per row).
-columnToTextVec :: Column -> V.Vector T.Text
-columnToTextVec c@(MergedColumn _ _) = columnToTextVec (materializeMerged c)
-columnToTextVec (BoxedColumn bm (col' :: V.Vector a)) =
-    case bm of
-        Nothing -> case testEquality (typeRep @a) (typeRep @T.Text) of
-            Just Refl -> col'
-            Nothing -> V.map (T.pack . show) col'
-        Just bitmap ->
-            V.imap (\i x -> if bitmapTestBit bitmap i then T.pack (show x) else "null") col'
-columnToTextVec (UnboxedColumn bm col') =
-    case bm of
-        Nothing -> V.map (T.pack . show) (V.convert col')
-        Just bitmap ->
-            V.generate (VU.length col') $ \i ->
-                if bitmapTestBit bitmap i then T.pack (show (col' VU.! i)) else "null"
-columnToTextVec (PackedText bm p) =
-    V.generate (packedLength p) $ \i -> case bm of
-        Just bitmap | not (bitmapTestBit bitmap i) -> "null"
-        _ -> packedIndexText p i
 
 -- | Build a map from stringified label to row indices.
 groupByIndices :: Column -> M.Map T.Text (VU.Vector Int)

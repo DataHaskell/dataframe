@@ -34,17 +34,23 @@ bitmapTestBit bm i = testBit (VU.unsafeIndex bm (i `shiftR` 3)) (i .&. 7)
 
 -- | Build a fully-valid bitmap for @n@ rows (all bits set).
 allValidBitmap :: Int -> Bitmap
-allValidBitmap n =
-    let bytes = (n + 7) `shiftR` 3
+allValidBitmap n = runST (allValidBitmap' n >>= VU.unsafeFreeze)
+{-# INLINE allValidBitmap #-}
+
+allValidBitmap' :: Int -> ST s (VUM.MVector s Word8)
+allValidBitmap' n =
+    let
+        bytes = (n + 7) `shiftR` 3
         lastBits = n .&. 7
         lastByte = if lastBits == 0 then 0xFF else (1 `shiftL` lastBits) - 1
-     in if bytes == 0
-            then VU.empty
-            else runST $ do
-                mv <- VUM.replicate bytes 0xFF
+     in
+        if bytes == 0
+            then VUM.new 0
+            else do
+                mv <- VUM.replicate bytes (0xFF :: Word8) :: ST s (VUM.MVector s Word8)
                 when (lastBits /= 0) $ VUM.unsafeWrite mv (bytes - 1) lastByte
-                VU.unsafeFreeze mv
-{-# INLINE allValidBitmap #-}
+                pure mv
+{-# INLINE allValidBitmap' #-}
 
 {- | Build a bitmap from a @VU.Vector Word8@ validity vector
 (1 = valid, 0 = null), as produced by Arrow / Parquet decoders.
@@ -64,23 +70,19 @@ buildBitmapFromValid valid =
 
 {- | Build a bitmap from a list of null-row indices.
 @nullIdxs@ are the positions that are NULL.
-
--- TODO: mchavinda - This function is materializes the valid bitmap then
--- modifies it. We can do this in one pass without materializing the
--- valid bitmap first.
 -}
 buildBitmapFromNulls :: Int -> [Int] -> Bitmap
-buildBitmapFromNulls n nullIdxs =
-    let base = allValidBitmap n
-     in VU.modify
-            ( \mv ->
-                forM_ nullIdxs $ \i -> do
-                    let byteIdx = i `shiftR` 3
-                        bitIdx = i .&. 7
-                    v <- VUM.unsafeRead mv byteIdx
-                    VUM.unsafeWrite mv byteIdx (clearBit8 v bitIdx)
-            )
-            base
+buildBitmapFromNulls n idxs = buildBitmapFromNulls' n (VU.fromList idxs)
+
+buildBitmapFromNulls' :: Int -> VU.Vector Int -> VU.Vector Word8
+buildBitmapFromNulls' n nullIdxs = runST $ do
+    bm' <- allValidBitmap' n
+    VU.forM_ nullIdxs $ \i -> do
+        let byteIdx = i `shiftR` 3
+            bitIdx = i .&. 7
+        v <- VUM.unsafeRead bm' byteIdx
+        VUM.unsafeWrite bm' byteIdx (clearBit8 v bitIdx)
+    VU.unsafeFreeze bm'
   where
     clearBit8 :: Word8 -> Int -> Word8
     clearBit8 b bit = b .&. complement (1 `shiftL` bit)

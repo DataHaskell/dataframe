@@ -24,14 +24,29 @@ import Data.Type.Equality (
     type (:~:) (Refl),
     type (:~~:) (HRefl),
  )
-import DataFrame.Display.Terminal.PrettyPrint
-import DataFrame.Errors
-import DataFrame.Internal.Column
+import DataFrame.Display.Terminal.PrettyPrint (
+    RenderFormat (..),
+    showTable,
+ )
+import DataFrame.Errors (
+    DataFrameException (ColumnsNotFoundException),
+ )
+import DataFrame.Internal.Column (
+    Column (..),
+    columnLength,
+    columnToTextVec,
+    columnTypeString,
+    expandColumn,
+    forceColumn,
+    materializeMerged,
+    sliceColumn,
+    takeColumn,
+ )
 import DataFrame.Internal.Column.Bitmap (bitmapTestBit)
 import DataFrame.Internal.Expression
 import DataFrame.Internal.PackedText (packedIndexText)
-import Text.Printf
-import Type.Reflection (Typeable, eqTypeRep, typeRep, pattern App)
+import Text.Printf (printf)
+import Type.Reflection (eqTypeRep, typeRep, pattern App)
 import Prelude hiding (null)
 
 data DataFrame = DataFrame
@@ -151,8 +166,8 @@ asTextWith fmt mTrunc d =
                 (takeColumn rowCap)
                 ((V.!?) (columns d) ((M.!) (columnIndices d) name))
         survivingCols = map lookupCol visibleHeaders
-        survivingTypes = map (maybe "" getType) survivingCols
-        survivingData = map get survivingCols
+        survivingTypes = map (maybe "" (T.pack . columnTypeString)) survivingCols
+        survivingData = map (maybe V.empty columnToTextVec) survivingCols
 
         clipCell = case mTrunc of
             Just cfg | maxCellWidth cfg > 0 -> truncateCell (maxCellWidth cfg)
@@ -166,42 +181,6 @@ asTextWith fmt mTrunc d =
                     , insertAt i ellipsisText survivingTypes
                     , insertAt i ellipsisCol survivingData
                     )
-
-        getType :: Column -> T.Text
-        showMaybeType :: forall a. (Typeable a) => String
-        showMaybeType =
-            let s = show (typeRep @a)
-             in "Maybe " <> if ' ' `elem` s then "(" <> s <> ")" else s
-        getType (BoxedColumn Nothing (_ :: V.Vector a)) = T.pack $ show (typeRep @a)
-        getType (BoxedColumn (Just _) (_ :: V.Vector a)) = T.pack $ showMaybeType @a
-        getType (UnboxedColumn Nothing (_ :: VU.Vector a)) = T.pack $ show (typeRep @a)
-        getType (UnboxedColumn (Just _) (_ :: VU.Vector a)) = T.pack $ showMaybeType @a
-        getType (PackedText Nothing _) = T.pack $ show (typeRep @T.Text)
-        getType (PackedText (Just _) _) = T.pack $ showMaybeType @T.Text
-        getType c@(MergedColumn _ _) = getType (mergedHead c)
-
-        get :: Maybe Column -> V.Vector T.Text
-        get (Just c@(MergedColumn _ _)) = get (Just (materializeMerged c))
-        get (Just (BoxedColumn (Just bm) (column :: V.Vector a))) =
-            V.generate (V.length column) $ \i ->
-                if bitmapTestBit bm i
-                    then T.pack (show (Just (V.unsafeIndex column i)))
-                    else "Nothing"
-        get (Just (BoxedColumn Nothing (column :: V.Vector a))) =
-            case testEquality (typeRep @a) (typeRep @T.Text) of
-                Just Refl -> column
-                Nothing -> case testEquality (typeRep @a) (typeRep @String) of
-                    Just Refl -> V.map T.pack column
-                    Nothing -> V.map (T.pack . show) column
-        get (Just (UnboxedColumn (Just bm) column)) =
-            V.generate (VU.length column) $ \i ->
-                if bitmapTestBit bm i
-                    then T.pack (show (Just (VU.unsafeIndex column i)))
-                    else "Nothing"
-        get (Just (UnboxedColumn Nothing column)) =
-            V.generate (VU.length column) (T.pack . show . VU.unsafeIndex column)
-        get (Just c@(PackedText _ _)) = get (Just (materializePacked c))
-        get Nothing = V.empty
      in showTable
             fmt
             (map clipCell finalHeaders)

@@ -2,6 +2,7 @@
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE DataKinds #-}
+
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GADTs #-}
@@ -9,6 +10,7 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
@@ -53,7 +55,7 @@ import DataFrame.Internal.Column.Bitmap (
     bitmapConcat,
     bitmapSlice,
     bitmapTestBit,
-    buildBitmapFromNulls,
+    buildBitmapFromNulls',
     buildBitmapFromValid,
  )
 import DataFrame.Internal.PackedText (
@@ -65,10 +67,38 @@ import DataFrame.Internal.PackedText (
     packedTake,
     sliceEqBytes,
  )
-import DataFrame.Internal.Types
+import DataFrame.Internal.Types (
+    Columnable',
+    FloatingIf,
+    FloatingTypes,
+    IntegralIf,
+    IntegralTypes,
+    KindOf,
+    Numeric,
+    Rep (..),
+    SBool (SFalse, STrue),
+    SBoolI,
+    These (That, These, This),
+    UnboxIf,
+    Unboxable,
+    sFloating,
+    sIntegral,
+    sNumeric,
+    sUnbox,
+ )
 import System.IO.Unsafe (unsafePerformIO)
-import System.Random
-import Type.Reflection
+import System.Random (RandomGen, UniformRange, uniformR)
+import Type.Reflection (
+    TypeRep,
+    Typeable,
+    eqTypeRep,
+    typeOf,
+    typeRep,
+    withTypeable,
+    pattern App,
+    type (:~:) (Refl),
+    type (:~~:) (HRefl),
+ )
 
 {- | Type-erased column GADT. Pattern-matching on the constructor recovers the
 representation; nullability is an optional bit-packed 'Bitmap' (@Nothing@ = no
@@ -99,38 +129,24 @@ data MutableColumn where
 {- | Materialize a nullable column from @VB.Vector (Maybe a)@; picks 'UnboxedColumn'
 when @a@ is unboxable, else 'BoxedColumn'. Always attaches a bitmap so the column
 reads as nullable even with no 'Nothing' values.
-
-TODO: mchavinda - Revisit the null indices construction. We can do this all in place.
-If null we don'y materialize the nullIdxs list. But if there is a null we do
-and we traverse it.
 -}
 fromMaybeVec :: forall a. (Columnable a) => VB.Vector (Maybe a) -> Column
-fromMaybeVec v = case sUnbox @a of
-    STrue -> fromMaybeVecUnboxed v
-    SFalse ->
-        let n = VB.length v
-            nullIdxs = [i | i <- [0 .. n - 1], isNothing (VB.unsafeIndex v i)]
-            bm = if null nullIdxs then allValidBitmap n else buildBitmapFromNulls n nullIdxs
-            dat = VB.map (fromMaybe (errorWithoutStackTrace "fromMaybeVec: Nothing slot")) v
-         in BoxedColumn (Just bm) dat
-
-{- | Materialize a nullable 'UnboxedColumn' to @VB.Vector (Maybe a)@ using runST.
-Always attaches a bitmap so the column is recognized as nullable even when
-no 'Nothing' values are present (preserves the Maybe type marker).
-
--- TODO: mchavinda - similar to optimization above.
--}
-fromMaybeVecUnboxed ::
-    forall a. (Columnable a, VU.Unbox a) => VB.Vector (Maybe a) -> Column
-fromMaybeVecUnboxed v =
-    let n = VB.length v
-        nullIdxs = [i | i <- [0 .. n - 1], isNothing (VB.unsafeIndex v i)]
-        bm = if null nullIdxs then allValidBitmap n else buildBitmapFromNulls n nullIdxs
-        dat = runST $ do
-            mv <- VUM.new n
-            VG.iforM_ v $ \i mx -> forM_ mx (VUM.unsafeWrite mv i)
-            VU.unsafeFreeze mv
-     in UnboxedColumn (Just bm) dat
+fromMaybeVec v =
+    let
+        n = VB.length v
+        nullIdxs = VU.filter (isNothing . VB.unsafeIndex v) (VU.enumFromN 0 n)
+        bm =
+            if VU.null nullIdxs then allValidBitmap n else buildBitmapFromNulls' n nullIdxs
+     in
+        case sUnbox @a of
+            STrue -> UnboxedColumn (Just bm) $ runST $ do
+                mv <- VUM.new n
+                VG.iforM_ v $ \i mx -> forM_ mx (VUM.unsafeWrite mv i)
+                VU.unsafeFreeze mv
+            SFalse ->
+                BoxedColumn
+                    (Just bm)
+                    (VB.map (fromMaybe (errorWithoutStackTrace "fromMaybeVec: Nothing slot")) v)
 
 -- | Whether row @i@ is null, respecting the bitmap.
 columnElemIsNull :: Column -> Int -> Bool
@@ -194,13 +210,11 @@ instance (Eq a) => Eq (TypedColumn a) where
     (==) :: (Eq a) => TypedColumn a -> TypedColumn a -> Bool
     (==) (TColumn a) (TColumn b) = a == b
 
--- | Gets the underlying value from a TypedColumn.
+{- | Gets the underlying value from a TypedColumn.
+TODO: mchav - investigate if this is still necessary to use.
+-}
 unwrapTypedColumn :: TypedColumn a -> Column
 unwrapTypedColumn (TColumn value) = value
-
--- | Gets the underlying vector from a TypedColumn.
-vectorFromTypedColumn :: TypedColumn a -> VB.Vector a
-vectorFromTypedColumn (TColumn value) = either throw id (toVector value)
 
 -- | Checks if a column contains missing values (has a bitmap).
 hasMissing :: Column -> Bool
@@ -278,6 +292,29 @@ columnTypeString column = case column of
     showMaybeType =
         let s = show (typeRep @a)
          in "Maybe " ++ if ' ' `elem` s then "(" ++ s ++ ")" else s
+
+-- | Convert any Column to a vector of Text labels (one per row).
+columnToTextVec :: Column -> VB.Vector T.Text
+columnToTextVec c@(MergedColumn _ _) = columnToTextVec (materializeMerged c)
+columnToTextVec (BoxedColumn bm (col' :: VB.Vector a)) =
+    case bm of
+        Nothing -> case testEquality (typeRep @a) (typeRep @T.Text) of
+            Just Refl -> col'
+            Nothing -> VB.map (T.pack . show) col'
+        Just bitmap ->
+            VB.imap
+                (\i x -> if bitmapTestBit bitmap i then T.pack (show x) else "null")
+                col'
+columnToTextVec (UnboxedColumn bm col') =
+    case bm of
+        Nothing -> VB.map (T.pack . show) (VB.convert col')
+        Just bitmap ->
+            VB.generate (VU.length col') $ \i ->
+                if bitmapTestBit bitmap i then T.pack (show (col' VU.! i)) else "null"
+columnToTextVec (PackedText bm p) =
+    VB.generate (packedLength p) $ \i -> case bm of
+        Just bitmap | not (bitmapTestBit bitmap i) -> "null"
+        _ -> packedIndexText p i
 
 instance (Show a) => Show (TypedColumn a) where
     show :: (Show a) => TypedColumn a -> String
@@ -1206,7 +1243,7 @@ expandColumn n column@(BoxedColumn bm col)
     | otherwise =
         let extra = n - VG.length col
             newBm = case bm of
-                Nothing -> Just (buildBitmapFromNulls n [VG.length col .. n - 1])
+                Nothing -> Just (buildBitmapFromNulls' n (VU.enumFromN (VG.length col) extra))
                 Just b ->
                     Just
                         (bitmapConcat (VG.length col) b extra (VU.replicate ((extra + 7) `shiftR` 3) 0))
@@ -1217,7 +1254,7 @@ expandColumn n column@(UnboxedColumn bm col)
     | otherwise =
         let extra = n - VG.length col
             newBm = case bm of
-                Nothing -> Just (buildBitmapFromNulls n [VG.length col .. n - 1])
+                Nothing -> Just (buildBitmapFromNulls' n (VU.enumFromN (VG.length col) extra))
                 Just b ->
                     Just
                         (bitmapConcat (VG.length col) b extra (VU.replicate ((extra + 7) `shiftR` 3) 0))
@@ -1241,7 +1278,7 @@ leftExpandColumn n column@(BoxedColumn bm col)
         let extra = n - VG.length col
             origLen = VG.length col
             newBm = case bm of
-                Nothing -> Just (buildBitmapFromNulls n [0 .. extra - 1])
+                Nothing -> Just (buildBitmapFromNulls' n (VU.enumFromN 0 extra))
                 Just b ->
                     let nullPart = VU.replicate ((extra + 7) `shiftR` 3) 0
                      in Just (bitmapConcat extra nullPart origLen b)
@@ -1254,7 +1291,7 @@ leftExpandColumn n column@(UnboxedColumn bm col)
         let extra = n - VG.length col
             origLen = VG.length col
             newBm = case bm of
-                Nothing -> Just (buildBitmapFromNulls n [0 .. extra - 1])
+                Nothing -> Just (buildBitmapFromNulls' n (VU.enumFromN 0 extra))
                 Just b ->
                     let nullPart = VU.replicate ((extra + 7) `shiftR` 3) 0
                      in Just (bitmapConcat extra nullPart origLen b)
