@@ -26,7 +26,7 @@ import DataFrame.Internal.Column (
     Columnable,
     columnLength,
     fromList,
-    fromMaybeVec,
+    fromVector,
     materializeMerged,
     sliceColumn,
  )
@@ -103,9 +103,9 @@ mkColumnFromRow name i rows =
                         Nothing -> throw (mismatchAt r (typeRep @b) (typeRep @a))
                 maybes = zipWith collect [0 :: Int ..] cells
              in if any isNothing maybes
-                    then fromMaybeVec (V.fromList maybes)
+                    then fromVector (V.fromList maybes)
                     else fromList (catMaybes maybes)
-        _ -> fromMaybeVec (V.fromList (map (const (Nothing :: Maybe T.Text)) cells))
+        _ -> fromVector (V.fromList (map (const (Nothing :: Maybe T.Text)) cells))
   where
     cells = zipWith cellAt [0 :: Int ..] rows
     cellAt r row = fromMaybe (throw (missingCellAt r)) (row !? i)

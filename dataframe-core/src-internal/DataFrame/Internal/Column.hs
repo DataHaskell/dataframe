@@ -2,7 +2,6 @@
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE DataKinds #-}
-
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GADTs #-}
@@ -125,28 +124,6 @@ Used mostly as an intermediate structure for I/O.
 data MutableColumn where
     MBoxedColumn :: (Columnable a) => VBM.IOVector a -> MutableColumn
     MUnboxedColumn :: (Columnable a, VU.Unbox a) => VUM.IOVector a -> MutableColumn
-
-{- | Materialize a nullable column from @VB.Vector (Maybe a)@; picks 'UnboxedColumn'
-when @a@ is unboxable, else 'BoxedColumn'. Always attaches a bitmap so the column
-reads as nullable even with no 'Nothing' values.
--}
-fromMaybeVec :: forall a. (Columnable a) => VB.Vector (Maybe a) -> Column
-fromMaybeVec v =
-    let
-        n = VB.length v
-        nullIdxs = VU.filter (isNothing . VB.unsafeIndex v) (VU.enumFromN 0 n)
-        bm =
-            if VU.null nullIdxs then allValidBitmap n else buildBitmapFromNulls' n nullIdxs
-     in
-        case sUnbox @a of
-            STrue -> UnboxedColumn (Just bm) $ runST $ do
-                mv <- VUM.new n
-                VG.iforM_ v $ \i mx -> forM_ mx (VUM.unsafeWrite mv i)
-                VU.unsafeFreeze mv
-            SFalse ->
-                BoxedColumn
-                    (Just bm)
-                    (VB.map (fromMaybe (errorWithoutStackTrace "fromMaybeVec: Nothing slot")) v)
 
 -- | Whether row @i@ is null, respecting the bitmap.
 columnElemIsNull :: Column -> Int -> Bool
@@ -465,7 +442,22 @@ instance
     ColumnifyRep 'RNullableBoxed (Maybe a)
     where
     toColumnRep :: (Columnable a) => VB.Vector (Maybe a) -> Column
-    toColumnRep = fromMaybeVec
+    toColumnRep v =
+        let
+            n = VB.length v
+            nullIdxs = VU.filter (isNothing . VB.unsafeIndex v) (VU.enumFromN 0 n)
+            bm =
+                if VU.null nullIdxs then allValidBitmap n else buildBitmapFromNulls' n nullIdxs
+         in
+            case sUnbox @a of
+                STrue -> UnboxedColumn (Just bm) $ runST $ do
+                    mv <- VUM.new n
+                    VG.iforM_ v $ \i mx -> forM_ mx (VUM.unsafeWrite mv i)
+                    VU.unsafeFreeze mv
+                SFalse ->
+                    BoxedColumn
+                        (Just bm)
+                        (VB.map (fromMaybe (errorWithoutStackTrace "toColumnRep: Nothing slot")) v)
 
 {- | O(n) Convert a vector to a column. Automatically picks the best representation of a vector to store the underlying data in.
 
