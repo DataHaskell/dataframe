@@ -16,7 +16,8 @@ import Data.Time (UTCTime (UTCTime), addDays, fromGregorian, secondsToDiffTime)
 import qualified Data.Vector as VB
 import qualified Data.Vector.Unboxed as VU
 import Data.Word (Word8)
-import DataFrame.Internal.Column (Bitmap, Column (..))
+import DataFrame.Internal.Column (Column (..))
+import DataFrame.Internal.Column.Bitmap (Bitmap)
 import DataFrame.Internal.DataFrame (DataFrame, fromNamedColumns)
 import DataFrame.Internal.PackedText (mkPackedContiguous32)
 
