@@ -74,7 +74,22 @@ import DataFrame.Errors (
     DataFrameException (..),
     TypeErrorContext (..),
  )
-import DataFrame.Internal.Column
+import DataFrame.Internal.Column (
+    Column (..),
+    Columnable,
+    TypedColumn (TColumn),
+    atIndicesStable,
+    findIndices,
+    hasMissing,
+    materializeMerged,
+    materializePacked,
+    mkRandom,
+    sliceColumn,
+    takeColumn,
+    takeLastColumn,
+    unwrapTypedColumn,
+ )
+import DataFrame.Internal.Column.Bitmap (bitmapTestBit)
 import DataFrame.Internal.DataFrame (
     DataFrame (..),
     columnNames,

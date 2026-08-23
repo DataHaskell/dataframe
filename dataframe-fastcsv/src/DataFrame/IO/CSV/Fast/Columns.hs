@@ -44,7 +44,7 @@ import DataFrame.IO.CSV (
 import DataFrame.IO.CSV.Fast.Passes
 import DataFrame.IO.CSV.Fast.Slice (extractField)
 import DataFrame.Internal.Column (Column, ensureOptional, fromVector)
-import DataFrame.Internal.DictEncode (dictCompactColumn)
+import DataFrame.Internal.Column.Encode (dictCompactColumn)
 import DataFrame.Operations.Typing (
     ParseOptions (..),
     ParsingAssumption (..),

@@ -65,7 +65,7 @@ import DataFrame.Internal.Binary (
     littleEndianWord32,
     littleEndianWord64,
  )
-import DataFrame.Internal.ColumnBuilder (
+import DataFrame.Internal.Column.Builder (
     TextBuilder,
     appendNull,
     appendText,

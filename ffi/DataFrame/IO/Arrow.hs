@@ -22,10 +22,33 @@ import qualified Data.Text.Encoding as TE
 import qualified Data.Vector as V
 import qualified Data.Vector.Unboxed as VU
 import qualified DataFrame.Internal.Column as DI
+import qualified DataFrame.Internal.Column.Bitmap as DI
 
 import Control.Monad (foldM_, forM, join, when, zipWithM_)
 import Data.Type.Equality (TestEquality (testEquality), type (:~:) (Refl))
-import Foreign
+import Foreign (
+    Bits (popCount),
+    FunPtr,
+    Int32,
+    Int64,
+    Ptr,
+    StablePtr,
+    Storable (peek, peekElemOff, poke, pokeElemOff),
+    Word8,
+    castPtr,
+    castPtrToStablePtr,
+    castStablePtrToPtr,
+    copyBytes,
+    deRefStablePtr,
+    free,
+    freeStablePtr,
+    mallocArray,
+    mallocBytes,
+    newStablePtr,
+    nullFunPtr,
+    nullPtr,
+    plusPtr,
+ )
 import Foreign.C.String (CString, newCString, peekCString)
 import Type.Reflection (typeRep)
 

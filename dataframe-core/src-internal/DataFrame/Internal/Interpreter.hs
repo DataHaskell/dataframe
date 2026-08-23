@@ -35,6 +35,7 @@ import qualified Data.Vector.Unboxed as VU
 import qualified Data.Vector.Unboxed.Mutable as VUM
 import DataFrame.Errors
 import DataFrame.Internal.Column
+import DataFrame.Internal.Column.Bitmap
 import DataFrame.Internal.DataFrame
 import DataFrame.Internal.Expression
 import qualified DataFrame.Internal.Grouping as G
@@ -851,7 +852,7 @@ eval (FlatCtx df) expr@(Over keys inner) = addContext expr $ do
         Flat groupCol ->
             Right (Flat (atIndicesStable (rowToGroup gdf) groupCol))
         Group groupCols -> do
-            sorted <- V.fold1M' concatColumns groupCols
+            sorted <- V.fold1M' mappendColumns groupCols
             let inv = invertPermutation (valueIndices gdf)
             Right (Flat (atIndicesStable inv sorted))
 eval (GroupCtx _) expr@(Over _ _) =

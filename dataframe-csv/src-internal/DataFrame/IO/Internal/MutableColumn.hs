@@ -22,14 +22,13 @@ import qualified Data.Vector.Unboxed.Mutable as VUM
 
 import Data.Maybe (fromMaybe)
 import Data.Type.Equality (TestEquality (..), type (:~:) (Refl))
-import Type.Reflection (typeRep)
-
 import DataFrame.Internal.Column (
     Column (..),
     MutableColumn (..),
-    buildBitmapFromNulls,
  )
+import DataFrame.Internal.Column.Bitmap (buildBitmapFromNulls)
 import DataFrame.Internal.Parsing (isNullish, readDouble, readInt)
+import Type.Reflection (typeRep)
 
 writeColumn :: Int -> T.Text -> MutableColumn -> IO (Either T.Text Bool)
 writeColumn i value (MBoxedColumn (col :: VBM.IOVector a)) =

@@ -4,7 +4,7 @@
 into contiguous, newline-aligned chunks (alignment is by construction —
 chunks are row ranges over the quote-resolved delimiter index), each
 worker runs every column's 'ColumnPlan' over its chunk with right-sized
-builders, and the merger splices the results ('mergeColumns' /
+builders, and the merger splices the results ('concatColumns' /
 'mergeTextChunksPar'). Inference classifies its sample once, globally,
 before fan-out; when chunks resolve different types the merger re-parses
 only the narrower-typed chunks.
@@ -33,8 +33,8 @@ import DataFrame.IO.CSV.Fast.Passes (NullSpec, PassCol (..))
 import DataFrame.IO.CSV.Fast.TextMerge (mergeTextChunksPar)
 import DataFrame.IO.CSV.Fast.Workers (pooledRun)
 import DataFrame.Internal.Column (Column, forceColumn)
-import DataFrame.Internal.ColumnBuilder (mergeColumns)
-import DataFrame.Internal.DictEncode (dictCompactColumn)
+import DataFrame.Internal.Column.Builder (concatColumns)
+import DataFrame.Internal.Column.Encode (dictCompactColumn)
 import DataFrame.Operations.Typing (SafeReadMode)
 
 -- | Below this input size the fan-out overhead outweighs the parallelism.
@@ -66,7 +66,7 @@ data ChunkCol
 mergePassCols :: Int -> [PassCol] -> IO Column
 mergePassCols width ps@(PassText{} : _) =
     mergeTextChunksPar width [tc | PassText tc <- ps]
-mergePassCols _ ps = pure $! mergeColumns [c | PassFull c <- ps]
+mergePassCols _ ps = pure $! concatColumns [c | PassFull c <- ps]
 
 {- | Build every column, fanning the row range out over @nChunks@ chunks
 on a capability-wide worker pool (sequentially when @nChunks <= 1@). Same

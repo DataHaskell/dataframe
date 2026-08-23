@@ -38,10 +38,10 @@ import DataFrame.Featurize.Internal (featureNames, numericMatrix, targetDoubles)
 import DataFrame.Internal.Column (
     Column (..),
     Columnable,
-    bitmapTestBit,
     columnBitmap,
     hasElemType,
  )
+import DataFrame.Internal.Column.Bitmap (bitmapTestBit)
 import DataFrame.Internal.DataFrame (DataFrame, unsafeGetColumn)
 import DataFrame.Internal.Expression (Expr (..))
 import DataFrame.Internal.Types (SBool (..), sIntegral)

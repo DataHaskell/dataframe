@@ -8,13 +8,12 @@
 columns merge at the byte level via 'TextChunk' \/ 'mergeTextChunks', so no
 per-chunk 'Data.Text.Text' values are ever materialized.
 -}
-module DataFrame.Internal.ColumnMerge (
+module DataFrame.Internal.Column.Merge (
     TextChunk (..),
-    mergeColumns,
+    concatColumns,
     mergeTextChunks,
     packedFromTextChunk,
-    packValidity,
-    spliceBitmaps,
+    concatValidity,
     tcRows,
 ) where
 
@@ -23,21 +22,21 @@ import qualified Data.Vector as VB
 import qualified Data.Vector.Unboxed as VU
 import qualified Data.Vector.Unboxed.Mutable as VUM
 
-import Control.Monad (foldM_, forM_, when)
-import Control.Monad.ST (ST, runST)
-import Data.Bits (shiftL, shiftR, (.&.), (.|.))
-import Data.Maybe (fromMaybe, isNothing)
+import Control.Monad (foldM_, forM_)
+import Control.Monad.ST (runST)
 import Data.Type.Equality (testEquality, (:~:) (Refl))
-import Data.Word (Word8)
 import DataFrame.Internal.Column (
-    Bitmap,
     Column (..),
     Columnable,
-    allValidBitmap,
     isMergedColumn,
     isPackedText,
     materializeMerged,
     materializePacked,
+ )
+import DataFrame.Internal.Column.Bitmap (
+    Bitmap,
+    Validity (Validity),
+    concatValidity,
  )
 import DataFrame.Internal.PackedText (mkPackedContiguous)
 import Type.Reflection (typeRep)
@@ -87,33 +86,34 @@ mergeTextChunks cs = runST $ do
     foldM_ (\(b, r) c -> splice b r c) (0, 0) cs
     farr <- A.unsafeFreeze arr
     foffs <- VU.unsafeFreeze offs
-    let !bm = spliceBitmaps [(tcBitmap c, tcRows c) | c <- cs]
+    let !bm = concatValidity [Validity (tcBitmap c) (tcRows c) | c <- cs]
     pure (PackedText bm (mkPackedContiguous farr foffs))
 
-{- | Merge per-chunk columns into one column: one allocation + memcpy per
-payload, with bitmaps spliced across non-byte-aligned chunk boundaries.
-All chunks must have the same element type.
+{- | Merge per-chunk columns into one column.
+
+TODO: mchavinda - this is very similar to mappendColumns can could possibly
+be defined in terms of it but I'll have to ivnestigate further.
 -}
-mergeColumns :: [Column] -> Column
-mergeColumns [] = error "DataFrame.Internal.ColumnBuilder.mergeColumns: empty list"
-mergeColumns [c] = c
+concatColumns :: [Column] -> Column
+concatColumns [] = error "DataFrame.Internal.Column.Builder.concatColumns: empty list"
+concatColumns [c] = c
 -- Normalize on the whole list, not the head: a packed or merged chunk in any
 -- position must demote every chunk to the common boxed form.
-mergeColumns cols@(c0 : _)
-    | any isMergedColumn cols = mergeColumns (map materializeMerged cols)
-    | any isPackedText cols = mergeColumns (map materializePacked cols)
-mergeColumns cols@(c0 : _) = case c0 of
-    PackedText _ _ -> mergeColumns (map materializePacked cols)
-    MergedColumn _ _ -> mergeColumns (map materializeMerged cols)
+concatColumns cols@(c0 : _)
+    | any isMergedColumn cols = concatColumns (map materializeMerged cols)
+    | any isPackedText cols = concatColumns (map materializePacked cols)
+concatColumns cols@(c0 : _) = case c0 of
+    PackedText _ _ -> concatColumns (map materializePacked cols)
+    MergedColumn _ _ -> concatColumns (map materializeMerged cols)
     UnboxedColumn _ (_ :: VU.Vector a) ->
         let parts = map (unboxedPart @a) cols
             !merged = VU.concat (map snd parts)
-            !bm = spliceBitmaps [(mb, VU.length v) | (mb, v) <- parts]
+            !bm = concatValidity [Validity mb (VU.length v) | (mb, v) <- parts]
          in UnboxedColumn bm merged
     BoxedColumn _ (_ :: VB.Vector a) ->
         let parts = map (boxedPart @a) cols
             !merged = VB.concat (map snd parts)
-            !bm = spliceBitmaps [(mb, VB.length v) | (mb, v) <- parts]
+            !bm = concatValidity [Validity mb (VB.length v) | (mb, v) <- parts]
          in BoxedColumn bm merged
 
 unboxedPart ::
@@ -134,52 +134,5 @@ boxedPart _ = mergeMismatch
 
 mergeMismatch :: a
 mergeMismatch =
-    error "DataFrame.Internal.ColumnBuilder.mergeColumns: chunk column types differ"
-
-{- | Splice chunk bitmaps end to end at the bit level. 'Nothing' if no chunk
-carries a bitmap; chunks without one count as all-valid otherwise.
--}
-spliceBitmaps :: [(Maybe Bitmap, Int)] -> Maybe Bitmap
-spliceBitmaps parts
-    | all (isNothing . fst) parts = Nothing
-    | otherwise = Just $ VU.create $ do
-        let total = sum (map snd parts)
-            outBytes = (total + 7) `shiftR` 3
-        mv <- VUM.replicate outBytes 0
-        let orInto i w =
-                when (i < outBytes && w /= 0) $ do
-                    old <- VUM.unsafeRead mv i
-                    VUM.unsafeWrite mv i (old .|. w)
-            splice !bitPos (mb, len) = do
-                let bm = fromMaybe (allValidBitmap len) mb
-                    sh = bitPos .&. 7
-                    byte0 = bitPos `shiftR` 3
-                    lastIdx = ((len + 7) `shiftR` 3) - 1
-                    tailBits = len .&. 7
-                    lastMask =
-                        if tailBits == 0 then 0xFF else (1 `shiftL` tailBits) - 1
-                forM_ [0 .. lastIdx] $ \k -> do
-                    let raw = VU.unsafeIndex bm k
-                        masked = if k == lastIdx then raw .&. lastMask else raw
-                        w = fromIntegral masked :: Word
-                    orInto (byte0 + k) (fromIntegral (w `shiftL` sh))
-                    when (sh /= 0) $
-                        orInto (byte0 + k + 1) (fromIntegral (w `shiftR` (8 - sh)))
-                pure (bitPos + len)
-        foldM_ splice 0 parts
-        pure mv
-
--- | Pack a 0\/1 byte-per-row validity prefix into a bit-packed 'Bitmap'.
-packValidity :: Int -> VUM.MVector s Word8 -> ST s Bitmap
-packValidity n val = do
-    bytes <- VU.unsafeFreeze (VUM.slice 0 n val)
-    let assemble b =
-            let base = b `shiftL` 3
-                m = min 8 (n - base)
-                go !acc !k
-                    | k >= m = acc
-                    | VU.unsafeIndex bytes (base + k) /= 0 =
-                        go (acc .|. (1 `shiftL` k)) (k + 1)
-                    | otherwise = go acc (k + 1)
-             in go (0 :: Word8) 0
-    pure $! VU.generate ((n + 7) `shiftR` 3) assemble
+    error
+        "DataFrame.Internal.Column.Builder.concatColumns: chunk column types differ"

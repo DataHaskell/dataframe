@@ -1,6 +1,6 @@
 cabal-version:      3.4
 name:               dataframe-core
-version:            2.4.0.0
+version:            2.4.1.0
 synopsis:           Core data structures for the dataframe library.
 description:
     Minimal interchange-format types for the @dataframe@ ecosystem:
@@ -46,12 +46,13 @@ library
                         DataFrame.Internal.AggKernelDirect
                         DataFrame.Internal.AggKernelPar
                         DataFrame.Internal.AggPlan
+                        DataFrame.Internal.Column.Bitmap
                         DataFrame.Internal.GroupingDirect
                         DataFrame.Internal.Column
-                        DataFrame.Internal.ColumnBuilder
-                        DataFrame.Internal.ColumnMerge
+                        DataFrame.Internal.Column.Builder
+                        DataFrame.Internal.Column.Encode
+                        DataFrame.Internal.Column.Merge
                         DataFrame.Internal.DataFrame
-                        DataFrame.Internal.DictEncode
                         DataFrame.Internal.Expression
                         DataFrame.Internal.Grouping
                         DataFrame.Internal.GroupingPar

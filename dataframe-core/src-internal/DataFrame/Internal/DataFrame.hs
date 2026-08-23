@@ -27,6 +27,7 @@ import Data.Type.Equality (
 import DataFrame.Display.Terminal.PrettyPrint
 import DataFrame.Errors
 import DataFrame.Internal.Column
+import DataFrame.Internal.Column.Bitmap (bitmapTestBit)
 import DataFrame.Internal.Expression
 import DataFrame.Internal.PackedText (packedIndexText)
 import Text.Printf

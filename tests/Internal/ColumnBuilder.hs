@@ -1,4 +1,6 @@
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE GADTs #-}
+
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
@@ -18,11 +20,42 @@ import Data.Maybe (catMaybes, isNothing)
 import Data.Text.Encoding (decodeUtf8Lenient, encodeUtf8)
 import Data.Type.Equality (testEquality, (:~:) (Refl))
 import Data.Word (Word8)
-import DataFrame.Internal.Column hiding (mergeColumns)
-import DataFrame.Internal.ColumnBuilder
+import DataFrame.Internal.Column (
+    Column (BoxedColumn, PackedText, UnboxedColumn),
+    Columnable,
+    columnElemIsNull,
+    columnVersionString,
+    fromVector,
+    materializePacked,
+ )
+import DataFrame.Internal.Column.Bitmap (bitmapTestBit)
+import DataFrame.Internal.Column.Builder (
+    ColumnBuilder (appendNull, builderLength, freezeBuilder),
+    appendDouble,
+    appendInt,
+    appendText,
+    appendTextSlice,
+    appendTextSliceFromPtr,
+    concatColumns,
+    newDoubleBuilder,
+    newIntBuilder,
+    newTextBuilder,
+ )
 import Foreign.Ptr (castPtr)
-import Test.HUnit
-import Test.QuickCheck
+import Test.HUnit (
+    Test (TestCase, TestLabel),
+    assertEqual,
+    assertFailure,
+ )
+import Test.QuickCheck (
+    Gen,
+    Property,
+    Testable (property),
+    chooseInt,
+    forAll,
+    (.&&.),
+    (===),
+ )
 import Type.Reflection (typeRep)
 
 -- Build a column by appending each list element (Nothing => appendNull).
@@ -211,7 +244,7 @@ mergeBitmapSpliceUnaligned = TestCase $ do
     let nullIdx = [1, 4, 9, 10, 14] :: [Int]
         xs = [if i `elem` nullIdx then Nothing else Just i | i <- [0 .. 14]]
         chunks = [take 3 xs, take 5 (drop 3 xs), drop 8 xs]
-        merged = mergeColumns (map buildIntColumn chunks)
+        merged = concatColumns (map buildIntColumn chunks)
     assertEqual "merged equals unsplit" (buildIntColumn xs) merged
     forM_ [0 .. 14] $ \i ->
         assertEqual
@@ -261,27 +294,27 @@ prop_textSliceMatchesLenientDecode fields =
 
 prop_mergeIntMatchesUnsplit :: [Maybe Int] -> Property
 prop_mergeIntMatchesUnsplit xs = forAll (splitsOf xs) $ \chunks ->
-    let merged = mergeColumns (map buildIntColumn chunks)
+    let merged = concatColumns (map buildIntColumn chunks)
         unsplit = buildIntColumn xs
      in merged === unsplit
             .&&. columnVersionString merged === columnVersionString unsplit
 
 prop_mergeDoubleMatchesUnsplit :: [Maybe Double] -> Property
 prop_mergeDoubleMatchesUnsplit xs = forAll (splitsOf xs) $ \chunks ->
-    mergeColumns (map buildDoubleColumn chunks) === buildDoubleColumn xs
+    concatColumns (map buildDoubleColumn chunks) === buildDoubleColumn xs
 
 prop_mergeTextMatchesUnsplit :: [Maybe String] -> Property
 prop_mergeTextMatchesUnsplit ss =
     let xs = map (fmap T.pack) ss
      in forAll (splitsOf xs) $ \chunks ->
-            let merged = mergeColumns (map buildTextColumn chunks)
+            let merged = concatColumns (map buildTextColumn chunks)
                 unsplit = buildTextColumn xs
              in merged === unsplit
                     .&&. columnTexts merged === columnTexts unsplit
 
 prop_mergeNullsLandAtRightRows :: [Maybe Int] -> Property
 prop_mergeNullsLandAtRightRows xs = forAll (splitsOf xs) $ \chunks ->
-    let merged = mergeColumns (map buildIntColumn chunks)
+    let merged = concatColumns (map buildIntColumn chunks)
      in map isNothing xs
             === [columnElemIsNull merged i | i <- [0 .. length xs - 1]]
 

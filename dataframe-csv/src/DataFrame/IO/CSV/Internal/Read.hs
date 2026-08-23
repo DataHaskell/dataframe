@@ -30,7 +30,7 @@ import DataFrame.IO.CSV.Internal.Options
 import DataFrame.IO.CSV.Internal.Scanner
 import DataFrame.IO.CSV.Internal.Sink
 import DataFrame.Internal.Column (Column, ensureOptional)
-import DataFrame.Internal.ColumnBuilder
+import DataFrame.Internal.Column.Builder
 import DataFrame.Internal.DataFrame (DataFrame (..), forceDataFrame)
 import DataFrame.Operations.Typing (
     SafeReadMode (..),

@@ -54,7 +54,18 @@ import qualified Data.Vector.Unboxed.Mutable as VUM
 import DataFrame.Errors (
     DataFrameException (ColumnsNotFoundException),
  )
-import DataFrame.Internal.Column as D
+import DataFrame.Internal.Column as D (
+    Column (BoxedColumn, UnboxedColumn),
+    atIndicesStable,
+    columnTypeString,
+    fromUnboxedVector,
+    fromVector,
+    gatherWithSentinel,
+    isPackedText,
+    materializePacked,
+    mkMergedColumns,
+ )
+import DataFrame.Internal.Column.Bitmap (bitmapTestBit)
 import DataFrame.Internal.DataFrame as D
 import DataFrame.Internal.ParRadixSort (parSortByHash)
 import DataFrame.Operations.Aggregation as D
@@ -602,7 +613,7 @@ assembleInner csSet left right leftIxs rightIxs =
                             then
                                 insertIfPresent
                                     name
-                                    (D.mergeColumns <$> getExpandedLeft name <*> getExpandedRight name)
+                                    (D.mkMergedColumns <$> getExpandedLeft name <*> getExpandedRight name)
                                     df
                             else
                                 insertIfPresent name (getExpandedRight name) df
@@ -900,7 +911,7 @@ assembleLeft csSet left right leftIxs rightIxs =
                             then
                                 insertIfPresent
                                     name
-                                    (D.mergeColumns <$> getExpandedLeft name <*> getExpandedRight name)
+                                    (D.mkMergedColumns <$> getExpandedLeft name <*> getExpandedRight name)
                                     df
                             else insertIfPresent name (getExpandedRight name) df
             )
@@ -1232,7 +1243,7 @@ assembleFullOuter csSet left right leftIxs rightIxs =
                             then
                                 insertIfPresent
                                     name
-                                    (D.mergeColumns <$> getExpandedLeft name <*> getExpandedRight name)
+                                    (D.mkMergedColumns <$> getExpandedLeft name <*> getExpandedRight name)
                                     df
                             else insertIfPresent name (getExpandedRight name) df
             )

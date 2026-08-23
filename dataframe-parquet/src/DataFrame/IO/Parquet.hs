@@ -80,7 +80,7 @@ import DataFrame.IO.Utils.RandomAccess (
  )
 import DataFrame.Internal.Column (Column, Columnable)
 import qualified DataFrame.Internal.Column as DI
-import DataFrame.Internal.ColumnBuilder (
+import DataFrame.Internal.Column.Builder (
     freezeTextChunk,
     mergeTextChunks,
     newTextBuilder,

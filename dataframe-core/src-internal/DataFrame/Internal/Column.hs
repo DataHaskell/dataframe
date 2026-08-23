@@ -29,19 +29,33 @@ import Control.Exception (throw)
 import Control.Monad (forM_, when)
 import Control.Monad.ST (ST, runST)
 import Data.Bits (
-    complement,
     popCount,
-    setBit,
-    shiftL,
     shiftR,
-    testBit,
-    (.&.),
  )
 import Data.Kind (Type)
-import Data.Maybe
+import Data.Maybe (fromMaybe, isJust, isNothing)
 import Data.Type.Equality (TestEquality (..))
 import Data.Word (Word8)
-import DataFrame.Errors
+import DataFrame.Errors (
+    DataFrameException (EmptyDataSetException, TypeMismatchException),
+    TypeErrorContext (
+        MkTypeErrorContext,
+        callingFunctionName,
+        errorColumnName,
+        expectedType,
+        userType
+    ),
+ )
+import DataFrame.Internal.Column.Bitmap (
+    Bitmap,
+    allValidBitmap,
+    andBitmaps,
+    bitmapConcat,
+    bitmapSlice,
+    bitmapTestBit,
+    buildBitmapFromNulls,
+    buildBitmapFromValid,
+ )
 import DataFrame.Internal.PackedText (
     PackedTextData (..),
     packedGather,
@@ -56,9 +70,6 @@ import System.IO.Unsafe (unsafePerformIO)
 import System.Random
 import Type.Reflection
 
--- | A bit-packed validity bitmap. Bit @i@ = 1 means row @i@ is valid (not null).
-type Bitmap = VU.Vector Word8
-
 {- | Type-erased column GADT. Pattern-matching on the constructor recovers the
 representation; nullability is an optional bit-packed 'Bitmap' (@Nothing@ = no
 nulls, @Just bm@ = bit @i@ set iff row @i@ is valid).
@@ -72,7 +83,7 @@ data Column where
     -- Text is materialized on demand. Only CSV ingest emits this; user-built
     -- Text columns stay 'BoxedColumn'.
     PackedText :: Maybe Bitmap -> {-# UNPACK #-} !PackedTextData -> Column
-    -- A join's same-named non-key column pair ('mergeColumns'): both sides
+    -- A join's same-named non-key column pair ('mkMergedColumns'): both sides
     -- keep their native (packed/dict/unboxed) representation; per-row 'These'
     -- values only materialize on element access ('materializeMerged').
     MergedColumn :: !Column -> !Column -> Column
@@ -85,89 +96,13 @@ data MutableColumn where
     MBoxedColumn :: (Columnable a) => VBM.IOVector a -> MutableColumn
     MUnboxedColumn :: (Columnable a, VU.Unbox a) => VUM.IOVector a -> MutableColumn
 
--- ---------------------------------------------------------------------------
--- Bitmap helpers
--- ---------------------------------------------------------------------------
-
--- | Test whether row @i@ is valid (not null) in a bitmap.
-bitmapTestBit :: Bitmap -> Int -> Bool
-bitmapTestBit bm i = testBit (VU.unsafeIndex bm (i `shiftR` 3)) (i .&. 7)
-{-# INLINE bitmapTestBit #-}
-
--- | Build a fully-valid bitmap for @n@ rows (all bits set).
-allValidBitmap :: Int -> Bitmap
-allValidBitmap n =
-    let bytes = (n + 7) `shiftR` 3
-        lastBits = n .&. 7
-        full = VU.replicate (bytes - 1) 0xFF
-        lastByte = if lastBits == 0 then 0xFF else (1 `shiftL` lastBits) - 1
-     in if bytes == 0 then VU.empty else VU.snoc full lastByte
-{-# INLINE allValidBitmap #-}
-
-{- | Build a bitmap from a @VU.Vector Word8@ validity vector
-(1 = valid, 0 = null), as produced by Arrow / Parquet decoders.
--}
-buildBitmapFromValid :: VU.Vector Word8 -> Bitmap
-buildBitmapFromValid valid =
-    let n = VU.length valid
-        bytes = (n + 7) `shiftR` 3
-     in VU.generate bytes $ \b ->
-            let base = b `shiftL` 3
-                setBitIf acc bit =
-                    let idx = base + bit
-                     in if idx < n && VU.unsafeIndex valid idx /= 0
-                            then setBit acc bit
-                            else acc
-             in foldl setBitIf (0 :: Word8) [0 .. 7]
-
-{- | Build a bitmap from a list of null-row indices.
-@nullIdxs@ are the positions that are NULL.
--}
-buildBitmapFromNulls :: Int -> [Int] -> Bitmap
-buildBitmapFromNulls n nullIdxs =
-    let base = allValidBitmap n
-     in VU.modify
-            ( \mv ->
-                forM_ nullIdxs $ \i -> do
-                    let byteIdx = i `shiftR` 3
-                        bitIdx = i .&. 7
-                    v <- VUM.unsafeRead mv byteIdx
-                    VUM.unsafeWrite mv byteIdx (clearBit8 v bitIdx)
-            )
-            base
-  where
-    clearBit8 :: Word8 -> Int -> Word8
-    clearBit8 b bit = b .&. complement (1 `shiftL` bit)
-
--- | Slice a bitmap for rows @[start .. start+len-1]@.
-bitmapSlice :: Int -> Int -> Bitmap -> Bitmap
-bitmapSlice start len bm
-    | start .&. 7 == 0 =
-        let startByte = start `shiftR` 3
-            bytes = min ((len + 7) `shiftR` 3) (VU.length bm - startByte)
-         in VU.slice startByte bytes bm
-    | otherwise =
-        let n = min len (VU.length bm `shiftL` 3 - start)
-         in buildBitmapFromValid $
-                VU.generate n $
-                    \i -> if bitmapTestBit bm (start + i) then 1 else 0
-
--- | Concatenate two bitmaps covering @n1@ and @n2@ rows respectively.
-bitmapConcat :: Int -> Bitmap -> Int -> Bitmap -> Bitmap
-bitmapConcat n1 bm1 n2 bm2 =
-    buildBitmapFromValid $
-        VU.generate (n1 + n2) $ \i ->
-            if i < n1
-                then if bitmapTestBit bm1 i then 1 else 0
-                else if bitmapTestBit bm2 (i - n1) then 1 else 0
-
--- | Combine two bitmaps with AND (both must be valid for result to be valid).
-mergeBitmaps :: Bitmap -> Bitmap -> Bitmap
-mergeBitmaps = VU.zipWith (.&.)
-
 {- | Materialize a nullable column from @VB.Vector (Maybe a)@; picks 'UnboxedColumn'
 when @a@ is unboxable, else 'BoxedColumn'. Always attaches a bitmap so the column
 reads as nullable even with no 'Nothing' values.
+
+TODO: mchavinda - Revisit the null indices construction. We can do this all in place.
+If null we don'y materialize the nullIdxs list. But if there is a null we do
+and we traverse it.
 -}
 fromMaybeVec :: forall a. (Columnable a) => VB.Vector (Maybe a) -> Column
 fromMaybeVec v = case sUnbox @a of
@@ -182,6 +117,8 @@ fromMaybeVec v = case sUnbox @a of
 {- | Materialize a nullable 'UnboxedColumn' to @VB.Vector (Maybe a)@ using runST.
 Always attaches a bitmap so the column is recognized as nullable even when
 no 'Nothing' values are present (preserves the Maybe type marker).
+
+-- TODO: mchavinda - similar to optimization above.
 -}
 fromMaybeVecUnboxed ::
     forall a. (Columnable a, VU.Unbox a) => VB.Vector (Maybe a) -> Column
@@ -242,13 +179,9 @@ checkMergedNoBothNull a b = case (columnBitmap a, columnBitmap b) of
             go !i
                 | i >= n = ()
                 | bitmapTestBit ba i || bitmapTestBit bb i = go (i + 1)
-                | otherwise = error "mergeColumns: both null"
+                | otherwise = error "mkMergedColumns: both null"
          in go 0
     _ -> ()
-
--- ---------------------------------------------------------------------------
--- End bitmap helpers
--- ---------------------------------------------------------------------------
 
 {- | A wrapper around the type-erased 'Column' carrying a phantom element type,
 used to type-check expressions. The phantom is not guaranteed to match the
@@ -788,7 +721,7 @@ gatherWithSentinel indices col =
                         Nothing -> Just newBm
                         Just sb ->
                             Just
-                                ( mergeBitmaps
+                                ( andBitmaps
                                     newBm
                                     ( buildBitmapFromValid $ VU.generate n $ \i ->
                                         let idx = VU.unsafeIndex indices i
@@ -804,7 +737,7 @@ gatherWithSentinel indices col =
                         Nothing -> Just newBm
                         Just sb ->
                             Just
-                                ( mergeBitmaps
+                                ( andBitmaps
                                     newBm
                                     ( buildBitmapFromValid $ VU.generate n $ \i ->
                                         let idx = VU.unsafeIndex indices i
@@ -822,7 +755,7 @@ gatherWithSentinel indices col =
                         Nothing -> Just newBm
                         Just sb ->
                             Just
-                                ( mergeBitmaps
+                                ( andBitmaps
                                     newBm
                                     ( buildBitmapFromValid $ VU.generate n $ \i ->
                                         let idx = VU.unsafeIndex indices i
@@ -1124,9 +1057,9 @@ zipColumns (UnboxedColumn _ column) (UnboxedColumn _ other) = UnboxedColumn Noth
 {- | Merge two columns using `These`. O(1): the sides are kept in their
 native representation and 'These' values materialize on element access.
 -}
-mergeColumns :: Column -> Column -> Column
-mergeColumns = MergedColumn
-{-# INLINE mergeColumns #-}
+mkMergedColumns :: Column -> Column -> Column
+mkMergedColumns = MergedColumn
+{-# INLINE mkMergedColumns #-}
 
 -- | Decode a 'MergedColumn' into the eager @BoxedColumn (These a b)@ form.
 materializeMerged :: Column -> Column
@@ -1173,7 +1106,7 @@ mergeEager colA colB = case (colA, colB) of
                 (True, True) -> These (atA i) (atB i)
                 (True, False) -> This (atA i)
                 (False, True) -> That (atB i)
-                (False, False) -> error "mergeColumns: both null"
+                (False, False) -> error "mkMergedColumns: both null"
     validAt mbm i = maybe True (`bitmapTestBit` i) mbm
     {-# INLINE validAt #-}
 
@@ -1334,12 +1267,12 @@ leftExpandColumn n column@(UnboxedColumn bm col)
 {- | Concatenates two columns.
 Returns Nothing if the columns are of different types.
 -}
-concatColumns :: Column -> Column -> Either DataFrameException Column
-concatColumns left right = case (left, right) of
-    (MergedColumn _ _, _) -> concatColumns (materializeMerged left) right
-    (_, MergedColumn _ _) -> concatColumns left (materializeMerged right)
-    (PackedText _ _, _) -> concatColumns (materializePacked left) right
-    (_, PackedText _ _) -> concatColumns left (materializePacked right)
+mappendColumns :: Column -> Column -> Either DataFrameException Column
+mappendColumns left right = case (left, right) of
+    (MergedColumn _ _, _) -> mappendColumns (materializeMerged left) right
+    (_, MergedColumn _ _) -> mappendColumns left (materializeMerged right)
+    (PackedText _ _, _) -> mappendColumns (materializePacked left) right
+    (_, PackedText _ _) -> mappendColumns left (materializePacked right)
     (BoxedColumn bmL l, BoxedColumn bmR r) -> case testEquality (typeOf l) (typeOf r) of
         Just Refl ->
             let newBm = case (bmL, bmR) of
@@ -1377,12 +1310,12 @@ concatColumns left right = case (left, right) of
                     ( MkTypeErrorContext
                         { userType = Right ta
                         , expectedType = Right tb
-                        , callingFunctionName = Just "concatColumns"
+                        , callingFunctionName = Just "mappendColumns"
                         , errorColumnName = Nothing
                         }
                     )
 
-{- | Like 'concatColumns' but also combines columns of different types by wrapping
+{- | Like 'mappendColumns' but also combines columns of different types by wrapping
 values in 'Either' (e.g. @[1,2]@ and @["a","b"]@ become
 @[Left 1, Left 2, Right "a", Right "b"]@).
 -}
@@ -1445,14 +1378,14 @@ concatManyColumns (c0 : cs) = case c0 of
     PackedText _ _ -> concatManyColumns (map materializePacked (c0 : cs))
     MergedColumn _ _ -> concatManyColumns (map materializeMerged (c0 : cs))
 
-concatColumnsEither :: Column -> Column -> Column
-concatColumnsEither l@(MergedColumn _ _) r =
-    concatColumnsEither (materializeMerged l) r
-concatColumnsEither l r@(MergedColumn _ _) =
-    concatColumnsEither l (materializeMerged r)
-concatColumnsEither l@(PackedText _ _) r = concatColumnsEither (materializePacked l) r
-concatColumnsEither l r@(PackedText _ _) = concatColumnsEither l (materializePacked r)
-concatColumnsEither (BoxedColumn bmL left) (BoxedColumn bmR right) = case testEquality (typeOf left) (typeOf right) of
+mappendColumnsEither :: Column -> Column -> Column
+mappendColumnsEither l@(MergedColumn _ _) r =
+    mappendColumnsEither (materializeMerged l) r
+mappendColumnsEither l r@(MergedColumn _ _) =
+    mappendColumnsEither l (materializeMerged r)
+mappendColumnsEither l@(PackedText _ _) r = mappendColumnsEither (materializePacked l) r
+mappendColumnsEither l r@(PackedText _ _) = mappendColumnsEither l (materializePacked r)
+mappendColumnsEither (BoxedColumn bmL left) (BoxedColumn bmR right) = case testEquality (typeOf left) (typeOf right) of
     Nothing ->
         BoxedColumn Nothing $ fmap Left left <> fmap Right right
     Just Refl ->
@@ -1476,7 +1409,7 @@ concatColumnsEither (BoxedColumn bmL left) (BoxedColumn bmR right) = case testEq
                         )
                 (Just bl, Just br) -> Just (bitmapConcat (VB.length left) bl (VB.length right) br)
          in BoxedColumn newBm $ left <> right
-concatColumnsEither (UnboxedColumn bmL left) (UnboxedColumn bmR right) = case testEquality (typeOf left) (typeOf right) of
+mappendColumnsEither (UnboxedColumn bmL left) (UnboxedColumn bmR right) = case testEquality (typeOf left) (typeOf right) of
     Nothing ->
         BoxedColumn Nothing $
             fmap Left (VG.convert left) <> fmap Right (VG.convert right)
@@ -1501,9 +1434,9 @@ concatColumnsEither (UnboxedColumn bmL left) (UnboxedColumn bmR right) = case te
                         )
                 (Just bl, Just br) -> Just (bitmapConcat (VU.length left) bl (VU.length right) br)
          in UnboxedColumn newBm $ left <> right
-concatColumnsEither (BoxedColumn _ left) (UnboxedColumn _ right) =
+mappendColumnsEither (BoxedColumn _ left) (UnboxedColumn _ right) =
     BoxedColumn Nothing $ fmap Left left <> fmap Right (VG.convert right)
-concatColumnsEither (UnboxedColumn _ left) (BoxedColumn _ right) =
+mappendColumnsEither (UnboxedColumn _ left) (BoxedColumn _ right) =
     BoxedColumn Nothing $ fmap Left (VG.convert left) <> fmap Right right
 
 -- | Allocate a mutable column of size @n@ matching the constructor/type of the given column.

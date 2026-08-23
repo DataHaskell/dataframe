@@ -33,7 +33,7 @@ import Control.Monad.ST (RealWorld, stToIO)
 import Data.IORef
 import Data.Word (Word8)
 import DataFrame.IO.CSV.Internal.Scanner
-import DataFrame.Internal.ColumnBuilder
+import DataFrame.Internal.Column.Builder
 import DataFrame.Internal.Parsing.Fast (
     isMissingFieldSlice,
     parseDoubleFieldSlice,
