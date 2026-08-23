@@ -20,10 +20,11 @@ import Control.Monad.ST (stToIO)
 import Data.Int (Int32)
 import DataFrame.IO.CSV.Fast.Workers (pooledRun)
 import DataFrame.Internal.Column (Column (..))
-import DataFrame.Internal.ColumnMerge (
+import DataFrame.Internal.Column.Bitmap (Validity (Validity))
+import DataFrame.Internal.Column.Merge (
     TextChunk (..),
+    concatValidity,
     mergeTextChunks,
-    spliceBitmaps,
     tcRows,
  )
 import DataFrame.Internal.PackedText (mkPackedContiguous, mkPackedContiguous32)
@@ -73,5 +74,5 @@ mergeTextChunksPar width cs = do
                 mkPackedContiguous
                     <$> stToIO (A.unsafeFreeze marr)
                     <*> VU.unsafeFreeze offsMV
-    let !bm = spliceBitmaps [(tcBitmap c, tcRows c) | c <- cs]
+    let !bm = concatValidity [Validity (tcBitmap c) (tcRows c) | c <- cs]
     pure (PackedText bm packed)

@@ -2,7 +2,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 
 {- | Correctness oracle for the dictionary-encode building block
-('DataFrame.Internal.DictEncode'). A text column encodes to dense
+('DataFrame.Internal.Column.Encode'). A text column encodes to dense
 first-appearance @Int@ codes: two rows share a code iff their text is equal, the
 codes are a contiguous @0 .. card-1@ range in first-appearance order, packed and
 boxed Text encode identically, and the cap parameter bails past a cardinality.
@@ -21,7 +21,7 @@ import Data.Maybe (isJust)
 import Data.Text.Encoding (encodeUtf8)
 import Data.Word (Word8)
 import qualified DataFrame.Internal.Column as DI
-import DataFrame.Internal.DictEncode (dictEncodeColumn, dictEncodeColumnUpTo)
+import DataFrame.Internal.Column.Encode (dictEncodeColumn, dictEncodeColumnUpTo)
 import DataFrame.Internal.PackedText (mkPackedContiguous)
 import Test.HUnit
 

@@ -42,7 +42,6 @@ import DataFrame.IO.CSV.Fast.Index (
     CsvParseError (..),
     comma,
     getDelimiterIndices,
-    tab,
  )
 import DataFrame.Internal.DataFrame (DataFrame)
 import DataFrame.Schema (Schema (..))

@@ -29,15 +29,14 @@ import qualified Data.Proxy as P
 import Data.Time
 import Data.Type.Equality (TestEquality (..))
 import DataFrame.Internal.Column (
-    Bitmap,
     Column (..),
     Columnable,
-    bitmapTestBit,
     ensureOptional,
     finalizeParseResult,
     fromVector,
     materializePacked,
  )
+import DataFrame.Internal.Column.Bitmap (Bitmap, bitmapTestBit)
 import DataFrame.Internal.DataFrame (
     DataFrame (..),
     insertColumn,

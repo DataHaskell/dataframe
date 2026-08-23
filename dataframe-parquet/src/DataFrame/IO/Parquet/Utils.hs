@@ -44,9 +44,9 @@ import DataFrame.IO.Parquet.Thrift (
 import DataFrame.Internal.Column (
     Column (..),
     Columnable,
-    buildBitmapFromValid,
     fromList,
  )
+import DataFrame.Internal.Column.Bitmap (buildBitmapFromValid)
 
 {- | A left-fold driver over a column's per-page triples
 @(values, def-levels, rep-levels)@, as produced by

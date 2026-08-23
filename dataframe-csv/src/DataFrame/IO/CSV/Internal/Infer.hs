@@ -29,16 +29,36 @@ import Data.Time (Day)
 import Data.Word (Word8)
 import DataFrame.IO.CSV.Internal.Options
 import DataFrame.IO.CSV.Internal.Sink (Cells (..), cellAt, withCell)
-import DataFrame.Internal.Column
-import DataFrame.Internal.ColumnBuilder
-import DataFrame.Internal.Parsing
+import DataFrame.Internal.Column (
+    Column (UnboxedColumn),
+    Columnable,
+    finalizeParseResult,
+    fromVector,
+ )
+import DataFrame.Internal.Column.Bitmap (Bitmap)
+import DataFrame.Internal.Column.Builder (
+    ColumnBuilder (appendNull, freezeBuilder),
+    appendTextSliceFromPtr,
+    newTextBuilder,
+ )
+import DataFrame.Internal.Parsing (
+    readByteStringBool,
+    readByteStringDate,
+    readByteStringDouble,
+    readByteStringInt,
+ )
 import DataFrame.Internal.Parsing.Fast (
     parseBoolFieldSlice,
     parseDateFieldSlice,
     parseDoubleFieldSlice,
     parseIntFieldSlice,
  )
-import DataFrame.Operations.Typing
+import DataFrame.Operations.Typing (
+    ParsingAssumption (..),
+    SafeReadMode (EitherRead),
+    makeParsingAssumptionBytes,
+    promoteIntColumnIndexed,
+ )
 import Foreign.Ptr (Ptr, castPtr, plusPtr)
 
 inferColumnFromBS :: SafeReadMode -> ReadOptions -> Cells -> IO Column

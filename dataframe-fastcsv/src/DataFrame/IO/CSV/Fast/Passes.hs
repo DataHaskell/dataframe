@@ -44,7 +44,7 @@ import DataFrame.IO.CSV (ReadOptions (..))
 import DataFrame.IO.CSV.Fast.Index (quote)
 import DataFrame.IO.CSV.Fast.Slice
 import DataFrame.Internal.Column (Column, Columnable, fromVector)
-import DataFrame.Internal.ColumnBuilder (
+import DataFrame.Internal.Column.Builder (
     ColumnBuilder (..),
     TextChunk,
     appendNum,

@@ -26,8 +26,9 @@ import DataFrame.IO.CSV (
     ReadOptions (..),
     defaultReadOptions,
  )
-import DataFrame.Internal.Column (Column (..), bitmapTestBit)
+import DataFrame.Internal.Column (Column (..))
 import qualified DataFrame.Internal.Column as DI
+import DataFrame.Internal.Column.Bitmap (bitmapTestBit)
 import DataFrame.Internal.DataFrame (
     DataFrame (..),
     columnIndices,

@@ -28,13 +28,15 @@ import Control.Monad.ST (ST, runST)
 import Data.Type.Equality (TestEquality (..), type (:~:) (Refl))
 import DataFrame.Errors
 import DataFrame.Internal.Column (
-    Bitmap,
     Column (..),
-    bitmapTestBit,
     materializeMerged,
  )
+import DataFrame.Internal.Column.Bitmap (
+    Bitmap,
+    bitmapTestBit,
+ )
+import DataFrame.Internal.Column.Encode (dictEncodeColumnUpTo)
 import DataFrame.Internal.DataFrame (DataFrame (..), GroupedDataFrame (..))
-import DataFrame.Internal.DictEncode (dictEncodeColumnUpTo)
 import DataFrame.Internal.GroupingDirect (
     DirectGrouping (..),
     directGroupThreshold,

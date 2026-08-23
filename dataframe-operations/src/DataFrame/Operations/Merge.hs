@@ -49,7 +49,7 @@ instance Semigroup D.DataFrame where
                                 Nothing ->
                                     D.insertColumn name (D.leftExpandColumn sumRows b'') df
                                 Just a'' ->
-                                    let concatedColumns = D.concatColumnsEither a'' b''
+                                    let concatedColumns = D.mappendColumnsEither a'' b''
                                      in D.insertColumn name concatedColumns df
             result = L.foldl' (addColumns a b) D.empty (D.columnNames a `L.union` D.columnNames b)
          in

@@ -13,6 +13,7 @@
 --      is resolved too late for the configure-time library lookup.
 
 import Data.Bifunctor (second)
+import Distribution.Compiler (PerCompilerFlavor (..))
 import Distribution.PackageDescription (
     BuildInfo (..),
     Executable (..),
@@ -172,8 +173,16 @@ addToTest p t = t{testBuildInfo = addExtra p (testBuildInfo t)}
 addToExe :: FilePath -> Executable -> Executable
 addToExe p e = e{buildInfo = addExtra p (buildInfo e)}
 
+-- TODO: mchavinda - make this linking windows compatible.
 addExtra :: FilePath -> BuildInfo -> BuildInfo
-addExtra p bi = bi{extraLibDirs = mkLibDir p : extraLibDirs bi}
+addExtra p bi =
+    bi
+        { extraLibDirs = mkLibDir p : extraLibDirs bi
+        , options = addRpath (options bi)
+        }
+  where
+    addRpath (PerCompilerFlavor ghc ghcjs) =
+        PerCompilerFlavor (("-optl-Wl,-rpath," ++ p) : ghc) ghcjs
 
 -- | In Cabal 3.14+, extraLibDirs holds 'SymbolicPath' values, not 'FilePath'.
 #if MIN_VERSION_Cabal(3,14,0)

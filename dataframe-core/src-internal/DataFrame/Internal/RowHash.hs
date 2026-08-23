@@ -27,10 +27,12 @@ import System.IO.Unsafe (unsafePerformIO)
 import Type.Reflection (typeRep)
 
 import DataFrame.Internal.Column (
-    Bitmap,
     Column (..),
-    bitmapTestBit,
     materializeMerged,
+ )
+import DataFrame.Internal.Column.Bitmap (
+    Bitmap,
+    bitmapTestBit,
  )
 import DataFrame.Internal.Hash (
     fnvOffset,

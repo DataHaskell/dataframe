@@ -45,6 +45,7 @@ import DataFrame.DecisionTree.Tao (taoIteration, taoOptimize)
 import DataFrame.DecisionTree.Types (CarePoint (..), Direction (..))
 import qualified DataFrame.Functions as F
 import qualified DataFrame.Internal.Column as DI
+import qualified DataFrame.Internal.Column.Bitmap as DI
 import DataFrame.Internal.Expression (Expr (..), eqExpr, getColumns)
 import DataFrame.Internal.Interpreter (interpret)
 import DataFrame.Internal.PackedText (mkPackedContiguous)

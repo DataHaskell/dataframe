@@ -7,7 +7,7 @@
 per-append @IORef@ traffic: hot counters live in an unboxed vector, payloads
 double on demand, and validity is only materialized once a null is seen.
 -}
-module DataFrame.Internal.ColumnBuilder (
+module DataFrame.Internal.Column.Builder (
     ColumnBuilder (..),
     NumBuilder,
     IntBuilder,
@@ -25,7 +25,7 @@ module DataFrame.Internal.ColumnBuilder (
     appendTextSlice,
     appendTextSliceFromPtr,
     freezeTextChunk,
-    mergeColumns,
+    concatColumns,
     mergeTextChunks,
 ) where
 
@@ -40,17 +40,21 @@ import Data.Bits (shiftR)
 import Data.STRef
 import Data.Text.Internal (Text (..))
 import Data.Word (Word8)
-import DataFrame.Internal.Column hiding (mergeColumns)
-import DataFrame.Internal.ColumnMerge (
+import DataFrame.Internal.Column (
+    Column (UnboxedColumn),
+    Columnable,
+ )
+import DataFrame.Internal.Column.Bitmap (packValidity)
+import DataFrame.Internal.Column.Merge (
     TextChunk (..),
-    mergeColumns,
+    concatColumns,
     mergeTextChunks,
-    packValidity,
  )
 import Foreign.Ptr (Ptr)
 
-{- | Operations shared by all column builders. A builder must not be used
-again after 'freezeBuilder' (its storage is frozen in place, not copied).
+{- | Operations shared by all column builders.
+
+NB: Do not use after freezing
 -}
 class ColumnBuilder b where
     -- | Append a null row (sentinel payload + invalid bit).
@@ -59,7 +63,7 @@ class ColumnBuilder b where
     -- | Rows appended so far.
     builderLength :: b s -> ST s Int
 
-    -- | Freeze into a fully-forced 'Column'; bitmap only when a null was seen.
+    -- | Freeze into a fully-forced 'Column'.
     freezeBuilder :: b s -> ST s Column
 
 -- Counter slots shared by the builders: rows, any-null flag, text bytes used.
@@ -69,7 +73,7 @@ cAnyNull = 1
 cBytes = 2
 
 {- | Builder for unboxed numeric payloads ('Int', 'Double', ...). 'nbNull'
-is the sentinel written into null slots (protected by the bitmap).
+is the sentinel written into null slots.
 -}
 data NumBuilder a s = NumBuilder
     { nbNull :: !a
@@ -87,6 +91,8 @@ type IntBuilder = NumBuilder Int
 type DoubleBuilder = NumBuilder Double
 
 -- | New numeric builder with a row-capacity hint and a null sentinel.
+{-# SPECIALIZE newNumBuilder :: Int -> Int -> ST s (NumBuilder Int s) #-}
+{-# SPECIALIZE newNumBuilder :: Double -> Int -> ST s (NumBuilder Double s) #-}
 newNumBuilder :: (VU.Unbox a) => a -> Int -> ST s (NumBuilder a s)
 newNumBuilder nullValue hint = do
     let cap = max 16 hint
@@ -168,9 +174,10 @@ freezeTrimmed n mv
     | VUM.length mv - n <= n `shiftR` 2 = VU.unsafeFreeze (VUM.slice 0 n mv)
     | otherwise = VU.freeze (VUM.slice 0 n mv)
 
-{- | Builder for 'Text' columns. All field bytes go into one exponentially
-grown byte array; rows are recorded as offsets, so an append is a memcpy
-and freezing slices 'Text' values off the shared array without copying.
+{- | Builder for 'Text' columns.
+
+Representation is packed. I.e all field bytes go into one exponentially
+grown byte array with rows recorded as offsets.
 -}
 data TextBuilder s = TextBuilder
     { tbCounters :: !(VUM.MVector s Int)
@@ -261,8 +268,8 @@ growText b (TextArrays bytes bcap offsets val) needRows needBytes = do
     writeSTRef (tbArrays b) arrs
     pure arrs
 
-{- | Freeze a 'TextBuilder' into a raw 'TextChunk' for byte-level merging
-('mergeTextChunks'): no 'T.Text' values are created until chunks merge.
+{- | Freeze a 'TextBuilder' into a raw 'TextChunk' for later merging
+('mergeTextChunks').
 -}
 freezeTextChunk :: TextBuilder s -> ST s TextChunk
 freezeTextChunk b = do

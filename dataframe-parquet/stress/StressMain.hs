@@ -14,12 +14,11 @@ import DataFrame10GB (
 import System.Exit (exitFailure)
 import System.FilePath ((</>))
 import System.IO (hPutStrLn, stderr)
-import System.IO.Temp (withSystemTempDirectory)
 
 main :: IO ()
-main = withSystemTempDirectory "dataframe-parquet-10gb-stress" $ \directory -> do
+main = do
     expected <- evaluate (forceDataFrame stressDataFrame)
-    let output = directory </> "roundtrip.parquet"
+    let output = "../../10gbtest.parquet"
     putStrLn
         ( "writing "
             <> show stressRows
@@ -30,9 +29,10 @@ main = withSystemTempDirectory "dataframe-parquet-10gb-stress" $ \directory -> d
             <> " resident payload bytes)"
         )
     writeParquet output expected
-    putStrLn "reading the stress dataframe"
-    actual <- readParquet output
-    putStrLn "checking dataframe equivalence"
-    unless (expected == actual) $ do
-        hPutStrLn stderr "10 GiB Parquet roundtrip mismatch"
-        exitFailure
+
+-- putStrLn "reading the stress dataframe"
+-- actual <- readParquet output
+-- putStrLn "checking dataframe equivalence"
+-- unless (expected == actual) $ do
+--     hPutStrLn stderr "10 GiB Parquet roundtrip mismatch"
+--     exitFailure

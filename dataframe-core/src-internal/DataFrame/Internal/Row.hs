@@ -21,8 +21,20 @@ import Data.Maybe (catMaybes, fromMaybe, isNothing)
 import Data.Type.Equality (TestEquality (..))
 import Data.Typeable (Typeable, type (:~:) (..))
 import DataFrame.Errors (DataFrameException (..), TypeErrorContext (..))
-import DataFrame.Internal.Column
-import DataFrame.Internal.DataFrame
+import DataFrame.Internal.Column (
+    Column (..),
+    Columnable,
+    columnLength,
+    fromList,
+    fromMaybeVec,
+    materializeMerged,
+    sliceColumn,
+ )
+import DataFrame.Internal.Column.Bitmap (Bitmap, bitmapTestBit)
+import DataFrame.Internal.DataFrame (
+    DataFrame (columnIndices, dataframeDimensions),
+    getColumn,
+ )
 import DataFrame.Internal.Expression (Expr (..))
 import DataFrame.Internal.PackedText (packedIndexText, packedLength)
 import Type.Reflection (TypeRep, typeOf, typeRep)

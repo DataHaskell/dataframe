@@ -5,10 +5,11 @@
 {-# LANGUAGE TypeApplications #-}
 
 {- | Dictionary-encode a text (or factor) group key to dense @Int@ codes: each row
-gets a first-appearance code @0..card-1@ (NULL reserved) plus the cardinality. A
-tested building block; profiled slower than the hash group-by, so unused for now.
+gets a first-appearance code @0..card-1@ (NULL reserved) plus the cardinality.
+
+TODO: mchavinda - revise if this module is still necessary.
 -}
-module DataFrame.Internal.DictEncode (
+module DataFrame.Internal.Column.Encode (
     dictEncodeColumn,
     dictEncodeColumnUpTo,
     dictCompactColumn,
@@ -25,7 +26,8 @@ import qualified Data.Vector.Unboxed as VU
 import qualified Data.Vector.Unboxed.Mutable as VUM
 import Type.Reflection (typeRep)
 
-import DataFrame.Internal.Column (Bitmap, Column (..), bitmapTestBit)
+import DataFrame.Internal.Column (Column (..))
+import DataFrame.Internal.Column.Bitmap (Bitmap, bitmapTestBit)
 import DataFrame.Internal.Hash (fnvOffset, mixBytes, mixText, nullSalt)
 import DataFrame.Internal.HashTable (htInsert, newHashTable)
 import DataFrame.Internal.PackedText (
@@ -168,4 +170,11 @@ dictPacked p codes card = runST $ do
                 copyRep (c + 1)
     copyRep 0
     arr <- A.unsafeFreeze marr
-    pure (PackedTextData arr (mkOffsets offs) (Just (mkSel card codes)) True)
+    pure
+        ( PackedTextData
+            { ptBytes = arr
+            , ptOffsets = mkOffsets offs
+            , ptSel = Just (mkSel card codes)
+            , ptCanonicalSel = True
+            }
+        )
