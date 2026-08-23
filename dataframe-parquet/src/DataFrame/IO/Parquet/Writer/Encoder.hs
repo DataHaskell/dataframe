@@ -51,10 +51,10 @@ import Type.Reflection (typeRep)
 
 data Encoder = Encoder
     { encType :: !ThriftType
-    , encConverted :: !(Maybe ConvertedType)
-    , encLogical :: !(Maybe LogicalType)
-    , encWriteValue :: !(MemoryBuffer -> Int -> IO Bool)
-    , encFinishValues :: !(MemoryBuffer -> IO ())
+    , convertedType :: !(Maybe ConvertedType)
+    , logicalType :: !(Maybe LogicalType)
+    , writeValue :: !(MemoryBuffer -> Int -> IO Bool)
+    , finishValues :: !(MemoryBuffer -> IO ())
     }
 
 buildEncoder :: Column -> IO Encoder

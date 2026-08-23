@@ -71,5 +71,75 @@ rootSchemaElement count =
         , logicalType = putField Nothing
         }
 
-magic :: BS.ByteString
-magic = "PAR1"
+mkColumnChunk ::
+    ParquetWriteOptions ->
+    Int64 ->
+    Int ->
+    Int64 ->
+    Int ->
+    ColumnChunkState ->
+    ColumnChunk
+mkColumnChunk opts offset compressedSize uncompressedSize rgRows cs =
+    ColumnChunk
+        { cc_file_path = putField Nothing
+        , cc_file_offset = putField offset
+        , cc_meta_data = putField (Just metadata)
+        , cc_offset_index_offset = putField Nothing
+        , cc_offset_index_length = putField Nothing
+        , cc_column_index_offset = putField Nothing
+        , cc_column_index_length = putField Nothing
+        , cc_crypto_metadata = putField Nothing
+        , cc_encrypted_column_metadata = putField Nothing
+        }
+  where
+    metadata =
+        ColumnMetaData
+            { cmd_type = putField (ckEncoder cs).encType
+            , cmd_encodings = putField [PLAIN enum, RLE enum]
+            , cmd_path_in_schema = putField [ckName cs]
+            , cmd_codec = putField opts.compressionCodec
+            , cmd_num_values = putField (fromIntegral rgRows)
+            , cmd_total_uncompressed_size = putField uncompressedSize
+            , cmd_total_compressed_size = putField (fromIntegral compressedSize)
+            , cmd_key_value_metadata = putField Nothing
+            , cmd_data_page_offset = putField offset
+            , cmd_index_page_offset = putField Nothing
+            , cmd_dictionary_page_offset = putField Nothing
+            , cmd_statistics = putField Nothing
+            , cmd_encoding_stats = putField Nothing
+            , cmd_bloom_filter_offset = putField Nothing
+            , cmd_bloom_filter_length = putField Nothing
+            }
+
+mkRowGroup :: [ColumnChunk] -> Int64 -> Int64 -> Int -> RowGroup
+mkRowGroup chunks totalCompressed totalUncompressed rgRows =
+    RowGroup
+        { rg_columns = putField chunks
+        , rg_total_byte_size = putField totalUncompressed
+        , rg_num_rows = putField (fromIntegral rgRows)
+        , rg_sorting_columns = putField Nothing
+        , rg_file_offset = putField Nothing
+        , rg_total_compressed_size = putField (Just totalCompressed)
+        , rg_ordinal = putField Nothing
+        }
+
+writeFooter :: WriterState -> Int -> IO ()
+writeFooter writerState numRows = do
+    rowGroupMetadata <- reverse <$> readIORef writerState.rowGroupMetadataRef
+    let schemaElements =
+            rootSchemaElement (VB.length writerState.columnChunks) : VB.toList (VB.map schema writerState.columnChunks)
+        metadata =
+            FileMetadata
+                { version = putField 1
+                , schema = putField schemaElements
+                , num_rows = putField (fromIntegral numRows)
+                , row_groups = putField rowGroupMetadata
+                , key_value_metadata = putField Nothing
+                , created_by = putField (Just "dataframe-parquet")
+                , column_orders = putField Nothing
+                , encryption_algorithm = putField Nothing
+                , footer_signing_key_metadata = putField Nothing
+                }
+        footer = Pinch.encode Pinch.compactProtocol metadata
+    writeByteStringToWritableHandle writerState.outputFileHandle footer
+    writeWord32LEToHandle writerState.outputFileHandle (fromIntegral (BS.length footer))
