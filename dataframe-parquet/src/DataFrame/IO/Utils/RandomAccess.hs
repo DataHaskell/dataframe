@@ -1,7 +1,5 @@
-{-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE OverloadedRecordDot #-}
-{-# LANGUAGE TypeFamilies #-}
 
 module DataFrame.IO.Utils.RandomAccess (
     uncurry3,
@@ -14,16 +12,10 @@ module DataFrame.IO.Utils.RandomAccess (
     WritableBinaryHandle,
     openWritableBinaryFile,
     withWritableBinaryFile,
-    HasBuffer (..),
-    Sink (..),
     MemoryBuffer (..),
     mallocBuffer,
-    BufferHandle,
-    withFileBuffer,
-    appendByteString,
-    appendGeneratedBytes,
+    writeByteString,
     appendTextArraySlice,
-    appendByteStringHandle,
     writeWord8,
     writeWord32LE,
     writeWord64LE,
@@ -31,24 +23,13 @@ module DataFrame.IO.Utils.RandomAccess (
     writeDoubleLE,
     bufferResidency,
     bufferToByteString,
-    copyBufferInto,
+    flushBufferToBuffer,
     resetPosition,
     flushBufferToFile,
     writeByteStringToFile,
-    MemoryWriter,
-    onBuffer,
-    putWord8,
-    putWord32LE,
-    putWord64LE,
-    putFloatLE,
-    putDoubleLE,
-    putByteString,
-    putGenerated,
-    copyBuffer,
 ) where
 
 import Control.Exception (bracket)
-import Control.Monad (foldM)
 import Control.Monad.IO.Class (MonadIO (..))
 import Control.Monad.Primitive (RealWorld)
 import Control.Monad.ST (stToIO)
@@ -56,13 +37,11 @@ import Data.Bits (shiftR)
 import qualified Data.ByteString as BS
 import Data.ByteString.Internal (ByteString (PS), create)
 import qualified Data.ByteString.Unsafe as BU
-import qualified Data.Foldable as Foldable
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Primitive.ByteArray (
     MutableByteArray,
     copyMutableByteArray,
     getSizeofMutableByteArray,
-    mutableByteArrayContents,
     newPinnedByteArray,
     withMutableByteArrayContents,
     writeByteArray,
@@ -81,12 +60,10 @@ import GHC.Float (castDoubleToWord64, castFloatToWord32)
 import System.IO (
     BufferMode (NoBuffering),
     Handle,
-    IOMode (ReadWriteMode, WriteMode),
+    IOMode (WriteMode),
     SeekMode (AbsoluteSeek),
     hClose,
-    hGetBuf,
     hPutBuf,
-    hSeek,
     hSetBinaryMode,
     hSetBuffering,
     openBinaryFile,
@@ -181,6 +158,45 @@ withWritableBinaryFile filepath =
         (openWritableBinaryFile filepath)
         (hClose . unHandle)
 
+data MemoryBuffer = MemoryBuffer
+    { arrayRef :: !(IORef (MutableByteArray RealWorld))
+    , positionRef :: !(IORef Int)
+    }
+
+mallocBuffer :: Int -> IO MemoryBuffer
+mallocBuffer capacity
+    | capacity < 0 = ioError $ userError "mallocBuffer: negative capacity"
+    | otherwise = do
+        array <- newPinnedByteArray capacity
+        MemoryBuffer <$> newIORef array <*> newIORef 0
+
+-- We're using pinned ByteArrays so we must
+-- not use the grow function brovided by Data.Primitive
+-- instead we must alloocate a new pinned ByteArray.
+-- We might have been worried about heap fragmentation
+-- because a single pinned object in a 4KB GHC block can
+-- keep the whole plock alive but oyr buffers will tend to
+-- be much larger than that.
+-- But the memory usage will temporarily spike to 2.5x the size of
+-- the buffer, but it should be fine since the current writer is single threaded
+-- and grows *should* be rare.
+-- If it becomes an issue we should start tracking an array of pointers
+-- to buffers intsead of replacing them wholesale so grwoing a buffer
+-- is just a matter of adding a new buffer to the array (which we can
+-- pre-allocate to three elements to begin with and grow it only on the
+-- off chance that a buffer required more than three grows).
+ensureCapacity :: MemoryBuffer -> Int -> IO (MutableByteArray RealWorld)
+ensureCapacity buffer needed = do
+    array <- readIORef buffer.arrayRef
+    maxSize <- getSizeofMutableByteArray array
+    if needed <= maxSize
+        then pure array
+        else do
+            position <- readIORef buffer.positionRef
+            grown <- newPinnedByteArray (needed + (needed `div` 2))
+            copyMutableByteArray grown 0 array 0 position
+            writeIORef buffer.arrayRef grown
+            pure grown
 
 writeWord8 :: MemoryBuffer -> Word8 -> IO ()
 writeWord8 buffer b = do
@@ -189,18 +205,118 @@ writeWord8 buffer b = do
     writeByteArray array position b
     writeIORef buffer.positionRef (position + 1)
 
-
-appendGeneratedBytes :: MemoryBuffer -> Int -> (Int -> Word8) -> IO ()
-appendGeneratedBytes buffer count at
-    | count < 0 = ioError $ userError "appendGeneratedBytes: negative length"
-    | otherwise = do
+writeByteString :: MemoryBuffer -> ByteString -> IO ()
+writeByteString buffer bs =
+    BU.unsafeUseAsCStringLen bs $ \(source, len) -> do
         position <- readIORef buffer.positionRef
-        array <- ensureCapacity buffer (position + count)
-        let go i
-                | i >= count = pure ()
-                | otherwise = writeByteArray array (position + i) (at i) >> go (i + 1)
+        array <- ensureCapacity buffer (position + len)
+        withMutableByteArrayContents array $ \dst ->
+            copyBytes (dst `plusPtr` position) (castPtr source) len
+        writeIORef buffer.positionRef (position + len)
+
+writeWord32LE :: MemoryBuffer -> Word32 -> IO ()
+writeWord32LE buffer w = do
+    position <- readIORef buffer.positionRef
+    array <- ensureCapacity buffer (position + 4)
+    writeByteArray array position (fromIntegral w :: Word8)
+    writeByteArray array (position + 1) (fromIntegral (w `shiftR` 8) :: Word8)
+    writeByteArray array (position + 2) (fromIntegral (w `shiftR` 16) :: Word8)
+    writeByteArray array (position + 3) (fromIntegral (w `shiftR` 24) :: Word8)
+    writeIORef buffer.positionRef (position + 4)
+
+writeWord64LE :: MemoryBuffer -> Word64 -> IO ()
+writeWord64LE buffer w = do
+    position <- readIORef buffer.positionRef
+    array <- ensureCapacity buffer (position + 8)
+    writeByteArray array position (fromIntegral w :: Word8)
+    writeByteArray array (position + 1) (fromIntegral (w `shiftR` 8) :: Word8)
+    writeByteArray array (position + 2) (fromIntegral (w `shiftR` 16) :: Word8)
+    writeByteArray array (position + 3) (fromIntegral (w `shiftR` 24) :: Word8)
+    writeByteArray array (position + 4) (fromIntegral (w `shiftR` 32) :: Word8)
+    writeByteArray array (position + 5) (fromIntegral (w `shiftR` 40) :: Word8)
+    writeByteArray array (position + 6) (fromIntegral (w `shiftR` 48) :: Word8)
+    writeByteArray array (position + 7) (fromIntegral (w `shiftR` 56) :: Word8)
+    writeIORef buffer.positionRef (position + 8)
+
+writeFloatLE :: MemoryBuffer -> Float -> IO ()
+writeFloatLE buffer = writeWord32LE buffer . castFloatToWord32
+
+writeDoubleLE :: MemoryBuffer -> Double -> IO ()
+writeDoubleLE buffer = writeWord64LE buffer . castDoubleToWord64
+
+flushBufferToBuffer :: MemoryBuffer -> MemoryBuffer -> IO ()
+flushBufferToBuffer source destination
+    | source.arrayRef == destination.arrayRef = pure ()
+    | otherwise = do
+        sourceArray <- readIORef source.arrayRef
+        sourcePosition <- readIORef source.positionRef
+        destinationPosition <- readIORef destination.positionRef
+        destinationArray <-
+            ensureCapacity destination (destinationPosition + sourcePosition)
+        copyMutableByteArray
+            destinationArray
+            destinationPosition
+            sourceArray
+            0
+            sourcePosition
+        writeIORef destination.positionRef (destinationPosition + sourcePosition)
+        writeIORef source.positionRef 0
+
+bufferToByteString :: MemoryBuffer -> IO ByteString
+bufferToByteString buffer = do
+    array <- readIORef buffer.arrayRef
+    position <- readIORef buffer.positionRef
+    create position $ \dst ->
+        withMutableByteArrayContents array $ \src ->
+            copyBytes dst (castPtr src) position
+
+bufferResidency :: MemoryBuffer -> IO Int
+bufferResidency buffer = readIORef buffer.positionRef
+
+resetPosition :: MemoryBuffer -> IO ()
+resetPosition buffer = writeIORef buffer.positionRef 0
+
+-- I tested write speeds by doing (on Apple Silicon)
+-- `dd if=/dev/zero of=test bs={$n}k oflag=direct conv=fdatasync
+-- Results:
+--
+-- ```
+--    | block size | data (GiB) |  time (s) | GiB/s |
+--    |------------|------------|-----------|-------|
+--    | 4k         |       4.00 |     2.371 |  1.69 |
+--    | 8k         |       4.00 |     1.486 |  2.69 |
+--    | 16k        |       4.00 |     1.045 |  3.83 |
+--    | 32k        |       4.00 |     0.740 |  5.40 |
+--    | 64k        |       4.00 |     0.675 |  5.92 |
+--    | 128k       |       4.00 |     0.669 |  5.98 |
+--    | 256k       |       4.00 |     0.664 |  6.03 |
+--    | 512k       |       4.00 |     0.670 |  5.97 |
+--    | 1024k      |       4.00 |     0.664 |  6.02 |
+--    | 4096k      |       4.00 |     0.668 |  5.99 |
+-- ```
+-- So when writing to a file to minimize syscall overhead while
+-- trying not to create dirty pages in the kernel page cache, we'll
+-- be flushing in 256 KiB chunks.
+flushBufferToFile :: WritableBinaryHandle -> MemoryBuffer -> IO ()
+flushBufferToFile (WritableBinaryHandle h) buffer = do
+    array <- readIORef buffer.arrayRef
+    position <- readIORef buffer.positionRef
+    withMutableByteArrayContents array $ \ptr -> do
+        let chunkSize = 262144
+            go offset
+                | offset >= position = pure ()
+                | otherwise = do
+                    let n = min chunkSize (position - offset)
+                    hPutBuf h (ptr `plusPtr` offset) n
+                    go (offset + n)
         go 0
-        writeIORef buffer.positionRef (position + count)
+    writeIORef buffer.positionRef 0
+
+writeByteStringToFile :: WritableBinaryHandle -> ByteString -> IO ()
+writeByteStringToFile handle bs = do
+    buffer <- mallocBuffer (max 1 (BS.length bs))
+    writeByteString buffer bs
+    flushBufferToFile handle buffer
 
 appendTextArraySlice :: MemoryBuffer -> TA.Array -> Int -> Int -> IO ()
 appendTextArraySlice buffer source offset count
@@ -212,13 +328,3 @@ appendTextArraySlice buffer source offset count
             stToIO (TA.copyToPointer source offset (destination `plusPtr` position) count)
         writeIORef buffer.positionRef (position + count)
 {-# INLINE appendTextArraySlice #-}
-
-flushBufferToFile :: WritableBinaryHandle -> MemoryBuffer -> IO ()
-flushBufferToFile handle = runReaderIO (flushTo (FileSink handle))
-
-writeByteStringToFile :: WritableBinaryHandle -> ByteString -> IO ()
-writeByteStringToFile handle bs = do
-    buffer <- mallocBuffer (max 1 (BS.length bs))
-    appendByteString buffer bs
-    flushBufferToFile handle buffer
-

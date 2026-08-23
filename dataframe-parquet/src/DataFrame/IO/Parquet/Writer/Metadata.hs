@@ -4,13 +4,25 @@ module DataFrame.IO.Parquet.Writer.Metadata (
     mkSchemaElem,
     rootSchemaElement,
     mkDataPageHeader,
+    mkColumnChunk,
+    mkRowGroup,
+    writeFooter,
     magic,
 ) where
 
 import qualified Data.ByteString as BS
+import Data.Int (Int64)
 import qualified Data.Text as T
 import DataFrame.IO.Parquet.Thrift
+import DataFrame.IO.Utils.RandomAccess (
+    WritableBinaryHandle,
+    flushBufferToFile,
+    mallocBuffer,
+    writeByteString,
+    writeWord32LE,
+ )
 import Pinch (enum, putField)
+import qualified Pinch
 
 mkDataPageHeader :: Int -> Int -> Int -> PageHeader
 mkDataPageHeader rows uncompressedSize compressedSize =
@@ -72,14 +84,15 @@ rootSchemaElement count =
         }
 
 mkColumnChunk ::
-    ParquetWriteOptions ->
+    CompressionCodec ->
+    ThriftType ->
+    T.Text ->
     Int64 ->
     Int ->
     Int64 ->
     Int ->
-    ColumnChunkState ->
     ColumnChunk
-mkColumnChunk opts offset compressedSize uncompressedSize rgRows cs =
+mkColumnChunk codec columnType columnName offset compressedSize uncompressedSize rgRows =
     ColumnChunk
         { cc_file_path = putField Nothing
         , cc_file_offset = putField offset
@@ -94,10 +107,10 @@ mkColumnChunk opts offset compressedSize uncompressedSize rgRows cs =
   where
     metadata =
         ColumnMetaData
-            { cmd_type = putField (ckEncoder cs).encType
+            { cmd_type = putField columnType
             , cmd_encodings = putField [PLAIN enum, RLE enum]
-            , cmd_path_in_schema = putField [ckName cs]
-            , cmd_codec = putField opts.compressionCodec
+            , cmd_path_in_schema = putField [columnName]
+            , cmd_codec = putField codec
             , cmd_num_values = putField (fromIntegral rgRows)
             , cmd_total_uncompressed_size = putField uncompressedSize
             , cmd_total_compressed_size = putField (fromIntegral compressedSize)
@@ -123,12 +136,10 @@ mkRowGroup chunks totalCompressed totalUncompressed rgRows =
         , rg_ordinal = putField Nothing
         }
 
-writeFooter :: WriterState -> Int -> IO ()
-writeFooter writerState numRows = do
-    rowGroupMetadata <- reverse <$> readIORef writerState.rowGroupMetadataRef
-    let schemaElements =
-            rootSchemaElement (VB.length writerState.columnChunks) : VB.toList (VB.map schema writerState.columnChunks)
-        metadata =
+writeFooter ::
+    WritableBinaryHandle -> [SchemaElement] -> Int -> [RowGroup] -> IO ()
+writeFooter output schemaElements numRows rowGroupMetadata = do
+    let metadata =
             FileMetadata
                 { version = putField 1
                 , schema = putField schemaElements
@@ -141,5 +152,11 @@ writeFooter writerState numRows = do
                 , footer_signing_key_metadata = putField Nothing
                 }
         footer = Pinch.encode Pinch.compactProtocol metadata
-    writeByteStringToWritableHandle writerState.outputFileHandle footer
-    writeWord32LEToHandle writerState.outputFileHandle (fromIntegral (BS.length footer))
+    buffer <- mallocBuffer (BS.length footer + 8)
+    writeByteString buffer footer
+    writeWord32LE buffer (fromIntegral (BS.length footer))
+    writeByteString buffer magic
+    flushBufferToFile output buffer
+
+magic :: BS.ByteString
+magic = "PAR1"
