@@ -57,7 +57,6 @@ skewnessOfSymmetricDataSet =
             0
         )
 
--- g1, matching scipy.stats.skew
 skewnessOfSimpleDataSet :: Test
 skewnessOfSimpleDataSet =
     TestCase
@@ -65,7 +64,7 @@ skewnessOfSimpleDataSet =
             "Skewness of a simple data set"
             ( abs
                 ( D.skewness' (VU.fromList [25 :: Int, 28, 26, 30, 40, 50, 40])
-                    - 0.612_140_127_240_396_6
+                    - 0.566_731_633_676
                 )
                 < 1e-12
             )

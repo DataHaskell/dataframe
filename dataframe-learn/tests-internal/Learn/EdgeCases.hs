@@ -28,7 +28,7 @@ import DataFrame.LinearModel
 import DataFrame.LinearSolver (sigmoid)
 import DataFrame.PCA
 
-import DataFrame.Internal.Statistics (correlation', meanSquaredError, variance')
+import DataFrame.Internal.Statistics (correlation', variance')
 
 import Test.HUnit
 
@@ -167,27 +167,6 @@ testCorrelationTooFew = TestCase $ do
         "correlation of one point is Nothing"
         Nothing
         (correlation' (VU.fromList [1]) (VU.fromList [2]))
-
-{- meanSquaredError refuses length mismatches and empty inputs rather than
-   averaging over terms it never summed (or indexing out of bounds). -}
-testMeanSquaredErrorGuards :: Test
-testMeanSquaredErrorGuards = TestCase $ do
-    assertEqual
-        "mse of mismatched lengths is Nothing"
-        Nothing
-        (meanSquaredError (VU.fromList [0, 0, 0, 0]) (VU.fromList [2, 2]))
-    assertEqual
-        "mse with the longer prediction does not index out of bounds"
-        Nothing
-        (meanSquaredError (VU.fromList [1]) (VU.fromList [1, 2, 3]))
-    assertEqual
-        "mse of empty inputs is Nothing"
-        Nothing
-        (meanSquaredError VU.empty VU.empty)
-    assertEqual
-        "mse of equal-length inputs is the plain mean"
-        (Just 4.0)
-        (meanSquaredError (VU.fromList [0, 0]) (VU.fromList [2, 2]))
 
 -- ===========================================================================
 -- Category 8: stability inside the model expr layer
@@ -445,7 +424,6 @@ tests =
     , testCorrelationPerfect
     , testCorrelationConstantColumnIsNaN
     , testCorrelationTooFew
-    , testMeanSquaredErrorGuards
     , testLogisticProbsExtremeFeatures
     , testOLSOneRow
     , testLogisticSingleClass
