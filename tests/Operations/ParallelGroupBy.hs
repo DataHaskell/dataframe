@@ -109,7 +109,11 @@ aggParityFor n =
                 ]
             seqDf = D.aggregate aggs (groupBySeq ["ki", "kt"] df)
             parDf = D.aggregate aggs (groupByPar ["ki", "kt"] df)
-         in assertEqual ("aggregate parity n=" ++ show n) seqDf parDf
+         in -- render: NaN /= NaN under Eq
+            assertEqual
+                ("aggregate parity n=" ++ show n)
+                (D.toMarkdown seqDf)
+                (D.toMarkdown parDf)
 
 collisionParity :: Test
 collisionParity =

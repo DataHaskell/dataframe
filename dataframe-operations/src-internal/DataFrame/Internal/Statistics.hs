@@ -73,7 +73,9 @@ varianceStep (VarAcc !n !meanVal !m2) !x =
 
 computeVariance :: VarAcc -> Double
 computeVariance (VarAcc !n _ !m2)
-    | n < 2 = 0 -- or error "variance of <2 samples"
+    | n == 0 = throw $ EmptyDataSetException "variance"
+    -- undefined at n = 1: NaN, not 0
+    | n < 2 = 0 / 0
     | otherwise = m2 / fromIntegral (n - 1)
 {-# INLINE computeVariance #-}
 

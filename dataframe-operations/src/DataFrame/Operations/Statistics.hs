@@ -118,7 +118,7 @@ mean (Col name) df = case _getColumnAsDouble name df of
     Nothing -> error "[INTERNAL ERROR] Column is non-numeric"
 mean expr df = case interpret df expr of
     Left e -> throw e
-    Right (TColumn col) -> case toUnboxedVector @a col of
+    Right (TColumn col) -> case toUnboxedVector @a (dropNulls col) of
         Left e -> throw e
         Right xs -> mean' xs
 
@@ -136,12 +136,15 @@ meanMaybe expr df = case interpret @(Maybe a) df expr of
 -- | Calculates the median of a given column as a standalone value.
 median ::
     forall a. (Columnable a, Real a, VU.Unbox a) => Expr a -> DataFrame -> Double
-median (Col name) df = case columnAsUnboxedVector (Col @a name) df of
-    Right xs -> median' xs
-    Left e -> throw e
+median (Col name) df = case getColumn name df of
+    Just col -> case toUnboxedVector @a (dropNulls col) of
+        Right xs -> median' xs
+        Left e -> throw e
+    Nothing ->
+        throw $ ColumnsNotFoundException [name] "median" (M.keys $ columnIndices df)
 median expr df = case interpret df expr of
     Left e -> throw e
-    Right (TColumn col) -> case toUnboxedVector @a col of
+    Right (TColumn col) -> case toUnboxedVector @a (dropNulls col) of
         Left e -> throw e
         Right xs -> median' xs
 
@@ -161,12 +164,15 @@ medianMaybe expr df = case interpret @(Maybe a) df expr of
 percentile ::
     forall a.
     (Columnable a, Real a, VU.Unbox a) => Int -> Expr a -> DataFrame -> Double
-percentile n (Col name) df = case columnAsUnboxedVector (Col @a name) df of
-    Right xs -> percentile' n xs
-    Left e -> throw e
+percentile n (Col name) df = case getColumn name df of
+    Just col -> case toUnboxedVector @a (dropNulls col) of
+        Right xs -> percentile' n xs
+        Left e -> throw e
+    Nothing ->
+        throw $ ColumnsNotFoundException [name] "percentile" (M.keys $ columnIndices df)
 percentile n expr df = case interpret df expr of
     Left e -> throw e
-    Right (TColumn col) -> case toUnboxedVector @a col of
+    Right (TColumn col) -> case toUnboxedVector @a (dropNulls col) of
         Left e -> throw e
         Right xs -> percentile' n xs
 
@@ -174,36 +180,47 @@ percentile n expr df = case interpret df expr of
 genericPercentile ::
     forall a.
     (Columnable a, Ord a) => Int -> Expr a -> DataFrame -> a
-genericPercentile n (Col name) df = case columnAsVector (Col @a name) df of
-    Right xs -> percentileOrd' n xs
-    Left e -> throw e
+genericPercentile n (Col name) df = case getColumn name df of
+    Just col -> case toVector @a (dropNullsExceptMaybe @a col) of
+        Right xs -> percentileOrd' n xs
+        Left e -> throw e
+    Nothing ->
+        throw $
+            ColumnsNotFoundException [name] "genericPercentile" (M.keys $ columnIndices df)
 genericPercentile n expr df = case interpret df expr of
     Left e -> throw e
-    Right (TColumn col) -> case toVector @a col of
+    Right (TColumn col) -> case toVector @a (dropNullsExceptMaybe @a col) of
         Left e -> throw e
         Right xs -> percentileOrd' n xs
 
 -- | Calculates the standard deviation of a given column as a standalone value.
 standardDeviation ::
     forall a. (Columnable a, Real a, VU.Unbox a) => Expr a -> DataFrame -> Double
-standardDeviation (Col name) df = case columnAsUnboxedVector (Col @a name) df of
-    Right xs -> (sqrt . variance') xs
-    Left e -> throw e
+standardDeviation (Col name) df = case getColumn name df of
+    Just col -> case toUnboxedVector @a (dropNulls col) of
+        Right xs -> (sqrt . variance') xs
+        Left e -> throw e
+    Nothing ->
+        throw $
+            ColumnsNotFoundException [name] "standardDeviation" (M.keys $ columnIndices df)
 standardDeviation expr df = case interpret df expr of
     Left e -> throw e
-    Right (TColumn col) -> case toUnboxedVector @a col of
+    Right (TColumn col) -> case toUnboxedVector @a (dropNulls col) of
         Left e -> throw e
         Right xs -> (sqrt . variance') xs
 
 -- | Calculates the skewness of a given column as a standalone value.
 skewness ::
     forall a. (Columnable a, Real a, VU.Unbox a) => Expr a -> DataFrame -> Double
-skewness (Col name) df = case columnAsUnboxedVector (Col @a name) df of
-    Right xs -> skewness' xs
-    Left e -> throw e
+skewness (Col name) df = case getColumn name df of
+    Just col -> case toUnboxedVector @a (dropNulls col) of
+        Right xs -> skewness' xs
+        Left e -> throw e
+    Nothing ->
+        throw $ ColumnsNotFoundException [name] "skewness" (M.keys $ columnIndices df)
 skewness expr df = case interpret df expr of
     Left e -> throw e
-    Right (TColumn col) -> case toUnboxedVector @a col of
+    Right (TColumn col) -> case toUnboxedVector @a (dropNulls col) of
         Left e -> throw e
         Right xs -> skewness' xs
 
@@ -215,42 +232,51 @@ variance (Col name) df = case _getColumnAsDouble name df of
     Nothing -> error "[INTERNAL ERROR] Column is non-numeric"
 variance expr df = case interpret df expr of
     Left e -> throw e
-    Right (TColumn col) -> case toUnboxedVector @a col of
+    Right (TColumn col) -> case toUnboxedVector @a (dropNulls col) of
         Left e -> throw e
         Right xs -> variance' xs
 
 -- | Calculates the inter-quartile range of a given column as a standalone value.
 interQuartileRange ::
     forall a. (Columnable a, Real a, VU.Unbox a) => Expr a -> DataFrame -> Double
-interQuartileRange (Col name) df = case columnAsUnboxedVector (Col @a name) df of
-    Right xs -> interQuartileRange' xs
-    Left e -> throw e
+interQuartileRange (Col name) df = case getColumn name df of
+    Just col -> case toUnboxedVector @a (dropNulls col) of
+        Right xs -> interQuartileRange' xs
+        Left e -> throw e
+    Nothing ->
+        throw $
+            ColumnsNotFoundException [name] "interQuartileRange" (M.keys $ columnIndices df)
 interQuartileRange expr df = case interpret df expr of
     Left e -> throw e
-    Right (TColumn col) -> case toUnboxedVector @a col of
+    Right (TColumn col) -> case toUnboxedVector @a (dropNulls col) of
         Left e -> throw e
         Right xs -> interQuartileRange' xs
 
--- | Calculates the Pearson's correlation coefficient between two given columns as a standalone value.
+{- | Calculates the Pearson's correlation coefficient between two given columns as a standalone value.
+Pairs with a null in either column are dropped.
+-}
 correlation :: T.Text -> T.Text -> DataFrame -> Maybe Double
 correlation first second df = do
-    f <- _getColumnAsDouble first df
-    s <- _getColumnAsDouble second df
+    let df' = filterJust first (filterJust second df)
+    f <- _getColumnAsDouble first df'
+    s <- _getColumnAsDouble second df'
     correlation' f s
 
 _getColumnAsDouble :: T.Text -> DataFrame -> Maybe (VU.Vector Double)
 _getColumnAsDouble name df = case getColumn name df of
-    Just (UnboxedColumn _ (f :: VU.Vector a)) -> case testEquality (typeRep @a) (typeRep @Double) of
-        Just Refl -> Just f
-        Nothing -> case sIntegral @a of
-            STrue -> Just (VU.map fromIntegral f)
-            SFalse -> case sFloating @a of
-                STrue -> Just (VU.map realToFrac f)
-                SFalse -> Nothing
+    Just col -> case dropNulls col of
+        UnboxedColumn _ (f :: VU.Vector a) ->
+            case testEquality (typeRep @a) (typeRep @Double) of
+                Just Refl -> Just f
+                Nothing -> case sIntegral @a of
+                    STrue -> Just (VU.map fromIntegral f)
+                    SFalse -> case sFloating @a of
+                        STrue -> Just (VU.map realToFrac f)
+                        SFalse -> Nothing
+        _ -> Nothing
     Nothing ->
         throw $
             ColumnsNotFoundException [name] "_getColumnAsDouble" (M.keys $ columnIndices df)
-    _ -> Nothing
 {-# INLINE _getColumnAsDouble #-}
 
 optionalToDoubleVector :: (Real a) => V.Vector (Maybe a) -> VU.Vector Double
@@ -265,17 +291,18 @@ sum ::
     forall a. (Columnable a, Num a) => Expr a -> DataFrame -> a
 sum (Col name) df = case getColumn name df of
     Nothing -> throw $ ColumnsNotFoundException [name] "sum" (M.keys $ columnIndices df)
-    Just ((UnboxedColumn _ (column :: VU.Vector a'))) -> case testEquality (typeRep @a') (typeRep @a) of
-        Just Refl -> VG.sum column
-        Nothing -> 0
-    Just ((BoxedColumn _ (column :: V.Vector a'))) -> case testEquality (typeRep @a') (typeRep @a) of
-        Just Refl -> VG.sum column
-        Nothing -> 0
-    Just (PackedText _ _) -> 0
-    Just (MergedColumn _ _) -> 0 -- matches the old eager These column (type never Num)
+    Just c -> case dropNulls c of
+        UnboxedColumn _ (column :: VU.Vector a') -> case testEquality (typeRep @a') (typeRep @a) of
+            Just Refl -> VG.sum column
+            Nothing -> 0
+        BoxedColumn _ (column :: V.Vector a') -> case testEquality (typeRep @a') (typeRep @a) of
+            Just Refl -> VG.sum column
+            Nothing -> 0
+        PackedText _ _ -> 0
+        MergedColumn _ _ -> 0 -- never numeric
 sum expr df = case interpret df expr of
     Left e -> throw e
-    Right (TColumn xs) -> case toVector @a @V.Vector xs of
+    Right (TColumn xs) -> case toVector @a @V.Vector (dropNulls xs) of
         Left e -> throw e
         Right xs' -> VG.sum xs'
 
@@ -416,7 +443,10 @@ summarize df =
 
 -- | Round a @Double@ to Specified Precision
 roundTo :: Int -> Double -> Double
-roundTo n x = fromInteger (round $ x * 10 ^ n) / 10.0 ^^ n
+roundTo n x
+    -- round on NaN is garbage
+    | isNaN x = x
+    | otherwise = fromInteger (round $ x * 10 ^ n) / 10.0 ^^ n
 
 toPct2dp :: Double -> String
 toPct2dp x

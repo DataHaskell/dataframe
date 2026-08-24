@@ -139,6 +139,28 @@ columnBitmap (UnboxedColumn bm _) = bm
 columnBitmap (PackedText bm _) = bm
 columnBitmap (MergedColumn _ _) = Nothing
 
+{- | Drops the null values in a nullable column: those slots hold a sentinel,
+not a value. Identity on columns without a bitmap. 'VG.ifilter' inspects only
+the index, so boxed error thunks at null slots are never forced.
+-}
+dropNulls :: Column -> Column
+dropNulls (BoxedColumn (Just bm) xs) =
+    BoxedColumn Nothing (VG.ifilter (\i _ -> bitmapTestBit bm i) xs)
+dropNulls (UnboxedColumn (Just bm) xs) =
+    UnboxedColumn Nothing (VG.ifilter (\i _ -> bitmapTestBit bm i) xs)
+dropNulls c@(PackedText (Just _) _) = dropNulls (materializePacked c)
+dropNulls c = c
+{-# INLINE dropNulls #-}
+
+{- | 'dropNulls', unless the view type @a@ is @Maybe@-headed: a @Maybe@-typed
+view encodes the nulls as values, so the column passes through untouched.
+-}
+dropNullsExceptMaybe :: forall a. (Typeable a) => Column -> Column
+dropNullsExceptMaybe c = case typeRep @a of
+    App m _ | Just HRefl <- eqTypeRep m (typeRep @Maybe) -> c
+    _ -> dropNulls c
+{-# INLINE dropNullsExceptMaybe #-}
+
 {- | Decode a 'PackedText' into a @BoxedColumn Text@ (bit-identical to
 materializing at freeze). Identity on every other column.
 -}

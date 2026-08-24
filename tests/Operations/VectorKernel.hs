@@ -123,7 +123,11 @@ parityCase n keys aggs =
             fast = D.aggregate aggs gdf
             ref = interpretOnly aggs gdf
             label = "n=" ++ show n ++ " keys=" ++ show keys ++ " #aggs=" ++ show (length aggs)
-         in assertEqual ("kernel==interpreter " ++ label) ref fast
+         in -- render: NaN /= NaN under Eq
+            assertEqual
+                ("kernel==interpreter " ++ label)
+                (D.toMarkdown ref)
+                (D.toMarkdown fast)
 
 tests :: [Test]
 tests =

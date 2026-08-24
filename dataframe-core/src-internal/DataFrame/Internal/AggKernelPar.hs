@@ -290,7 +290,8 @@ varPar takeSqrt vis offs nGroups v caps bounds = do
             | otherwise = do
                 c <- VUM.unsafeRead cnt k
                 mm <- VUM.unsafeRead m2 k
-                let var = if c < 2 then 0 else mm / fromIntegral (c - 1)
+                -- NaN at n = 1, matching computeVariance
+                let var = if c < 2 then 0 / 0 else mm / fromIntegral (c - 1)
                 VUM.unsafeWrite out k (if takeSqrt then sqrt var else var)
                 fin (k + 1)
     fin 0

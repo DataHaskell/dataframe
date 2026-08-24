@@ -124,14 +124,13 @@ testVarianceConstant = TestCase $ do
     let v = variance' (VU.replicate 100 (7.0 :: Double))
     assertEqual "variance of constant column is 0" 0 v
 
-{- Variance of fewer than two samples is defined to be 0 (computeVariance guard),
-   not NaN from a /0. -}
+{- Sample variance of one observation is undefined: NaN, so a singleton
+   group can never look as tight as a genuinely constant column. -}
 testVarianceSingleton :: Test
 testVarianceSingleton = TestCase $ do
-    assertEqual
-        "variance of one sample is 0"
-        0
-        (variance' (VU.fromList [3.5 :: Double]))
+    assertBool
+        "variance of one sample is NaN"
+        (isNaN (variance' (VU.fromList [3.5 :: Double])))
 
 {- Correlation of a perfectly linear pair is exactly +1 (and -1 reversed),
    computed stably. y = 2x+1 over a spread of x. -}
