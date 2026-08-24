@@ -313,10 +313,16 @@ flushBufferToFile (WritableBinaryHandle h) buffer = do
     writeIORef buffer.positionRef 0
 
 writeByteStringToFile :: WritableBinaryHandle -> ByteString -> IO ()
-writeByteStringToFile handle bs = do
-    buffer <- mallocBuffer (max 1 (BS.length bs))
-    writeByteString buffer bs
-    flushBufferToFile handle buffer
+writeByteStringToFile (WritableBinaryHandle h) bs =
+    BU.unsafeUseAsCStringLen bs $ \(source, len) -> do
+        let chunkSize = 262144
+            go offset
+                | offset >= len = pure ()
+                | otherwise = do
+                    let n = min chunkSize (len - offset)
+                    hPutBuf h (source `plusPtr` offset) n
+                    go (offset + n)
+        go 0
 
 appendTextArraySlice :: MemoryBuffer -> TA.Array -> Int -> Int -> IO ()
 appendTextArraySlice buffer source offset count
