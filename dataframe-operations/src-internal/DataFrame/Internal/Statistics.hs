@@ -106,7 +106,7 @@ skewnessStep (SkewAcc !n !meanVal !m2 !m3) !x' =
 computeSkewness :: SkewAcc -> Double
 computeSkewness (SkewAcc n _ m2 m3)
     | n < 3 = 0 -- or error "skewness of <3 samples"
-    | otherwise = (sqrt (fromIntegral n - 1) * m3) / sqrt (m2 ^ (3 :: Int))
+    | otherwise = (sqrt (fromIntegral n) * m3) / sqrt (m2 ^ (3 :: Int))
 {-# INLINE computeSkewness #-}
 
 skewness' :: (VU.Unbox a, Real a, Num a) => VU.Vector a -> Double
