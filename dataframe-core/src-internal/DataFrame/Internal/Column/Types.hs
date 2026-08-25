@@ -12,7 +12,7 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
 
-module DataFrame.Internal.Types where
+module DataFrame.Internal.Column.Types where
 
 import Data.Int (Int16, Int32, Int64, Int8)
 import Data.Kind (Constraint, Type)

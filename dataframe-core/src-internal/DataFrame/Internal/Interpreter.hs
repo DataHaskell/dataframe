@@ -39,7 +39,6 @@ import DataFrame.Internal.Column.Bitmap
 import DataFrame.Internal.DataFrame
 import DataFrame.Internal.Expression
 import qualified DataFrame.Internal.Grouping as G
-import DataFrame.Internal.Types
 import Type.Reflection (
     Typeable,
     typeRep,

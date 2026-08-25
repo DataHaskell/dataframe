@@ -72,6 +72,7 @@ import DataFrame.Internal.Column (
     toList,
     toVector,
  )
+import DataFrame.Internal.Column.Types (Columnable')
 import DataFrame.Internal.DataFrame (
     DataFrame,
     GroupedDataFrame,
@@ -107,4 +108,3 @@ import DataFrame.Internal.Row (
     toRowList,
     toRowVector,
  )
-import DataFrame.Internal.Types (Columnable')

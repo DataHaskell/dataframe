@@ -27,6 +27,8 @@ import Control.Monad
 import Control.Monad.ST (ST, runST)
 import Data.Type.Equality (TestEquality (..), type (:~:) (Refl))
 import DataFrame.Errors
+import DataFrame.Internal.Algorithms.Hash
+import DataFrame.Internal.Algorithms.Rank.Radix (rankByHash)
 import DataFrame.Internal.Column (
     Column (..),
     materializeMerged,
@@ -36,16 +38,9 @@ import DataFrame.Internal.Column.Bitmap (
     bitmapTestBit,
  )
 import DataFrame.Internal.Column.Encode (dictEncodeColumnUpTo)
-import DataFrame.Internal.DataFrame (DataFrame (..), GroupedDataFrame (..))
-import DataFrame.Internal.GroupingDirect (
-    DirectGrouping (..),
-    directGroupThreshold,
-    tryDirectGroupColumn,
- )
-import DataFrame.Internal.GroupingPar (parallelAssignGroups, shouldParallelize)
-import DataFrame.Internal.Hash
-import DataFrame.Internal.HashTable (htInsert, newHashTable)
-import DataFrame.Internal.PackedText (
+import DataFrame.Internal.Column.Types
+import DataFrame.Internal.Data.HashTable (htInsert, newHashTable)
+import DataFrame.Internal.Data.PackedText (
     PackedSel,
     PackedTextData (..),
     offAt,
@@ -56,8 +51,16 @@ import DataFrame.Internal.PackedText (
     selLength,
     sliceEqBytes,
  )
-import DataFrame.Internal.RadixRank (rankByHash)
-import DataFrame.Internal.Types
+import DataFrame.Internal.DataFrame (DataFrame (..), GroupedDataFrame (..))
+import DataFrame.Internal.Grouping.Direct (
+    DirectGrouping (..),
+    directGroupThreshold,
+    tryDirectGroupColumn,
+ )
+import DataFrame.Internal.Grouping.Parallel (
+    parallelAssignGroups,
+    shouldParallelize,
+ )
 import System.IO.Unsafe (unsafePerformIO)
 import Type.Reflection (typeRep)
 
@@ -90,7 +93,7 @@ groupBy names df
     !n = nRows df
 
 {- | Low-cardinality direct-indexed grouping fast path
-('DataFrame.Internal.GroupingDirect'): fires only for a single clean small-range
+('DataFrame.Internal.Grouping.Direct'): fires only for a single clean small-range
 @Int@ key. Returns 'Nothing' on any other key shape, falling back to the hash path.
 -}
 tryDirectGroup :: [T.Text] -> DataFrame -> Maybe GroupedDataFrame
@@ -186,7 +189,7 @@ groupBySeq names df =
         (vis, os) = indicesFromGroups rtg nGroups
      in Grouped df names vis os rtg
 
-{- | The parallel partitioned grouping path (see 'DataFrame.Internal.GroupingPar'):
+{- | The parallel partitioned grouping path (see 'DataFrame.Internal.Grouping.Parallel'):
 forks one task per capability, producing output bit-for-bit identical to
 'groupBySeq'. Pure via 'unsafePerformIO' (deterministic thread fan-out only).
 -}

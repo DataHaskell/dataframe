@@ -11,8 +11,8 @@ import qualified DataFrame.Functions as F
 import Text.Read (readMaybe)
 
 import Data.Text (Text)
+import DataFrame.Expression.Operators
 import DataFrame.Monad
-import DataFrame.Operators
 
 $( D.declareColumnsFromCsvWithOpts
     (D.defaultReadOptions{D.columnSeparator = '\t'})

@@ -11,7 +11,7 @@
 'planAgg' recognises a supported aggregate shape over a clean unboxed Int/Double
 column and returns an 'AggPlan'; 'momentScatter' fuses the six regression sums.
 -}
-module DataFrame.Internal.AggPlan (
+module DataFrame.Internal.Aggregation.Plan (
     AggPlan (..),
     planAgg,
     Moments (..),
@@ -27,7 +27,10 @@ import qualified Data.Vector.Unboxed as VU
 import qualified Data.Vector.Unboxed.Mutable as VUM
 
 import Control.Monad.ST (runST)
-import DataFrame.Internal.AggKernel (Reduction (..), scatterColumnToDouble)
+import DataFrame.Internal.Aggregation.Kernel (
+    Reduction (..),
+    scatterColumnToDouble,
+ )
 import DataFrame.Internal.Column (Column (..), fromUnboxedVector)
 import DataFrame.Internal.DataFrame (
     DataFrame (derivingExpressions),

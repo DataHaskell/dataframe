@@ -620,10 +620,6 @@ splitCsvAtNewlines n path = do
             Just i -> off + i + 1
             Nothing -> BS.length body
 
--- ---------------------------------------------------------------------------
--- Join helper
--- ---------------------------------------------------------------------------
-
 {- | Route a join to 'Operations.Join', renaming the right key when the names
 differ. 'Join.join' keeps its first argument, so LEFT/RIGHT must pass 'leftDf'
 first to retain the intended side; symmetric INNER/FULL_OUTER pass @rightDf@ first.

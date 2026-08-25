@@ -59,16 +59,7 @@ import qualified Data.Vector.Unboxed as VU
 import Data.Word (Word16, Word32, Word64, Word8)
 import Type.Reflection (TypeRep, Typeable, typeRep)
 
-import qualified DataFrame.Functions as F
-import DataFrame.Internal.Column (Columnable)
-import DataFrame.Internal.Expression (
-    AggStrategy (..),
-    BinaryOp (binaryName),
-    Expr (..),
-    UnaryOp (unaryName),
- )
-import qualified DataFrame.Internal.Expression as F
-import DataFrame.Operators (
+import DataFrame.Expression.Operators (
     ifThenElse,
     (.&&.),
     (./=.),
@@ -79,6 +70,15 @@ import DataFrame.Operators (
     (.>=.),
     (.||.),
  )
+import qualified DataFrame.Functions as F
+import DataFrame.Internal.Column (Columnable)
+import DataFrame.Internal.Expression (
+    AggStrategy (..),
+    BinaryOp (binaryName),
+    Expr (..),
+    UnaryOp (unaryName),
+ )
+import qualified DataFrame.Internal.Expression as F
 
 {- | Existential wrapper around a typed expression decoded from JSON.
 TODO: mchavinda - Maybe consolidate with UExpr from the main package.

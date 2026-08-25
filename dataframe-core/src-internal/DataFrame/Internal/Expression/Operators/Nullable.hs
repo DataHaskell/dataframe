@@ -24,7 +24,7 @@ F.col \@Int \"x\" '.+' F.col \@Int \"y\"           -- :: Expr Int
 F.col \@(Maybe Int) \"x\" '.==' F.col \@Int \"y\"  -- :: Expr (Maybe Bool)
 @
 -}
-module DataFrame.Internal.Nullable (
+module DataFrame.Internal.Expression.Operators.Nullable (
     -- * Type family
     BaseType,
 
@@ -59,7 +59,7 @@ module DataFrame.Internal.Nullable (
 
 import Data.Int (Int32, Int64)
 import DataFrame.Internal.Column (Columnable)
-import DataFrame.Internal.Types (Promote, PromoteDiv)
+import DataFrame.Internal.Column.Types (Promote, PromoteDiv)
 
 {- | Strip one layer of 'Maybe'.
 

@@ -1,5 +1,5 @@
 {- | Thread fan-out primitives shared by the parallel scan, the chunk
-parse and the parallel merge: plain 'forkIO' workers joined through
+parse and the parallel merge: plain 'forkFinally' workers joined through
 'MVar's (no sparks), with a counter-based pool for finer-grained chunks.
 -}
 module DataFrame.IO.CSV.Fast.Workers (
@@ -10,7 +10,7 @@ module DataFrame.IO.CSV.Fast.Workers (
 import qualified Data.Vector as V
 import qualified Data.Vector.Mutable as VM
 
-import Control.Concurrent (forkIO)
+import Control.Concurrent (forkFinally)
 import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar)
 import Control.Exception (ErrorCall (..), SomeException, throwIO, try)
 import Control.Monad (when)
@@ -25,7 +25,7 @@ forkJoin actions = do
   where
     spawn act = do
         var <- newEmptyMVar
-        _ <- forkIO (try act >>= putMVar var)
+        _ <- forkFinally act (putMVar var)
         pure var
 
 {- | Run the actions on a pool of @width@ threads (work-stealing via a

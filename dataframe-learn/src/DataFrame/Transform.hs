@@ -26,6 +26,7 @@ import qualified Data.Text as T
 import qualified Data.Vector as V
 import qualified Data.Vector.Unboxed as VU
 
+import DataFrame.Expression.Operators ((.-.), (./.))
 import qualified DataFrame.Functions as F
 import DataFrame.Internal.Column (Columnable)
 import DataFrame.Internal.DataFrame (DataFrame)
@@ -37,7 +38,6 @@ import DataFrame.Internal.Expression (
  )
 import DataFrame.Operations.Core (columnAsDoubleVector)
 import DataFrame.Operations.Transformations (deriveMany)
-import DataFrame.Operators ((.-.), (./.))
 
 -- | A fitted transform: named output columns derived from the input frame.
 newtype Transform = Transform {transformOutputs :: [NamedExpr]}

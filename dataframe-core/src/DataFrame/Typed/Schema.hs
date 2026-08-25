@@ -78,7 +78,7 @@ import GHC.TypeLits
 import Type.Reflection (SomeTypeRep, Typeable, someTypeRep)
 
 import DataFrame.Internal.Column (Columnable)
-import DataFrame.Internal.Types (These)
+import DataFrame.Internal.Column.Types (These)
 
 -- | Look up the element type of a column by name.
 type family Lookup (name :: Symbol) (cols :: [(Symbol, Type)]) :: Type where

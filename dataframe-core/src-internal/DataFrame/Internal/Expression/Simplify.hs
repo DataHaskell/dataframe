@@ -7,7 +7,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 
-module DataFrame.Internal.Simplify (
+module DataFrame.Internal.Expression.Simplify (
     simplify,
     simplifyPredicatePair,
 
@@ -31,7 +31,7 @@ import DataFrame.Internal.Expression (
     eqExpr,
     normalize,
  )
-import DataFrame.Operators (
+import DataFrame.Internal.Expression.Operators (
     NullAnd,
     NullEq,
     NullGeq,

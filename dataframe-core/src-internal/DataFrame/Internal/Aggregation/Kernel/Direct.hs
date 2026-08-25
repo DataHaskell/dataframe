@@ -5,21 +5,22 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 
-module DataFrame.Internal.AggKernelDirect (
+module DataFrame.Internal.Aggregation.Kernel.Direct (
     directThreshold,
     directReduce,
 ) where
 
-import Control.Concurrent (forkIO, getNumCapabilities)
+import Control.Concurrent (forkFinally, getNumCapabilities)
 import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar)
-import Control.Exception (SomeException, throwIO, try)
+import Control.Exception (SomeException, throwIO)
 import Data.Type.Equality (TestEquality (..), type (:~:) (Refl))
 import qualified Data.Vector.Unboxed as VU
 import qualified Data.Vector.Unboxed.Mutable as VUM
 import System.IO.Unsafe (unsafePerformIO)
 import Type.Reflection (typeRep)
 
-import DataFrame.Internal.AggKernel (Reduction (..))
+import Control.Monad.ST (ST, runST)
+import DataFrame.Internal.Aggregation.Kernel (Reduction (..))
 import DataFrame.Internal.Column (
     Column (..),
     fromUnboxedVector,
@@ -95,7 +96,7 @@ runPartialsOver n caps fill = do
             var <- newEmptyMVar
             let !lo = min n (w * per)
                 !hi = min n (lo + per)
-            _ <- forkIO (try (fill lo hi) >>= putMVar var)
+            _ <- forkFinally (fill lo hi) (putMVar var)
             pure var
     vars <- mapM spawn [0 .. caps - 1]
     results <- mapM takeMVar vars
@@ -115,7 +116,7 @@ runPartialsPairOver n caps fill = do
             var <- newEmptyMVar
             let !lo = min n (w * per)
                 !hi = min n (lo + per)
-            _ <- forkIO (try (fill lo hi) >>= putMVar var)
+            _ <- forkFinally (fill lo hi) (putMVar var)
             pure var
     vars <- mapM spawn [0 .. caps - 1]
     results <- mapM takeMVar vars
@@ -128,7 +129,7 @@ runPartialsPairOver n caps fill = do
 countDirect :: VU.Vector Int -> Int -> Int -> VU.Vector Int
 countDirect g nGroups n
     | not (shouldPar n) =
-        unsafePerformIO (countChunk g nGroups 0 n >>= VU.unsafeFreeze)
+        runST (countChunk' g nGroups 0 n >>= VU.unsafeFreeze)
     | otherwise = unsafePerformIO $ do
         parts <- runPartialsOver n capabilities (countChunk g nGroups)
         mergeIntSum nGroups parts
@@ -136,6 +137,19 @@ countDirect g nGroups n
 
 countChunk :: VU.Vector Int -> Int -> Int -> Int -> IO (VUM.IOVector Int)
 countChunk g nGroups lo hi = do
+    acc <- VUM.replicate nGroups (0 :: Int)
+    let go !i
+            | i >= hi = pure ()
+            | otherwise = do
+                let !k = VU.unsafeIndex g i
+                c <- VUM.unsafeRead acc k
+                VUM.unsafeWrite acc k (c + 1)
+                go (i + 1)
+    go lo
+    pure acc
+
+countChunk' :: VU.Vector Int -> Int -> Int -> Int -> ST s (VUM.MVector s Int)
+countChunk' g nGroups lo hi = do
     acc <- VUM.replicate nGroups (0 :: Int)
     let go !i
             | i >= hi = pure ()

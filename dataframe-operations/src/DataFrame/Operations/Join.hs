@@ -54,6 +54,7 @@ import qualified Data.Vector.Unboxed.Mutable as VUM
 import DataFrame.Errors (
     DataFrameException (ColumnsNotFoundException),
  )
+import DataFrame.Internal.Algorithms.Sort.Radix.Parallel (parSortByHash)
 import DataFrame.Internal.Column as D (
     Column (BoxedColumn, UnboxedColumn),
     atIndicesStable,
@@ -67,7 +68,6 @@ import DataFrame.Internal.Column as D (
  )
 import DataFrame.Internal.Column.Bitmap (bitmapTestBit)
 import DataFrame.Internal.DataFrame as D
-import DataFrame.Internal.ParRadixSort (parSortByHash)
 import DataFrame.Operations.Aggregation as D
 import DataFrame.Operations.Core as D
 import DataFrame.Operations.JoinPar (

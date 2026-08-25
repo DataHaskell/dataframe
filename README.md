@@ -89,7 +89,7 @@ you can also drop the same code into an `Example.hs` and run it with
 import qualified DataFrame as D
 import qualified DataFrame.Functions as F
 import qualified DataFrame.Typed as DT
-import DataFrame.Operators
+import DataFrame.Expression.Operators
 import Data.Text (Text)
 import Data.Int (Int64)
 

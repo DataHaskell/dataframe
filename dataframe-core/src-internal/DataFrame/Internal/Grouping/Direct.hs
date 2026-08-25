@@ -8,15 +8,15 @@
 clean unboxed @Int@ column of small value range, the value itself indexes a dense
 accumulator (no hashing/probing). Emits groups in ascending value order.
 -}
-module DataFrame.Internal.GroupingDirect (
+module DataFrame.Internal.Grouping.Direct (
     directGroupThreshold,
     tryDirectGroupColumn,
     DirectGrouping (..),
 ) where
 
-import Control.Concurrent (forkIO, getNumCapabilities)
+import Control.Concurrent (forkFinally, getNumCapabilities)
 import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar)
-import Control.Exception (SomeException, throwIO, try)
+import Control.Exception (SomeException, throwIO)
 import Data.Type.Equality (TestEquality (..), type (:~:) (Refl))
 import qualified Data.Vector.Unboxed as VU
 import qualified Data.Vector.Unboxed.Mutable as VUM
@@ -75,7 +75,7 @@ rangeOf v
                 var <- newEmptyMVar
                 let !lo = min n (w * per)
                     !hi = min n (lo + per)
-                _ <- forkIO (try (pure $! rangeChunk v lo hi) >>= putMVar var)
+                _ <- forkFinally (pure $! rangeChunk v lo hi) (putMVar var)
                 pure var
         vars <- mapM spawn [0 .. caps - 1]
         rs <- mapM takeMVar vars
@@ -138,7 +138,7 @@ buildHistogram v mn range n
                 var <- newEmptyMVar
                 let !lo = min n (w * per)
                     !hi = min n (lo + per)
-                _ <- forkIO (try (histChunk v mn range lo hi) >>= putMVar var)
+                _ <- forkFinally (histChunk v mn range lo hi) (putMVar var)
                 pure var
         vars <- mapM spawn [0 .. caps - 1]
         rs <- mapM takeMVar vars

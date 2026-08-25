@@ -137,12 +137,13 @@ import GHC.TypeLits (KnownSymbol, Symbol, symbolVal)
 
 import qualified DataFrame.Functions as F
 import DataFrame.Internal.Column (Columnable)
+import DataFrame.Internal.Column.Types (Promote, PromoteDiv)
 import DataFrame.Internal.Expression (
     BinUDF (..),
     Expr (..),
     UnUDF (..),
  )
-import DataFrame.Internal.Nullable (
+import DataFrame.Internal.Expression.Operators.Nullable (
     BaseType,
     DivWidenOp,
     NullCmpResult,
@@ -158,7 +159,6 @@ import DataFrame.Internal.Nullable (
     widenArithOp,
     widenCmpOp,
  )
-import DataFrame.Internal.Types (Promote, PromoteDiv)
 
 import qualified Data.Vector.Unboxed as VU
 import DataFrame.Typed.Expr.Extra

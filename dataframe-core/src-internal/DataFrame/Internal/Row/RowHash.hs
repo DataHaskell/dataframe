@@ -9,15 +9,15 @@
 build/probe. Each row's hash depends only on its own bytes, so hashing disjoint
 ranges in parallel is race-free and bit-identical to the sequential pass.
 -}
-module DataFrame.Internal.RowHash (
+module DataFrame.Internal.Row.RowHash (
     computeRowHashesIO,
     hashRowRange,
     parRowHashThreshold,
 ) where
 
-import Control.Concurrent (forkIO, getNumCapabilities)
+import Control.Concurrent (forkFinally, getNumCapabilities)
 import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar)
-import Control.Exception (SomeException, throwIO, try)
+import Control.Exception (SomeException, throwIO)
 import qualified Data.Text as T
 import Data.Type.Equality (TestEquality (..), type (:~:) (Refl))
 import qualified Data.Vector as V
@@ -26,15 +26,7 @@ import qualified Data.Vector.Unboxed.Mutable as VUM
 import System.IO.Unsafe (unsafePerformIO)
 import Type.Reflection (typeRep)
 
-import DataFrame.Internal.Column (
-    Column (..),
-    materializeMerged,
- )
-import DataFrame.Internal.Column.Bitmap (
-    Bitmap,
-    bitmapTestBit,
- )
-import DataFrame.Internal.Hash (
+import DataFrame.Internal.Algorithms.Hash (
     fnvOffset,
     mixBytes,
     mixDouble,
@@ -43,15 +35,23 @@ import DataFrame.Internal.Hash (
     mixText,
     nullSalt,
  )
-import DataFrame.Internal.PackedText (
-    PackedTextData (..),
-    offAt,
-    packedSlice,
+import DataFrame.Internal.Column (
+    Column (..),
+    materializeMerged,
  )
-import DataFrame.Internal.Types (
+import DataFrame.Internal.Column.Bitmap (
+    Bitmap,
+    bitmapTestBit,
+ )
+import DataFrame.Internal.Column.Types (
     SBool (..),
     sFloating,
     sIntegral,
+ )
+import DataFrame.Internal.Data.PackedText (
+    PackedTextData (..),
+    offAt,
+    packedSlice,
  )
 
 {- | At least this many rows make the fork/coordination overhead of the parallel
@@ -81,7 +81,7 @@ computeRowHashesIO n selected = do
                     var <- newEmptyMVar
                     let !lo = min n (w * per)
                         !hi = min n (lo + per)
-                    _ <- forkIO (try (runRange lo hi) >>= putMVar var)
+                    _ <- forkFinally (runRange lo hi) (putMVar var)
                     pure var
             vars <- mapM spawn [0 .. caps - 1]
             rs <- mapM takeMVar vars

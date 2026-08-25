@@ -33,6 +33,7 @@ import Control.Monad (forM)
 import Language.Haskell.TH
 import qualified Language.Haskell.TH.Syntax as TH
 
+import DataFrame.Expression.Operators (col)
 import DataFrame.Functions (sanitize)
 import DataFrame.Internal.Column (columnTypeString)
 import DataFrame.Internal.DataFrame (
@@ -40,7 +41,6 @@ import DataFrame.Internal.DataFrame (
     unsafeGetColumn,
  )
 import DataFrame.Internal.Expression (Expr)
-import DataFrame.Operators (col)
 import Prelude as P
 
 typeFromString :: [String] -> Q Type

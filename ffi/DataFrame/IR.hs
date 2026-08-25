@@ -33,6 +33,7 @@ import Data.Word (Word16, Word32, Word64, Word8)
 import Foreign (wordPtrToPtr)
 import Type.Reflection (SomeTypeRep (..), eqTypeRep, typeRep)
 
+import DataFrame.Expression.Operators ((.=))
 import DataFrame.Functions (count, mean, meanMaybe, sumMaybe)
 import qualified DataFrame.Functions as Functions
 import DataFrame.IO.Arrow (arrowToDataframe)
@@ -62,7 +63,6 @@ import qualified DataFrame.Operations.Statistics as Stats
 import DataFrame.Operations.Subset (exclude, filterWhere, range, select)
 import qualified DataFrame.Operations.Subset as Subset
 import DataFrame.Operations.Transformations (derive)
-import DataFrame.Operators ((.=))
 import DataFrame.Schema (Schema, makeSchema, schemaType)
 
 -- ---------------------------------------------------------------------------

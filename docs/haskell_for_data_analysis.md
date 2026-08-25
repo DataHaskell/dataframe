@@ -14,7 +14,7 @@ import qualified Data.Text.IO as TIO
 import qualified Data.Text as T
 import Data.Text (Text)
 import Granite.Svg
-import DataFrame.Operators
+import DataFrame.Expression.Operators
 import DataFrame.Operations.Merge ()
 ```
 
@@ -1387,7 +1387,7 @@ Grouping is the backbone of most summary analyses. This chapter covers `groupBy`
 
 
 ```haskell
-import DataFrame.Operators (as)
+import DataFrame.Expression.Operators (as)
 
 grouped = D.groupBy ["ocean_proximity"] housing
 

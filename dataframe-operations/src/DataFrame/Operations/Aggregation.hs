@@ -20,7 +20,7 @@ import qualified Data.Vector.Unboxed as VU
 
 import Control.Exception (throw)
 import DataFrame.Errors
-import DataFrame.Internal.AggPlan (MomentPlan, planAgg, planMoments)
+import DataFrame.Internal.Aggregation.Plan (MomentPlan, planAgg, planMoments)
 import DataFrame.Internal.Column (
     Column (..),
     TypedColumn (..),
@@ -35,7 +35,7 @@ import DataFrame.Internal.DataFrame (
 import DataFrame.Internal.Expression
 import DataFrame.Internal.Grouping (buildRowToGroup, changingPoints, groupBy)
 import DataFrame.Internal.Interpreter
-import DataFrame.Internal.RowHash (computeRowHashesIO)
+import DataFrame.Internal.Row.RowHash (computeRowHashesIO)
 import DataFrame.Operations.AggregateScatter (runMomentPlan, runPlan)
 import DataFrame.Operations.Core
 import DataFrame.Operations.Subset

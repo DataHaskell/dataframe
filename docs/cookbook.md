@@ -501,7 +501,7 @@ import qualified DataFrame as D
 import qualified DataFrame.Functions as F
 import qualified DataFrame.Typed as DT
 
-import DataFrame.Operators ((|>))
+import DataFrame.Expression.Operators ((|>))
 import DataFrame.Typed ((.>.))
 
 $(DT.deriveSchemaFromCsvFile "Challenges" "./data/challenges_table.csv")

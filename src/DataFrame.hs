@@ -284,7 +284,7 @@ import DataFrame.Operations.Typing as Typing (
     effectiveSafeRead,
     parseDefaults,
  )
-import DataFrame.Operators as Operators
+import DataFrame.Expression.Operators as Operators
 #ifdef WITH_TH
 import DataFrame.TH as TH (
     declareColumns,

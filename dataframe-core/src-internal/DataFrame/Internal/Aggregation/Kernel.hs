@@ -7,7 +7,7 @@
 {-# LANGUAGE TypeApplications #-}
 
 -- | Vectorized scatter-accumulate aggregation kernel.
-module DataFrame.Internal.AggKernel (
+module DataFrame.Internal.Aggregation.Kernel (
     Reduction (..),
     scatterReduce,
     scatterColumnToDouble,

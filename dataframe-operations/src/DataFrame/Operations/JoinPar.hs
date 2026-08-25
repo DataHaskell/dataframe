@@ -5,7 +5,7 @@
 Parallel chunked-probe join kernels. The build side is indexed once into a
 shared, read-only 'CompactIndex' (open-addressing, from
 "DataFrame.Operations.Join"); the probe side is split into @caps@ /contiguous/
-row ranges and probed in parallel by 'forkIO' workers (no sparks). Each worker
+row ranges and probed in parallel by 'forkFinally' workers (no sparks). Each worker
 makes two passes over its range — a count pass to size its slice, then a fill
 pass — and writes into the single shared output buffers at a precomputed
 prefix-sum offset. Because ranges are contiguous and laid out in range order,
@@ -28,7 +28,7 @@ module DataFrame.Operations.JoinPar (
     parProbeThreshold,
 ) where
 
-import Control.Concurrent (forkIO, getNumCapabilities)
+import Control.Concurrent (forkFinally, getNumCapabilities)
 import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar)
 import Control.Exception (SomeException, throwIO, try)
 import qualified Data.Vector.Unboxed as VU
@@ -66,7 +66,7 @@ shouldParallelizeJoin probeRows buildRows =
 dominate the join, so partitioning the probe across cores wins even when the
 build side is small and cache-resident (the regime 'shouldParallelizeJoin'
 deliberately leaves sequential). Sized at 1e6: below it the per-question gain is
-swamped by 'forkIO'/coordination overhead, so small/medium-inner joins stay
+swamped by 'forkFinally'/coordination overhead, so small/medium-inner joins stay
 sequential (measured). This is the small-build large-probe lever closing the
 medium-factor 1e7 join (1e7 probe x ~1e4 build).
 -}
@@ -211,5 +211,5 @@ forkRanges nChunks body = do
   where
     spawn k = do
         var <- newEmptyMVar
-        _ <- forkIO (try (body k) >>= putMVar var)
+        _ <- forkFinally (body k) (putMVar var)
         pure var

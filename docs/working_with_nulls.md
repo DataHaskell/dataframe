@@ -87,7 +87,7 @@ D.filterWhere (F.col @Int "id" .==. F.lit 2) df
 These accept any combination of nullable and non-nullable operands and propagate `Nothing` automatically (three-valued logic).
 
 ```haskell
-import DataFrame.Operators
+import DataFrame.Expression.Operators
 
 -- Int column + Maybe Int column → Maybe Int column
 D.derive "adjusted" (F.col @Int "id" .+ F.col @(Maybe Int) "score") df

@@ -21,8 +21,8 @@ import Data.Word (Word8)
 import qualified DataFrame as D
 import qualified DataFrame.Functions as F
 import qualified DataFrame.Internal.Column as DI
+import DataFrame.Internal.Data.PackedText (mkPackedContiguous)
 import DataFrame.Internal.DataFrame (unsafeGetColumn)
-import DataFrame.Internal.PackedText (mkPackedContiguous)
 import qualified DataFrame.Operations.Aggregation as Agg
 import Test.HUnit
 

@@ -44,7 +44,7 @@ Let's, for some time, just look at the petal columns.
 
 ```haskell
 :set -XOverloadedStrings
-import DataFrame.Operators
+import DataFrame.Expression.Operators
 
 df |> D.select ["petal.width", "petal.length", "variety"]
    |> D.take 5

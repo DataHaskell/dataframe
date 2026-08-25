@@ -6,7 +6,7 @@
 key-hash to a dense group id, re-verifying the real key on every hash hit to
 reject collisions. Runs in any 'PrimMonad' ('ST' for grouping, 'IO' per worker).
 -}
-module DataFrame.Internal.HashTable (
+module DataFrame.Internal.Data.HashTable (
     HashTable (..),
     newHashTable,
     htInsert,

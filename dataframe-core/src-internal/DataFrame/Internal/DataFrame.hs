@@ -43,8 +43,8 @@ import DataFrame.Internal.Column (
     takeColumn,
  )
 import DataFrame.Internal.Column.Bitmap (bitmapTestBit)
+import DataFrame.Internal.Data.PackedText (packedIndexText)
 import DataFrame.Internal.Expression
-import DataFrame.Internal.PackedText (packedIndexText)
 import Text.Printf (printf)
 import Type.Reflection (eqTypeRep, typeRep, pattern App)
 import Prelude hiding (null)

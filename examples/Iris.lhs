@@ -48,7 +48,7 @@ in Python or `#include` in C++:
 
 DataFrame is a Haskell library similar to pandas in Python:
 
-> import DataFrame.Operators
+> import DataFrame.Expression.Operators
 > import qualified DataFrame as D
 > import qualified DataFrame.Functions as F
 > import qualified DataFrame.Hasktorch as DHT

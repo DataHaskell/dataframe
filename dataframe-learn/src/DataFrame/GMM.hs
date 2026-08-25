@@ -29,6 +29,7 @@ import qualified Data.Text as T
 import qualified Data.Vector as V
 import qualified Data.Vector.Unboxed as VU
 
+import DataFrame.Expression.Operators ((.*.), (.+.), (.-.))
 import DataFrame.Featurize.Internal (Features (..), argMaxExpr, extractFeatures)
 import qualified DataFrame.Functions as F
 import DataFrame.Internal.DataFrame (DataFrame)
@@ -36,7 +37,6 @@ import DataFrame.Internal.Expression (Expr (..))
 import DataFrame.LinearAlgebra (Matrix, logSumExp)
 import DataFrame.LinearAlgebra.Solve (backSubst, cholesky, forwardSubst)
 import DataFrame.Model
-import DataFrame.Operators ((.*.), (.+.), (.-.))
 import DataFrame.Random (mkGen, sampleIndices)
 
 data CovType = FullCov | DiagCov

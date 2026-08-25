@@ -4,11 +4,12 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
 
-module DataFrame.Operators where
+module DataFrame.Internal.Expression.Operators where
 
 import Data.Function ((&))
 import qualified Data.Text as T
 import DataFrame.Internal.Column (Columnable)
+import DataFrame.Internal.Column.Types (Promote, PromoteDiv)
 import DataFrame.Internal.Expression (
     BinUDF (MkBinaryOp),
     BinaryOp (
@@ -23,7 +24,7 @@ import DataFrame.Internal.Expression (
     UExpr (UExpr),
     UnUDF (MkUnaryOp),
  )
-import DataFrame.Internal.Nullable (
+import DataFrame.Internal.Expression.Operators.Nullable (
     BaseType,
     DivWidenOp,
     NullCmpResult,
@@ -36,7 +37,6 @@ import DataFrame.Internal.Nullable (
     widenArithOp,
     widenCmpOp,
  )
-import DataFrame.Internal.Types (Promote, PromoteDiv)
 
 infixr 8 .^^, .^^., .^, .^.
 infixl 7 .*, ./, .*., ./.

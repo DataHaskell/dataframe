@@ -3,7 +3,7 @@
 {- | UTF-8 validation and @decodeUtf8Lenient@-parity slice decoding used by
 'DataFrame.Internal.Column.Builder' to turn shared byte buffers into 'Text'.
 -}
-module DataFrame.Internal.Utf8 (
+module DataFrame.Internal.Data.PackedText.Utf8 (
     isValidUtf8Slice,
     isUtf8Boundary,
     lenientDecodeSlice,

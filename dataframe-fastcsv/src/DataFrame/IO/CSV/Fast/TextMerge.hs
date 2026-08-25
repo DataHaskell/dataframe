@@ -27,7 +27,10 @@ import DataFrame.Internal.Column.Merge (
     mergeTextChunks,
     tcRows,
  )
-import DataFrame.Internal.PackedText (mkPackedContiguous, mkPackedContiguous32)
+import DataFrame.Internal.Data.PackedText (
+    mkPackedContiguous,
+    mkPackedContiguous32,
+ )
 
 {- | Merge text chunks with @width@-way parallel byte copies + offset
 rebase, then wrap the shared buffer as 'PackedText'. Single chunks take

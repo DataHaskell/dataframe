@@ -25,13 +25,13 @@ import qualified Data.Text as T
 import qualified Data.Vector as V
 import qualified Data.Vector.Unboxed as VU
 
+import DataFrame.Expression.Operators ((.*.), (.+.), (.-.))
 import DataFrame.Featurize.Internal (Features (..), argMinExpr, extractFeatures)
 import qualified DataFrame.Functions as F
 import DataFrame.Internal.DataFrame (DataFrame)
 import DataFrame.Internal.Expression (Expr (..), UExpr (..))
 import DataFrame.LinearAlgebra (Matrix, nearestCenter, sqDist)
 import DataFrame.Model
-import DataFrame.Operators ((.*.), (.+.), (.-.))
 import DataFrame.Random (Gen, mkGen, nextDouble, nextIntR, splitGen)
 import DataFrame.Transform (Transform (..))
 

@@ -45,7 +45,7 @@ import Control.Monad (void)
 import DataFrame.Internal.Column (Columnable)
 import DataFrame.Internal.DataFrame (DataFrame)
 import DataFrame.Internal.Expression (Expr (..), UExpr (..), prettyPrint)
-import DataFrame.Internal.Nullable (BaseType)
+import DataFrame.Internal.Expression.Operators.Nullable (BaseType)
 import qualified DataFrame.Operations.Core as D
 import DataFrame.Operations.Permutation (SortOrder)
 import qualified DataFrame.Operations.Permutation as D

@@ -46,7 +46,7 @@ import Prelude hiding (sum)
 
 import DataFrame.Internal.Column (Columnable)
 import qualified DataFrame.Internal.DataFrame as D
-import DataFrame.Internal.Nullable (BaseType)
+import DataFrame.Internal.Expression.Operators.Nullable (BaseType)
 import qualified DataFrame.Operations.Core as Core
 import qualified DataFrame.Operations.Statistics as Stats
 import DataFrame.Operations.Transformations (ImputeOp)

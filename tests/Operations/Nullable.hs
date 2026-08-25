@@ -7,11 +7,11 @@ module Operations.Nullable where
 
 import qualified Data.Vector as V
 import qualified DataFrame as D
+import DataFrame.Expression.Operators ((.*), (.+), (.-), (./), (.==))
 import qualified DataFrame.Functions as F
 import qualified DataFrame.Internal.Column as DI
 import qualified DataFrame.Internal.DataFrame as DI
 import DataFrame.Internal.Expression (Expr)
-import DataFrame.Operators ((.*), (.+), (.-), (./), (.==))
 import qualified DataFrame.Typed as DT
 import qualified DataFrame.Typed.Expr as TE
 import DataFrame.Typed.Types (TExpr (..))

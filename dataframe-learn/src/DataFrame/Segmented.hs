@@ -34,6 +34,7 @@ import qualified Data.Vector as V
 import qualified Data.Vector.Unboxed as VU
 import DataFrame.Errors (DataFrameException (..))
 
+import DataFrame.Expression.Operators ((.&&.), (.==.))
 import DataFrame.Featurize.Internal (featureNames, numericMatrix, targetDoubles)
 import DataFrame.Internal.Column (
     Column (..),
@@ -43,9 +44,9 @@ import DataFrame.Internal.Column (
     hasElemType,
  )
 import DataFrame.Internal.Column.Bitmap (bitmapTestBit)
+import DataFrame.Internal.Column.Types (SBool (..), sIntegral)
 import DataFrame.Internal.DataFrame (DataFrame, unsafeGetColumn)
 import DataFrame.Internal.Expression (Expr (..))
-import DataFrame.Internal.Types (SBool (..), sIntegral)
 import DataFrame.LinearAlgebra (Matrix, gram, matVec, tMatVec)
 import DataFrame.LinearAlgebra.Solve (choleskySolve, qrLeastSquares)
 import DataFrame.LinearModel.Logistic (LogisticConfig)
@@ -56,7 +57,6 @@ import DataFrame.LinearModel.Regression (
 import DataFrame.Model
 import DataFrame.Operations.Core (nRows)
 import DataFrame.Operations.Subset (exclude, rowsAtIndices)
-import DataFrame.Operators ((.&&.), (.==.))
 import DataFrame.SymbolicRegression (SRConfig)
 
 {- | A base estimator @cfg@ wrapped to fit one model per categorical

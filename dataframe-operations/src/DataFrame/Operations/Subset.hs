@@ -74,6 +74,14 @@ import DataFrame.Errors (
     DataFrameException (..),
     TypeErrorContext (..),
  )
+import DataFrame.Expression.Operators (
+    col,
+    name,
+    (.<.),
+    (.<=.),
+    (.>.),
+    (.>=.),
+ )
 import DataFrame.Internal.Column (
     Column (..),
     Columnable,
@@ -88,12 +96,12 @@ import DataFrame.Internal.Column (
     sliceColumn,
     takeColumn,
     takeLastColumn,
-    unwrapTypedColumn,
  )
 import DataFrame.Internal.Column.Bitmap (bitmapTestBit)
 import DataFrame.Internal.DataFrame (
     DataFrame (..),
     columnNames,
+    dataframeDimensions,
     derivingExpressions,
     empty,
     getColumn,
@@ -101,18 +109,10 @@ import DataFrame.Internal.DataFrame (
     unsafeGetColumn,
  )
 import DataFrame.Internal.Expression (Expr (Col, Lit), normalize)
-import DataFrame.Internal.Interpreter (interpret)
+import DataFrame.Internal.Interpreter (Ctx (..), eval, interpret, materialize)
 import DataFrame.Operations.Core ()
 import DataFrame.Operations.Merge ()
 import DataFrame.Operations.Transformations (apply)
-import DataFrame.Operators (
-    col,
-    name,
-    (.<.),
-    (.<=.),
-    (.>.),
-    (.>=.),
- )
 import System.Random (RandomGen, SplitGen (..))
 import Type.Reflection (
     eqTypeRep,
@@ -580,7 +580,9 @@ stratifiedSample ::
 stratifiedSample gen p strataCol df =
     let col' = case strataCol of
             Col colName -> unsafeGetColumn colName df
-            _ -> unwrapTypedColumn (either throw id (interpret @a df strataCol))
+            _ -> either throw id $ do
+                v <- eval (FlatCtx df) strataCol
+                pure $ materialize @a (fst (dataframeDimensions df)) v
         groups = M.elems (groupByIndices col')
         go _ [] = mempty
         go g (ixs : rest) =
@@ -604,7 +606,9 @@ stratifiedSplit ::
 stratifiedSplit gen p strataCol df =
     let col' = case strataCol of
             Col colName -> unsafeGetColumn colName df
-            _ -> unwrapTypedColumn (either throw id (interpret @a df strataCol))
+            _ -> either throw id $ do
+                v <- eval (FlatCtx df) strataCol
+                pure $ materialize @a (fst (dataframeDimensions df)) v
         groups = M.elems (groupByIndices col')
         go _ [] = (mempty, mempty)
         go g (ixs : rest) =

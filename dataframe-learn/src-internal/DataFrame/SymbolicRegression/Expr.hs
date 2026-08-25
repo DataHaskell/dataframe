@@ -21,9 +21,9 @@ import qualified Data.Text as T
 import qualified Data.Vector as V
 import qualified Data.Vector.Unboxed as VU
 
+import DataFrame.Expression.Operators ((.*.), (.+.), (.-.), (./.))
 import qualified DataFrame.Functions as F
 import DataFrame.Internal.Expression (Expr (..))
-import DataFrame.Operators ((.*.), (.+.), (.-.), (./.))
 
 data BinOp = SAdd | SSub | SMul | SDiv
     deriving (Eq, Ord, Show, Enum, Bounded)

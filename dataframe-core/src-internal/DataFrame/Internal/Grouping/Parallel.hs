@@ -6,16 +6,16 @@
 top hash bits, then one task per capability groups its partitions independently.
 Output is bit-for-bit identical to the sequential 'DataFrame.Internal.Grouping.groupBy'.
 -}
-module DataFrame.Internal.GroupingPar (
+module DataFrame.Internal.Grouping.Parallel (
     parallelAssignGroups,
     shouldParallelize,
     parThreshold,
     numPartitionsFor,
 ) where
 
-import Control.Concurrent (forkIO, getNumCapabilities)
+import Control.Concurrent (forkFinally, getNumCapabilities)
 import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar)
-import Control.Exception (SomeException, throwIO, try)
+import Control.Exception (SomeException, throwIO)
 import Control.Monad (forM_, when)
 import Data.Bits (countLeadingZeros, unsafeShiftR)
 import Data.IORef (atomicModifyIORef', newIORef)
@@ -24,11 +24,11 @@ import qualified Data.Vector.Mutable as VM
 import qualified Data.Vector.Unboxed as VU
 import qualified Data.Vector.Unboxed.Mutable as VUM
 import Data.Word (Word64)
-import DataFrame.Internal.HashTable (
+import DataFrame.Internal.Algorithms.Rank.Radix (rankByHash)
+import DataFrame.Internal.Data.HashTable (
     htInsert,
     newHashTable,
  )
-import DataFrame.Internal.RadixRank (rankByHash)
 import System.IO.Unsafe (unsafePerformIO)
 
 {- | Below this many rows the partition/fork overhead is not worth it; 'groupBy'
@@ -291,10 +291,6 @@ assemble n p partStart sortedRows localGid globalBase canonOf nGroups = do
     vis <- VU.unsafeFreeze visM
     pure (rtg, vis, offs)
 
--------------------------------------------------------------------------------
--- Thread fan-out (plain forkIO + MVar join, no sparks)
--------------------------------------------------------------------------------
-
 -- | Run each action on its own thread; rethrow the first failure (in order).
 forkJoin_ :: [IO ()] -> IO ()
 forkJoin_ actions = do
@@ -304,5 +300,5 @@ forkJoin_ actions = do
   where
     spawn act = do
         var <- newEmptyMVar
-        _ <- forkIO (try act >>= putMVar var)
+        _ <- forkFinally act (putMVar var)
         pure var

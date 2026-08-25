@@ -6,8 +6,8 @@
 
 {- | Execute a recognised aggregation plan ('AggPlan') through the vectorized
 scatter kernel, producing one result column (length @nGroups@, canonical group
-order). The scatter reductions live in 'DataFrame.Internal.AggKernel' (sequential)
-and 'DataFrame.Internal.AggKernelPar' (parallel by disjoint group range); this
+order). The scatter reductions live in 'DataFrame.Internal.Aggregation.Kernel' (sequential)
+and 'DataFrame.Internal.Aggregation.Kernel.Parallel' (parallel by disjoint group range); this
 module handles the compound @max - min@ combine and the holistic grouped median.
 A plan only reaches here once 'planAgg' verified the value columns are clean
 unboxed Int/Double, so the @error@ branches are unreachable.
@@ -24,14 +24,27 @@ import qualified Data.Vector.Algorithms.Intro as VA
 import qualified Data.Vector.Unboxed as VU
 import qualified Data.Vector.Unboxed.Mutable as VUM
 
-import Control.Concurrent (forkIO, getNumCapabilities)
+import Control.Concurrent (forkFinally, getNumCapabilities)
 import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar)
 import Control.Exception (SomeException, throwIO, try)
 import Data.Type.Equality (TestEquality (..), type (:~:) (Refl))
-import DataFrame.Internal.AggKernel (Reduction (..), scatterColumnToDouble)
-import DataFrame.Internal.AggKernelDirect (directReduce, directThreshold)
-import DataFrame.Internal.AggKernelPar (momentScatterPar, scatterReducePar)
-import DataFrame.Internal.AggPlan (AggPlan (..), MomentPlan (..), Moments (..))
+import DataFrame.Internal.Aggregation.Kernel (
+    Reduction (..),
+    scatterColumnToDouble,
+ )
+import DataFrame.Internal.Aggregation.Kernel.Direct (
+    directReduce,
+    directThreshold,
+ )
+import DataFrame.Internal.Aggregation.Kernel.Parallel (
+    momentScatterPar,
+    scatterReducePar,
+ )
+import DataFrame.Internal.Aggregation.Plan (
+    AggPlan (..),
+    MomentPlan (..),
+    Moments (..),
+ )
 import DataFrame.Internal.Column (Column (..), fromUnboxedVector)
 import DataFrame.Internal.DataFrame (GroupedDataFrame (..), getColumn)
 import System.IO.Unsafe (unsafePerformIO)
@@ -186,7 +199,7 @@ medianByGroup vis offs nGroups vals = unsafePerformIO $ do
 -------------------------------------------------------------------------------
 
 {- | Split @[0, nGroups)@ into @caps@ contiguous group ranges balanced by row
-count. Identical policy to 'DataFrame.Internal.AggKernelPar.groupRangeBounds'.
+count. Identical policy to 'DataFrame.Internal.Aggregation.Kernel.Parallel.groupRangeBounds'.
 -}
 groupRangeBounds :: VU.Vector Int -> Int -> Int -> VU.Vector Int
 groupRangeBounds offs nGroups caps = VU.create $ do
@@ -220,5 +233,5 @@ forEachRange bounds caps act
         var <- newEmptyMVar
         let !s = VU.unsafeIndex bounds w
             !e = VU.unsafeIndex bounds (w + 1)
-        _ <- forkIO (try (act s e) >>= putMVar var)
+        _ <- forkFinally (act s e) (putMVar var)
         pure var

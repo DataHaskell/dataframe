@@ -6,7 +6,7 @@
 without depending on @hashable@. Each value is folded into an 'Int' with an
 FxHash-style step (rotate, xor, multiply); small and not cryptographic.
 -}
-module DataFrame.Internal.Hash (
+module DataFrame.Internal.Algorithms.Hash (
     fnvOffset,
     nullSalt,
     mixInt,

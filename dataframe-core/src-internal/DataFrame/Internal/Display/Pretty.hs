@@ -2,7 +2,7 @@
 A 'Doc' describes a layout abstractly; 'render' chooses where soft breaks become
 newlines to fit a target width. 'Group' lays a region flat when it fits.
 -}
-module DataFrame.Internal.Pretty (
+module DataFrame.Internal.Display.Pretty (
     Doc,
     text,
     line,

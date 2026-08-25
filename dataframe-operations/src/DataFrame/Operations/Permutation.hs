@@ -34,13 +34,13 @@ import DataFrame.Internal.Column (
     atIndicesStable,
     materializeMerged,
  )
+import DataFrame.Internal.Data.PackedText (packedSlice, sliceCmpBytes)
 import DataFrame.Internal.DataFrame (
     DataFrame (..),
     columnNames,
     unsafeGetColumn,
  )
 import DataFrame.Internal.Expression (Expr (Col), getColumns)
-import DataFrame.Internal.PackedText (packedSlice, sliceCmpBytes)
 import DataFrame.Operations.Core (dimensions)
 import DataFrame.Operations.Transformations (derive)
 import System.Random (Random (randomR), RandomGen)

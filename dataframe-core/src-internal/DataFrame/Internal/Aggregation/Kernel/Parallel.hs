@@ -6,14 +6,14 @@
 {-# LANGUAGE TypeApplications #-}
 
 -- | Parallel scatter-accumulate aggregation kernel.
-module DataFrame.Internal.AggKernelPar (
+module DataFrame.Internal.Aggregation.Kernel.Parallel (
     scatterReducePar,
     momentScatterPar,
 ) where
 
-import Control.Concurrent (forkIO, getNumCapabilities)
+import Control.Concurrent (forkFinally, getNumCapabilities)
 import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar)
-import Control.Exception (SomeException, throwIO, try)
+import Control.Exception (SomeException, throwIO)
 import Control.Monad (when)
 import Data.Type.Equality (TestEquality (..), type (:~:) (Refl))
 import qualified Data.Vector.Unboxed as VU
@@ -21,12 +21,12 @@ import qualified Data.Vector.Unboxed.Mutable as VUM
 import System.IO.Unsafe (unsafePerformIO)
 import Type.Reflection (typeRep)
 
-import DataFrame.Internal.AggKernel (
+import DataFrame.Internal.Aggregation.Kernel (
     Reduction (..),
     scatterColumnToDouble,
     scatterReduce,
  )
-import DataFrame.Internal.AggPlan (Moments (..), momentScatter)
+import DataFrame.Internal.Aggregation.Plan (Moments (..), momentScatter)
 import DataFrame.Internal.Column (
     Column (..),
     Columnable,
@@ -77,7 +77,7 @@ forEachRange bounds caps act
         var <- newEmptyMVar
         let !s = VU.unsafeIndex bounds w
             !e = VU.unsafeIndex bounds (w + 1)
-        _ <- forkIO (try (act s e) >>= putMVar var)
+        _ <- forkFinally (act s e) (putMVar var)
         pure var
 
 scatterReducePar ::

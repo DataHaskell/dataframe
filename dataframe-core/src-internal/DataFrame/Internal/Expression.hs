@@ -22,7 +22,7 @@ import qualified Data.Text as T
 import Data.Type.Equality (TestEquality (testEquality), type (:~:) (Refl))
 import qualified Data.Vector.Generic as VG
 import DataFrame.Internal.Column
-import qualified DataFrame.Internal.Pretty as P
+import qualified DataFrame.Internal.Display.Pretty as P
 import Type.Reflection (Typeable, typeOf, typeRep)
 
 {- | Operators are an open typeclass: built-ins get their own 'Typeable' type so the

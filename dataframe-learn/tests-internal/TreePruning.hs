@@ -8,9 +8,9 @@ module TreePruning (tests) where
 
 import DataFrame.DecisionTree.Prune (pruneDead)
 import DataFrame.DecisionTree.Types (Tree (..))
+import DataFrame.Expression.Operators
 import qualified DataFrame.Functions as F
 import DataFrame.Internal.Expression (eqExpr)
-import DataFrame.Operators
 
 import qualified Data.Text as T
 import Test.HUnit

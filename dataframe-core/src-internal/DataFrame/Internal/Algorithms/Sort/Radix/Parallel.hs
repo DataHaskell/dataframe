@@ -5,12 +5,12 @@
 'Int' hash, used by the join build side. A counting sort buckets rows into
 key-ordered partitions that workers LSD-radix-sort in parallel, with no merge step.
 -}
-module DataFrame.Internal.ParRadixSort (
+module DataFrame.Internal.Algorithms.Sort.Radix.Parallel (
     parSortByHash,
     parSortThreshold,
 ) where
 
-import Control.Concurrent (forkIO, getNumCapabilities)
+import Control.Concurrent (forkFinally, getNumCapabilities)
 import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar)
 import Control.Exception (SomeException, throwIO, try)
 import Control.Monad (forM_, when)
@@ -19,7 +19,7 @@ import Data.IORef (atomicModifyIORef', newIORef)
 import qualified Data.Vector.Unboxed as VU
 import qualified Data.Vector.Unboxed.Mutable as VUM
 import Data.Word (Word64)
-import DataFrame.Internal.RadixRank (sortKey)
+import DataFrame.Internal.Algorithms.Rank.Radix (sortKey)
 import System.IO.Unsafe (unsafePerformIO)
 
 {- | Below this many rows the partition/fork overhead is not worth it; the
@@ -268,5 +268,5 @@ forkJoin_ actions = do
   where
     spawn act = do
         var <- newEmptyMVar
-        _ <- forkIO (try act >>= putMVar var)
+        _ <- forkFinally act (putMVar var)
         pure var

@@ -17,8 +17,8 @@ import Data.Char (isUpper, toLower, toUpper)
 import qualified Data.Text as T
 import Language.Haskell.TH
 
+import DataFrame.Expression.Operators (col)
 import DataFrame.Internal.Expression (Expr)
-import DataFrame.Operators (col)
 import DataFrame.Schema (Schema, makeSchema, schemaType)
 
 {- | Auto-generate a runtime 'Schema' (and per-column @'Expr'@ accessors)

@@ -7,7 +7,7 @@
 import qualified Data.Text as T
 import           DataFrame.TH (declareColumns, declareColumnsWithPrefix)
 import           Data.Text (Text)
-import           DataFrame.Operators
+import           DataFrame.Expression.Operators
 import           Data.Int
 import           Data.Time
 

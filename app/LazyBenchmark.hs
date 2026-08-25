@@ -19,8 +19,8 @@ import qualified Data.Map as M
 import qualified Data.Text as T
 import Data.Time (UTCTime, diffUTCTime, getCurrentTime)
 import qualified DataFrame as D
+import DataFrame.Expression.Operators
 import qualified DataFrame.Lazy as L
-import DataFrame.Operators
 import DataFrame.Schema (Schema (..), schemaType)
 import System.Directory (doesFileExist, getFileSize, getTemporaryDirectory)
 import System.Environment (getArgs)

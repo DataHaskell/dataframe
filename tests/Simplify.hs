@@ -2,16 +2,16 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeApplications #-}
 
-{- | Specification for 'DataFrame.Internal.Simplify.simplify': each case is the
+{- | Specification for 'DataFrame.Internal.Expression.Simplify.simplify': each case is the
 full predicate expression, compared with 'eqExpr'.
 -}
 module Simplify (tests) where
 
+import DataFrame.Expression.Operators
 import qualified DataFrame.Functions as F
 import DataFrame.Internal.Column (Columnable)
 import DataFrame.Internal.Expression (Expr, eqExpr)
-import DataFrame.Internal.Simplify (simplify)
-import DataFrame.Operators
+import DataFrame.Internal.Expression.Simplify (simplify)
 
 import Test.HUnit
 

@@ -52,8 +52,8 @@ import DataFrame.Internal.Column (
  )
 import DataFrame.Internal.DataFrame (DataFrame (..), getColumn, insertColumn)
 import DataFrame.Internal.Expression
+import DataFrame.Internal.Expression.Operators.Nullable (BaseType)
 import DataFrame.Internal.Interpreter
-import DataFrame.Internal.Nullable (BaseType)
 import DataFrame.Operations.Core
 import GHC.TypeLits (ErrorMessage (..), TypeError)
 import Type.Reflection (typeRep)

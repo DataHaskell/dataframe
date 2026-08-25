@@ -6,7 +6,7 @@ no per-row 'Data.Text.Text' header is materialized until decode is demanded.
 Offsets and selection vectors are stored 'Int32' whenever their values fit
 (Arrow-style), halving the per-row footprint of large string columns.
 -}
-module DataFrame.Internal.PackedText (
+module DataFrame.Internal.Data.PackedText (
     PackedTextData (..),
     PackedOffsets (..),
     PackedSel (..),
@@ -35,7 +35,10 @@ import qualified Data.Vector.Unboxed as VU
 import Data.Int (Int32)
 import Data.Ord (comparing)
 import Data.Text.Internal (Text (Text))
-import DataFrame.Internal.Utf8 (isValidUtf8Slice, lenientDecodeSlice)
+import DataFrame.Internal.Data.PackedText.Utf8 (
+    isValidUtf8Slice,
+    lenientDecodeSlice,
+ )
 
 {- | Row byte-offsets, physically 'Int32' when every value fits (total buffer
 bytes < 2^31) and 'Int' otherwise. Values are non-negative byte positions.

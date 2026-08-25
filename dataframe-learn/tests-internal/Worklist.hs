@@ -18,6 +18,7 @@ import DataFrame.DecisionTree.Pool (
     boolExprsVec,
     saturateCandidates,
  )
+import DataFrame.Expression.Operators
 import qualified DataFrame.Functions as F
 import qualified DataFrame.Internal.Column as DI
 import DataFrame.Internal.Expression (
@@ -27,7 +28,6 @@ import DataFrame.Internal.Expression (
     eqExpr,
     normalize,
  )
-import DataFrame.Operators
 import qualified DataFrameApi as D
 
 import Data.Function (on)

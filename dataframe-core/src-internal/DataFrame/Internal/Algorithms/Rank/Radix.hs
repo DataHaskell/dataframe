@@ -5,7 +5,7 @@
 order. Shared by the sequential and parallel group-by canonical-ordering steps
 so they stay bit-for-bit identical. @O(ng)@ stable LSD radix sort.
 -}
-module DataFrame.Internal.RadixRank (
+module DataFrame.Internal.Algorithms.Rank.Radix (
     rankByHash,
     sortKey,
 ) where

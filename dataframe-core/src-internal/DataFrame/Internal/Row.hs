@@ -31,12 +31,12 @@ import DataFrame.Internal.Column (
     sliceColumn,
  )
 import DataFrame.Internal.Column.Bitmap (Bitmap, bitmapTestBit)
+import DataFrame.Internal.Data.PackedText (packedIndexText, packedLength)
 import DataFrame.Internal.DataFrame (
     DataFrame (columnIndices, dataframeDimensions),
     getColumn,
  )
 import DataFrame.Internal.Expression (Expr (..))
-import DataFrame.Internal.PackedText (packedIndexText, packedLength)
 import Type.Reflection (TypeRep, typeOf, typeRep)
 
 data Any where

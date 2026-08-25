@@ -28,6 +28,7 @@ module DataFrame.LinearSolver (
     dotProduct,
 ) where
 
+import DataFrame.Expression.Operators ((.*.), (.+.), (.>.))
 import qualified DataFrame.Functions as F
 import DataFrame.Internal.Expression (Expr (..))
 import DataFrame.LinearAlgebra (Matrix, gram, scaleV)
@@ -37,7 +38,6 @@ import DataFrame.LinearSolver.Loss (
     logisticLoss,
     sigmoid,
  )
-import DataFrame.Operators ((.*.), (.+.), (.>.))
 
 import Control.Monad.ST (ST, runST)
 import qualified Data.Text as T

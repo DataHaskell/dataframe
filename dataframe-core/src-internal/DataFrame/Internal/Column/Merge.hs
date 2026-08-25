@@ -38,7 +38,7 @@ import DataFrame.Internal.Column.Bitmap (
     Validity (Validity),
     concatValidity,
  )
-import DataFrame.Internal.PackedText (mkPackedContiguous)
+import DataFrame.Internal.Data.PackedText (mkPackedContiguous)
 import Type.Reflection (typeRep)
 
 {- | A frozen text-builder chunk: raw UTF-8 bytes plus row offsets (row @i@
