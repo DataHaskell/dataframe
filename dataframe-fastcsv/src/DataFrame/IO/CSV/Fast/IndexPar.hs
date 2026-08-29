@@ -29,7 +29,7 @@ import Foreign.Storable (peek)
 
 import Control.Concurrent (getNumCapabilities)
 import DataFrame.IO.CSV.Fast.Index (byteStringView, lf, quote, scalarScan)
-import DataFrame.IO.CSV.Fast.Workers (pooledRun)
+import DataFrame.Internal.Control.Concurrent (pooledRun)
 
 foreign import capi "process_csv.h count_delimiters_chunk"
     count_delimiters_chunk ::

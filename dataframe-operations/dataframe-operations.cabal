@@ -33,12 +33,12 @@ library
                         DataFrame.Internal.Statistics
                         DataFrame.Functions
                         DataFrame.Monad
-                        DataFrame.Operations.AggregateScatter
+                        DataFrame.Operations.Aggregation.Run
                         DataFrame.Operations.Aggregation
                         DataFrame.Operations.Core
                         DataFrame.Operations.Inference
                         DataFrame.Operations.Join
-                        DataFrame.Operations.JoinPar
+                        DataFrame.Operations.Join.Parallel
                         DataFrame.Operations.Merge
                         DataFrame.Operations.Permutation
                         DataFrame.Operations.SetOps

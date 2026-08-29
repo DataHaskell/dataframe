@@ -70,7 +70,7 @@ import DataFrame.Internal.Column.Bitmap (bitmapTestBit)
 import DataFrame.Internal.DataFrame as D
 import DataFrame.Operations.Aggregation as D
 import DataFrame.Operations.Core as D
-import DataFrame.Operations.JoinPar (
+import DataFrame.Operations.Join.Parallel (
     parInnerProbe,
     parLeftProbe,
     shouldParallelizeJoin,

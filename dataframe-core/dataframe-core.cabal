@@ -42,11 +42,14 @@ library
                         DataFrame.Typed.Util
                         DataFrame.Display.Terminal.Colours
                         DataFrame.Display.Terminal.PrettyPrint
+                        -- Concurrency
+                        DataFrame.Internal.Control.Concurrent
                         -- Aggregation kernels and planning.
-                        DataFrame.Internal.Aggregation.Kernel
-                        DataFrame.Internal.Aggregation.Kernel.Direct
-                        DataFrame.Internal.Aggregation.Kernel.Parallel
+                        DataFrame.Internal.Aggregation.Kernel.Dense
+                        DataFrame.Internal.Aggregation.Kernel.Moments
+                        DataFrame.Internal.Aggregation.Kernel.Scatter
                         DataFrame.Internal.Aggregation.Plan
+                        DataFrame.Internal.Aggregation.Reduction
                         -- Shared algorithms.
                         DataFrame.Internal.Algorithms.Hash
                         DataFrame.Internal.Algorithms.Rank.Radix
@@ -75,7 +78,7 @@ library
                         DataFrame.Internal.Expression.Simplify
                         DataFrame.Internal.Grouping
                         DataFrame.Internal.Grouping.Direct
-                        DataFrame.Internal.Grouping.Parallel
+                        DataFrame.Internal.Grouping.Partitioned
                         DataFrame.Internal.Interpreter
                         DataFrame.Internal.Row
                         DataFrame.Internal.Row.RowHash

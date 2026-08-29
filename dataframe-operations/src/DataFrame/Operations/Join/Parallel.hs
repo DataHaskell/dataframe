@@ -12,13 +12,8 @@ prefix-sum offset. Because ranges are contiguous and laid out in range order,
 the produced @(probeIxs, buildIxs)@ vectors are /bit-for-bit identical/ to the
 sequential 'hashInnerKernel' \/ 'hashLeftKernel': probe rows appear in original
 order and, within a probe row, build matches in @ciSortedIndices@ order.
-
-This is the parallel==sequential correctness gate (see
-@tests/Operations/ParallelJoin.hs@). A sequential fallback is used when there is
-a single capability or the probe side is below 'parJoinThreshold'; the caller
-('innerJoin' \/ 'leftJoin') decides via 'shouldParallelizeJoin'.
 -}
-module DataFrame.Operations.JoinPar (
+module DataFrame.Operations.Join.Parallel (
     parInnerProbe,
     parLeftProbe,
     shouldParallelizeJoin,
@@ -28,12 +23,10 @@ module DataFrame.Operations.JoinPar (
     parProbeThreshold,
 ) where
 
-import Control.Concurrent (forkFinally, getNumCapabilities)
-import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar)
-import Control.Exception (SomeException, throwIO, try)
+import Control.Concurrent (getNumCapabilities)
 import qualified Data.Vector.Unboxed as VU
 import qualified Data.Vector.Unboxed.Mutable as VUM
-import System.IO.Unsafe (unsafePerformIO)
+import DataFrame.Internal.Control.Concurrent (capabilities, forkJoin_)
 
 {- | Below this many probe rows the fork/coordination overhead is not worth it;
 the caller uses its sequential 'ST' kernel instead.
@@ -86,10 +79,6 @@ shouldParallelizeSmallBuildProbe probeRows =
     probeRows >= parProbeThreshold
         && capabilities > 1
 {-# NOINLINE shouldParallelizeSmallBuildProbe #-}
-
-capabilities :: Int
-capabilities = unsafePerformIO getNumCapabilities
-{-# NOINLINE capabilities #-}
 
 {- | A read-only view of the build-side index needed by the probe: the lookup
 returns @(start, len)@ of the matching run in @sortedIndices@, or @(-1, 0)@ on a
@@ -204,12 +193,4 @@ forked threads; rethrow the first failure. Chunk @k@ is owned by exactly one
 thread, so concurrent writes to disjoint output regions are race-free.
 -}
 forkRanges :: Int -> (Int -> IO ()) -> IO ()
-forkRanges nChunks body = do
-    vars <- mapM spawn [0 .. nChunks - 1]
-    results <- mapM takeMVar vars
-    mapM_ (either (throwIO :: SomeException -> IO ()) pure) results
-  where
-    spawn k = do
-        var <- newEmptyMVar
-        _ <- forkFinally (body k) (putMVar var)
-        pure var
+forkRanges nChunks body = forkJoin_ (map body [0 .. nChunks - 1])

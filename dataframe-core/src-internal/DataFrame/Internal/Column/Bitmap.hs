@@ -15,7 +15,7 @@ import Data.Word (Word8)
 type Bitmap = VU.Vector Word8
 
 -- | A bitmap attached to its row counts so we can splice it.
-data Validity = Validity {-# UNPACK #-} !(Maybe Bitmap) {-# UNPACK #-} !Int
+data Validity = Validity !(Maybe Bitmap) {-# UNPACK #-} !Int
 
 vBitmap :: Validity -> Maybe Bitmap
 vBitmap (Validity bm _) = bm

@@ -13,7 +13,7 @@ parallel threshold.
 
 Floating-point sums computed by the scatter follow the same left-to-right
 group-order fold as the interpreter, so the two paths agree bit-for-bit here.
-The PARALLEL kernel ('DataFrame.Internal.Aggregation.Kernel.Parallel') splits the work by
+The PARALLEL path ('DataFrame.Internal.Aggregation.Kernel.Scatter') splits the work by
 disjoint group-id range, and because each group's rows stay in their original
 @valueIndices@ order within one worker's range, the per-group fold order is
 unchanged from the sequential scatter — so the parallel path is also

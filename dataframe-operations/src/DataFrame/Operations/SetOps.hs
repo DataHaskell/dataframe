@@ -1,19 +1,6 @@
+{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
-{- |
-Module      : DataFrame.Operations.SetOps
-Description : Set-theoretic ("topos") row operations.
-
-These treat a 'DataFrame' as a /set/ of rows and implement the subobject
-lattice from relational algebra: 'union', 'intersect', 'difference', and
-'symmetricDifference'. Every result is deduplicated, so each operation has the
-schema-preserving shape @DataFrame -> DataFrame -> DataFrame@.
-
-Row equality is the same hash-based notion used by 'distinct' (see
-"DataFrame.Operations.Aggregation"), so these operations and 'distinct' agree
-on what "the same row" means. Both inputs are expected to share a schema; the
-typed layer ('DataFrame.Typed') enforces that statically.
--}
 module DataFrame.Operations.SetOps (
     union,
     intersect,
@@ -79,8 +66,8 @@ setOp keep a b =
     chosen =
         [ VU.head members
         | k <- [0 .. nGroups - 1]
-        , let s = VU.unsafeIndex offs k
-              e = VU.unsafeIndex offs (k + 1)
+        , let !s = VU.unsafeIndex offs k
+              !e = VU.unsafeIndex offs (k + 1)
               members = VU.slice s (e - s) vis
               inLeft = VU.any (< leftRows) members
               inRight = VU.any (>= leftRows) members
