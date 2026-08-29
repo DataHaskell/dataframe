@@ -1,9 +1,9 @@
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE ExplicitNamespaces #-}
 {-# LANGUAGE GADTs #-}
-{-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeApplications #-}
 
 {- | The fused two-column moment kernel: one pass over @x@ and @y@ producing the
 six sufficient statistics @(n, Sx, Sy, Sxx, Syy, Sxy)@ per group, from which the
@@ -26,10 +26,10 @@ module DataFrame.Internal.Aggregation.Kernel.Moments (
 
 import Control.Monad.ST (runST)
 import Data.Type.Equality (TestEquality (..), type (:~:) (Refl))
-import Type.Reflection (typeRep)
 import qualified Data.Vector.Unboxed as VU
 import qualified Data.Vector.Unboxed.Mutable as VUM
 import System.IO.Unsafe (unsafePerformIO)
+import Type.Reflection (typeRep)
 
 import DataFrame.Internal.Aggregation.Kernel.Scatter (
     groupRangeBounds,
@@ -237,19 +237,23 @@ momentStreamPar rtg nGroups colX colY
 {- | Monomorphic entry points (see 'reduceParInt' for why the 'testEquality'
 dispatch needs them).
 -}
-momentStreamII :: VU.Vector Int -> Int -> VU.Vector Int -> VU.Vector Int -> Moments
+momentStreamII ::
+    VU.Vector Int -> Int -> VU.Vector Int -> VU.Vector Int -> Moments
 momentStreamII = momentStreamTyped
 {-# NOINLINE momentStreamII #-}
 
-momentStreamID :: VU.Vector Int -> Int -> VU.Vector Int -> VU.Vector Double -> Moments
+momentStreamID ::
+    VU.Vector Int -> Int -> VU.Vector Int -> VU.Vector Double -> Moments
 momentStreamID = momentStreamTyped
 {-# NOINLINE momentStreamID #-}
 
-momentStreamDI :: VU.Vector Int -> Int -> VU.Vector Double -> VU.Vector Int -> Moments
+momentStreamDI ::
+    VU.Vector Int -> Int -> VU.Vector Double -> VU.Vector Int -> Moments
 momentStreamDI = momentStreamTyped
 {-# NOINLINE momentStreamDI #-}
 
-momentStreamDD :: VU.Vector Int -> Int -> VU.Vector Double -> VU.Vector Double -> Moments
+momentStreamDD ::
+    VU.Vector Int -> Int -> VU.Vector Double -> VU.Vector Double -> Moments
 momentStreamDD = momentStreamTyped
 {-# NOINLINE momentStreamDD #-}
 
@@ -383,4 +387,3 @@ freezeMoments (MomentAcc cnt sx sy sxx syy sxy) =
         <*> (fromUnboxedVector <$> VU.unsafeFreeze sxx)
         <*> (fromUnboxedVector <$> VU.unsafeFreeze syy)
         <*> (fromUnboxedVector <$> VU.unsafeFreeze sxy)
-

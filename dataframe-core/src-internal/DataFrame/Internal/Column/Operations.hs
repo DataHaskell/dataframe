@@ -34,8 +34,8 @@ import Data.Bits (setBit, shiftL, shiftR)
 import Data.Int (Int32)
 import Data.Kind (Type)
 import Data.Maybe (fromMaybe, isNothing)
-import Data.Word (Word8)
 import Data.Type.Equality (TestEquality (..))
+import Data.Word (Word8)
 import DataFrame.Errors (
     DataFrameException (EmptyDataSetException, TypeMismatchException),
     TypeErrorContext (
@@ -268,6 +268,7 @@ sliceColumn start n c@(PackedText _ _) = sliceColumn start n (materializePacked 
 {-# INLINE sliceColumn #-}
 
 -- | O(n) Selects the elements at a given set of indices. Does not change the order.
+
 -------------------------------------------------------------------------------
 -- Parallel element-wise kernels
 -------------------------------------------------------------------------------
@@ -340,13 +341,17 @@ parGenerateUnboxedInline n f
 -- | Closure-free parallel 'Int' gather: @out!i = v ! (ix!i)@.
 parBackpermuteInt :: VU.Vector Int -> VU.Vector Int -> VU.Vector Int
 parBackpermuteInt v ix =
-    parGenerateUnboxedInline (VU.length ix) (\i -> VU.unsafeIndex v (VU.unsafeIndex ix i))
+    parGenerateUnboxedInline
+        (VU.length ix)
+        (\i -> VU.unsafeIndex v (VU.unsafeIndex ix i))
 {-# NOINLINE parBackpermuteInt #-}
 
 -- | Closure-free parallel 'Double' gather: @out!i = v ! (ix!i)@.
 parBackpermuteDouble :: VU.Vector Double -> VU.Vector Int -> VU.Vector Double
 parBackpermuteDouble v ix =
-    parGenerateUnboxedInline (VU.length ix) (\i -> VU.unsafeIndex v (VU.unsafeIndex ix i))
+    parGenerateUnboxedInline
+        (VU.length ix)
+        (\i -> VU.unsafeIndex v (VU.unsafeIndex ix i))
 {-# NOINLINE parBackpermuteDouble #-}
 
 {- | Closure-free double-indirection gather: @out!g = vis ! (offs!g)@ over
@@ -1170,8 +1175,9 @@ data MGSpec
       MGInt !(VU.Vector Int)
     | -- | Clean unboxed 'Double' payload.
       MGDouble !(VU.Vector Double)
-    | -- | Packed text with an 'Int32' selector (base row count necessarily
-      -- fits 'Int32'); carries the payload for rebuilding and the canon flag.
+    | {- | Packed text with an 'Int32' selector (base row count necessarily
+      fits 'Int32'); carries the payload for rebuilding and the canon flag.
+      -}
       MGSel32 !PackedTextData !(VU.Vector Int32)
     | -- | Packed text with an 'Int' selector and an 'Int32'-sized base.
       MGSel64To32 !PackedTextData !(VU.Vector Int)
@@ -1278,7 +1284,13 @@ mgFillDouble ixs v dst lo hi = go lo
 {-# NOINLINE mgFillDouble #-}
 
 mgFillSel32 ::
-    VU.Vector Int -> VU.Vector Int32 -> Int -> VUM.IOVector Int32 -> Int -> Int -> IO ()
+    VU.Vector Int ->
+    VU.Vector Int32 ->
+    Int ->
+    VUM.IOVector Int32 ->
+    Int ->
+    Int ->
+    IO ()
 mgFillSel32 ixs s !base dst lo hi = go lo
   where
     !sn = VU.length s
@@ -1297,7 +1309,13 @@ mgFillSel32 ixs s !base dst lo hi = go lo
 {-# NOINLINE mgFillSel32 #-}
 
 mgFillSel64To32 ::
-    VU.Vector Int -> VU.Vector Int -> Int -> VUM.IOVector Int32 -> Int -> Int -> IO ()
+    VU.Vector Int ->
+    VU.Vector Int ->
+    Int ->
+    VUM.IOVector Int32 ->
+    Int ->
+    Int ->
+    IO ()
 mgFillSel64To32 ixs s !base dst lo hi = go lo
   where
     !sn = VU.length s
@@ -1333,4 +1351,3 @@ mgFillSel64To64 ixs s !base dst lo hi = go lo
             VUM.unsafeWrite dst i out
             go (i + 1)
 {-# NOINLINE mgFillSel64To64 #-}
-

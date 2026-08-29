@@ -33,14 +33,14 @@ import qualified Data.Text.Array as A
 import qualified Data.Vector.Unboxed as VU
 import qualified Data.Vector.Unboxed.Mutable as VUM
 
+import Data.Int (Int32)
+import Data.Ord (comparing)
+import Data.Text.Internal (Text (Text))
 import DataFrame.Internal.Control.Concurrent (
     parThreshold,
     parallelChunks_,
     shouldParallelize,
  )
-import Data.Int (Int32)
-import Data.Ord (comparing)
-import Data.Text.Internal (Text (Text))
 import DataFrame.Internal.Data.PackedText.Utf8 (
     isValidUtf8Slice,
     lenientDecodeSlice,
@@ -233,6 +233,7 @@ only on @f i@, so the result is bit-identical to 'VU.generate' at any @-N@.
 Same policy as 'DataFrame.Internal.Column.Operations.parGenerateUnboxed', which
 sits above this module.
 -}
+
 {- | 'parGenSel' with an INLINE body: each monomorphic NOINLINE kernel above
 gets its own copy of the fill loop with the pick function inlined — no unknown
 closure call (or boxed result allocation) per element. Bit-identical results;

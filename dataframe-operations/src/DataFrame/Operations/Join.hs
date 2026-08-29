@@ -41,7 +41,6 @@ import Control.Exception (throw)
 import Control.Monad (when)
 import Control.Monad.ST (ST, runST)
 import Data.Bits (popCount, unsafeShiftL, unsafeShiftR, (.&.), (.|.))
-import Data.Word (Word64)
 import qualified Data.Map.Strict as M
 import Data.Maybe (fromMaybe)
 import Data.STRef (newSTRef, readSTRef, writeSTRef)
@@ -52,6 +51,7 @@ import qualified Data.Vector as VB
 import qualified Data.Vector.Algorithms.Merge as VA
 import qualified Data.Vector.Unboxed as VU
 import qualified Data.Vector.Unboxed.Mutable as VUM
+import Data.Word (Word64)
 import DataFrame.Errors (
     DataFrameException (ColumnsNotFoundException),
  )
@@ -116,10 +116,11 @@ data CompactIndex = CompactIndex
     { ciSortedIndices :: {-# UNPACK #-} !(VU.Vector Int)
     , ciKeys :: {-# UNPACK #-} !(VU.Vector Int)
     , ciRuns :: {-# UNPACK #-} !(VU.Vector Int)
-    -- ^ @(start, len)@ of each run packed 32/32 into one 'Int'; @-1@ = empty
-    -- slot. One vector instead of separate starts\/lens halves the table's
-    -- memory (a 1e8-row build side is a 2^28-slot table: 2.1GB instead of
-    -- 4.3GB) and saves a random cache-line read per lookup hit.
+    {- ^ @(start, len)@ of each run packed 32/32 into one 'Int'; @-1@ = empty
+    slot. One vector instead of separate starts\/lens halves the table's
+    memory (a 1e8-row build side is a 2^28-slot table: 2.1GB instead of
+    4.3GB) and saves a random cache-line read per lookup hit.
+    -}
     , ciMask :: {-# UNPACK #-} !Int
     }
 
@@ -192,7 +193,8 @@ sized for the worst case (every row distinct) so building never resizes.
 buildCompactIndex :: VU.Vector Int -> CompactIndex
 buildCompactIndex hashes
     | VU.length hashes > 0x7FFFFFFF =
-        error "buildCompactIndex: build side exceeds 2^31 rows (packed run fields are 32-bit)"
+        error
+            "buildCompactIndex: build side exceeds 2^31 rows (packed run fields are 32-bit)"
 buildCompactIndex hashes =
     let n = VU.length hashes
         (sortedHashes, sortedIndices) = parSortByHash n hashes
@@ -368,8 +370,9 @@ parInnerKernel probeHashes buildHashes =
      in (pf, bf)
 {-# NOINLINE parInnerKernel #-}
 
--- | The raw table fields of a 'CompactIndex', in the closure-free shape the
--- parallel probe kernels consume.
+{- | The raw table fields of a 'CompactIndex', in the closure-free shape the
+parallel probe kernels consume.
+-}
 ciProbeTable :: CompactIndex -> ProbeTable
 ciProbeTable ci =
     ProbeTable

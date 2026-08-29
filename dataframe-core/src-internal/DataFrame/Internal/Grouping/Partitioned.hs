@@ -37,11 +37,11 @@ import DataFrame.Internal.Control.Concurrent (
     parallelChunks_,
     pooledIndices,
  )
-import System.IO.Unsafe (unsafePerformIO)
 import DataFrame.Internal.Data.HashTable (
     htInsert,
     newHashTable,
  )
+import System.IO.Unsafe (unsafePerformIO)
 
 {- | Sign-preserving unsigned remap: ascending 'Word64' order of @key h@ equals
 ascending signed-'Int' order of @h@, so partitioning and sorting on it reproduce
@@ -135,7 +135,11 @@ threads never contend and each partition keeps its rows in ascending original
 row order — bit-for-bit the sequential counting sort's layout.
 -}
 partitionRows ::
-    Int -> VU.Vector Int -> Int -> Int -> IO (VU.Vector Int, VU.Vector Int, VU.Vector Int)
+    Int ->
+    VU.Vector Int ->
+    Int ->
+    Int ->
+    IO (VU.Vector Int, VU.Vector Int, VU.Vector Int)
 partitionRows n hashes p shift = do
     caps <- getNumCapabilities
     let chunks = rowChunks caps n
@@ -376,7 +380,8 @@ rtgFromVisOffs :: Int -> VU.Vector Int -> VU.Vector Int -> VU.Vector Int
 rtgFromVisOffs n vis offs = unsafePerformIO $ do
     let !nGroups = VU.length offs - 1
     rtgM <- VUM.new (max 1 n)
-    let -- Largest g with offs[g] <= i (offsets are non-decreasing).
+    let
+        -- Largest g with offs[g] <= i (offsets are non-decreasing).
         findGroup !i = go2 0 nGroups
           where
             go2 !lo !hi

@@ -44,10 +44,10 @@ import qualified Data.Vector.Unboxed.Mutable as VUM
 import System.IO.Unsafe (unsafePerformIO)
 import Type.Reflection (typeRep)
 
-import DataFrame.Internal.Column (Column (..))
 import Control.Monad (when)
 import Control.Monad.ST (runST)
 import Data.Bits (countLeadingZeros, unsafeShiftL, unsafeShiftR, (.&.))
+import DataFrame.Internal.Column (Column (..))
 import DataFrame.Internal.Control.Concurrent (
     capabilities,
     chunksFor,
@@ -141,6 +141,7 @@ codeSlices = chunksFor 4096
 {- | Run each action on its own thread and collect the results in order;
 rethrow the first failure. A single action runs on the calling thread.
 -}
+
 -------------------------------------------------------------------------------
 -- Full grouping (eager valueIndices): compatibility entry point
 -------------------------------------------------------------------------------
@@ -222,7 +223,11 @@ chunk's first row of each code, and reporting invalid codes (third component
 'False'; the arrays are then abandoned).
 -}
 histFirstChunk ::
-    (Int -> Int) -> Int -> Int -> Int -> IO (VUM.IOVector Int, VUM.IOVector Int, Bool)
+    (Int -> Int) ->
+    Int ->
+    Int ->
+    Int ->
+    IO (VUM.IOVector Int, VUM.IOVector Int, Bool)
 histFirstChunk codeAt card lo hi = do
     acc <- VUM.replicate card (0 :: Int)
     firstV <- VUM.unsafeNew card
@@ -374,7 +379,8 @@ scanOffsets counts codeToGroup nGroups = do
     VU.unsafeFreeze offsM
 
 -- | @rowToGroup@ for one row chunk: remap each row's code through the table.
-rtgChunk :: (Int -> Int) -> VU.Vector Int -> VUM.IOVector Int -> Int -> Int -> IO ()
+rtgChunk ::
+    (Int -> Int) -> VU.Vector Int -> VUM.IOVector Int -> Int -> Int -> IO ()
 rtgChunk codeAt codeToGroup rtgM lo hi = go lo
   where
     go !i
@@ -407,7 +413,8 @@ Preconditions (all guaranteed by the grouping paths): @rtg@ has length @n@ with
 every value in @[0, nGroups)@, and @offs@ is the group-count prefix array of
 length @nGroups + 1@ with @offs[nGroups] == n@.
 -}
-visFromRowToGroup :: Int -> Int -> VU.Vector Int -> VU.Vector Int -> VU.Vector Int
+visFromRowToGroup ::
+    Int -> Int -> VU.Vector Int -> VU.Vector Int -> VU.Vector Int
 visFromRowToGroup n nGroups offs rtg
     | n <= 0 = VU.empty
     | useTwoLevel n nGroups = unsafePerformIO (visWide n nGroups offs rtg)
@@ -669,7 +676,14 @@ packBucketed validate codeAt n card = do
 escapes @[0, card)@ (the counts are then abandoned).
 -}
 bucketHist ::
-    Bool -> (Int -> Int) -> Int -> Int -> Int -> Int -> Int -> IO (VUM.IOVector Int, Bool)
+    Bool ->
+    (Int -> Int) ->
+    Int ->
+    Int ->
+    Int ->
+    Int ->
+    Int ->
+    IO (VUM.IOVector Int, Bool)
 bucketHist validate codeAt card shift nBuckets lo hi = do
     acc <- VUM.replicate nBuckets (0 :: Int)
     let bump !c !i = do
@@ -689,7 +703,13 @@ bucketHist validate codeAt card shift nBuckets lo hi = do
 
 -- | Scatter one row chunk's packed @(code, row)@ words through its bucket cursor.
 scatterPacked ::
-    (Int -> Int) -> Int -> VUM.IOVector Int -> VUM.IOVector Int -> Int -> Int -> IO ()
+    (Int -> Int) ->
+    Int ->
+    VUM.IOVector Int ->
+    VUM.IOVector Int ->
+    Int ->
+    Int ->
+    IO ()
 scatterPacked codeAt shift cursor packed lo hi = go lo
   where
     go !i

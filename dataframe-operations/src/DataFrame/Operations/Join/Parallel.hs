@@ -139,7 +139,11 @@ runProbe keepUnmatched pt probeHashes = do
         -- Packed (start,len) run for hash @h@, or -1 on a miss. Home slot is
         -- the top log2(cap) bits of a Fibonacci multiply (the row hash's low
         -- bits are poorly diffused); must match the build-side ciSlot exactly.
-        findRun !h = go (fromIntegral ((fromIntegral h * (0x9E3779B97F4A7C15 :: Word64)) `unsafeShiftR` shift))
+        findRun !h =
+            go
+                ( fromIntegral
+                    ((fromIntegral h * (0x9E3779B97F4A7C15 :: Word64)) `unsafeShiftR` shift)
+                )
           where
             go !slot =
                 let !w = runs `VU.unsafeIndex` slot

@@ -123,7 +123,8 @@ not both. Wide domains run the two-level radix engine instead
 tryDirectGroup :: [T.Text] -> DataFrame -> Maybe GroupedDataFrame
 tryDirectGroup [] _ = Nothing
 tryDirectGroup names df = do
-    cols <- traverse (\nm -> M.lookup nm (columnIndices df) >>= (columns df V.!?)) names
+    cols <-
+        traverse (\nm -> M.lookup nm (columnIndices df) >>= (columns df V.!?)) names
     case traverse fusedKey cols of
         Just keys -> fusedDirectGroup names df keys
         Nothing -> case (names, cols) of
@@ -185,7 +186,8 @@ are lazy at their definition site), so each per-row output pass is deferred
 until a consumer demands it. The wide-domain engine defers only
 @valueIndices@ (see the branch comment below).
 -}
-fusedDirectGroup :: [T.Text] -> DataFrame -> [FusedKey] -> Maybe GroupedDataFrame
+fusedDirectGroup ::
+    [T.Text] -> DataFrame -> [FusedKey] -> Maybe GroupedDataFrame
 fusedDirectGroup names df keys = do
     domain <- fusedDomain (map fkDomain keys)
     let n = nRows df
@@ -592,7 +594,13 @@ finishLayout ::
     Int ->
     (VU.Vector Int -> (VU.Vector Int, Int)) ->
     [VUM.IOVector Int] ->
-    ([VUM.IOVector Int] -> VUM.IOVector Int -> VUM.IOVector Int -> Int -> Int -> IO ()) ->
+    ( [VUM.IOVector Int] ->
+      VUM.IOVector Int ->
+      VUM.IOVector Int ->
+      Int ->
+      Int ->
+      IO ()
+    ) ->
     IO
         ( Maybe
             ( VU.Vector Int

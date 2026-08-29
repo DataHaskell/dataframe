@@ -138,14 +138,12 @@ would stay at the abstract element type and never meet its SPECIALIZE rules
 -}
 maxMinusMinDenseInt ::
     VU.Vector Int -> Int -> VU.Vector Int -> VU.Vector Int -> VU.Vector Int
-maxMinusMinDenseInt g nGroups va vb =
-    maxMinusMinDense minBound maxBound g nGroups va vb
+maxMinusMinDenseInt = maxMinusMinDense minBound maxBound
 {-# NOINLINE maxMinusMinDenseInt #-}
 
 maxMinusMinDenseDbl ::
     VU.Vector Int -> Int -> VU.Vector Double -> VU.Vector Double -> VU.Vector Double
-maxMinusMinDenseDbl g nGroups va vb =
-    maxMinusMinDense (negate (1 / 0)) (1 / 0) g nGroups va vb
+maxMinusMinDenseDbl = maxMinusMinDense (negate (1 / 0)) (1 / 0)
 {-# NOINLINE maxMinusMinDenseDbl #-}
 
 -- | Whether to fan out at this row count.
@@ -396,7 +394,13 @@ maxMinusMinDense ::
     VU.Vector a ->
     VU.Vector a
 {-# SPECIALIZE maxMinusMinDense ::
-    Int -> Int -> VU.Vector Int -> Int -> VU.Vector Int -> VU.Vector Int -> VU.Vector Int
+    Int ->
+    Int ->
+    VU.Vector Int ->
+    Int ->
+    VU.Vector Int ->
+    VU.Vector Int ->
+    VU.Vector Int
     #-}
 {-# SPECIALIZE maxMinusMinDense ::
     Double ->
@@ -413,7 +417,10 @@ maxMinusMinDense maxSeed minSeed g nGroups va vb
         finalizeMaxMinusMin nGroups mx mn
     | otherwise = unsafePerformIO $ do
         parts <-
-            runPartialsOver n capabilities (maxMinusMinChunk maxSeed minSeed g va vb nGroups)
+            runPartialsOver
+                n
+                capabilities
+                (maxMinusMinChunk maxSeed minSeed g va vb nGroups)
         (mx, mn) <- mergeMaxMin nGroups parts
         finalizeMaxMinusMin nGroups mx mn
   where

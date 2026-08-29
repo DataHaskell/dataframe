@@ -197,7 +197,6 @@ toVector col = case col of
                                     , errorColumnName = Nothing
                                     }
                                 )
-
 {-# INLINEABLE toVector #-}
 
 -- Some common types we will use for numerical computing.

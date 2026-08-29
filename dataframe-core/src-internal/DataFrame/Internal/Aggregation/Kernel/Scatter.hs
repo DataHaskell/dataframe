@@ -387,7 +387,8 @@ reduceParTyped red vis offs nGroups v idents =
             RStd ->
                 fromUnboxedVector (unsafePerformIO (varPar True vis offs nGroups v caps bounds))
             RTop2Sum -> fromUnboxedVector (unsafePerformIO (top2Par vis offs nGroups v caps bounds))
-            RTop2Snd -> fromUnboxedVector (unsafePerformIO (top2SndPar vis offs nGroups v caps bounds))
+            RTop2Snd ->
+                fromUnboxedVector (unsafePerformIO (top2SndPar vis offs nGroups v caps bounds))
 {-# INLINEABLE reduceParTyped #-}
 
 {- | For each group in @[gs, ge)@, fold the group's rows (in @valueIndices@
@@ -470,7 +471,13 @@ extremaPar ::
 extremaPar combine seed vis offs nGroups v caps bounds = do
     out <- VUM.replicate nGroups seed
     parallelBounds_ caps bounds $ \gs ge ->
-        overGroupsAcc vis offs gs ge seed (\acc row -> combine acc (VU.unsafeIndex v row)) $
+        overGroupsAcc
+            vis
+            offs
+            gs
+            ge
+            seed
+            (\acc row -> combine acc (VU.unsafeIndex v row)) $
             VUM.unsafeWrite out
     VU.unsafeFreeze out
 {-# INLINE extremaPar #-}
@@ -661,7 +668,9 @@ maxMinusMinParInt ::
     Column
 maxMinusMinParInt vis offs nGroups va vb caps bounds =
     fromUnboxedVector
-        (unsafePerformIO (maxMinusMinPar minBound maxBound vis offs nGroups va vb caps bounds))
+        ( unsafePerformIO
+            (maxMinusMinPar minBound maxBound vis offs nGroups va vb caps bounds)
+        )
 {-# NOINLINE maxMinusMinParInt #-}
 
 maxMinusMinParDbl ::
@@ -739,7 +748,6 @@ maxMinusMinPar maxSeed minSeed vis offs nGroups va vb caps bounds = do
          in grp gs
     VU.unsafeFreeze out
 
-
 -------------------------------------------------------------------------------
 -- Streaming (rowToGroup-scatter) kernels: no valueIndices, no placement pass
 -------------------------------------------------------------------------------
@@ -767,7 +775,7 @@ streamGroupCap = 1048576
 Below 4096 groups (or single-capability) the merge stays on one thread.
 -}
 groupSlices :: Int -> [(Int, Int)]
-groupSlices nGroups = chunksFor 4096 nGroups
+groupSlices = chunksFor 4096
 
 {- | Second-largest value per group: the same (largest, second-largest)
 accumulator pair as 'top2Scatter', but the finalize returns the second max

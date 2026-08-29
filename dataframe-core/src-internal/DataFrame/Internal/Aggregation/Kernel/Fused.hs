@@ -1,5 +1,5 @@
-{-# LANGUAGE ExplicitNamespaces #-}
 {-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE ExplicitNamespaces #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
@@ -68,7 +68,7 @@ finalize the fully merged accumulator into the output column.
 -}
 data FusedAgg
     = forall s.
-      FusedAgg
+        FusedAgg
         (IO s)
         -- \^ allocate one worker's accumulator
         (s -> Int -> Int -> IO ())
@@ -76,7 +76,8 @@ data FusedAgg
         (s -> s -> Int -> Int -> IO ())
         -- \^ merge the second accumulator into the first over groups [lo, hi)
         (s -> IO Column)
-        -- \^ finalize the merged accumulator
+
+-- \^ finalize the merged accumulator
 
 {- | Below this many groups a Double sum/mean does NOT join the fused streaming
 pass: the per-expression kernel it would replace
@@ -166,7 +167,7 @@ functions (worker order) and the merge+finalize action.
 -}
 openFusedAgg :: Int -> Int -> FusedAgg -> IO ([Int -> Int -> IO ()], IO Column)
 openFusedAgg caps' nGroups (FusedAgg new step mergeR fin) = do
-    ss <- sequence (replicate caps' new)
+    ss <- Control.Monad.replicateM caps' new
     let finish = case ss of
             [] -> error "runFusedAggs: no workers"
             (s0 : rest) -> do
@@ -353,7 +354,13 @@ extremaIntFusedAgg isMin nGroups rtg v =
         (fmap fromUnboxedVector . VU.unsafeFreeze)
 
 extremaStepInt ::
-    Bool -> VU.Vector Int -> VU.Vector Int -> VUM.IOVector Int -> Int -> Int -> IO ()
+    Bool ->
+    VU.Vector Int ->
+    VU.Vector Int ->
+    VUM.IOVector Int ->
+    Int ->
+    Int ->
+    IO ()
 extremaStepInt isMin rtg v acc lo hi = go lo
   where
     go !i
@@ -365,7 +372,8 @@ extremaStepInt isMin rtg v acc lo hi = go lo
             VUM.unsafeWrite acc k (if isMin then min c x else max c x)
             go (i + 1)
 
-extremaDblFusedAgg :: Bool -> Int -> VU.Vector Int -> VU.Vector Double -> FusedAgg
+extremaDblFusedAgg ::
+    Bool -> Int -> VU.Vector Int -> VU.Vector Double -> FusedAgg
 extremaDblFusedAgg isMin nGroups rtg v =
     FusedAgg
         (VUM.replicate nGroups (if isMin then 1 / 0 else negate (1 / 0) :: Double))
@@ -441,9 +449,7 @@ top2SndStepDbl rtg v s lo hi = go lo
                     VUM.unsafeWrite s (k2 + 1) a1
                 else do
                     a2 <- VUM.unsafeRead s (k2 + 1)
-                    if x > a2
-                        then VUM.unsafeWrite s (k2 + 1) x
-                        else pure ()
+                    when (x > a2) $ VUM.unsafeWrite s (k2 + 1) x
             go (i + 1)
 
 -- | Top two of the four candidates per group (pairs already ordered m1 >= m2).
@@ -488,7 +494,8 @@ addDblRange a b lo hi = go lo
             VUM.unsafeWrite a g (x + y)
             go (g + 1)
 
-combineIntRange :: Bool -> VUM.IOVector Int -> VUM.IOVector Int -> Int -> Int -> IO ()
+combineIntRange ::
+    Bool -> VUM.IOVector Int -> VUM.IOVector Int -> Int -> Int -> IO ()
 combineIntRange isMin a b lo hi = go lo
   where
     go !g
@@ -525,7 +532,7 @@ kernels separately, at any @-N@.
 -}
 data GatherAgg
     = forall s.
-      GatherAgg
+        GatherAgg
         (IO s)
         (s -> Int -> Int -> IO ())
         (s -> IO Column)
