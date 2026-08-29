@@ -17,7 +17,12 @@ import qualified Data.Vector.Unboxed as VU
 import qualified Data.Vector.Unboxed.Mutable as VUM
 import Data.Word (Word64)
 import DataFrame.Internal.Algorithms.Rank.Radix (sortKey)
-import DataFrame.Internal.Control.Concurrent (capabilities, pooledIndices)
+import DataFrame.Internal.Control.Concurrent (
+    capabilities,
+    forkJoin,
+    forkJoin_,
+    pooledIndices,
+ )
 import System.IO.Unsafe (unsafePerformIO)
 
 {- | Below this many rows the partition/fork overhead is not worth it; the
@@ -94,7 +99,23 @@ radixPasses ::
     VUM.IOVector Int ->
     VUM.IOVector Int ->
     IO ()
-radixPasses n keysA orderA keysB orderB = do
+radixPasses = radixPassesN 8
+
+{- | Run the first @np@ stable 8-bit LSD passes (bits @0 .. 8*np-1@),
+ping-ponging between the buffer pairs. For odd @np@ the sorted order lands in
+@(keysB, orderB)@, for even in @(keysA, orderA)@. Callers whose rows share
+their top bytes (per-partition sorts partitioned on the top byte) can pass
+@np = 7@: the eighth pass would be a stable identity copy.
+-}
+radixPassesN ::
+    Int ->
+    Int ->
+    VUM.IOVector Int ->
+    VUM.IOVector Int ->
+    VUM.IOVector Int ->
+    VUM.IOVector Int ->
+    IO ()
+radixPassesN np n keysA orderA keysB orderB = do
     counts <- VUM.new 256
     let pass ::
             Int ->
@@ -132,14 +153,11 @@ radixPasses n keysA orderA keysB orderB = do
                         VUM.unsafeWrite dstO pos o
                         place (i + 1)
             place 0
-    pass 0 keysA orderA keysB orderB
-    pass 8 keysB orderB keysA orderA
-    pass 16 keysA orderA keysB orderB
-    pass 24 keysB orderB keysA orderA
-    pass 32 keysA orderA keysB orderB
-    pass 40 keysB orderB keysA orderA
-    pass 48 keysA orderA keysB orderB
-    pass 56 keysB orderB keysA orderA
+        run !k
+            | k >= np = pure ()
+            | even k = pass (8 * k) keysA orderA keysB orderB >> run (k + 1)
+            | otherwise = pass (8 * k) keysB orderB keysA orderA >> run (k + 1)
+    run 0
 
 -------------------------------------------------------------------------------
 -- Parallel path: counting-sort partition, then per-partition sort in parallel
@@ -150,52 +168,110 @@ parSortByHashIO n hashes = do
     caps <- getNumCapabilities
     let !p = numPartitionsFor caps
         !shift = 64 - intLog2 p
-    (partStart, partRows) <- partitionRows n hashes p shift
+    (partStart, partRows, partHashes) <- partitionRows n hashes p shift
     outOrder <- VUM.new n
     outKeys <- VUM.new n
-    sortPartitions caps p partStart partRows hashes outOrder outKeys
+    sortPartitions caps p partStart partRows partHashes outOrder outKeys
     order <- VU.unsafeFreeze outOrder
-    pure (VU.unsafeBackpermute hashes order, order)
+    sortedHashes <- VU.unsafeFreeze outKeys
+    pure (sortedHashes, order)
 
 {- | Bucket every row index into its top-bits partition by a counting sort.
-Returns the exclusive prefix sum @partStart@ (length @p+1@, @partStart[p] == n@)
-and the row indices laid out partition-by-partition in ascending key order.
+Returns the exclusive prefix sum @partStart@ (length @p+1@, @partStart[p] == n@),
+the row indices laid out partition-by-partition in ascending key order, and
+each sorted position's hash in the same layout (so downstream passes read
+hashes sequentially instead of a random @hashes[row]@ gather per row).
+
+Runs chunked across capabilities: per-chunk partition histograms are prefix
+summed (in chunk order) into disjoint per-chunk write cursors, so the scatter
+threads never contend and each partition keeps its rows in ascending original
+row order — bit-for-bit the sequential counting sort's layout.
 -}
 partitionRows ::
-    Int -> VU.Vector Int -> Int -> Int -> IO (VU.Vector Int, VU.Vector Int)
+    Int ->
+    VU.Vector Int ->
+    Int ->
+    Int ->
+    IO (VU.Vector Int, VU.Vector Int, VU.Vector Int)
 partitionRows n hashes p shift = do
-    counts <- VUM.replicate (p + 1) (0 :: Int)
-    let countLoop !i
-            | i >= n = pure ()
-            | otherwise = do
-                let !pp = partIx shift (VU.unsafeIndex hashes i)
-                c <- VUM.unsafeRead counts pp
-                VUM.unsafeWrite counts pp (c + 1)
-                countLoop (i + 1)
-    countLoop 0
+    caps <- getNumCapabilities
+    let chunks = rowChunks caps n
+    cursors <- forkJoin [histChunk hashes p shift lo hi | (lo, hi) <- chunks]
+    -- Exclusive prefix over partitions (outer) and chunks (inner): partStart
+    -- from the totals, and each chunk's histogram rewritten into its cursor.
     partStartM <- VUM.new (p + 1)
-    let scan !k !acc
-            | k > p = pure ()
+    let seed !pp !acc
+            | pp >= p = VUM.unsafeWrite partStartM p acc
             | otherwise = do
-                VUM.unsafeWrite partStartM k acc
-                c <- if k < p then VUM.unsafeRead counts k else pure 0
-                scan (k + 1) (acc + c)
-    scan 0 0
-    cursor <- VUM.new p
-    forM_ [0 .. p - 1] $ \k -> VUM.unsafeRead partStartM k >>= VUM.unsafeWrite cursor k
+                VUM.unsafeWrite partStartM pp acc
+                let inner [] !a = pure a
+                    inner (cur : rest) !a = do
+                        t <- VUM.unsafeRead cur pp
+                        VUM.unsafeWrite cur pp a
+                        inner rest (a + t)
+                acc' <- inner cursors acc
+                seed (pp + 1) acc'
+    seed 0 0
     rowsM <- VUM.new (max 1 n)
-    let place !i
-            | i >= n = pure ()
-            | otherwise = do
-                let !pp = partIx shift (VU.unsafeIndex hashes i)
-                pos <- VUM.unsafeRead cursor pp
-                VUM.unsafeWrite rowsM pos i
-                VUM.unsafeWrite cursor pp (pos + 1)
-                place (i + 1)
-    place 0
+    rowHashM <- VUM.new (max 1 n)
+    forkJoin_
+        [ scatterChunk hashes shift cur rowsM rowHashM lo hi
+        | ((lo, hi), cur) <- zip chunks cursors
+        ]
     partStart <- VU.unsafeFreeze partStartM
     partRows <- VU.unsafeFreeze rowsM
-    pure (partStart, partRows)
+    partHashes <- VU.unsafeFreeze rowHashM
+    pure (partStart, partRows, partHashes)
+
+-- | Contiguous near-equal row chunks, one per capability; empties dropped.
+rowChunks :: Int -> Int -> [(Int, Int)]
+rowChunks caps n =
+    [ (lo, hi)
+    | w <- [0 .. caps - 1]
+    , let lo = min n (w * per)
+    , let hi = min n (lo + per)
+    , lo < hi
+    ]
+  where
+    !per = (n + max 1 caps - 1) `div` max 1 caps
+
+-- | Per-partition counts of one row chunk.
+histChunk :: VU.Vector Int -> Int -> Int -> Int -> Int -> IO (VUM.IOVector Int)
+histChunk hashes p shift lo hi = do
+    acc <- VUM.replicate p (0 :: Int)
+    let go !i
+            | i >= hi = pure acc
+            | otherwise = do
+                let !pp = partIx shift (VU.unsafeIndex hashes i)
+                c <- VUM.unsafeRead acc pp
+                VUM.unsafeWrite acc pp (c + 1)
+                go (i + 1)
+    go lo
+
+{- | Scatter one row chunk into the partitioned layout using the chunk's
+pre-summed cursor (disjoint write regions per chunk, no contention).
+-}
+scatterChunk ::
+    VU.Vector Int ->
+    Int ->
+    VUM.IOVector Int ->
+    VUM.IOVector Int ->
+    VUM.IOVector Int ->
+    Int ->
+    Int ->
+    IO ()
+scatterChunk hashes shift cursor rowsM rowHashM lo hi = go lo
+  where
+    go !i
+        | i >= hi = pure ()
+        | otherwise = do
+            let !h = VU.unsafeIndex hashes i
+                !pp = partIx shift h
+            pos <- VUM.unsafeRead cursor pp
+            VUM.unsafeWrite rowsM pos i
+            VUM.unsafeWrite rowHashM pos h
+            VUM.unsafeWrite cursor pp (pos + 1)
+            go (i + 1)
 
 {- | Stable-sort each partition by full key, writing sorted original indices
 into @outOrder@ and their hashes into @outKeys@ at the partition's slot range.
@@ -204,6 +280,11 @@ Within a partition the counting sort already left rows in ascending original
 order, so the LSD radix sort's stability reproduces the global @(key, row)@
 order. Partitions below two elements are already sorted (counting sort kept
 original order) and are copied directly.
+
+@partHashes@ is the partition-layout hash vector from 'partitionRows', so
+seeding reads hashes sequentially; only 7 LSD passes run (the top byte is the
+partition byte, constant within a partition), and the sorted hash is recovered
+from the sort key ('sortKey' is self-inverse) instead of a random gather.
 -}
 sortPartitions ::
     Int ->
@@ -214,7 +295,7 @@ sortPartitions ::
     VUM.IOVector Int ->
     VUM.IOVector Int ->
     IO ()
-sortPartitions caps p partStart partRows hashes outOrder outKeys =
+sortPartitions caps p partStart partRows partHashes outOrder outKeys =
     pooledIndices caps p sortOne
   where
     sortOne !pp = do
@@ -224,28 +305,28 @@ sortPartitions caps p partStart partRows hashes outOrder outKeys =
         when (sz > 0) $
             if sz == 1
                 then do
-                    let !r = VU.unsafeIndex partRows s
-                    VUM.unsafeWrite outOrder s r
-                    VUM.unsafeWrite outKeys s (VU.unsafeIndex hashes r)
+                    VUM.unsafeWrite outOrder s (VU.unsafeIndex partRows s)
+                    VUM.unsafeWrite outKeys s (VU.unsafeIndex partHashes s)
                 else do
                     keysA <- VUM.new sz
                     orderA <- VUM.new sz
                     let seed !i
                             | i >= sz = pure ()
                             | otherwise = do
-                                let !r = VU.unsafeIndex partRows (s + i)
-                                VUM.unsafeWrite keysA i (sortKey (VU.unsafeIndex hashes r))
-                                VUM.unsafeWrite orderA i r
+                                VUM.unsafeWrite keysA i (sortKey (VU.unsafeIndex partHashes (s + i)))
+                                VUM.unsafeWrite orderA i (VU.unsafeIndex partRows (s + i))
                                 seed (i + 1)
                     seed 0
                     keysB <- VUM.new sz
                     orderB <- VUM.new sz
-                    radixPasses sz keysA orderA keysB orderB
+                    radixPassesN 7 sz keysA orderA keysB orderB
                     let emit !i
                             | i >= sz = pure ()
                             | otherwise = do
-                                o <- VUM.unsafeRead orderA i
+                                o <- VUM.unsafeRead orderB i
+                                k <- VUM.unsafeRead keysB i
                                 VUM.unsafeWrite outOrder (s + i) o
-                                VUM.unsafeWrite outKeys (s + i) (VU.unsafeIndex hashes o)
+                                -- sortKey is an involution: recover the hash.
+                                VUM.unsafeWrite outKeys (s + i) (sortKey k)
                                 emit (i + 1)
                     emit 0

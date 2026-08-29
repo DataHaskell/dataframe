@@ -85,6 +85,7 @@ planAgg gdf (UExpr (expr :: Expr a)) = case expr of
         "stddev" -> require name (PlanScatter RStd name)
         "variance" -> require name (PlanScatter RVar name)
         "top2Sum" -> require name (PlanScatter RTop2Sum name)
+        "top2Snd" -> require name (PlanScatter RTop2Snd name)
         "median" -> require name (PlanMedian name)
         _ -> Nothing
     require name plan = colUnboxedNumeric name >> Just plan

@@ -46,6 +46,7 @@ library
                         DataFrame.Internal.Control.Concurrent
                         -- Aggregation kernels and planning.
                         DataFrame.Internal.Aggregation.Kernel.Dense
+                        DataFrame.Internal.Aggregation.Kernel.Fused
                         DataFrame.Internal.Aggregation.Kernel.Moments
                         DataFrame.Internal.Aggregation.Kernel.Scatter
                         DataFrame.Internal.Aggregation.Plan
