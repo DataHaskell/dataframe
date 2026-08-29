@@ -302,11 +302,10 @@ get their own copy with @f@ inlined.
 -}
 fillGenerate ::
     (VU.Unbox c) => VUM.IOVector c -> (Int -> c) -> Int -> Int -> IO ()
-fillGenerate mv f = \ !lo !hi ->
-    let go !i
-            | i >= hi = pure ()
-            | otherwise = VUM.unsafeWrite mv i (f i) >> go (i + 1)
-     in go lo
+fillGenerate mv f !lo !hi = let go !i
+                                    | i >= hi = pure ()
+                                    | otherwise = VUM.unsafeWrite mv i (f i) >> go (i + 1)
+                             in go lo
 {-# INLINE fillGenerate #-}
 
 {- | Parallel unboxed gather: element @i@ of the result is
@@ -319,7 +318,7 @@ count; falls back to a sequential loop below 'parThreshold'.
 parBackpermuteUnboxed ::
     (VU.Unbox a) => VU.Vector a -> VU.Vector Int -> VU.Vector a
 parBackpermuteUnboxed v ix =
-    parGenerateUnboxed (VU.length ix) (\i -> VU.unsafeIndex v (VU.unsafeIndex ix i))
+    parGenerateUnboxed (VU.length ix) (VU.unsafeIndex v . VU.unsafeIndex ix)
 {-# INLINE parBackpermuteUnboxed #-}
 
 {- | 'parGenerateUnboxed' with an INLINE body: each monomorphic NOINLINE
@@ -343,7 +342,7 @@ parBackpermuteInt :: VU.Vector Int -> VU.Vector Int -> VU.Vector Int
 parBackpermuteInt v ix =
     parGenerateUnboxedInline
         (VU.length ix)
-        (\i -> VU.unsafeIndex v (VU.unsafeIndex ix i))
+        (VU.unsafeIndex v . VU.unsafeIndex ix)
 {-# NOINLINE parBackpermuteInt #-}
 
 -- | Closure-free parallel 'Double' gather: @out!i = v ! (ix!i)@.
@@ -351,7 +350,7 @@ parBackpermuteDouble :: VU.Vector Double -> VU.Vector Int -> VU.Vector Double
 parBackpermuteDouble v ix =
     parGenerateUnboxedInline
         (VU.length ix)
-        (\i -> VU.unsafeIndex v (VU.unsafeIndex ix i))
+        (VU.unsafeIndex v . VU.unsafeIndex ix)
 {-# NOINLINE parBackpermuteDouble #-}
 
 {- | Closure-free double-indirection gather: @out!g = vis ! (offs!g)@ over
@@ -362,7 +361,7 @@ parBackpermute2Int :: VU.Vector Int -> VU.Vector Int -> VU.Vector Int
 parBackpermute2Int vis offs =
     parGenerateUnboxedInline
         (max 0 (VU.length offs - 1))
-        (\g -> VU.unsafeIndex vis (VU.unsafeIndex offs g))
+        (VU.unsafeIndex vis . VU.unsafeIndex offs)
 {-# NOINLINE parBackpermute2Int #-}
 
 {- | Parallel boxed gather. The read side uses 'VB.unsafeIndexM' so the array
@@ -396,7 +395,7 @@ parClampNonNeg :: VU.Vector Int -> VU.Vector Int
 parClampNonNeg ix =
     parGenerateUnboxedInline
         (VU.length ix)
-        (\i -> let !x = VU.unsafeIndex ix i in if x < 0 then 0 else x)
+        (\i -> let !x = VU.unsafeIndex ix i in max x 0)
 {-# NOINLINE parClampNonNeg #-}
 
 {- | Validity bitmap from sentinel indices (bit @i@ valid iff @ix!i >= 0@),
@@ -1159,7 +1158,7 @@ atIndicesStableMulti ixs cols =
      in if nFused < 2
             then map (atIndicesStable ixs) cols
             else
-                let fused = multiGatherRun ixs [s | Just s <- specs]
+                let fused = multiGatherRun ixs (Data.Maybe.catMaybes specs)
                     go [] _ = []
                     go (Nothing : ss) !k = atIndicesStable ixs (cols !! k) : go ss (k + 1)
                     go (Just _ : ss) !k =
