@@ -165,6 +165,7 @@ jobs:
           echo "packages: $GITHUB_WORKSPACE/source/dataframe-viz" >> cabal.project
           echo "packages: $GITHUB_WORKSPACE/source/dataframe-learn" >> cabal.project
           echo "packages: $GITHUB_WORKSPACE/source/dataframe-lazy" >> cabal.project
+          echo "packages: $GITHUB_WORKSPACE/source/dataframe-arrow-bridge" >> cabal.project
           echo "packages: $GITHUB_WORKSPACE/source/dataframe-fastcsv" >> cabal.project
           cat cabal.project
       - name: sdist
@@ -205,6 +206,8 @@ jobs:
           echo "PKGDIR_dataframe_learn=${PKGDIR_dataframe_learn}" >> "$GITHUB_ENV"
           PKGDIR_dataframe_lazy="$(find "$GITHUB_WORKSPACE/unpacked" -maxdepth 1 -type d -regex '.*/dataframe-lazy-[0-9.]*')"
           echo "PKGDIR_dataframe_lazy=${PKGDIR_dataframe_lazy}" >> "$GITHUB_ENV"
+          PKGDIR_dataframe_arrow_bridge="$(find "$GITHUB_WORKSPACE/unpacked" -maxdepth 1 -type d -regex '.*/dataframe-arrow-bridge-[0-9.]*')"
+          echo "PKGDIR_dataframe_arrow_bridge=${PKGDIR_dataframe_arrow_bridge}" >> "$GITHUB_ENV"
           PKGDIR_dataframe_fastcsv="$(find "$GITHUB_WORKSPACE/unpacked" -maxdepth 1 -type d -regex '.*/dataframe-fastcsv-[0-9.]*')"
           echo "PKGDIR_dataframe_fastcsv=${PKGDIR_dataframe_fastcsv}" >> "$GITHUB_ENV"
           rm -f cabal.project cabal.project.local
@@ -224,6 +227,7 @@ jobs:
           echo "packages: ${PKGDIR_dataframe_viz}" >> cabal.project
           echo "packages: ${PKGDIR_dataframe_learn}" >> cabal.project
           echo "packages: ${PKGDIR_dataframe_lazy}" >> cabal.project
+          echo "packages: ${PKGDIR_dataframe_arrow_bridge}" >> cabal.project
           echo "packages: ${PKGDIR_dataframe_fastcsv}" >> cabal.project
           echo "package dataframe" >> cabal.project
           echo "    ghc-options: -Werror=missing-methods -Werror=missing-fields" >> cabal.project
@@ -253,6 +257,8 @@ jobs:
           echo "    ghc-options: -Werror=missing-methods -Werror=missing-fields" >> cabal.project
           echo "package dataframe-lazy" >> cabal.project
           echo "    ghc-options: -Werror=missing-methods -Werror=missing-fields" >> cabal.project
+          echo "package dataframe-arrow-bridge" >> cabal.project
+          echo "    ghc-options: -Werror=missing-methods -Werror=missing-fields" >> cabal.project
           echo "package dataframe-fastcsv" >> cabal.project
           echo "    ghc-options: -Werror=missing-methods -Werror=missing-fields" >> cabal.project
           echo "package dataframe" >> cabal.project
@@ -283,6 +289,8 @@ jobs:
           echo "    ghc-options: -Werror=unused-packages" >> cabal.project
           echo "package dataframe-lazy" >> cabal.project
           echo "    ghc-options: -Werror=unused-packages" >> cabal.project
+          echo "package dataframe-arrow-bridge" >> cabal.project
+          echo "    ghc-options: -Werror=unused-packages" >> cabal.project
           echo "package dataframe-fastcsv" >> cabal.project
           echo "    ghc-options: -Werror=unused-packages" >> cabal.project
           echo "package dataframe" >> cabal.project
@@ -313,6 +321,8 @@ jobs:
           echo "    ghc-options: -Werror=incomplete-patterns -Werror=incomplete-uni-patterns" >> cabal.project
           echo "package dataframe-lazy" >> cabal.project
           echo "    ghc-options: -Werror=incomplete-patterns -Werror=incomplete-uni-patterns" >> cabal.project
+          echo "package dataframe-arrow-bridge" >> cabal.project
+          echo "    ghc-options: -Werror=incomplete-patterns -Werror=incomplete-uni-patterns" >> cabal.project
           echo "package dataframe-fastcsv" >> cabal.project
           echo "    ghc-options: -Werror=incomplete-patterns -Werror=incomplete-uni-patterns" >> cabal.project
           cat >> cabal.project <<EOF
@@ -323,7 +333,7 @@ jobs:
           # it); the bundled `parsec` was built against text-2.0.2, so it must be
           # rebuilt against text-2.1 too or the solver dead-ends on the
           # aeson -> network-uri -> parsec chain.
-          $HCPKG list --simple-output --names-only | perl -ne 'for (split /\s+/) { print "constraints: any.$_ installed\n" unless /^(text|parsec|dataframe|dataframe-(core|parsing|operations|csv|csv-th|json|parquet|parquet-th|th|viz|learn|lazy|fastcsv))$/; }' >> cabal.project.local
+          $HCPKG list --simple-output --names-only | perl -ne 'for (split /\s+/) { print "constraints: any.$_ installed\n" unless /^(text|parsec|dataframe|dataframe-arrow-bridge|dataframe-core|dataframe-csv|dataframe-csv-th|dataframe-expr-serializer|dataframe-fastcsv|dataframe-json|dataframe-lazy|dataframe-learn|dataframe-operations|dataframe-parquet|dataframe-parquet-th|dataframe-parsing|dataframe-th|dataframe-viz)$/; }' >> cabal.project.local
           cat cabal.project
           cat cabal.project.local
       - name: dump install plan
@@ -378,6 +388,8 @@ jobs:
           cd ${PKGDIR_dataframe_learn} || false
           ${CABAL} -vnormal check
           cd ${PKGDIR_dataframe_lazy} || false
+          ${CABAL} -vnormal check
+          cd ${PKGDIR_dataframe_arrow_bridge} || false
           ${CABAL} -vnormal check
           cd ${PKGDIR_dataframe_fastcsv} || false
           ${CABAL} -vnormal check

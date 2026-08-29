@@ -17,7 +17,7 @@ DIRS=(
   "tests"
   "benchmark"
   "examples"
-  "ffi"
+  "dataframe-arrow-bridge"
   "dataframe-arrow"
   "dataframe-core"
   "dataframe-csv"

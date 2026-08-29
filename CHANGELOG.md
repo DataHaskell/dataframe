@@ -1,5 +1,52 @@
 # Revision history for dataframe
 
+## 3.6.0.0
+
+### Breaking changes
+* `DataFrame.Operators` has been renamed to `DataFrame.Expression.Operators`.
+  The module's contents are unchanged; update the import if you were using it
+  directly (`import DataFrame` is unaffected).
+* `dataframe-core`'s exposed `DataFrame.Internal.*` modules were reorganised
+  into namespaced groups, e.g. `DataFrame.Internal.Hash` →
+  `DataFrame.Internal.Algorithms.Hash`, `DataFrame.Internal.ColumnBuilder` →
+  `DataFrame.Internal.Column.Builder`, `DataFrame.Internal.GroupingPar` →
+  `DataFrame.Internal.Grouping.Partitioned`. Likewise in
+  `dataframe-operations`: `DataFrame.Operations.AggregateScatter` →
+  `DataFrame.Operations.Aggregation.Run` and
+  `DataFrame.Operations.JoinPar` → `DataFrame.Operations.Join.Parallel`.
+* The `arrow-bridge` public sublibrary of this package is gone; it now ships
+  as the standalone package `dataframe-arrow-bridge` (`1.0.0.0`), with the
+  same modules (`DataFrame.IO.Arrow`, `DataFrame.IR`, and the re-exported
+  `DataFrame.IR.ExprJson`). A sublibrary of a separately uploaded package
+  cannot be resolved by dependents on Hackage — `dataframe-arrow` failed to
+  configure with "missing or private dependencies: dataframe:arrow-bridge" —
+  so consumers should now depend on `dataframe-arrow-bridge` directly. The
+  meta-package no longer ships `cbits/arrow_abi.h`, which only the sublibrary
+  referenced (`dataframe-arrow` carries its own copy).
+* Coordinated bumps: `dataframe-core` and `dataframe-operations` →
+  `2.5.0.0`, `dataframe-learn` → `2.4.2.0`, `dataframe-lazy` → `2.4.1.0`,
+  `dataframe-th` → `2.2.1.0`, `dataframe-viz` → `1.3.2.0`,
+  `dataframe-expr-serializer` → `1.2.1.0`, `dataframe-arrow` → `1.0.3.0`,
+  with inter-package bounds raised to match.
+
+### Improvements
+* Faster `groupBy` and joins through better parallelism.
+
+### Bug fixes
+* Validity bits are now counted only up to the column's length, so statistics
+  on a nullable column no longer include trailing bits from the bitmap's
+  padding.
+* `range` clamps both endpoints before subtracting, fixing an underflow when
+  the range starts past the end of the frame.
+* `sliceGroups` permutes the group bitmap alongside the data, so nulls stay
+  attached to their rows.
+* `shuffledIndices` uses Fisher-Yates, making the shuffle uniform.
+* Packed text columns are sliced through their selection layer.
+
+## 3.5.0.0
+
+* Reduced memory pressure in CSV reads, `groupBy`, and joins.
+
 ## 3.4.0.0
 
 * `impute` on a non-nullable expression is now fails and throws when given a column with the wrong type.

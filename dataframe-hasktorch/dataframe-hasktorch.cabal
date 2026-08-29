@@ -37,8 +37,8 @@ library
 
     build-depends:    base >= 4.11 && < 5,
                       vector >= 0.13 && < 0.15,
-                      dataframe-core ^>= 2.4,
-                      dataframe-operations ^>= 2.4,
+                      dataframe-core ^>= 2.5,
+                      dataframe-operations ^>= 2.5,
                       hasktorch >= 0.2.1.6 && < 0.3
 
     hs-source-dirs:   src
