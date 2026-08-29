@@ -224,6 +224,10 @@ import Data.Int (Int16, Int32, Int64, Int8)
 {-# SPECIALIZE mapColumn ::
     (Int -> Int) -> Column -> Either DataFrameException Column
     #-}
+-- toDouble on an Int column (hot path for derived arithmetic)
+{-# SPECIALIZE mapColumn ::
+    (Int -> Double) -> Column -> Either DataFrameException Column
+    #-}
 
 -- zipWithColumns: binary ops
 {-# SPECIALIZE zipWithColumns ::
@@ -831,7 +835,7 @@ eval ctx (CastExprWith _tag onResult (inner :: Expr src)) = do
             Group <$> V.mapM (promoteColumnWith onResult) gs
 eval ctx expr@(Unary op (inner :: Expr b)) = addContext expr $ do
     v <- eval @b ctx inner
-    liftValue (unaryFn op) v
+    liftValue (fastUnaryFn @b @a (unaryName op) (unaryFn op)) v
 eval ctx expr@(Binary op (left :: Expr c) (right :: Expr b)) =
     addContext expr $ do
         l <- eval @c ctx left
@@ -981,6 +985,37 @@ eval ctx expr@(Agg (FoldAgg _ Nothing (f :: a -> b -> a)) inner) =
                     Group gs ->
                         Flat . fromVector
                             <$> V.mapM (foldl1Column @a f) gs
+
+{- | The op's element function, with a fast path for @toDouble@ (matched by
+'unaryName', like the @toDouble@ peeling in "DataFrame.Internal.Simplify").
+The closure captured at 'Expr'-construction time is @realToFrac@, which at an
+integral source type without a fired rewrite rule lowers to
+@fromRational . toRational@ — a 'Rational' allocation plus 'fromRat' per
+element. 'fromIntegral' at the concrete type is the same correctly-rounded
+conversion, so the swap is bit-identical; only the constant factor changes.
+Non-integral sources and other ops keep the stored function.
+-}
+fastUnaryFn ::
+    forall b a.
+    (Columnable b, Columnable a) =>
+    T.Text -> (b -> a) -> (b -> a)
+fastUnaryFn name f
+    | name == "toDouble"
+    , Just Refl <- testEquality (typeRep @a) (typeRep @Double) =
+        integralToDouble @b f
+    | otherwise = f
+
+integralToDouble :: forall b. (Columnable b) => (b -> Double) -> b -> Double
+integralToDouble f
+    | Just Refl <- testEquality rb (typeRep @Int) = fromIntegral
+    | Just Refl <- testEquality rb (typeRep @Int8) = fromIntegral
+    | Just Refl <- testEquality rb (typeRep @Int16) = fromIntegral
+    | Just Refl <- testEquality rb (typeRep @Int32) = fromIntegral
+    | Just Refl <- testEquality rb (typeRep @Int64) = fromIntegral
+    | Just Refl <- testEquality rb (typeRep @Word) = fromIntegral
+    | otherwise = f
+  where
+    rb = typeRep @b
 
 broadcastFold ::
     forall acc b.

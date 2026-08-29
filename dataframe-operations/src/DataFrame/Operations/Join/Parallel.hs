@@ -14,6 +14,7 @@ sequential 'hashInnerKernel' \/ 'hashLeftKernel': probe rows appear in original
 order and, within a probe row, build matches in @ciSortedIndices@ order.
 -}
 module DataFrame.Operations.Join.Parallel (
+    ProbeTable (..),
     parInnerProbe,
     parLeftProbe,
     shouldParallelizeJoin,
@@ -24,8 +25,10 @@ module DataFrame.Operations.Join.Parallel (
 ) where
 
 import Control.Concurrent (getNumCapabilities)
+import Data.Bits (popCount, unsafeShiftR, (.&.))
 import qualified Data.Vector.Unboxed as VU
 import qualified Data.Vector.Unboxed.Mutable as VUM
+import Data.Word (Word64)
 import DataFrame.Internal.Control.Concurrent (capabilities, forkJoin_)
 
 {- | Below this many probe rows the fork/coordination overhead is not worth it;
@@ -80,38 +83,39 @@ shouldParallelizeSmallBuildProbe probeRows =
         && capabilities > 1
 {-# NOINLINE shouldParallelizeSmallBuildProbe #-}
 
-{- | A read-only view of the build-side index needed by the probe: the lookup
-returns @(start, len)@ of the matching run in @sortedIndices@, or @(-1, 0)@ on a
-miss. Passed in by the caller so this module need not depend on the
-'CompactIndex' record directly.
+{- | A read-only view of the build-side index needed by the probe: the raw
+open-addressing table vectors of the @CompactIndex@ (which lives in
+"DataFrame.Operations.Join"; passing the fields avoids an import cycle).
+Passing concrete vectors instead of a lookup closure keeps the per-row probe
+loop free of unknown calls and boxed-tuple allocation — the lookup is inlined
+into the count and fill loops.
 -}
-data ProbeIndex = ProbeIndex
-    { piSorted :: !(VU.Vector Int)
-    , piLookup :: !(Int -> (Int, Int))
+data ProbeTable = ProbeTable
+    { ptSorted :: !(VU.Vector Int)
+    , ptKeys :: !(VU.Vector Int)
+    , ptRuns :: !(VU.Vector Int)
+    -- ^ @(start, len)@ packed 32\/32 per slot; @-1@ = empty (see @ciRuns@).
+    , ptMask :: {-# UNPACK #-} !Int
     }
 
-{- | Parallel inner-join probe. @parInnerProbe sortedIdxs lookup probeHashes@
-returns @(probeIxs, buildIxs)@ identical to a sequential probe of the same
-index. The build index must already be constructed from the build side.
+{- | Parallel inner-join probe. @parInnerProbe table probeHashes@ returns
+@(probeIxs, buildIxs)@ identical to a sequential probe of the same index. The
+build index must already be constructed from the build side.
 -}
 parInnerProbe ::
-    VU.Vector Int ->
-    (Int -> (Int, Int)) ->
+    ProbeTable ->
     VU.Vector Int ->
     IO (VU.Vector Int, VU.Vector Int)
-parInnerProbe sortedIdxs lookupFn =
-    runProbe False (ProbeIndex sortedIdxs lookupFn)
+parInnerProbe = runProbe False
 
 {- | Parallel left-join probe. Like 'parInnerProbe' but every probe row emits at
 least one output row; unmatched rows carry a @-1@ sentinel in the build column.
 -}
 parLeftProbe ::
-    VU.Vector Int ->
-    (Int -> (Int, Int)) ->
+    ProbeTable ->
     VU.Vector Int ->
     IO (VU.Vector Int, VU.Vector Int)
-parLeftProbe sortedIdxs lookupFn =
-    runProbe True (ProbeIndex sortedIdxs lookupFn)
+parLeftProbe = runProbe True
 
 {- | Shared two-pass parallel probe. @keepUnmatched@ selects left- vs
 inner-join semantics. Splits @[0, probeN)@ into @caps@ contiguous ranges, counts
@@ -120,15 +124,31 @@ buffers in parallel.
 -}
 runProbe ::
     Bool ->
-    ProbeIndex ->
+    ProbeTable ->
     VU.Vector Int ->
     IO (VU.Vector Int, VU.Vector Int)
-runProbe keepUnmatched pidx probeHashes = do
+runProbe keepUnmatched pt probeHashes = do
     caps <- getNumCapabilities
     let !probeN = VU.length probeHashes
         !nChunks = max 1 (min caps probeN)
-        !sorted = piSorted pidx
-        !lookupFn = piLookup pidx
+        !sorted = ptSorted pt
+        !keys = ptKeys pt
+        !runs = ptRuns pt
+        !mask = ptMask pt
+        !shift = 64 - popCount mask
+        -- Packed (start,len) run for hash @h@, or -1 on a miss. Home slot is
+        -- the top log2(cap) bits of a Fibonacci multiply (the row hash's low
+        -- bits are poorly diffused); must match the build-side ciSlot exactly.
+        findRun !h = go (fromIntegral ((fromIntegral h * (0x9E3779B97F4A7C15 :: Word64)) `unsafeShiftR` shift))
+          where
+            go !slot =
+                let !w = runs `VU.unsafeIndex` slot
+                 in if w < 0
+                        then -1
+                        else
+                            if keys `VU.unsafeIndex` slot == h
+                                then w
+                                else go ((slot + 1) .&. mask)
         chunkBounds k = (lo, hi)
           where
             !lo = (probeN * k) `div` nChunks
@@ -138,10 +158,10 @@ runProbe keepUnmatched pidx probeHashes = do
             let go !i !acc
                     | i >= hi = acc
                     | otherwise =
-                        let (!start, !len) = lookupFn (VU.unsafeIndex probeHashes i)
-                         in if start < 0
+                        let !w = findRun (VU.unsafeIndex probeHashes i)
+                         in if w < 0
                                 then go (i + 1) (if keepUnmatched then acc + 1 else acc)
-                                else go (i + 1) (acc + len)
+                                else go (i + 1) (acc + (w .&. 0xFFFFFFFF))
              in go lo 0
     chunkCounts <- VUM.new (nChunks + 1)
     forkRanges nChunks $ \k ->
@@ -165,8 +185,8 @@ runProbe keepUnmatched pidx probeHashes = do
             fill !i !p
                 | i >= hi = pure ()
                 | otherwise = do
-                    let (!start, !len) = lookupFn (VU.unsafeIndex probeHashes i)
-                    if start < 0
+                    let !w = findRun (VU.unsafeIndex probeHashes i)
+                    if w < 0
                         then
                             if keepUnmatched
                                 then do
@@ -175,7 +195,9 @@ runProbe keepUnmatched pidx probeHashes = do
                                     fill (i + 1) (p + 1)
                                 else fill (i + 1) p
                         else do
-                            let writeMatch !j !q
+                            let !start = w `unsafeShiftR` 32
+                                !len = w .&. 0xFFFFFFFF
+                                writeMatch !j !q
                                     | j >= len = pure ()
                                     | otherwise = do
                                         VUM.unsafeWrite pv q i

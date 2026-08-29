@@ -14,8 +14,9 @@ module DataFrame.Internal.Data.HashTable (
 ) where
 
 import Control.Monad.Primitive (PrimMonad, PrimState)
-import Data.Bits ((.&.))
+import Data.Bits (popCount, unsafeShiftR, (.&.))
 import qualified Data.Vector.Unboxed.Mutable as VUM
+import Data.Word (Word64)
 
 {- | An open-addressing linear-probe table. @htMask@ is @capacity - 1@ (capacity
 is a power of two) and maps a hash to its home slot.
@@ -68,7 +69,7 @@ htInsert ::
     -- | Precomputed hash of the row's key.
     Int ->
     m (Int, Bool)
-htInsert ht eqRow nextGroup row hash = go (hash .&. mask)
+htInsert ht eqRow nextGroup row hash = go (homeSlot mask hash)
   where
     !mask = htMask ht
     !hs = htHash ht
@@ -92,3 +93,16 @@ htInsert ht eqRow nextGroup row hash = go (hash .&. mask)
                             else go ((slot + 1) .&. mask)
                     else go ((slot + 1) .&. mask)
 {-# INLINE htInsert #-}
+
+{- | Home slot of a hash: the top @log2 cap@ bits of a Fibonacci multiply. The
+row hash's final FxHash step is a multiply, which leaves its LOW bits poorly
+diffused — raw-text keys cluster into contiguous linear-probe pileups when
+slotted by @hash .&. mask@, so the home slot must come from the top bits.
+-}
+homeSlot :: Int -> Int -> Int
+homeSlot !mask !hash =
+    fromIntegral
+        ( (fromIntegral hash * (0x9E3779B97F4A7C15 :: Word64))
+            `unsafeShiftR` (64 - popCount mask)
+        )
+{-# INLINE homeSlot #-}

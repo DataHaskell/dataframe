@@ -31,7 +31,13 @@ module DataFrame.Internal.Data.PackedText (
 import qualified Data.Text as T
 import qualified Data.Text.Array as A
 import qualified Data.Vector.Unboxed as VU
+import qualified Data.Vector.Unboxed.Mutable as VUM
 
+import DataFrame.Internal.Control.Concurrent (
+    parThreshold,
+    parallelChunks_,
+    shouldParallelize,
+ )
 import Data.Int (Int32)
 import Data.Ord (comparing)
 import Data.Text.Internal (Text (Text))
@@ -39,6 +45,7 @@ import DataFrame.Internal.Data.PackedText.Utf8 (
     isValidUtf8Slice,
     lenientDecodeSlice,
  )
+import System.IO.Unsafe (unsafePerformIO)
 
 {- | Row byte-offsets, physically 'Int32' when every value fits (total buffer
 bytes < 2^31) and 'Int' otherwise. Values are non-negative byte positions.
@@ -134,18 +141,130 @@ over the unselected base.
 packedGather :: VU.Vector Int -> PackedTextData -> PackedTextData
 packedGather indices (PackedTextData arr offs msel canon) =
     let !base = offCount offs - 1
-        clamp r = if r >= 0 && r < base then r else -1
-        (sel', canon') = case msel of
-            Nothing -> (VU.map clamp indices, False)
-            Just s ->
-                let !sn = selLength s
-                 in ( VU.map
-                        (\i -> if i >= 0 && i < sn then clamp (selAt s i) else -1)
-                        indices
-                    , canon
-                    )
-     in PackedTextData arr offs (Just (mkSel base sel')) canon'
-{-# INLINE packedGather #-}
+        canon' = case msel of
+            Nothing -> False
+            Just _ -> canon
+        {- Base row for logical output row i composes any existing selection;
+        only the SELECTOR is rebuilt (the byte buffer and offsets are shared
+        untouched — a canonical dict column keeps its bytes). Each (source
+        width x output width) shape runs a monomorphic closure-free kernel,
+        generated directly at its final 'mkSel' width (one parallel pass).
+        Same values and widths as the historical closure-driven build. -}
+        sel' = case msel of
+            Nothing
+                | base <= int32Max -> Sel32 (gatherBaseTo32 indices base)
+                | otherwise -> Sel64 (gatherBaseTo64 indices base)
+            Just (Sel32 s)
+                | base <= int32Max -> Sel32 (gatherSel32To32 indices s base)
+                | otherwise -> Sel64 (gatherSel32To64 indices s base)
+            Just (Sel64 s)
+                | base <= int32Max -> Sel32 (gatherSel64To32 indices s base)
+                | otherwise -> Sel64 (gatherSel64To64 indices s base)
+     in PackedTextData arr offs (Just sel') canon'
+
+-- Monomorphic 'packedGather' selector kernels. All reproduce exactly
+-- @clamp r = if r >= 0 && r < base then r else -1@ over the composed pick.
+
+gatherBaseTo32 :: VU.Vector Int -> Int -> VU.Vector Int32
+gatherBaseTo32 indices !base =
+    parGenSelInline (VU.length indices) $ \i ->
+        let !r = VU.unsafeIndex indices i
+         in if r >= 0 && r < base then fromIntegral r else -1
+{-# NOINLINE gatherBaseTo32 #-}
+
+gatherBaseTo64 :: VU.Vector Int -> Int -> VU.Vector Int
+gatherBaseTo64 indices !base =
+    parGenSelInline (VU.length indices) $ \i ->
+        let !r = VU.unsafeIndex indices i
+         in if r >= 0 && r < base then r else -1
+{-# NOINLINE gatherBaseTo64 #-}
+
+gatherSel32To32 :: VU.Vector Int -> VU.Vector Int32 -> Int -> VU.Vector Int32
+gatherSel32To32 indices s !base =
+    let !sn = VU.length s
+     in parGenSelInline (VU.length indices) $ \i ->
+            let !j = VU.unsafeIndex indices i
+             in if j >= 0 && j < sn
+                    then
+                        let !r = fromIntegral (VU.unsafeIndex s j) :: Int
+                         in if r >= 0 && r < base then fromIntegral r else -1
+                    else -1
+{-# NOINLINE gatherSel32To32 #-}
+
+gatherSel32To64 :: VU.Vector Int -> VU.Vector Int32 -> Int -> VU.Vector Int
+gatherSel32To64 indices s !base =
+    let !sn = VU.length s
+     in parGenSelInline (VU.length indices) $ \i ->
+            let !j = VU.unsafeIndex indices i
+             in if j >= 0 && j < sn
+                    then
+                        let !r = fromIntegral (VU.unsafeIndex s j) :: Int
+                         in if r >= 0 && r < base then r else -1
+                    else -1
+{-# NOINLINE gatherSel32To64 #-}
+
+gatherSel64To32 :: VU.Vector Int -> VU.Vector Int -> Int -> VU.Vector Int32
+gatherSel64To32 indices s !base =
+    let !sn = VU.length s
+     in parGenSelInline (VU.length indices) $ \i ->
+            let !j = VU.unsafeIndex indices i
+             in if j >= 0 && j < sn
+                    then
+                        let !r = VU.unsafeIndex s j
+                         in if r >= 0 && r < base then fromIntegral r else -1
+                    else -1
+{-# NOINLINE gatherSel64To32 #-}
+
+gatherSel64To64 :: VU.Vector Int -> VU.Vector Int -> Int -> VU.Vector Int
+gatherSel64To64 indices s !base =
+    let !sn = VU.length s
+     in parGenSelInline (VU.length indices) $ \i ->
+            let !j = VU.unsafeIndex indices i
+             in if j >= 0 && j < sn
+                    then
+                        let !r = VU.unsafeIndex s j
+                         in if r >= 0 && r < base then r else -1
+                    else -1
+{-# NOINLINE gatherSel64To64 #-}
+
+{- | Selector generate over 'parallelChunks_': one contiguous index chunk per
+capability written into disjoint slices of one buffer — element @i@ depends
+only on @f i@, so the result is bit-identical to 'VU.generate' at any @-N@.
+Same policy as 'DataFrame.Internal.Column.Operations.parGenerateUnboxed', which
+sits above this module.
+-}
+{- | 'parGenSel' with an INLINE body: each monomorphic NOINLINE kernel above
+gets its own copy of the fill loop with the pick function inlined — no unknown
+closure call (or boxed result allocation) per element. Bit-identical results;
+callers must be NOINLINE so the 'unsafePerformIO' runs once per call.
+-}
+parGenSelInline :: (VU.Unbox c) => Int -> (Int -> c) -> VU.Vector c
+parGenSelInline n f
+    | not (shouldParallelize parThreshold n) = VU.generate n f
+    | otherwise = unsafePerformIO $ do
+        mv <- VUM.unsafeNew n
+        parallelChunks_ parThreshold n $ \ !lo !hi ->
+            let fill !i
+                    | i >= hi = pure ()
+                    | otherwise = VUM.unsafeWrite mv i (f i) >> fill (i + 1)
+             in fill lo
+        VU.unsafeFreeze mv
+{-# INLINE parGenSelInline #-}
+
+parGenSel :: (VU.Unbox c) => Int -> (Int -> c) -> VU.Vector c
+{-# SPECIALIZE parGenSel :: Int -> (Int -> Int32) -> VU.Vector Int32 #-}
+{-# SPECIALIZE parGenSel :: Int -> (Int -> Int) -> VU.Vector Int #-}
+parGenSel n f
+    | not (shouldParallelize parThreshold n) = VU.generate n f
+    | otherwise = unsafePerformIO $ do
+        mv <- VUM.unsafeNew n
+        parallelChunks_ parThreshold n $ \ !lo !hi ->
+            let fill !i
+                    | i >= hi = pure ()
+                    | otherwise = VUM.unsafeWrite mv i (f i) >> fill (i + 1)
+             in fill lo
+        VU.unsafeFreeze mv
+{-# NOINLINE parGenSel #-}
 
 {- | Take the first @k@ logical rows, sharing the byte buffer via a capped
 selection layer. O(k), no byte copy or decode — cheap @take@/display on a

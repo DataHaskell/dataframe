@@ -198,6 +198,8 @@ toVector col = case col of
                                     }
                                 )
 
+{-# INLINEABLE toVector #-}
+
 -- Some common types we will use for numerical computing.
 
 {- | Convert a column to an unboxed 'Double' vector, coercing numeric types
