@@ -43,6 +43,7 @@ data DataFrameException where
 
 instance Show DataFrameException where
     show :: DataFrameException -> String
+    show ExpectedNonNullableException = "Expected non-nullable column"
     show (TypeMismatchException context) =
         let
             errorString =
