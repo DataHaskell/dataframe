@@ -1,6 +1,6 @@
 cabal-version:      3.4
 name:               dataframe-fastcsv
-version:            1.4.1.0
+version:            1.4.1.1
 synopsis: SIMD-accelerated CSV reader for the dataframe library.
 
 description: A fast, SIMD-accelerated CSV/TSV reader using memory-mapped I/O
