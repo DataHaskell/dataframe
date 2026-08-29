@@ -7,6 +7,7 @@ module Operations.Statistics where
 import qualified Data.Vector.Unboxed as VU
 import qualified DataFrame as D
 import qualified DataFrame.Internal.Column as DI
+import DataFrame.Internal.DataFrame (getColumn)
 import qualified DataFrame.Internal.Statistics as D
 
 import Assertions
@@ -198,6 +199,56 @@ summarizeOptional =
             )
         )
 
+{- | A sliced column's bitmap keeps whole bytes, so its trailing bits still
+describe rows past the end of the slice. Counting non-null rows has to stop
+at the column's length rather than fold the whole byte vector.
+-}
+sixteenNullableRows :: D.DataFrame
+sixteenNullableRows =
+    D.fromNamedColumns
+        [ ("x", D.fromList (map (Just . fromIntegral) [1 .. 16 :: Int] :: [Maybe Double]))
+        ]
+
+countAfterTake :: Test
+countAfterTake =
+    TestCase
+        ( assertEqual
+            "summarize counts the rows a take actually kept"
+            (Just (DI.fromList ([3.0] :: [Double])))
+            ( getColumn "x" $
+                D.take 1 $
+                    D.summarize (D.take 3 sixteenNullableRows)
+            )
+        )
+
+countAfterRange :: Test
+countAfterRange =
+    TestCase
+        ( assertEqual
+            "summarize counts the rows a range actually kept"
+            (Just (DI.fromList ([5.0] :: [Double])))
+            ( getColumn "x" $
+                D.take 1 $
+                    D.summarize (D.range (8, 13) sixteenNullableRows)
+            )
+        )
+
+-- allMissing folds the same bitmap, so it needs the same length cutoff: the
+-- padding bits of a sliced all-null column would otherwise read as present.
+allMissingAfterSlice :: Test
+allMissingAfterSlice =
+    TestCase
+        ( assertEqual
+            "an all-null slice is still all-null"
+            (Just True)
+            (DI.allMissing <$> getColumn "x" (D.take 3 allNullRows))
+        )
+
+allNullRows :: D.DataFrame
+allNullRows =
+    D.fromNamedColumns
+        [("x", DI.fromList (replicate 16 (Nothing :: Maybe Double)))]
+
 -- correlation
 
 correlationDf :: D.DataFrame
@@ -277,6 +328,9 @@ tests =
     , TestLabel "wrongQuantileNumber" wrongQuantileNumber
     , TestLabel "wrongQuantileIndex" wrongQuantileIndex
     , TestLabel "summarizeOptional" summarizeOptional
+    , TestLabel "countAfterTake" countAfterTake
+    , TestLabel "countAfterRange" countAfterRange
+    , TestLabel "allMissingAfterSlice" allMissingAfterSlice
     , TestLabel "correlationPerfectPositive" correlationPerfectPositive
     , TestLabel "correlationPerfectNegative" correlationPerfectNegative
     , TestLabel "correlationSelfIdentity" correlationSelfIdentity

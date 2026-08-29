@@ -4,7 +4,16 @@ module DataFrame.Internal.Column.Bitmap where
 
 import Control.Monad (foldM_, forM_, when)
 import Control.Monad.ST (ST, runST)
-import Data.Bits (complement, setBit, shiftL, shiftR, testBit, (.&.), (.|.))
+import Data.Bits (
+    complement,
+    popCount,
+    setBit,
+    shiftL,
+    shiftR,
+    testBit,
+    (.&.),
+    (.|.),
+ )
 import Data.List (foldl')
 import Data.Maybe (fromMaybe, isNothing)
 import qualified Data.Vector.Unboxed as VU
@@ -99,6 +108,23 @@ bitmapSlice start len bm
          in buildBitmapFromValid $
                 VU.generate n $
                     \i -> if bitmapTestBit bm (start + i) then 1 else 0
+
+{- | Count the set bits among the first @n@ bits of a bitmap. A bitmap does
+not know the length of the column it describes, and 'bitmapSlice' keeps whole
+bytes on its aligned path, so the bits past @n@ may still describe rows
+outside the slice.
+-}
+popCountUpTo :: Int -> Bitmap -> Int
+popCountUpTo n bm = whole + partial
+  where
+    !fullBytes = min (n `shiftR` 3) (VU.length bm)
+    !rest = n .&. 7
+    whole = VU.foldl' (\acc b -> acc + popCount b) 0 (VU.take fullBytes bm)
+    partial
+        | rest == 0 || fullBytes >= VU.length bm = 0
+        | otherwise =
+            popCount (VU.unsafeIndex bm fullBytes .&. ((1 `shiftL` rest) - 1))
+{-# INLINE popCountUpTo #-}
 
 -- | Concatenate two bitmaps covering @n1@ and @n2@ rows respectively.
 bitmapConcat :: Int -> Bitmap -> Int -> Bitmap -> Bitmap
