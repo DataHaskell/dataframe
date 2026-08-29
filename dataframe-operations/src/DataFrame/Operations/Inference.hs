@@ -1,13 +1,6 @@
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
-{- | Single-pass sampled inference lattice (Round-2 S2). One walk over
-the sampled cells maintains a candidate mask {Bool, Int, Double, Date}
-cleared by attempting the WS-B byte parsers; the assumption is the
-highest-priority surviving candidate. Shared by every reader (audit T1),
-together with the Int -> Double prefix promotion that replaces the
-full-column retry chain (audit T2).
--}
 module DataFrame.Operations.Inference (
     DateFormat,
     ParsingAssumption (..),
@@ -57,29 +50,17 @@ parseTimeOpt dateFormat s =
         dateFormat
         (T.unpack s)
 
-{- | The default @%Y-%m-%d@ format takes the WS-B byte-level fast path;
-custom formats keep the reference 'readByteStringDate' parser.
--}
 byteStringDateParser :: DateFormat -> BS.ByteString -> Maybe Day
 byteStringDateParser "%Y-%m-%d" = parseDateField
 byteStringDateParser fmt = readByteStringDate fmt
 {-# INLINE byteStringDateParser #-}
 
-{- | 'DataFrame.Internal.Parsing.readInt' that rejects overflow instead of
-wrapping. Fields of <= 18 chars cannot overflow and keep the Text-level
-parse; longer (rare) fields take the exact byte-level parser, so an
-overflowing cell demotes\/promotes instead of silently wrapping.
--}
 readIntStrict :: T.Text -> Maybe Int
 readIntStrict t
     | T.length t <= 18 = readInt t
     | otherwise = parseIntField (TE.encodeUtf8 t)
 {-# INLINE readIntStrict #-}
 
-{- | Candidate-mask priority, reproducing the documented fallback order:
-an all-null sample makes no assumption; Int wins only when the Double
-mask agrees (so mixed Int\/Double samples classify as Double).
--}
 pickAssumption ::
     Bool -> Bool -> Bool -> Bool -> Bool -> ParsingAssumption
 pickAssumption seen b i d dt
@@ -90,12 +71,6 @@ pickAssumption seen b i d dt
     | dt = DateAssumption
     | otherwise = TextAssumption
 
-{- | Classify a sample of decoded 'T.Text' cells ('Nothing' = null).
-Bool\/Int\/Double candidates are tested with the WS-B byte parsers on
-the UTF-8 bytes (strip-tolerant, overflow-rejecting); the Date
-candidate keeps 'parseTimeOpt' so custom formats behave exactly as
-before. The walk exits early once every candidate is cleared.
--}
 makeParsingAssumption ::
     DateFormat -> V.Vector (Maybe T.Text) -> ParsingAssumption
 makeParsingAssumption dfmt cells = go 0 False True True True True
@@ -137,13 +112,6 @@ makeParsingAssumptionBytes dfmt cells = go 0 False True True True True
                     (d && isJust (parseDoubleField bs))
                     (dt && isJust (dateP bs))
 
-{- | Fused Int pass with in-place promotion (audit T2): on the first
-non-null cell that fails Int but parses as Double, the built Int prefix
-is converted by a vector map and the pass continues as Double over the
-retained raw cells. @Nothing@ = some cell parses as neither (the caller
-demotes the column to Text). Null slots hold sentinels (0 \/ 0.0)
-guarded by the bitmap, exactly like the unpromoted passes.
--}
 promoteIntColumn ::
     forall src.
     (Int -> src -> Bool) ->

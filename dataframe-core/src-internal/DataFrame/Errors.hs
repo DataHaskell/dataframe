@@ -34,6 +34,7 @@ data DataFrameException where
     ColumnsNotFoundException :: [T.Text] -> T.Text -> [T.Text] -> DataFrameException
     EmptyDataSetException :: T.Text -> DataFrameException
     InternalException :: T.Text -> DataFrameException
+    ExpectedNonNullableException :: DataFrameException
     NonColumnReferenceException :: T.Text -> DataFrameException
     UnaggregatedException :: T.Text -> DataFrameException
     WrongQuantileNumberException :: Int -> DataFrameException

@@ -5,84 +5,75 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 
-module DataFrame.Internal.Aggregation.Kernel.Direct (
-    directThreshold,
-    directReduce,
+{- | The low-cardinality DENSE reduction kernel: when the group domain is small,
+the grouping layer's @rowToGroup@ already maps row -> group, so the reduction
+scatters straight off it with no @valueIndices@ gather.
+
+Parallel by ROW range with a private per-worker accumulator of @nGroups@ slots,
+merged afterwards — which is why it needs a small domain, and why it admits only
+order-independent reductions: the merge must be exact for the result to stay
+byte-identical to @-N1@. Anything it rejects falls back to
+"DataFrame.Internal.Aggregation.Kernel.Scatter".
+
+The caller decides whether the domain is small enough; see @denseThreshold@ in
+the operations layer.
+-}
+module DataFrame.Internal.Aggregation.Kernel.Dense (
+    denseReduce,
 ) where
 
-import Control.Concurrent (forkFinally, getNumCapabilities)
-import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar)
-import Control.Exception (SomeException, throwIO)
 import Data.Type.Equality (TestEquality (..), type (:~:) (Refl))
 import qualified Data.Vector.Unboxed as VU
 import qualified Data.Vector.Unboxed.Mutable as VUM
 import System.IO.Unsafe (unsafePerformIO)
 import Type.Reflection (typeRep)
 
-import Control.Monad.ST (ST, runST)
-import DataFrame.Internal.Aggregation.Kernel (Reduction (..))
+import DataFrame.Internal.Aggregation.Reduction (Reduction (..))
 import DataFrame.Internal.Column (
     Column (..),
     fromUnboxedVector,
     materializePacked,
  )
-
-{- | Group-domain size at or below which the direct-indexed accumulator path is
-taken; wider domains keep the group-range kernel. The admitted reductions are
-order-independent, so the per-worker accumulator merge is exact.
--}
-directThreshold :: Int
-directThreshold = 262144
-
-capabilities :: Int
-capabilities = unsafePerformIO getNumCapabilities
-{-# NOINLINE capabilities #-}
-
-{- | Below this many rows the parallel fan-out is not worth it; a single
-sequential direct pass runs instead (tiny accumulator, one tight loop). Matches
-the grouping/scatter parallel threshold.
--}
-parThreshold :: Int
-parThreshold = 200000
+import DataFrame.Internal.Control.Concurrent (
+    capabilities,
+    parThreshold,
+    parallelChunks,
+ )
 
 {- | Run a recognised reduction through the direct-indexed path. 'Nothing' (so
 the caller falls back to the order-preserving kernel) unless the reduction is
 order-independent at this element type AND the column is a clean unboxed Int/Double.
 -}
-directReduce :: Reduction -> VU.Vector Int -> Int -> Column -> Maybe Column
-directReduce red g nGroups col = case col of
+denseReduce :: Reduction -> VU.Vector Int -> Int -> Column -> Maybe Column
+denseReduce red g nGroups col = case col of
     UnboxedColumn Nothing (v :: VU.Vector a) ->
         case testEquality (typeRep @a) (typeRep @Int) of
-            Just Refl -> directInt red g nGroups v
+            Just Refl -> denseInt red g nGroups v
             Nothing -> case testEquality (typeRep @a) (typeRep @Double) of
-                Just Refl -> directDouble red g nGroups v
+                Just Refl -> denseDouble red g nGroups v
                 Nothing -> Nothing
-    p@(PackedText _ _) -> directReduce red g nGroups (materializePacked p)
+    p@(PackedText _ _) -> denseReduce red g nGroups (materializePacked p)
     _ -> Nothing
-{-# INLINEABLE directReduce #-}
+{-# INLINEABLE denseReduce #-}
 
 -- | The order-independent reductions over an Int column.
-directInt :: Reduction -> VU.Vector Int -> Int -> VU.Vector Int -> Maybe Column
-directInt red g nGroups v = case red of
-    RCount -> Just (fromUnboxedVector (countDirect g nGroups (VU.length v)))
-    RSum -> Just (fromUnboxedVector (sumIntDirect g nGroups v))
-    RMin -> Just (fromUnboxedVector (extremaIntDirect True g nGroups v))
-    RMax -> Just (fromUnboxedVector (extremaIntDirect False g nGroups v))
-    RMean -> Just (fromUnboxedVector (meanIntDirect g nGroups v))
+denseInt :: Reduction -> VU.Vector Int -> Int -> VU.Vector Int -> Maybe Column
+denseInt red g nGroups v = case red of
+    RCount -> Just (fromUnboxedVector (countDense g nGroups (VU.length v)))
+    RSum -> Just (fromUnboxedVector (sumIntDense g nGroups v))
+    RMin -> Just (fromUnboxedVector (extremaIntDense True g nGroups v))
+    RMax -> Just (fromUnboxedVector (extremaIntDense False g nGroups v))
+    RMean -> Just (fromUnboxedVector (meanIntDense g nGroups v))
     _ -> Nothing
 
 {- | Over a Double column only @count@ is order-independent; the float
 sum/mean/variance reductions must keep the order-preserving kernel.
 -}
-directDouble ::
+denseDouble ::
     Reduction -> VU.Vector Int -> Int -> VU.Vector Double -> Maybe Column
-directDouble red g nGroups v = case red of
-    RCount -> Just (fromUnboxedVector (countDirect g nGroups (VU.length v)))
+denseDouble red g nGroups v = case red of
+    RCount -> Just (fromUnboxedVector (countDense g nGroups (VU.length v)))
     _ -> Nothing
-
--- | Whether to fan out at this row count.
-shouldPar :: Int -> Bool
-shouldPar n = n >= parThreshold && capabilities > 1
 
 {- | Fork @caps@ workers over disjoint contiguous row ranges of @[0, n)@, each
 producing its own private accumulator (no shared array, no sync). Returns the
@@ -90,17 +81,7 @@ partials in worker order for the caller's merge; rethrows the first failure.
 -}
 runPartialsOver ::
     Int -> Int -> (Int -> Int -> IO (VUM.IOVector Int)) -> IO [VUM.IOVector Int]
-runPartialsOver n caps fill = do
-    let !per = (n + caps - 1) `div` caps
-        spawn w = do
-            var <- newEmptyMVar
-            let !lo = min n (w * per)
-                !hi = min n (lo + per)
-            _ <- forkFinally (fill lo hi) (putMVar var)
-            pure var
-    vars <- mapM spawn [0 .. caps - 1]
-    results <- mapM takeMVar vars
-    mapM (either (throwIO @SomeException) pure) results
+runPartialsOver n _caps = parallelChunks parThreshold n
 
 {- | As 'runPartialsOver' but each worker produces a PAIR of accumulators (e.g.
 sum and count for the fused integer mean).
@@ -110,46 +91,20 @@ runPartialsPairOver ::
     Int ->
     (Int -> Int -> IO (VUM.IOVector Int, VUM.IOVector Int)) ->
     IO [(VUM.IOVector Int, VUM.IOVector Int)]
-runPartialsPairOver n caps fill = do
-    let !per = (n + caps - 1) `div` caps
-        spawn w = do
-            var <- newEmptyMVar
-            let !lo = min n (w * per)
-                !hi = min n (lo + per)
-            _ <- forkFinally (fill lo hi) (putMVar var)
-            pure var
-    vars <- mapM spawn [0 .. caps - 1]
-    results <- mapM takeMVar vars
-    mapM (either (throwIO @SomeException) pure) results
+runPartialsPairOver n _caps = parallelChunks parThreshold n
 
 -------------------------------------------------------------------------------
 -- Count (order-independent: per-group row count)
 -------------------------------------------------------------------------------
 
-countDirect :: VU.Vector Int -> Int -> Int -> VU.Vector Int
-countDirect g nGroups n
-    | not (shouldPar n) =
-        runST (countChunk' g nGroups 0 n >>= VU.unsafeFreeze)
-    | otherwise = unsafePerformIO $ do
-        parts <- runPartialsOver n capabilities (countChunk g nGroups)
-        mergeIntSum nGroups parts
-{-# NOINLINE countDirect #-}
+countDense :: VU.Vector Int -> Int -> Int -> VU.Vector Int
+countDense g nGroups n = unsafePerformIO $ do
+    parts <- runPartialsOver n capabilities (countChunk g nGroups)
+    mergeIntSum nGroups parts
+{-# NOINLINE countDense #-}
 
 countChunk :: VU.Vector Int -> Int -> Int -> Int -> IO (VUM.IOVector Int)
 countChunk g nGroups lo hi = do
-    acc <- VUM.replicate nGroups (0 :: Int)
-    let go !i
-            | i >= hi = pure ()
-            | otherwise = do
-                let !k = VU.unsafeIndex g i
-                c <- VUM.unsafeRead acc k
-                VUM.unsafeWrite acc k (c + 1)
-                go (i + 1)
-    go lo
-    pure acc
-
-countChunk' :: VU.Vector Int -> Int -> Int -> Int -> ST s (VUM.MVector s Int)
-countChunk' g nGroups lo hi = do
     acc <- VUM.replicate nGroups (0 :: Int)
     let go !i
             | i >= hi = pure ()
@@ -165,16 +120,11 @@ countChunk' g nGroups lo hi = do
 -- Integer sum (exact: merge order irrelevant)
 -------------------------------------------------------------------------------
 
-sumIntDirect :: VU.Vector Int -> Int -> VU.Vector Int -> VU.Vector Int
-sumIntDirect g nGroups v
-    | not (shouldPar n) =
-        unsafePerformIO (sumIntChunk g v nGroups 0 n >>= VU.unsafeFreeze)
-    | otherwise = unsafePerformIO $ do
-        parts <- runPartialsOver n capabilities (sumIntChunk g v nGroups)
-        mergeIntSum nGroups parts
-  where
-    !n = VU.length v
-{-# NOINLINE sumIntDirect #-}
+sumIntDense :: VU.Vector Int -> Int -> VU.Vector Int -> VU.Vector Int
+sumIntDense g nGroups v = unsafePerformIO $ do
+    parts <- runPartialsOver (VU.length v) capabilities (sumIntChunk g v nGroups)
+    mergeIntSum nGroups parts
+{-# NOINLINE sumIntDense #-}
 
 sumIntChunk ::
     VU.Vector Int -> VU.Vector Int -> Int -> Int -> Int -> IO (VUM.IOVector Int)
@@ -194,17 +144,13 @@ sumIntChunk g v nGroups lo hi = do
 -- Integer min / max (order-independent)
 -------------------------------------------------------------------------------
 
-extremaIntDirect ::
+extremaIntDense ::
     Bool -> VU.Vector Int -> Int -> VU.Vector Int -> VU.Vector Int
-extremaIntDirect isMin g nGroups v
-    | not (shouldPar n) =
-        unsafePerformIO (extremaIntChunk isMin g v nGroups 0 n >>= VU.unsafeFreeze)
-    | otherwise = unsafePerformIO $ do
-        parts <- runPartialsOver n capabilities (extremaIntChunk isMin g v nGroups)
-        mergeExtremaInt isMin nGroups parts
-  where
-    !n = VU.length v
-{-# NOINLINE extremaIntDirect #-}
+extremaIntDense isMin g nGroups v = unsafePerformIO $ do
+    parts <-
+        runPartialsOver (VU.length v) capabilities (extremaIntChunk isMin g v nGroups)
+    mergeExtremaInt isMin nGroups parts
+{-# NOINLINE extremaIntDense #-}
 
 extremaIntChunk ::
     Bool ->
@@ -236,18 +182,13 @@ extremaIntChunk isMin g v nGroups lo hi = do
 divided once at finalize. The integer sum is exact, so the parallel partial
 merge is byte-identical to the sequential single pass at any @-N@.
 -}
-meanIntDirect :: VU.Vector Int -> Int -> VU.Vector Int -> VU.Vector Double
-meanIntDirect g nGroups v
-    | not (shouldPar n) = unsafePerformIO $ do
-        (s, c) <- meanIntChunk g v nGroups 0 n
-        finalizeMeanInt nGroups s c
-    | otherwise = unsafePerformIO $ do
-        parts <- runPartialsPairOver n capabilities (meanIntChunk g v nGroups)
-        (s, c) <- mergePair nGroups parts
-        finalizeMeanInt nGroups s c
-  where
-    !n = VU.length v
-{-# NOINLINE meanIntDirect #-}
+meanIntDense :: VU.Vector Int -> Int -> VU.Vector Int -> VU.Vector Double
+meanIntDense g nGroups v = unsafePerformIO $ do
+    parts <-
+        runPartialsPairOver (VU.length v) capabilities (meanIntChunk g v nGroups)
+    (s, c) <- mergePair nGroups parts
+    finalizeMeanInt nGroups s c
+{-# NOINLINE meanIntDense #-}
 
 meanIntChunk ::
     VU.Vector Int ->

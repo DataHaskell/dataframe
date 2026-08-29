@@ -15,15 +15,11 @@ module DataFrame.Internal.Row.RowHash (
     parRowHashThreshold,
 ) where
 
-import Control.Concurrent (forkFinally, getNumCapabilities)
-import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar)
-import Control.Exception (SomeException, throwIO)
 import qualified Data.Text as T
 import Data.Type.Equality (TestEquality (..), type (:~:) (Refl))
 import qualified Data.Vector as V
 import qualified Data.Vector.Unboxed as VU
 import qualified Data.Vector.Unboxed.Mutable as VUM
-import System.IO.Unsafe (unsafePerformIO)
 import Type.Reflection (typeRep)
 
 import DataFrame.Internal.Algorithms.Hash (
@@ -48,6 +44,7 @@ import DataFrame.Internal.Column.Types (
     sFloating,
     sIntegral,
  )
+import DataFrame.Internal.Control.Concurrent (parallelChunks_)
 import DataFrame.Internal.Data.PackedText (
     PackedTextData (..),
     offAt,
@@ -61,10 +58,6 @@ grouping/join parallel thresholds so the whole pipeline switches together.
 parRowHashThreshold :: Int
 parRowHashThreshold = 200000
 
-capabilities :: Int
-capabilities = unsafePerformIO getNumCapabilities
-{-# NOINLINE capabilities #-}
-
 {- | Compute the per-row key hash over the selected key columns of an @n@-row
 frame. Forks one worker per capability over disjoint row ranges when the row
 count justifies it, else hashes the single full range; output is capability-independent.
@@ -73,20 +66,7 @@ computeRowHashesIO :: Int -> [Column] -> IO (VU.Vector Int)
 computeRowHashesIO n selected = do
     mv <- VUM.unsafeNew (max 1 n)
     let runRange lo hi = hashRowRange mv lo hi selected
-    if n >= parRowHashThreshold && capabilities > 1
-        then do
-            let !caps = capabilities
-                !per = (n + caps - 1) `div` caps
-                spawn w = do
-                    var <- newEmptyMVar
-                    let !lo = min n (w * per)
-                        !hi = min n (lo + per)
-                    _ <- forkFinally (runRange lo hi) (putMVar var)
-                    pure var
-            vars <- mapM spawn [0 .. caps - 1]
-            rs <- mapM takeMVar vars
-            mapM_ (either (throwIO @SomeException) pure) rs
-        else runRange 0 n
+    parallelChunks_ parRowHashThreshold n runRange
     VU.unsafeFreeze (VUM.slice 0 n mv)
 
 {- | Mix every selected column over the row range @[lo, hi)@ into @mv@, seeding

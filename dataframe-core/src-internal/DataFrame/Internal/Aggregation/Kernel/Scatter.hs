@@ -5,45 +5,258 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 
--- | Parallel scatter-accumulate aggregation kernel.
-module DataFrame.Internal.Aggregation.Kernel.Parallel (
+{- | The group-range scatter-accumulate reduction kernel: reduces a value column
+over the grouped layout @(valueIndices, offsets)@.
+
+Sequential and parallel are the same algorithm at different row counts, so they
+live together. 'scatterReducePar' cuts the GROUP axis into @caps@ ranges of
+roughly equal row count and lets workers write disjoint slots of one shared
+output — no per-worker accumulator, no merge — which keeps each group's
+accumulation order identical to 'scatterReduce' and the results byte-identical
+at any @-N@. Below 'parThreshold' it delegates to 'scatterReduce' directly.
+
+Contrast "DataFrame.Internal.Aggregation.Kernel.Dense", which scatters off
+@rowToGroup@ with no gather but needs a small dense group domain.
+-}
+module DataFrame.Internal.Aggregation.Kernel.Scatter (
+    scatterReduce,
     scatterReducePar,
-    momentScatterPar,
+
+    -- * Group-range helpers
+    -- $shared
+    groupRangeBounds,
+    rtgFromVis,
+    overGroups,
 ) where
 
-import Control.Concurrent (forkFinally, getNumCapabilities)
-import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar)
-import Control.Exception (SomeException, throwIO)
 import Control.Monad (when)
+import Control.Monad.ST (ST, runST)
 import Data.Type.Equality (TestEquality (..), type (:~:) (Refl))
 import qualified Data.Vector.Unboxed as VU
 import qualified Data.Vector.Unboxed.Mutable as VUM
 import System.IO.Unsafe (unsafePerformIO)
 import Type.Reflection (typeRep)
 
-import DataFrame.Internal.Aggregation.Kernel (
-    Reduction (..),
-    scatterColumnToDouble,
-    scatterReduce,
- )
-import DataFrame.Internal.Aggregation.Plan (Moments (..), momentScatter)
+import DataFrame.Internal.Aggregation.Reduction (Reduction (..))
 import DataFrame.Internal.Column (
     Column (..),
     Columnable,
     fromUnboxedVector,
     materializePacked,
  )
+import DataFrame.Internal.Control.Concurrent (
+    capabilities,
+    parThreshold,
+    parallelBounds_,
+    shouldParallelize,
+ )
 
-parThreshold :: Int
-parThreshold = 200000
+{- $shared
+Also used by "DataFrame.Internal.Aggregation.Kernel.Moments", which partitions
+the group axis the same way.
+-}
 
-capabilities :: Int
-capabilities = unsafePerformIO getNumCapabilities
-{-# NOINLINE capabilities #-}
+scatterReduce ::
+    Reduction -> VU.Vector Int -> Int -> Column -> Maybe Column
+scatterReduce red g nGroups col = case col of
+    UnboxedColumn Nothing (v :: VU.Vector a) ->
+        case testEquality (typeRep @a) (typeRep @Int) of
+            Just Refl -> Just (reduceTyped red g nGroups v intIdent)
+            Nothing -> case testEquality (typeRep @a) (typeRep @Double) of
+                Just Refl -> Just (reduceTyped red g nGroups v dblIdent)
+                Nothing -> Nothing
+    p@(PackedText _ _) -> scatterReduce red g nGroups (materializePacked p)
+    _ -> Nothing
+{-# INLINEABLE scatterReduce #-}
 
--- | Whether to take the parallel path at this row count.
-shouldPar :: Int -> Bool
-shouldPar n = n >= parThreshold && capabilities > 1
+-- | Per-type seed identities for the order-preserving reductions.
+data Idents a = Idents {minSeed :: !a, maxSeed :: !a}
+
+intIdent :: Idents Int
+intIdent = Idents maxBound minBound
+
+dblIdent :: Idents Double
+dblIdent = Idents (1 / 0) (negate (1 / 0))
+
+reduceTyped ::
+    forall a.
+    (Columnable a, VU.Unbox a, Num a, Ord a, Real a) =>
+    Reduction -> VU.Vector Int -> Int -> VU.Vector a -> Idents a -> Column
+reduceTyped red g nGroups v idents = case red of
+    RCount -> fromUnboxedVector (countScatter g nGroups)
+    RSum -> fromUnboxedVector (sumScatter g nGroups v)
+    RMin -> fromUnboxedVector (extremaScatter min (minSeed idents) g nGroups v)
+    RMax -> fromUnboxedVector (extremaScatter max (maxSeed idents) g nGroups v)
+    RMean -> fromUnboxedVector (meanScatter g nGroups v)
+    RVar -> fromUnboxedVector (varScatter False g nGroups v)
+    RStd -> fromUnboxedVector (varScatter True g nGroups v)
+    RTop2Sum -> fromUnboxedVector (top2Scatter g nGroups v)
+{-# INLINE reduceTyped #-}
+
+countScatter :: VU.Vector Int -> Int -> VU.Vector Int
+countScatter g nGroups = runST $ do
+    cnt <- VUM.replicate nGroups (0 :: Int)
+    let n = VU.length g
+        go !i
+            | i >= n = pure ()
+            | otherwise = do
+                let !k = VU.unsafeIndex g i
+                c <- VUM.unsafeRead cnt k
+                VUM.unsafeWrite cnt k (c + 1)
+                go (i + 1)
+    go 0
+    VU.unsafeFreeze cnt
+
+sumScatter ::
+    (VU.Unbox a, Num a) => VU.Vector Int -> Int -> VU.Vector a -> VU.Vector a
+sumScatter g nGroups v = runST $ do
+    s <- VUM.replicate nGroups 0
+    let n = VU.length v
+        go !i
+            | i >= n = pure ()
+            | otherwise = do
+                let !k = VU.unsafeIndex g i
+                cur <- VUM.unsafeRead s k
+                VUM.unsafeWrite s k (cur + VU.unsafeIndex v i)
+                go (i + 1)
+    go 0
+    VU.unsafeFreeze s
+{-# INLINE sumScatter #-}
+
+extremaScatter ::
+    (VU.Unbox a) =>
+    (a -> a -> a) -> a -> VU.Vector Int -> Int -> VU.Vector a -> VU.Vector a
+extremaScatter combine seed g nGroups v = runST $ do
+    m <- VUM.replicate nGroups seed
+    let n = VU.length v
+        go !i
+            | i >= n = pure ()
+            | otherwise = do
+                let !k = VU.unsafeIndex g i
+                cur <- VUM.unsafeRead m k
+                VUM.unsafeWrite m k (combine cur (VU.unsafeIndex v i))
+                go (i + 1)
+    go 0
+    VU.unsafeFreeze m
+{-# INLINE extremaScatter #-}
+
+meanScatter ::
+    (VU.Unbox a, Real a) => VU.Vector Int -> Int -> VU.Vector a -> VU.Vector Double
+meanScatter g nGroups v = runST $ do
+    s <- VUM.replicate nGroups (0 :: Double)
+    cnt <- VUM.replicate nGroups (0 :: Int)
+    scatterSumCount g v s cnt
+    finalizeMean nGroups s cnt
+{-# INLINE meanScatter #-}
+
+scatterSumCount ::
+    (VU.Unbox a, Real a) =>
+    VU.Vector Int ->
+    VU.Vector a ->
+    VUM.MVector s Double ->
+    VUM.MVector s Int ->
+    ST s ()
+scatterSumCount g v s cnt = go 0
+  where
+    n = VU.length v
+    go !i
+        | i >= n = pure ()
+        | otherwise = do
+            let !k = VU.unsafeIndex g i
+                !x = realToFrac (VU.unsafeIndex v i)
+            curS <- VUM.unsafeRead s k
+            VUM.unsafeWrite s k (curS + x)
+            curC <- VUM.unsafeRead cnt k
+            VUM.unsafeWrite cnt k (curC + 1)
+            go (i + 1)
+{-# INLINE scatterSumCount #-}
+
+finalizeMean ::
+    Int -> VUM.MVector s Double -> VUM.MVector s Int -> ST s (VU.Vector Double)
+finalizeMean nGroups s cnt = do
+    out <- VUM.new nGroups
+    let go !k
+            | k >= nGroups = pure ()
+            | otherwise = do
+                sv <- VUM.unsafeRead s k
+                c <- VUM.unsafeRead cnt k
+                VUM.unsafeWrite out k (if c == 0 then 0 / 0 else sv / fromIntegral c)
+                go (k + 1)
+    go 0
+    VU.unsafeFreeze out
+
+varScatter ::
+    (VU.Unbox a, Real a) =>
+    Bool -> VU.Vector Int -> Int -> VU.Vector a -> VU.Vector Double
+varScatter takeSqrt g nGroups v = runST $ do
+    cnt <- VUM.replicate nGroups (0 :: Int)
+    meanV <- VUM.replicate nGroups (0 :: Double)
+    m2 <- VUM.replicate nGroups (0 :: Double)
+    let n = VU.length v
+        go !i
+            | i >= n = pure ()
+            | otherwise = do
+                let !k = VU.unsafeIndex g i
+                    !x = realToFrac (VU.unsafeIndex v i)
+                c <- VUM.unsafeRead cnt k
+                mu <- VUM.unsafeRead meanV k
+                mm <- VUM.unsafeRead m2 k
+                let !c' = c + 1
+                    !delta = x - mu
+                    !mu' = mu + delta / fromIntegral c'
+                    !mm' = mm + delta * (x - mu')
+                VUM.unsafeWrite cnt k c'
+                VUM.unsafeWrite meanV k mu'
+                VUM.unsafeWrite m2 k mm'
+                go (i + 1)
+    go 0
+    out <- VUM.new nGroups
+    let fin !k
+            | k >= nGroups = pure ()
+            | otherwise = do
+                c <- VUM.unsafeRead cnt k
+                mm <- VUM.unsafeRead m2 k
+                let var = if c < 2 then 0 else mm / fromIntegral (c - 1)
+                VUM.unsafeWrite out k (if takeSqrt then sqrt var else var)
+                fin (k + 1)
+    fin 0
+    VU.unsafeFreeze out
+{-# INLINE varScatter #-}
+
+top2Scatter ::
+    (VU.Unbox a, Real a) => VU.Vector Int -> Int -> VU.Vector a -> VU.Vector Double
+top2Scatter g nGroups v = runST $ do
+    let ninf = negate (1 / 0) :: Double
+    m1 <- VUM.replicate nGroups ninf
+    m2 <- VUM.replicate nGroups ninf
+    let n = VU.length v
+        go !i
+            | i >= n = pure ()
+            | otherwise = do
+                let !k = VU.unsafeIndex g i
+                    !x = realToFrac (VU.unsafeIndex v i)
+                a1 <- VUM.unsafeRead m1 k
+                if x > a1
+                    then do
+                        VUM.unsafeWrite m1 k x
+                        VUM.unsafeWrite m2 k a1
+                    else do
+                        a2 <- VUM.unsafeRead m2 k
+                        when (x > a2) (VUM.unsafeWrite m2 k x)
+                go (i + 1)
+    go 0
+    out <- VUM.new nGroups
+    let fin !k
+            | k >= nGroups = pure ()
+            | otherwise = do
+                a1 <- VUM.unsafeRead m1 k
+                a2 <- VUM.unsafeRead m2 k
+                let s = (if isInfinite a1 then 0 else a1) + (if isInfinite a2 then 0 else a2)
+                VUM.unsafeWrite out k s
+                fin (k + 1)
+    fin 0
+    VU.unsafeFreeze out
+{-# INLINE top2Scatter #-}
 
 groupRangeBounds :: VU.Vector Int -> Int -> Int -> VU.Vector Int
 groupRangeBounds offs nGroups caps = VU.create $ do
@@ -65,25 +278,10 @@ groupRangeBounds offs nGroups caps = VU.create $ do
     go 1 0
     pure b
 
-forEachRange :: VU.Vector Int -> Int -> (Int -> Int -> IO ()) -> IO ()
-forEachRange bounds caps act
-    | caps <= 1 = act (VU.unsafeIndex bounds 0) (VU.unsafeIndex bounds caps)
-    | otherwise = do
-        vars <- mapM spawn [0 .. caps - 1]
-        results <- mapM takeMVar vars
-        mapM_ (either (throwIO :: SomeException -> IO ()) pure) results
-  where
-    spawn w = do
-        var <- newEmptyMVar
-        let !s = VU.unsafeIndex bounds w
-            !e = VU.unsafeIndex bounds (w + 1)
-        _ <- forkFinally (act s e) (putMVar var)
-        pure var
-
 scatterReducePar ::
     Reduction -> VU.Vector Int -> VU.Vector Int -> Int -> Column -> Maybe Column
 scatterReducePar red vis offs nGroups col
-    | not (shouldPar (VU.length vis)) || nGroups <= 1 =
+    | not (shouldParallelize parThreshold (VU.length vis)) || nGroups <= 1 =
         scatterReduce red (rtgFromVis vis offs nGroups) nGroups col
     | otherwise = case col of
         UnboxedColumn Nothing (v :: VU.Vector a) ->
@@ -113,14 +311,6 @@ rtgFromVis vis offs nGroups = VU.create $ do
                 go (g + 1)
     go 0
     pure rtg
-
-data Idents a = Idents {minSeed :: !a, maxSeed :: !a}
-
-intIdent :: Idents Int
-intIdent = Idents maxBound minBound
-
-dblIdent :: Idents Double
-dblIdent = Idents (1 / 0) (negate (1 / 0))
 
 reduceParTyped ::
     forall a.
@@ -178,7 +368,7 @@ countPar ::
     IO (VU.Vector Int)
 countPar _vis offs nGroups caps bounds = do
     out <- VUM.replicate nGroups (0 :: Int)
-    forEachRange bounds caps $ \gs ge ->
+    parallelBounds_ caps bounds $ \gs ge ->
         let grp !g
                 | g >= ge = pure ()
                 | otherwise = do
@@ -199,7 +389,7 @@ sumPar ::
     IO (VU.Vector a)
 sumPar vis offs nGroups v caps bounds = do
     out <- VUM.replicate nGroups 0
-    forEachRange bounds caps $ \gs ge ->
+    parallelBounds_ caps bounds $ \gs ge ->
         overGroups vis offs gs ge $ \g row -> do
             cur <- VUM.unsafeRead out g
             VUM.unsafeWrite out g (cur + VU.unsafeIndex v row)
@@ -219,7 +409,7 @@ extremaPar ::
     IO (VU.Vector a)
 extremaPar combine seed vis offs nGroups v caps bounds = do
     out <- VUM.replicate nGroups seed
-    forEachRange bounds caps $ \gs ge ->
+    parallelBounds_ caps bounds $ \gs ge ->
         overGroups vis offs gs ge $ \g row -> do
             cur <- VUM.unsafeRead out g
             VUM.unsafeWrite out g (combine cur (VU.unsafeIndex v row))
@@ -238,7 +428,7 @@ meanPar ::
 meanPar vis offs nGroups v caps bounds = do
     s <- VUM.replicate nGroups (0 :: Double)
     cnt <- VUM.replicate nGroups (0 :: Int)
-    forEachRange bounds caps $ \gs ge ->
+    parallelBounds_ caps bounds $ \gs ge ->
         overGroups vis offs gs ge $ \g row -> do
             let !x = realToFrac (VU.unsafeIndex v row)
             cs <- VUM.unsafeRead s g
@@ -271,7 +461,7 @@ varPar takeSqrt vis offs nGroups v caps bounds = do
     cnt <- VUM.replicate nGroups (0 :: Int)
     meanV <- VUM.replicate nGroups (0 :: Double)
     m2 <- VUM.replicate nGroups (0 :: Double)
-    forEachRange bounds caps $ \gs ge ->
+    parallelBounds_ caps bounds $ \gs ge ->
         overGroups vis offs gs ge $ \g row -> do
             let !x = realToFrac (VU.unsafeIndex v row)
             c <- VUM.unsafeRead cnt g
@@ -310,7 +500,7 @@ top2Par vis offs nGroups v caps bounds = do
     let ninf = negate (1 / 0) :: Double
     m1 <- VUM.replicate nGroups ninf
     m2 <- VUM.replicate nGroups ninf
-    forEachRange bounds caps $ \gs ge ->
+    parallelBounds_ caps bounds $ \gs ge ->
         overGroups vis offs gs ge $ \g row -> do
             let !x = realToFrac (VU.unsafeIndex v row)
             a1 <- VUM.unsafeRead m1 g
@@ -333,59 +523,3 @@ top2Par vis offs nGroups v caps bounds = do
     fin 0
     VU.unsafeFreeze out
 {-# INLINE top2Par #-}
-
--------------------------------------------------------------------------------
--- Parallel fused two-column moments (Q9)
--------------------------------------------------------------------------------
-
-{- | Parallel counterpart of 'momentScatter': one fused pass over both columns,
-each group's six sums accumulated within one worker's range. Byte-identical to
-'momentScatter'. 'Nothing' unless both columns are non-null unboxed Int/Double.
--}
-momentScatterPar ::
-    VU.Vector Int -> VU.Vector Int -> Int -> Column -> Column -> Maybe Moments
-momentScatterPar vis offs nGroups colX colY
-    | not (shouldPar (VU.length vis)) || nGroups <= 1 =
-        momentScatter (rtgFromVis vis offs nGroups) nGroups colX colY
-    | otherwise = do
-        xs <- scatterColumnToDouble colX
-        ys <- scatterColumnToDouble colY
-        let !caps = capabilities
-            !bounds = groupRangeBounds offs nGroups caps
-        pure (unsafePerformIO (momentPar vis offs nGroups xs ys caps bounds))
-{-# NOINLINE momentScatterPar #-}
-
-momentPar ::
-    VU.Vector Int ->
-    VU.Vector Int ->
-    Int ->
-    VU.Vector Double ->
-    VU.Vector Double ->
-    Int ->
-    VU.Vector Int ->
-    IO Moments
-momentPar vis offs nGroups xs ys caps bounds = do
-    cnt <- VUM.replicate nGroups (0 :: Int)
-    sx <- VUM.replicate nGroups (0 :: Double)
-    sy <- VUM.replicate nGroups (0 :: Double)
-    sxx <- VUM.replicate nGroups (0 :: Double)
-    syy <- VUM.replicate nGroups (0 :: Double)
-    sxy <- VUM.replicate nGroups (0 :: Double)
-    let bump arr g d = VUM.unsafeRead arr g >>= \c -> VUM.unsafeWrite arr g (c + d)
-    forEachRange bounds caps $ \gs ge ->
-        overGroups vis offs gs ge $ \g row -> do
-            let !x = VU.unsafeIndex xs row
-                !y = VU.unsafeIndex ys row
-            VUM.unsafeRead cnt g >>= \c -> VUM.unsafeWrite cnt g (c + 1)
-            bump sx g x
-            bump sy g y
-            bump sxx g (x * x)
-            bump syy g (y * y)
-            bump sxy g (x * y)
-    Moments . fromUnboxedVector
-        <$> VU.unsafeFreeze cnt
-        <*> (fromUnboxedVector <$> VU.unsafeFreeze sx)
-        <*> (fromUnboxedVector <$> VU.unsafeFreeze sy)
-        <*> (fromUnboxedVector <$> VU.unsafeFreeze sxx)
-        <*> (fromUnboxedVector <$> VU.unsafeFreeze syy)
-        <*> (fromUnboxedVector <$> VU.unsafeFreeze sxy)

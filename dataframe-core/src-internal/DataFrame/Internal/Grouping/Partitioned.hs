@@ -2,51 +2,38 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE Strict #-}
 
-{- | Parallel partitioned group-by: rows are counting-sorted into partitions by the
-top hash bits, then one task per capability groups its partitions independently.
-Output is bit-for-bit identical to the sequential 'DataFrame.Internal.Grouping.groupBy'.
+{- | Partitioned group-by: rows are counting-sorted into partitions by the top
+hash bits, then one task per capability groups its partitions independently,
+after which the group numbering is canonicalized to first-appearance order.
+Output is bit-for-bit identical to the sequential
+'DataFrame.Internal.Grouping.groupBy'.
+
+The name is the mechanism, not the threading: this is a genuinely different
+algorithm from the sequential single-hash-table path, not that path with a
+fork\/join wrapped around it. (Its sibling
+"DataFrame.Internal.Grouping.Direct" is also internally parallel.) Whether to
+take this path is 'DataFrame.Internal.Grouping.groupBy''s decision, not this
+module's.
 -}
-module DataFrame.Internal.Grouping.Parallel (
+module DataFrame.Internal.Grouping.Partitioned (
     parallelAssignGroups,
-    shouldParallelize,
-    parThreshold,
     numPartitionsFor,
 ) where
 
-import Control.Concurrent (forkFinally, getNumCapabilities)
-import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar)
-import Control.Exception (SomeException, throwIO)
+import Control.Concurrent (getNumCapabilities)
 import Control.Monad (forM_, when)
 import Data.Bits (countLeadingZeros, unsafeShiftR)
-import Data.IORef (atomicModifyIORef', newIORef)
 import qualified Data.Vector as V
 import qualified Data.Vector.Mutable as VM
 import qualified Data.Vector.Unboxed as VU
 import qualified Data.Vector.Unboxed.Mutable as VUM
 import Data.Word (Word64)
 import DataFrame.Internal.Algorithms.Rank.Radix (rankByHash)
+import DataFrame.Internal.Control.Concurrent (pooledIndices)
 import DataFrame.Internal.Data.HashTable (
     htInsert,
     newHashTable,
  )
-import System.IO.Unsafe (unsafePerformIO)
-
-{- | Below this many rows the partition/fork overhead is not worth it; 'groupBy'
-uses its sequential 'ST' path instead.
--}
-parThreshold :: Int
-parThreshold = 200000
-
-{- | Whether 'groupBy' should take the parallel path: more than one capability
-and at least 'parThreshold' rows.
--}
-shouldParallelize :: Int -> Bool
-shouldParallelize n = n >= parThreshold && capabilities > 1
-{-# NOINLINE shouldParallelize #-}
-
-capabilities :: Int
-capabilities = unsafePerformIO getNumCapabilities
-{-# NOINLINE capabilities #-}
 
 {- | Sign-preserving unsigned remap: ascending 'Word64' order of @key h@ equals
 ascending signed-'Int' order of @h@, so partitioning and sorting on it reproduce
@@ -170,35 +157,32 @@ runPartitions ::
     VM.IOVector (VU.Vector Int) ->
     VUM.IOVector Int ->
     IO ()
-runPartitions caps p partStart sortedRows hashes eqRow localGid canonBoxes nLocalGroups = do
-    next <- newIORef 0
-    let groupPartition !pp = do
-            let !s = VU.unsafeIndex partStart pp
-                !e = VU.unsafeIndex partStart (pp + 1)
-                !sz = e - s
-            when (sz > 0) $ do
-                ht <- newHashTable sz
-                repHashM <- VUM.new sz
-                let loop !pos !nextGid
-                        | pos >= e = pure nextGid
-                        | otherwise = do
-                            let !row = VU.unsafeIndex sortedRows pos
-                                !h = VU.unsafeIndex hashes row
-                            (gid, isNew) <- htInsert ht eqRow nextGid row h
-                            VUM.unsafeWrite localGid pos gid
-                            if isNew
-                                then do
-                                    VUM.unsafeWrite repHashM nextGid h
-                                    loop (pos + 1) (nextGid + 1)
-                                else loop (pos + 1) nextGid
-                ng <- loop s 0
-                VUM.unsafeWrite nLocalGroups pp ng
-                canon <- rankByHash (VUM.unsafeRead repHashM) ng
-                VM.unsafeWrite canonBoxes pp canon
-        worker = do
-            i <- atomicModifyIORef' next (\j -> (j + 1, j))
-            when (i < p) $ groupPartition i >> worker
-    forkJoin_ (replicate caps worker)
+runPartitions caps p partStart sortedRows hashes eqRow localGid canonBoxes nLocalGroups =
+    pooledIndices caps p groupPartition
+  where
+    groupPartition !pp = do
+        let !s = VU.unsafeIndex partStart pp
+            !e = VU.unsafeIndex partStart (pp + 1)
+            !sz = e - s
+        when (sz > 0) $ do
+            ht <- newHashTable sz
+            repHashM <- VUM.new sz
+            let loop !pos !nextGid
+                    | pos >= e = pure nextGid
+                    | otherwise = do
+                        let !row = VU.unsafeIndex sortedRows pos
+                            !h = VU.unsafeIndex hashes row
+                        (gid, isNew) <- htInsert ht eqRow nextGid row h
+                        VUM.unsafeWrite localGid pos gid
+                        if isNew
+                            then do
+                                VUM.unsafeWrite repHashM nextGid h
+                                loop (pos + 1) (nextGid + 1)
+                            else loop (pos + 1) nextGid
+            ng <- loop s 0
+            VUM.unsafeWrite nLocalGroups pp ng
+            canon <- rankByHash (VUM.unsafeRead repHashM) ng
+            VM.unsafeWrite canonBoxes pp canon
 
 -------------------------------------------------------------------------------
 -- Phase 3: global base ids + assembly
@@ -290,15 +274,3 @@ assemble n p partStart sortedRows localGid globalBase canonOf nGroups = do
     offs <- VU.unsafeFreeze offsM
     vis <- VU.unsafeFreeze visM
     pure (rtg, vis, offs)
-
--- | Run each action on its own thread; rethrow the first failure (in order).
-forkJoin_ :: [IO ()] -> IO ()
-forkJoin_ actions = do
-    vars <- mapM spawn actions
-    results <- mapM takeMVar vars
-    mapM_ (either (throwIO :: SomeException -> IO ()) pure) results
-  where
-    spawn act = do
-        var <- newEmptyMVar
-        _ <- forkFinally act (putMVar var)
-        pure var

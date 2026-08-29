@@ -10,16 +10,14 @@ module DataFrame.Internal.Algorithms.Sort.Radix.Parallel (
     parSortThreshold,
 ) where
 
-import Control.Concurrent (forkFinally, getNumCapabilities)
-import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar)
-import Control.Exception (SomeException, throwIO, try)
+import Control.Concurrent (getNumCapabilities)
 import Control.Monad (forM_, when)
 import Data.Bits (countLeadingZeros, unsafeShiftR, (.&.))
-import Data.IORef (atomicModifyIORef', newIORef)
 import qualified Data.Vector.Unboxed as VU
 import qualified Data.Vector.Unboxed.Mutable as VUM
 import Data.Word (Word64)
 import DataFrame.Internal.Algorithms.Rank.Radix (sortKey)
+import DataFrame.Internal.Control.Concurrent (capabilities, pooledIndices)
 import System.IO.Unsafe (unsafePerformIO)
 
 {- | Below this many rows the partition/fork overhead is not worth it; the
@@ -27,10 +25,6 @@ caller's sequential LSD radix path is used instead.
 -}
 parSortThreshold :: Int
 parSortThreshold = 500000
-
-capabilities :: Int
-capabilities = unsafePerformIO getNumCapabilities
-{-# NOINLINE capabilities #-}
 
 {- | Top-bits partition index of a hash: the high @64 - shift@ bits of its
 unsigned 'sortKey'. Ascending partition order equals ascending key order.
@@ -220,53 +214,38 @@ sortPartitions ::
     VUM.IOVector Int ->
     VUM.IOVector Int ->
     IO ()
-sortPartitions caps p partStart partRows hashes outOrder outKeys = do
-    next <- newIORef 0
-    let sortOne !pp = do
-            let !s = VU.unsafeIndex partStart pp
-                !e = VU.unsafeIndex partStart (pp + 1)
-                !sz = e - s
-            when (sz > 0) $
-                if sz == 1
-                    then do
-                        let !r = VU.unsafeIndex partRows s
-                        VUM.unsafeWrite outOrder s r
-                        VUM.unsafeWrite outKeys s (VU.unsafeIndex hashes r)
-                    else do
-                        keysA <- VUM.new sz
-                        orderA <- VUM.new sz
-                        let seed !i
-                                | i >= sz = pure ()
-                                | otherwise = do
-                                    let !r = VU.unsafeIndex partRows (s + i)
-                                    VUM.unsafeWrite keysA i (sortKey (VU.unsafeIndex hashes r))
-                                    VUM.unsafeWrite orderA i r
-                                    seed (i + 1)
-                        seed 0
-                        keysB <- VUM.new sz
-                        orderB <- VUM.new sz
-                        radixPasses sz keysA orderA keysB orderB
-                        let emit !i
-                                | i >= sz = pure ()
-                                | otherwise = do
-                                    o <- VUM.unsafeRead orderA i
-                                    VUM.unsafeWrite outOrder (s + i) o
-                                    VUM.unsafeWrite outKeys (s + i) (VU.unsafeIndex hashes o)
-                                    emit (i + 1)
-                        emit 0
-        worker = do
-            i <- atomicModifyIORef' next (\j -> (j + 1, j))
-            when (i < p) $ sortOne i >> worker
-    forkJoin_ (replicate caps worker)
-
--- | Run each action on its own thread; rethrow the first failure (in order).
-forkJoin_ :: [IO ()] -> IO ()
-forkJoin_ actions = do
-    vars <- mapM spawn actions
-    results <- mapM takeMVar vars
-    mapM_ (either (throwIO :: SomeException -> IO ()) pure) results
+sortPartitions caps p partStart partRows hashes outOrder outKeys =
+    pooledIndices caps p sortOne
   where
-    spawn act = do
-        var <- newEmptyMVar
-        _ <- forkFinally act (putMVar var)
-        pure var
+    sortOne !pp = do
+        let !s = VU.unsafeIndex partStart pp
+            !e = VU.unsafeIndex partStart (pp + 1)
+            !sz = e - s
+        when (sz > 0) $
+            if sz == 1
+                then do
+                    let !r = VU.unsafeIndex partRows s
+                    VUM.unsafeWrite outOrder s r
+                    VUM.unsafeWrite outKeys s (VU.unsafeIndex hashes r)
+                else do
+                    keysA <- VUM.new sz
+                    orderA <- VUM.new sz
+                    let seed !i
+                            | i >= sz = pure ()
+                            | otherwise = do
+                                let !r = VU.unsafeIndex partRows (s + i)
+                                VUM.unsafeWrite keysA i (sortKey (VU.unsafeIndex hashes r))
+                                VUM.unsafeWrite orderA i r
+                                seed (i + 1)
+                    seed 0
+                    keysB <- VUM.new sz
+                    orderB <- VUM.new sz
+                    radixPasses sz keysA orderA keysB orderB
+                    let emit !i
+                            | i >= sz = pure ()
+                            | otherwise = do
+                                o <- VUM.unsafeRead orderA i
+                                VUM.unsafeWrite outOrder (s + i) o
+                                VUM.unsafeWrite outKeys (s + i) (VU.unsafeIndex hashes o)
+                                emit (i + 1)
+                    emit 0

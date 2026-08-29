@@ -39,6 +39,10 @@ import DataFrame.Internal.Column.Bitmap (
  )
 import DataFrame.Internal.Column.Encode (dictEncodeColumnUpTo)
 import DataFrame.Internal.Column.Types
+import DataFrame.Internal.Control.Concurrent (
+    parThreshold,
+    shouldParallelize,
+ )
 import DataFrame.Internal.Data.HashTable (htInsert, newHashTable)
 import DataFrame.Internal.Data.PackedText (
     PackedSel,
@@ -57,10 +61,7 @@ import DataFrame.Internal.Grouping.Direct (
     directGroupThreshold,
     tryDirectGroupColumn,
  )
-import DataFrame.Internal.Grouping.Parallel (
-    parallelAssignGroups,
-    shouldParallelize,
- )
+import DataFrame.Internal.Grouping.Partitioned (parallelAssignGroups)
 import System.IO.Unsafe (unsafePerformIO)
 import Type.Reflection (typeRep)
 
@@ -87,7 +88,7 @@ groupBy names df
             (VU.fromList [0])
             VU.empty
     | Just dg <- tryDirectGroup names df = dg
-    | shouldParallelize n = groupByPar names df
+    | shouldParallelize parThreshold n = groupByPar names df
     | otherwise = groupBySeq names df
   where
     !n = nRows df
@@ -155,7 +156,7 @@ group-by on every db-benchmark question, so it always falls back ('dictGroupEnab
 tryDictGroup ::
     Int -> DataFrame -> [T.Text] -> Column -> Maybe GroupedDataFrame
 tryDictGroup n df names col
-    | dictGroupEnabled && not (shouldParallelize n) = do
+    | dictGroupEnabled && not (shouldParallelize parThreshold n) = do
         (codes, card) <- dictEncodeColumnUpTo dictSingleThreshold col
         let (vis, os) = indicesFromGroups codes card
         Just (Grouped df names vis os codes)
@@ -189,7 +190,7 @@ groupBySeq names df =
         (vis, os) = indicesFromGroups rtg nGroups
      in Grouped df names vis os rtg
 
-{- | The parallel partitioned grouping path (see 'DataFrame.Internal.Grouping.Parallel'):
+{- | The parallel partitioned grouping path (see 'DataFrame.Internal.Grouping.Partitioned'):
 forks one task per capability, producing output bit-for-bit identical to
 'groupBySeq'. Pure via 'unsafePerformIO' (deterministic thread fan-out only).
 -}

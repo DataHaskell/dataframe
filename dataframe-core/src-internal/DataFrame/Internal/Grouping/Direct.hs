@@ -14,9 +14,6 @@ module DataFrame.Internal.Grouping.Direct (
     DirectGrouping (..),
 ) where
 
-import Control.Concurrent (forkFinally, getNumCapabilities)
-import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar)
-import Control.Exception (SomeException, throwIO)
 import Data.Type.Equality (TestEquality (..), type (:~:) (Refl))
 import qualified Data.Vector.Unboxed as VU
 import qualified Data.Vector.Unboxed.Mutable as VUM
@@ -24,6 +21,11 @@ import System.IO.Unsafe (unsafePerformIO)
 import Type.Reflection (typeRep)
 
 import DataFrame.Internal.Column (Column (..))
+import DataFrame.Internal.Control.Concurrent (
+    parThreshold,
+    parallelChunks,
+    shouldParallelize,
+ )
 
 {- | Largest key value RANGE (max - min + 1) the direct grouping path accepts. A
 @2^20@-slot histogram is 8MB; the low-cardinality questions sit far below it
@@ -41,13 +43,6 @@ data DirectGrouping = DirectGrouping
     , dgOffsets :: !(VU.Vector Int)
     , dgNGroups :: !Int
     }
-
-capabilities :: Int
-capabilities = unsafePerformIO getNumCapabilities
-{-# NOINLINE capabilities #-}
-
-parThreshold :: Int
-parThreshold = 200000
 
 {- | Take the direct path if the (single) key column is a clean non-null unboxed
 @Int@ column with a small value range. Returns 'Nothing' to fall back to the
@@ -67,20 +62,10 @@ tryDirectGroupColumn _ = Nothing
 -- | Parallel min/max reduce (order-independent).
 rangeOf :: VU.Vector Int -> (Int, Int)
 rangeOf v
-    | not (shouldPar n) = rangeChunk v 0 n
+    | not (shouldParallelize parThreshold n) = rangeChunk v 0 n
     | otherwise = unsafePerformIO $ do
-        let !caps = capabilities
-            !per = (n + caps - 1) `div` caps
-            spawn w = do
-                var <- newEmptyMVar
-                let !lo = min n (w * per)
-                    !hi = min n (lo + per)
-                _ <- forkFinally (pure $! rangeChunk v lo hi) (putMVar var)
-                pure var
-        vars <- mapM spawn [0 .. caps - 1]
-        rs <- mapM takeMVar vars
-        rs' <- mapM (either (throwIO @SomeException) pure) rs
-        pure (combineRanges (filter (\(a, _) -> a /= maxBound) rs'))
+        rs <- parallelChunks parThreshold n (\lo hi -> pure $! rangeChunk v lo hi)
+        pure (combineRanges (filter (\(a, _) -> a /= maxBound) rs))
   where
     !n = VU.length v
 {-# NOINLINE rangeOf #-}
@@ -97,9 +82,6 @@ rangeChunk v lo hi = go lo maxBound minBound
 combineRanges :: [(Int, Int)] -> (Int, Int)
 combineRanges [] = (0, 0)
 combineRanges ((a0, b0) : rest) = foldr (\(a, b) (ma, mb) -> (min ma a, max mb b)) (a0, b0) rest
-
-shouldPar :: Int -> Bool
-shouldPar n = n >= parThreshold && capabilities > 1
 
 {- | Build the grouping by counting sort on @value - min@: a (parallel) per-value
 histogram, compaction of non-empty values into ascending dense ids, a scan into
@@ -130,19 +112,9 @@ merge order is irrelevant). Sequential single pass below 'parThreshold'.
 -}
 buildHistogram :: VU.Vector Int -> Int -> Int -> Int -> IO (VUM.IOVector Int)
 buildHistogram v mn range n
-    | not (shouldPar n) = histChunk v mn range 0 n
+    | not (shouldParallelize parThreshold n) = histChunk v mn range 0 n
     | otherwise = do
-        let !caps = capabilities
-            !per = (n + caps - 1) `div` caps
-            spawn w = do
-                var <- newEmptyMVar
-                let !lo = min n (w * per)
-                    !hi = min n (lo + per)
-                _ <- forkFinally (histChunk v mn range lo hi) (putMVar var)
-                pure var
-        vars <- mapM spawn [0 .. caps - 1]
-        rs <- mapM takeMVar vars
-        parts <- mapM (either (throwIO @SomeException) pure) rs
+        parts <- parallelChunks parThreshold n (histChunk v mn range)
         case parts of
             [] -> VUM.replicate range 0
             (p0 : rest) -> do

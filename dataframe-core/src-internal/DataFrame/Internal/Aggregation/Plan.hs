@@ -1,5 +1,5 @@
 {-# LANGUAGE AllowAmbiguousTypes #-}
-{-# LANGUAGE BangPatterns #-}
+
 {-# LANGUAGE ExplicitNamespaces #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE LambdaCase #-}
@@ -7,15 +7,14 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 
-{- | The aggregation fast-path planner and the two-column moment scatter.
-'planAgg' recognises a supported aggregate shape over a clean unboxed Int/Double
-column and returns an 'AggPlan'; 'momentScatter' fuses the six regression sums.
+{- | The aggregation fast-path planner. 'planAgg' recognises a supported
+aggregate shape over a clean unboxed Int/Double column and returns an 'AggPlan';
+'planMoments' recognises the six-fold regression shape and returns a
+'MomentPlan'. Planning only — the kernels live under "Kernel".
 -}
 module DataFrame.Internal.Aggregation.Plan (
     AggPlan (..),
     planAgg,
-    Moments (..),
-    momentScatter,
     MomentPlan (..),
     planMoments,
 ) where
@@ -24,14 +23,9 @@ import qualified Data.Map.Strict as M
 import qualified Data.Text as T
 import Data.Type.Equality (TestEquality (..), type (:~:) (Refl))
 import qualified Data.Vector.Unboxed as VU
-import qualified Data.Vector.Unboxed.Mutable as VUM
 
-import Control.Monad.ST (runST)
-import DataFrame.Internal.Aggregation.Kernel (
-    Reduction (..),
-    scatterColumnToDouble,
- )
-import DataFrame.Internal.Column (Column (..), fromUnboxedVector)
+import DataFrame.Internal.Aggregation.Reduction (Reduction (..))
+import DataFrame.Internal.Column (Column (..))
 import DataFrame.Internal.DataFrame (
     DataFrame (derivingExpressions),
     GroupedDataFrame (..),
@@ -226,77 +220,3 @@ pickBaseColumns roles =
         _ -> Nothing
   where
     lins = M.keys (M.fromList [(c, ()) | (_, RoleLin c) <- roles])
-
-{- | The additive moment sums of two columns, each an @nGroups@-length column:
-@(n, Sx, Sy, Sxx, Syy, Sxy)@.
--}
-data Moments = Moments
-    { mN :: Column
-    , mSx :: Column
-    , mSy :: Column
-    , mSxx :: Column
-    , mSyy :: Column
-    , mSxy :: Column
-    }
-
-{- | One pass over two Double-coercible columns @x@ and @y@ filling the count and
-five sums, collapsing the Q9 regression family's six folds into a single pass.
-'Nothing' unless both columns are non-null unboxed Int/Double.
--}
-momentScatter :: VU.Vector Int -> Int -> Column -> Column -> Maybe Moments
-momentScatter g nGroups colX colY = do
-    xs <- scatterColumnToDouble colX
-    ys <- scatterColumnToDouble colY
-    let (cnt, sx, sy, sxx, syy, sxy) = momentPass g nGroups xs ys
-    pure
-        Moments
-            { mN = fromUnboxedVector cnt
-            , mSx = fromUnboxedVector sx
-            , mSy = fromUnboxedVector sy
-            , mSxx = fromUnboxedVector sxx
-            , mSyy = fromUnboxedVector syy
-            , mSxy = fromUnboxedVector sxy
-            }
-
-momentPass ::
-    VU.Vector Int ->
-    Int ->
-    VU.Vector Double ->
-    VU.Vector Double ->
-    ( VU.Vector Int
-    , VU.Vector Double
-    , VU.Vector Double
-    , VU.Vector Double
-    , VU.Vector Double
-    , VU.Vector Double
-    )
-momentPass g nGroups xs ys = runST $ do
-    cnt <- VUM.replicate nGroups (0 :: Int)
-    sx <- VUM.replicate nGroups (0 :: Double)
-    sy <- VUM.replicate nGroups (0 :: Double)
-    sxx <- VUM.replicate nGroups (0 :: Double)
-    syy <- VUM.replicate nGroups (0 :: Double)
-    sxy <- VUM.replicate nGroups (0 :: Double)
-    let n = VU.length xs
-        bump arr k d = VUM.unsafeRead arr k >>= \c -> VUM.unsafeWrite arr k (c + d)
-        go !i
-            | i >= n = pure ()
-            | otherwise = do
-                let !k = VU.unsafeIndex g i
-                    !x = VU.unsafeIndex xs i
-                    !y = VU.unsafeIndex ys i
-                VUM.unsafeRead cnt k >>= \c -> VUM.unsafeWrite cnt k (c + 1)
-                bump sx k x
-                bump sy k y
-                bump sxx k (x * x)
-                bump syy k (y * y)
-                bump sxy k (x * y)
-                go (i + 1)
-    go 0
-    (,,,,,)
-        <$> VU.unsafeFreeze cnt
-        <*> VU.unsafeFreeze sx
-        <*> VU.unsafeFreeze sy
-        <*> VU.unsafeFreeze sxx
-        <*> VU.unsafeFreeze syy
-        <*> VU.unsafeFreeze sxy

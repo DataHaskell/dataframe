@@ -36,7 +36,7 @@ import DataFrame.Internal.Expression
 import DataFrame.Internal.Grouping (buildRowToGroup, changingPoints, groupBy)
 import DataFrame.Internal.Interpreter
 import DataFrame.Internal.Row.RowHash (computeRowHashesIO)
-import DataFrame.Operations.AggregateScatter (runMomentPlan, runPlan)
+import DataFrame.Operations.Aggregation.Run (runMomentPlan, runPlan)
 import DataFrame.Operations.Core
 import DataFrame.Operations.Subset
 import System.IO.Unsafe (unsafePerformIO)

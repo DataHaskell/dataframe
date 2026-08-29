@@ -33,7 +33,7 @@ import Data.Kind (Type)
 import Data.Type.Equality (TestEquality (..))
 import Data.Word (Word8)
 import DataFrame.Errors (
-    DataFrameException (TypeMismatchException),
+    DataFrameException (ExpectedNonNullableException, TypeMismatchException),
     TypeErrorContext (
         MkTypeErrorContext,
         callingFunctionName,
@@ -209,30 +209,13 @@ toDoubleVector column =
     case column of
         PackedText _ _ -> toDoubleVector (materializePacked column)
         MergedColumn _ _ -> toDoubleVector (materializeMerged column)
-        UnboxedColumn bm (f :: VU.Vector a) -> case testEquality (typeRep @a) (typeRep @Double) of
-            Just Refl -> case bm of
-                Nothing -> Right f
-                Just bitmap -> Right $ VU.imap (\i x -> if bitmapTestBit bitmap i then x else read "NaN") f
+        UnboxedColumn (Just _) _ -> Left ExpectedNonNullableException
+        UnboxedColumn Nothing (f :: VU.Vector a) -> case testEquality (typeRep @a) (typeRep @Double) of
+            Just Refl -> Right f
             Nothing -> case sFloating @a of
-                STrue ->
-                    Right
-                        ( VU.imap
-                            ( \i x -> case bm of
-                                Just bitmap | not (bitmapTestBit bitmap i) -> read "NaN"
-                                _ -> realToFrac x
-                            )
-                            f
-                        )
+                STrue -> Right (VU.map realToFrac f)
                 SFalse -> case sIntegral @a of
-                    STrue ->
-                        Right
-                            ( VU.imap
-                                ( \i x -> case bm of
-                                    Just bitmap | not (bitmapTestBit bitmap i) -> read "NaN"
-                                    _ -> fromIntegral x
-                                )
-                                f
-                            )
+                    STrue -> Right (VU.map fromIntegral f)
                     SFalse ->
                         Left $
                             TypeMismatchException
@@ -243,17 +226,20 @@ toDoubleVector column =
                                     , errorColumnName = Nothing
                                     }
                                 )
-        BoxedColumn bm (f :: VB.Vector a) -> case testEquality (typeRep @a) (typeRep @Integer) of
-            Just Refl ->
-                Right
-                    ( VB.convert $
-                        VB.imap
-                            ( \i x -> case bm of
-                                Just bitmap | not (bitmapTestBit bitmap i) -> read "NaN"
-                                _ -> fromIntegral x
-                            )
-                            f
-                    )
+        BoxedColumn (Just _) (f :: VB.Vector a) -> case testEquality (typeRep @a) (typeRep @Integer) of
+            Just Refl -> Left ExpectedNonNullableException
+            Nothing ->
+                Left $
+                    TypeMismatchException
+                        ( MkTypeErrorContext
+                            { userType = Right (typeRep @Double)
+                            , expectedType = Left (columnTypeString column) :: Either String (TypeRep ())
+                            , callingFunctionName = Just "toDoubleVector"
+                            , errorColumnName = Nothing
+                            }
+                        )
+        BoxedColumn Nothing (f :: VB.Vector a) -> case testEquality (typeRep @a) (typeRep @Integer) of
+            Just Refl -> Right (VB.convert $ VB.map fromIntegral f)
             Nothing ->
                 Left $
                     TypeMismatchException

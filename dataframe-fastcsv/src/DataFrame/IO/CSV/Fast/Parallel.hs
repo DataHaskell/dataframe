@@ -31,10 +31,10 @@ import System.Mem (performMajorGC)
 import DataFrame.IO.CSV.Fast.Columns
 import DataFrame.IO.CSV.Fast.Passes (NullSpec, PassCol (..))
 import DataFrame.IO.CSV.Fast.TextMerge (mergeTextChunksPar)
-import DataFrame.IO.CSV.Fast.Workers (pooledRun)
 import DataFrame.Internal.Column (Column, forceColumn)
 import DataFrame.Internal.Column.Builder (concatColumns)
 import DataFrame.Internal.Column.Encode (dictCompactColumn)
+import DataFrame.Internal.Control.Concurrent (pooledRun)
 import DataFrame.Operations.Typing (SafeReadMode)
 
 -- | Below this input size the fan-out overhead outweighs the parallelism.
