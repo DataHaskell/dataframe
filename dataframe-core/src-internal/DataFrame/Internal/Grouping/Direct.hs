@@ -620,7 +620,7 @@ ceilLog2 x
 {- | The bucket store: rows partitioned by the top code bits, each bucket
 holding packed @(code, row)@ words in original row order.
 -}
-data PackedBuckets = PackedBuckets !(VUM.IOVector Int)
+newtype PackedBuckets = PackedBuckets (VUM.IOVector Int)
 
 packedVec :: PackedBuckets -> VUM.IOVector Int
 packedVec (PackedBuckets v) = v

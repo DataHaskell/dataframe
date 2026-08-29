@@ -99,8 +99,7 @@ radixPasses ::
     VUM.IOVector Int ->
     VUM.IOVector Int ->
     IO ()
-radixPasses n keysA orderA keysB orderB =
-    radixPassesN 8 n keysA orderA keysB orderB
+radixPasses = radixPassesN 8
 
 {- | Run the first @np@ stable 8-bit LSD passes (bits @0 .. 8*np-1@),
 ping-ponging between the buffer pairs. For odd @np@ the sorted order lands in

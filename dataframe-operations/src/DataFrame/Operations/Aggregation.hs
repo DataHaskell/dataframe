@@ -197,8 +197,8 @@ aggregate aggs gdf =
                         , Just (medC, varC, stdC) <- [runMedianVarFused gdf nGroups c]
                         , kv <-
                             [(nm, medC) | (nm, PlanMedian c') <- plans, c' == cname]
-                                ++ map (\nm -> (nm, stdC)) stds
-                                ++ map (\nm -> (nm, varC)) vars
+                                ++ [(nm, stdC) | nm <- stds]
+                                ++ [(nm, varC) | nm <- vars]
                         ]
 
         -- Fast path: a recognised reduction scatters in one unboxed pass.

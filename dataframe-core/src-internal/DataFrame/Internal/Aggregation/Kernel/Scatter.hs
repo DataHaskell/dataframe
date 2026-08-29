@@ -477,8 +477,8 @@ extremaPar combine seed vis offs nGroups v caps bounds = do
             gs
             ge
             seed
-            (\acc row -> combine acc (VU.unsafeIndex v row)) $
-            VUM.unsafeWrite out
+            (\acc row -> combine acc (VU.unsafeIndex v row))
+            $ VUM.unsafeWrite out
     VU.unsafeFreeze out
 {-# INLINE extremaPar #-}
 

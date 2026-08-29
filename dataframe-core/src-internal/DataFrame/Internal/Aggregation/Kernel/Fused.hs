@@ -30,7 +30,7 @@ module DataFrame.Internal.Aggregation.Kernel.Fused (
 ) where
 
 import Control.Exception (evaluate)
-import Control.Monad (when)
+import Control.Monad (replicateM, when)
 import Data.Type.Equality (TestEquality (..), type (:~:) (Refl))
 import qualified Data.Vector.Unboxed as VU
 import qualified Data.Vector.Unboxed.Mutable as VUM
@@ -151,6 +151,7 @@ runFusedAggs n nGroups aggs = unsafePerformIO $ do
     let !caps' = if shouldPar n then capabilities else 1
         !per = (max 1 n + caps' - 1) `div` caps'
     opened <- mapM (openFusedAgg caps' nGroups) aggs
+
     let stepsFor w = map (\(steps, _) -> steps !! w) opened
     _ <-
         forkJoin
@@ -167,7 +168,7 @@ functions (worker order) and the merge+finalize action.
 -}
 openFusedAgg :: Int -> Int -> FusedAgg -> IO ([Int -> Int -> IO ()], IO Column)
 openFusedAgg caps' nGroups (FusedAgg new step mergeR fin) = do
-    ss <- Control.Monad.replicateM caps' new
+    ss <- replicateM caps' new
     let finish = case ss of
             [] -> error "runFusedAggs: no workers"
             (s0 : rest) -> do

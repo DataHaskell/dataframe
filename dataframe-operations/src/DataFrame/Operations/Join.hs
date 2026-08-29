@@ -136,7 +136,7 @@ ciRunStart !w = w `unsafeShiftR` 32
 
 -- | Length field of a packed run.
 ciRunLen :: Int -> Int
-ciRunLen !w = w .&. 0xFFFFFFFF
+ciRunLen !w = w .&. 0xFFFF_FFFF
 {-# INLINE ciRunLen #-}
 
 {- | Home slot of a hash: the top @log2 cap@ bits of a Fibonacci multiply.
@@ -148,7 +148,7 @@ in the hundreds), so the table must never index by @h .&. mask@ directly.
 ciSlot :: Int -> Int -> Int
 ciSlot !shift !h =
     fromIntegral
-        ((fromIntegral h * (0x9E3779B97F4A7C15 :: Word64)) `unsafeShiftR` shift)
+        ((fromIntegral h * (0x9E37_79B9_7F4A_7C15 :: Word64)) `unsafeShiftR` shift)
 {-# INLINE ciSlot #-}
 
 -- | @64 - log2 cap@ for a table with slot mask @mask@ (@cap@ a power of two).
@@ -192,7 +192,7 @@ sized for the worst case (every row distinct) so building never resizes.
 -}
 buildCompactIndex :: VU.Vector Int -> CompactIndex
 buildCompactIndex hashes
-    | VU.length hashes > 0x7FFFFFFF =
+    | VU.length hashes > 0x7FFF_FFFF =
         error
             "buildCompactIndex: build side exceeds 2^31 rows (packed run fields are 32-bit)"
 buildCompactIndex hashes =

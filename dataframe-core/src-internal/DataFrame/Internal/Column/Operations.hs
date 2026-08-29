@@ -33,7 +33,7 @@ import Control.Monad.ST (runST)
 import Data.Bits (setBit, shiftL, shiftR)
 import Data.Int (Int32)
 import Data.Kind (Type)
-import Data.Maybe (fromMaybe, isNothing)
+import Data.Maybe (catMaybes, fromMaybe, isNothing)
 import Data.Type.Equality (TestEquality (..))
 import Data.Word (Word8)
 import DataFrame.Errors (
@@ -302,10 +302,11 @@ get their own copy with @f@ inlined.
 -}
 fillGenerate ::
     (VU.Unbox c) => VUM.IOVector c -> (Int -> c) -> Int -> Int -> IO ()
-fillGenerate mv f !lo !hi = let go !i
-                                    | i >= hi = pure ()
-                                    | otherwise = VUM.unsafeWrite mv i (f i) >> go (i + 1)
-                             in go lo
+fillGenerate mv f !lo !hi =
+    let go !i
+            | i >= hi = pure ()
+            | otherwise = VUM.unsafeWrite mv i (f i) >> go (i + 1)
+     in go lo
 {-# INLINE fillGenerate #-}
 
 {- | Parallel unboxed gather: element @i@ of the result is
@@ -1158,7 +1159,7 @@ atIndicesStableMulti ixs cols =
      in if nFused < 2
             then map (atIndicesStable ixs) cols
             else
-                let fused = multiGatherRun ixs (Data.Maybe.catMaybes specs)
+                let fused = multiGatherRun ixs (catMaybes specs)
                     go [] _ = []
                     go (Nothing : ss) !k = atIndicesStable ixs (cols !! k) : go ss (k + 1)
                     go (Just _ : ss) !k =
