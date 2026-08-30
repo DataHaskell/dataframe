@@ -44,7 +44,7 @@ import DataFrame.Internal.Column.Bitmap (
     Bitmap,
     bitmapTestBit,
  )
-import DataFrame.Internal.PackedText (
+import DataFrame.Internal.Data.PackedText (
     PackedTextData (..),
     offAt,
     selAt,
