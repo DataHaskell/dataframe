@@ -19,7 +19,7 @@ import Data.Word (Word8)
 import DataFrame.Internal.Column (Column (..))
 import DataFrame.Internal.Column.Bitmap (Bitmap)
 import DataFrame.Internal.DataFrame (DataFrame, fromNamedColumns)
-import DataFrame.Internal.PackedText (mkPackedContiguous32)
+import DataFrame.Internal.Data.PackedText (mkPackedContiguous32)
 
 stressRows :: Int
 stressRows = 1_000_000
