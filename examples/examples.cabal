@@ -72,6 +72,7 @@ executable examples
                    DataFrame.IO.Parquet.Thrift,
                    DataFrame.IO.Parquet.Time,
                    DataFrame.IO.Parquet.Utils,
+                   DataFrame.IO.Parquet.Writer,
                    DataFrame.IO.Utils.RandomAccess,
                    DataFrame.Lazy.IO.CSV,
                    DataFrame.Lazy.IO.Binary,
