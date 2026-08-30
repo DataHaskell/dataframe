@@ -29,6 +29,7 @@ import DataFrame.IO.Utils.RandomAccess (
     appendTextArraySlice,
     writeDoubleLE,
     writeFloatLE,
+    writeInteger64,
     writeWord32LE,
     writeWord64LE,
     writeWord8,
@@ -105,14 +106,6 @@ buildEncoder col
     | hasElemType @UTCTime col = pure (timestampEncoder col)
     | otherwise =
         error ("writeParquet: unsupported column type " <> columnTypeString col)
-
-writeInteger64 :: MemoryBuffer -> Integer -> IO ()
-writeInteger64 buffer value
-    | value < toInteger (minBound :: Int64) = outOfRange
-    | value > toInteger (maxBound :: Int64) = outOfRange
-    | otherwise = writeWord64LE buffer (fromIntegral value)
-  where
-    outOfRange = ioError (userError "writeParquet: Integer value is outside the INT64 range")
 
 scalarEncoder ::
     forall a.
