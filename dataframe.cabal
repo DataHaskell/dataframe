@@ -156,7 +156,7 @@ library
                             DataFrame.IO.Parquet.Time,
                             DataFrame.IO.Utils.RandomAccess,
                             DataFrame.Typed.IO.Parquet
-        build-depends:   dataframe-parquet >= 1.5 && < 1.6
+        build-depends:   dataframe-parquet >= 1.5.0.1 && < 1.6
         cpp-options:     -DWITH_PARQUET
 
     -- The lazy executor calls both CSV and Parquet readers directly, so
@@ -354,7 +354,7 @@ test-suite tests
                     dataframe-lazy >= 2.4.1 && < 2.5,
                     dataframe-learn >= 2.4.2 && < 2.5,
                     dataframe-operations >= 2.5 && < 2.6,
-                    dataframe-parquet >= 1.5 && < 1.6,
+                    dataframe-parquet >= 1.5.0.1 && < 1.6,
                     dataframe-parsing >= 2.2 && < 2.3,
                     HUnit >= 1.6 && < 1.8,
                     QuickCheck >= 2 && < 3,
