@@ -197,6 +197,7 @@ ensureCapacity buffer needed = do
             copyMutableByteArray grown 0 array 0 position
             writeIORef buffer.arrayRef grown
             pure grown
+{-# INLINE ensureCapacity #-}
 
 writeWord8 :: MemoryBuffer -> Word8 -> IO ()
 writeWord8 buffer b = do
@@ -204,6 +205,7 @@ writeWord8 buffer b = do
     array <- ensureCapacity buffer (position + 1)
     writeByteArray array position b
     writeIORef buffer.positionRef (position + 1)
+{-# INLINE writeWord8 #-}
 
 writeByteString :: MemoryBuffer -> ByteString -> IO ()
 writeByteString buffer bs =
@@ -213,6 +215,7 @@ writeByteString buffer bs =
         withMutableByteArrayContents array $ \dst ->
             copyBytes (dst `plusPtr` position) (castPtr source) len
         writeIORef buffer.positionRef (position + len)
+{-# INLINE writeByteString #-}
 
 writeWord32LE :: MemoryBuffer -> Word32 -> IO ()
 writeWord32LE buffer w = do
@@ -223,6 +226,7 @@ writeWord32LE buffer w = do
     writeByteArray array (position + 2) (fromIntegral (w `shiftR` 16) :: Word8)
     writeByteArray array (position + 3) (fromIntegral (w `shiftR` 24) :: Word8)
     writeIORef buffer.positionRef (position + 4)
+{-# INLINE writeWord32LE #-}
 
 writeWord64LE :: MemoryBuffer -> Word64 -> IO ()
 writeWord64LE buffer w = do
@@ -237,12 +241,15 @@ writeWord64LE buffer w = do
     writeByteArray array (position + 6) (fromIntegral (w `shiftR` 48) :: Word8)
     writeByteArray array (position + 7) (fromIntegral (w `shiftR` 56) :: Word8)
     writeIORef buffer.positionRef (position + 8)
+{-# INLINE writeWord64LE #-}
 
 writeFloatLE :: MemoryBuffer -> Float -> IO ()
 writeFloatLE buffer = writeWord32LE buffer . castFloatToWord32
+{-# INLINE writeFloatLE #-}
 
 writeDoubleLE :: MemoryBuffer -> Double -> IO ()
 writeDoubleLE buffer = writeWord64LE buffer . castDoubleToWord64
+{-# INLINE writeDoubleLE #-}
 
 flushBufferToBuffer :: MemoryBuffer -> MemoryBuffer -> IO ()
 flushBufferToBuffer source destination
@@ -261,6 +268,7 @@ flushBufferToBuffer source destination
             sourcePosition
         writeIORef destination.positionRef (destinationPosition + sourcePosition)
         writeIORef source.positionRef 0
+{-# INLINE flushBufferToBuffer #-}
 
 bufferToByteString :: MemoryBuffer -> IO ByteString
 bufferToByteString buffer = do
@@ -272,9 +280,11 @@ bufferToByteString buffer = do
 
 bufferResidency :: MemoryBuffer -> IO Int
 bufferResidency buffer = readIORef buffer.positionRef
+{-# INLINE bufferResidency #-}
 
 resetPosition :: MemoryBuffer -> IO ()
 resetPosition buffer = writeIORef buffer.positionRef 0
+{-# INLINE resetPosition #-}
 
 -- I tested write speeds by doing (on Apple Silicon)
 -- `dd if=/dev/zero of=test bs={$n}k oflag=direct conv=fdatasync

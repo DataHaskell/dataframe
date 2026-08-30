@@ -35,6 +35,7 @@ pushDef dl value = do
                     writeDefRun dl current count
                     writeIORef dl.dlValue value
                     writeIORef dl.dlCount 1
+{-# INLINE pushDef #-}
 
 flushDef :: DefLevels -> IO ()
 flushDef dl = do
@@ -43,11 +44,13 @@ flushDef dl = do
         value <- readIORef dl.dlValue
         writeDefRun dl value count
     writeIORef dl.dlCount 0
+{-# INLINE flushDef #-}
 
 writeDefRun :: DefLevels -> Int -> Int -> IO ()
 writeDefRun dl value count = do
     writeLeb128 dl.dlBuf (fromIntegral (count `shiftL` 1))
     writeWord8 dl.dlBuf (fromIntegral value)
+{-# INLINE writeDefRun #-}
 
 writeLeb128 :: MemoryBuffer -> Word64 -> IO ()
 writeLeb128 buffer value
@@ -55,3 +58,4 @@ writeLeb128 buffer value
     | otherwise = do
         writeWord8 buffer (fromIntegral (value .&. 0x7f) .|. 0x80)
         writeLeb128 buffer (value `shiftR` 7)
+{-# INLINE writeLeb128 #-}

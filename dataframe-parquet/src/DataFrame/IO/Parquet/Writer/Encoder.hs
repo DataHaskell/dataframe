@@ -277,6 +277,7 @@ textEncoder col =
 
 writeText :: MemoryBuffer -> T.Text -> IO ()
 writeText buffer (Text bytes offset count) = writeTextSlice buffer bytes offset count
+{-# INLINE writeText #-}
 
 writeTextSlice :: MemoryBuffer -> TA.Array -> Int -> Int -> IO ()
 writeTextSlice buffer bytes offset count = do
@@ -311,3 +312,4 @@ utcToMicros (UTCTime day dt) =
         ( (toModifiedJulianDay day - 40587) * 86400 * 1000000
             + diffTimeToPicoseconds dt `div` 1000000
         )
+{-# INLINE utcToMicros #-}
