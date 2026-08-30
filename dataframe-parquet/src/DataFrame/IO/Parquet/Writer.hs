@@ -41,6 +41,7 @@ import DataFrame.IO.Parquet.Writer.Options (
 import DataFrame.IO.Utils.RandomAccess (
     MemoryBuffer,
     WritableBinaryHandle,
+    atomicallyWriteFile,
     bufferResidency,
     bufferToByteString,
     flushBufferToBuffer,
@@ -91,7 +92,7 @@ writeParquet :: FilePath -> DataFrame -> IO ()
 writeParquet = writeParquetWithOptions defaultParquetWriteOptions
 
 writeParquetWithOptions :: ParquetWriteOptions -> FilePath -> DataFrame -> IO ()
-writeParquetWithOptions options path df = do
+writeParquetWithOptions options path_ df = do
     when (options.strategy == TwoPass) $
         error
             "The Two Pass Strategy for the Parquet Writer has not yet been implemented"
@@ -112,7 +113,7 @@ writeParquetWithOptions options path df = do
                 )
                 names
     scratchBuffer_ <- mallocBuffer (max 1 options.pageSize)
-    withWritableBinaryFile path $ \output -> do
+    atomicallyWriteFile path_ $ \path -> withWritableBinaryFile path $ \output -> do
         writeByteStringToFile output magic
         currentFileOffsetRef_ <- newIORef 4
         rowGroupMetadataRef_ <- newIORef []

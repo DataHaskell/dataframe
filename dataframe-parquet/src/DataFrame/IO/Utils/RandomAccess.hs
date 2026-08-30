@@ -12,6 +12,7 @@ module DataFrame.IO.Utils.RandomAccess (
     WritableBinaryHandle,
     openWritableBinaryFile,
     withWritableBinaryFile,
+    atomicallyWriteFile,
     MemoryBuffer (..),
     mallocBuffer,
     writeByteString,
@@ -19,6 +20,7 @@ module DataFrame.IO.Utils.RandomAccess (
     writeWord8,
     writeWord32LE,
     writeWord64LE,
+    writeInteger64,
     writeFloatLE,
     writeDoubleLE,
     bufferResidency,
@@ -29,7 +31,8 @@ module DataFrame.IO.Utils.RandomAccess (
     writeByteStringToFile,
 ) where
 
-import Control.Exception (bracket)
+import Control.Exception (bracket, bracketOnError, finally)
+import Control.Monad (when)
 import Control.Monad.IO.Class (MonadIO (..))
 import Control.Monad.Primitive (RealWorld)
 import Control.Monad.ST (stToIO)
@@ -38,6 +41,7 @@ import qualified Data.ByteString as BS
 import Data.ByteString.Internal (ByteString (PS), create)
 import qualified Data.ByteString.Unsafe as BU
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import Data.Int (Int64)
 import Data.Primitive.ByteArray (
     MutableByteArray,
     copyMutableByteArray,
@@ -57,6 +61,8 @@ import DataFrame.IO.Parquet.Seeking (
  )
 import Foreign (castForeignPtr, castPtr, copyBytes, plusPtr)
 import GHC.Float (castDoubleToWord64, castFloatToWord32)
+import System.Directory (copyPermissions, doesFileExist, removeFile, renameFile)
+import System.FilePath (takeDirectory)
 import System.IO (
     BufferMode (NoBuffering),
     Handle,
@@ -67,6 +73,7 @@ import System.IO (
     hSetBinaryMode,
     hSetBuffering,
     openBinaryFile,
+    openBinaryTempFileWithDefaultPermissions,
  )
 
 uncurry3 :: (a -> b -> c -> d) -> (a, b, c) -> d
@@ -151,6 +158,31 @@ openWritableBinaryFile filepath = do
     hSetBinaryMode h True
     hSetBuffering h NoBuffering
     pure . WritableBinaryHandle $ h
+
+atomicallyWriteFile :: FilePath -> (FilePath -> IO a) -> IO a
+atomicallyWriteFile path action =
+    bracketOnError
+        openAction
+        removeFile
+        ( \tmpFile -> do
+            result <- action tmpFile
+            renameFile tmpFile path
+            pure result
+        )
+  where
+    openAction =
+        bracketOnError
+            ( openBinaryTempFileWithDefaultPermissions
+                (takeDirectory path)
+                "dataframe-parquet.incomplete"
+            )
+            (\(tmpFile, h) -> hClose h `finally` removeFile tmpFile)
+            ( \(tmpFile, h) -> do
+                hClose h
+                destinationExists <- doesFileExist path
+                when destinationExists (copyPermissions path tmpFile)
+                pure tmpFile
+            )
 
 withWritableBinaryFile :: FilePath -> (WritableBinaryHandle -> IO a) -> IO a
 withWritableBinaryFile filepath =
@@ -242,6 +274,15 @@ writeWord64LE buffer w = do
     writeByteArray array (position + 7) (fromIntegral (w `shiftR` 56) :: Word8)
     writeIORef buffer.positionRef (position + 8)
 {-# INLINE writeWord64LE #-}
+
+writeInteger64 :: MemoryBuffer -> Integer -> IO ()
+writeInteger64 buffer value
+    | value < toInteger (minBound :: Int64) = outOfRange
+    | value > toInteger (maxBound :: Int64) = outOfRange
+    | otherwise = writeWord64LE buffer (fromIntegral value)
+  where
+    outOfRange = ioError (userError "writeParquet: Integer value is outside the INT64 range")
+{-# INLINE writeInteger64 #-}
 
 writeFloatLE :: MemoryBuffer -> Float -> IO ()
 writeFloatLE buffer = writeWord32LE buffer . castFloatToWord32
