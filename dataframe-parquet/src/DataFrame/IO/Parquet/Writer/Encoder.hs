@@ -94,7 +94,7 @@ buildEncoder col
                 (INT64 enum)
                 Nothing
                 Nothing
-                (\buffer -> writeWord64LE buffer . fromIntegral)
+                writeInteger64
                 col
     | hasElemType @Float col =
         pure $ scalarEncoder @Float (FLOAT enum) Nothing Nothing writeFloatLE col
@@ -105,6 +105,14 @@ buildEncoder col
     | hasElemType @UTCTime col = pure (timestampEncoder col)
     | otherwise =
         error ("writeParquet: unsupported column type " <> columnTypeString col)
+
+writeInteger64 :: MemoryBuffer -> Integer -> IO ()
+writeInteger64 buffer value
+    | value < toInteger (minBound :: Int64) = outOfRange
+    | value > toInteger (maxBound :: Int64) = outOfRange
+    | otherwise = writeWord64LE buffer (fromIntegral value)
+  where
+    outOfRange = ioError (userError "writeParquet: Integer value is outside the INT64 range")
 
 scalarEncoder ::
     forall a.
