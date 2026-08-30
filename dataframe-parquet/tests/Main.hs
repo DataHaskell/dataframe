@@ -118,6 +118,7 @@ tinyWriteOpts =
         { pageSize = 64
         , rowGroupSize = 512
         , batchRows = 4
+        , subBatchRows = 3
         }
 
 tests :: Test
