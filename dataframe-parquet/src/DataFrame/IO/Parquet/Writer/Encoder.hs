@@ -77,6 +77,25 @@ buildEncoder col
                 Nothing
                 (\buffer -> writeWord64LE buffer . fromIntegral)
                 col
+    -- Ints in GHC can be 32 bit or 64 bit integers depending on the
+    -- underlying computers architecture. So we'll do 64bit integers
+    -- to cover all our bases
+    | hasElemType @Int col =
+        pure $
+            scalarEncoder @Int
+                (INT64 enum)
+                Nothing
+                Nothing
+                (\buffer -> writeWord64LE buffer . fromIntegral)
+                col
+    | hasElemType @Integer col =
+        pure $
+            scalarEncoder @Integer
+                (INT64 enum)
+                Nothing
+                Nothing
+                (\buffer -> writeWord64LE buffer . fromIntegral)
+                col
     | hasElemType @Float col =
         pure $ scalarEncoder @Float (FLOAT enum) Nothing Nothing writeFloatLE col
     | hasElemType @Double col =
@@ -89,7 +108,7 @@ buildEncoder col
 
 scalarEncoder ::
     forall a.
-    (Columnable a, VU.Unbox a) =>
+    (Columnable a) =>
     ThriftType ->
     Maybe ConvertedType ->
     Maybe LogicalType ->
@@ -128,6 +147,22 @@ scalarEncoder tt conv logical writeValue col =
     Maybe ConvertedType ->
     Maybe LogicalType ->
     (MemoryBuffer -> Double -> IO ()) ->
+    Column ->
+    Encoder
+    #-}
+{-# SPECIALIZE scalarEncoder ::
+    ThriftType ->
+    Maybe ConvertedType ->
+    Maybe LogicalType ->
+    (MemoryBuffer -> Int -> IO ()) ->
+    Column ->
+    Encoder
+    #-}
+{-# SPECIALIZE scalarEncoder ::
+    ThriftType ->
+    Maybe ConvertedType ->
+    Maybe LogicalType ->
+    (MemoryBuffer -> Integer -> IO ()) ->
     Column ->
     Encoder
     #-}
@@ -175,6 +210,12 @@ columnWriter col writeValue = case col of
     #-}
 {-# SPECIALIZE columnWriter ::
     Column -> (MemoryBuffer -> UTCTime -> IO ()) -> MemoryBuffer -> Int -> IO Bool
+    #-}
+{-# SPECIALIZE columnWriter ::
+    Column -> (MemoryBuffer -> Int -> IO ()) -> MemoryBuffer -> Int -> IO Bool
+    #-}
+{-# SPECIALIZE columnWriter ::
+    Column -> (MemoryBuffer -> Integer -> IO ()) -> MemoryBuffer -> Int -> IO Bool
     #-}
 
 isPresent :: Maybe Bitmap -> Int -> Bool
