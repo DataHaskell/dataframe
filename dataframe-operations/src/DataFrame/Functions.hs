@@ -13,7 +13,7 @@
 
 module DataFrame.Functions (
     module DataFrame.Functions,
-    module DataFrame.Operators,
+    module DataFrame.Expression.Operators,
     add,
     sub,
     mult,
@@ -39,14 +39,14 @@ import Data.Type.Equality (testEquality, type (:~:) (Refl))
 import qualified Data.Vector as V
 import qualified Data.Vector.Unboxed as VU
 
-import DataFrame.Internal.Nullable (
+import DataFrame.Expression.Operators
+import DataFrame.Internal.Expression.Operators.Nullable (
     BaseType,
     NullLift1Op (applyNull1),
     NullLift1Result,
     NullLift2Op (applyNull2),
     NullLift2Result,
  )
-import DataFrame.Operators
 import Text.Regex.TDFA
 import Type.Reflection (typeRep)
 import Prelude hiding (maximum, minimum)

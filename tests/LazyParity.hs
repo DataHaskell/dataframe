@@ -13,6 +13,7 @@ import qualified Data.Map.Strict as M
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified DataFrame as D
+import DataFrame.Expression.Operators (as, (|>))
 import qualified DataFrame.Functions as F
 import qualified DataFrame.IO.CSV as Csv
 import qualified DataFrame.Internal.Column as DI
@@ -23,7 +24,6 @@ import qualified DataFrame.Operations.Aggregation as Agg
 import DataFrame.Operations.Join (JoinType (LEFT))
 import qualified DataFrame.Operations.Join as Join
 import qualified DataFrame.Operations.Permutation as Perm
-import DataFrame.Operators (as, (|>))
 import DataFrame.Schema (Schema (..), schemaType)
 import System.Directory (removeFile)
 import System.IO.Temp (emptySystemTempFile)

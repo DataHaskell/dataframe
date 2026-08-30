@@ -18,5 +18,6 @@ packages:
     dataframe-fastcsv
     dataframe-hasktorch
     dataframe-persistent
+    dataframe-arrow-bridge
     dataframe-arrow
     dataframe-fusion

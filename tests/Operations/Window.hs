@@ -10,7 +10,7 @@ import qualified DataFrame.Internal.Column as DI
 import qualified DataFrame.Internal.DataFrame as DI
 
 import Data.Function ((&))
-import DataFrame.Operators
+import DataFrame.Expression.Operators
 import Test.HUnit
 
 -- Similar to example discussed in https://www.sumsar.net/blog/pandas-feels-clunky-when-coming-from-r/

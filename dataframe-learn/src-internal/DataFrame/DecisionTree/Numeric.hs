@@ -27,13 +27,12 @@ module DataFrame.DecisionTree.Numeric (
 
 import DataFrame.DecisionTree.CondVec (CondVec (..), materializeCondVec)
 import DataFrame.DecisionTree.Types (SynthConfig (..), TreeConfig (..))
+import DataFrame.Expression.Operators
 import qualified DataFrame.Functions as F
 import DataFrame.Internal.Column
 import DataFrame.Internal.DataFrame (DataFrame, columnNames, unsafeGetColumn)
 import DataFrame.Internal.Expression (Expr (..), eqExpr, getColumns, normalize)
 import DataFrame.Internal.Interpreter (interpret)
-import DataFrame.Internal.Types
-import DataFrame.Operators
 
 import Data.List (sort)
 import Data.Maybe (catMaybes, mapMaybe)

@@ -9,8 +9,10 @@ import qualified DataFrame as D
 import qualified DataFrame.Internal.Column as Col
 import DataFrame.Internal.DataFrame
 import DataFrame.Operations.Merge ()
+import GenDataFrame ()
 import System.Random
 import Test.HUnit
+import Test.QuickCheck (Property, property)
 
 prop_dropZero :: DataFrame -> Bool
 prop_dropZero df = D.drop 0 df == df
@@ -52,6 +54,17 @@ prop_rangeFull :: DataFrame -> Bool
 prop_rangeFull df =
     let rows = fst (dataframeDimensions df)
      in D.range (0, rows) df == df
+
+prop_rangeClampsToBounds :: DataFrame -> Int -> Int -> Bool
+prop_rangeClampsToBounds df a b =
+    fst (dataframeDimensions (D.range (a, b) df)) == expected
+  where
+    rows = fst (dataframeDimensions df)
+    -- Rows in [a, b) that actually exist. Clamps before subtracting so the
+    -- oracle itself cannot overflow on extreme endpoints.
+    lo = min (max a 0) rows
+    hi = min (max b lo) rows
+    expected = hi - lo
 
 prop_selectAll :: DataFrame -> Bool
 prop_selectAll df = D.select (D.columnNames df) df == df
@@ -177,6 +190,37 @@ unit_stratifiedSplit_proportions =
                     )
                     (abs (vaProp - origProp) < tol)
 
+tenRows :: DataFrame
+tenRows = fromNamedColumns [("x", Col.fromList ([0 .. 9] :: [Int]))]
+
+-- Endpoints that overflow Int if the length is computed before clamping.
+unit_rangeExtremeEndpoints :: Test
+unit_rangeExtremeEndpoints =
+    TestCase
+        ( assertEqual
+            "range (1, minBound) is empty, not a wrapped-around full range"
+            0
+            (fst (dataframeDimensions (D.range (1, minBound) tenRows)))
+        )
+
+unit_rangeEndPastEnd :: Test
+unit_rangeEndPastEnd =
+    TestCase
+        ( assertEqual
+            "range (8, 20) on a 10-row frame yields rows 8 and 9"
+            (Just (Col.fromList ([8, 9] :: [Int])))
+            (getColumn "x" (D.range (8, 20) tenRows))
+        )
+
+unit_rangeStartBeforeZero :: Test
+unit_rangeStartBeforeZero =
+    TestCase
+        ( assertEqual
+            "range (-5, 3) on a 10-row frame yields rows 0 to 2"
+            (Just (Col.fromList ([0, 1, 2] :: [Int])))
+            (getColumn "x" (D.range (-5, 3) tenRows))
+        )
+
 hunitTests :: [Test]
 hunitTests =
     [ TestLabel "unit_stratifiedSample_full" unit_stratifiedSample_full
@@ -185,7 +229,14 @@ hunitTests =
         "unit_stratifiedSplit_singleRowStratum"
         unit_stratifiedSplit_singleRowStratum
     , TestLabel "unit_stratifiedSplit_proportions" unit_stratifiedSplit_proportions
+    , TestLabel "unit_rangeEndPastEnd" unit_rangeEndPastEnd
+    , TestLabel "unit_rangeExtremeEndpoints" unit_rangeExtremeEndpoints
+    , TestLabel "unit_rangeStartBeforeZero" unit_rangeStartBeforeZero
     ]
+
+-- Properties whose shape does not fit [DataFrame -> Bool].
+properties :: [Property]
+properties = [property prop_rangeClampsToBounds]
 
 tests :: [DataFrame -> Bool]
 tests =

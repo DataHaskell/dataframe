@@ -25,6 +25,7 @@ import qualified Data.Vector as V
 import qualified Data.Vector.Unboxed as VU
 import DataFrame.Errors (DataFrameException (..))
 
+import DataFrame.Expression.Operators ((.*.), (.+.), (.>.))
 import DataFrame.Featurize.Internal (featureNames, numericMatrix, targetValues)
 import qualified DataFrame.Functions as F
 import DataFrame.Internal.Column (Columnable)
@@ -34,7 +35,6 @@ import DataFrame.LinearAlgebra (dot)
 import DataFrame.LinearSolver (LinearModel (..), SolverConfig (..), fitProx)
 import DataFrame.LinearSolver.Loss (sqHingeLoss)
 import DataFrame.Model
-import DataFrame.Operators ((.*.), (.+.), (.>.))
 import DataFrame.Random (Gen, gaussianVector, mkGen, nextDouble)
 
 data RFFConfig = RFFConfig

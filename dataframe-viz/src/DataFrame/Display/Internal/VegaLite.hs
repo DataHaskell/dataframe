@@ -54,10 +54,11 @@ import qualified Data.Vector as V
 import System.IO (hPutStrLn, stderr)
 import Type.Reflection (TypeRep, tyConName, typeRep, typeRepTyCon, pattern App)
 
-import DataFrame.Internal.Column (Column, Columnable, unwrapTypedColumn)
-import DataFrame.Internal.DataFrame (DataFrame, getColumn)
+import Control.Exception (throw)
+import DataFrame.Internal.Column (Column, Columnable)
+import DataFrame.Internal.DataFrame (DataFrame, dataframeDimensions, getColumn)
 import DataFrame.Internal.Expression (Expr (Col))
-import DataFrame.Internal.Interpreter (interpret)
+import DataFrame.Internal.Interpreter (Ctx (..), eval, materialize)
 
 import DataFrame.Display.Internal.Common (columnToDoubles, columnToStrings)
 
@@ -250,11 +251,10 @@ resolveField df fallbackName expr =
         Nothing ->
             error $ "DataFrame.Display.Web: column not found: " <> T.unpack cname
 
-materialiseExpr :: (Columnable a) => DataFrame -> Expr a -> Column
-materialiseExpr df expr = case interpret df expr of
-    Right tc -> unwrapTypedColumn tc
-    Left err ->
-        error $ "DataFrame.Display.Web: could not evaluate expression: " <> show err
+materialiseExpr :: forall a. (Columnable a) => DataFrame -> Expr a -> Column
+materialiseExpr df expr = either throw id $ do
+    v <- eval (FlatCtx df) expr
+    pure $ materialize @a (fst (dataframeDimensions df)) v
 
 columnToValues :: FieldType -> Column -> [Value]
 columnToValues Quantitative col = map toJSON (columnToDoubles col)

@@ -13,4 +13,5 @@ packages:
     dataframe-viz
     dataframe-learn
     dataframe-lazy
+    dataframe-arrow-bridge
     dataframe-fastcsv

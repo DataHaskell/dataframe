@@ -35,6 +35,13 @@ import Type.Reflection (TypeRep, typeRep)
 
 import Data.Either (fromRight)
 import DataFrame.Errors (DataFrameException (..), TypeErrorContext (..))
+import DataFrame.Expression.Operators (
+    (.&&.),
+    (.*.),
+    (.+.),
+    (.<=.),
+    (.>=.),
+ )
 import qualified DataFrame.Functions as F
 import DataFrame.Internal.Column (Columnable, columnBitmap, columnTypeString)
 import qualified DataFrame.Internal.Column as D
@@ -46,7 +53,6 @@ import DataFrame.Operations.Core (
     columnAsUnboxedVector,
     columnAsVector,
  )
-import DataFrame.Operators ((.&&.), (.*.), (.+.), (.<=.), (.>=.))
 
 -- | Every column name except the supervised target's.
 featureNames :: Expr a -> DataFrame -> [T.Text]

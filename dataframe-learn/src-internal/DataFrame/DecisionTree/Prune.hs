@@ -15,7 +15,12 @@ module DataFrame.DecisionTree.Prune (
 import DataFrame.DecisionTree.Types (Tree (..))
 import DataFrame.Internal.Column (Columnable)
 import DataFrame.Internal.Expression (Expr (..), eqExpr)
-import DataFrame.Internal.Simplify (PredFact, entails, factFalse, factTrue)
+import DataFrame.Internal.Expression.Simplify (
+    PredFact,
+    entails,
+    factFalse,
+    factTrue,
+ )
 
 {- | Drop branches whose test is forced by the path conditions reaching them,
 and collapse @Branch c t t@ to @t@. Sound for the decidable threshold subset;

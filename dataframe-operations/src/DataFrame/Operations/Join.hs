@@ -40,7 +40,7 @@ import Control.Applicative ((<|>))
 import Control.Exception (throw)
 import Control.Monad (when)
 import Control.Monad.ST (ST, runST)
-import Data.Bits ((.&.))
+import Data.Bits (popCount, unsafeShiftL, unsafeShiftR, (.&.), (.|.))
 import qualified Data.Map.Strict as M
 import Data.Maybe (fromMaybe)
 import Data.STRef (newSTRef, readSTRef, writeSTRef)
@@ -51,9 +51,11 @@ import qualified Data.Vector as VB
 import qualified Data.Vector.Algorithms.Merge as VA
 import qualified Data.Vector.Unboxed as VU
 import qualified Data.Vector.Unboxed.Mutable as VUM
+import Data.Word (Word64)
 import DataFrame.Errors (
     DataFrameException (ColumnsNotFoundException),
  )
+import DataFrame.Internal.Algorithms.Sort.Radix.Parallel (parSortByHash)
 import DataFrame.Internal.Column as D (
     Column (BoxedColumn, UnboxedColumn),
     atIndicesStable,
@@ -67,10 +69,10 @@ import DataFrame.Internal.Column as D (
  )
 import DataFrame.Internal.Column.Bitmap (bitmapTestBit)
 import DataFrame.Internal.DataFrame as D
-import DataFrame.Internal.ParRadixSort (parSortByHash)
 import DataFrame.Operations.Aggregation as D
 import DataFrame.Operations.Core as D
-import DataFrame.Operations.JoinPar (
+import DataFrame.Operations.Join.Parallel (
+    ProbeTable (..),
     parInnerProbe,
     parLeftProbe,
     shouldParallelizeJoin,
@@ -113,28 +115,64 @@ by hash) records each run's offset and length. @-1@ starts mark empty slots.
 data CompactIndex = CompactIndex
     { ciSortedIndices :: {-# UNPACK #-} !(VU.Vector Int)
     , ciKeys :: {-# UNPACK #-} !(VU.Vector Int)
-    , ciStarts :: {-# UNPACK #-} !(VU.Vector Int)
-    , ciLens :: {-# UNPACK #-} !(VU.Vector Int)
+    , ciRuns :: {-# UNPACK #-} !(VU.Vector Int)
+    {- ^ @(start, len)@ of each run packed 32/32 into one 'Int'; @-1@ = empty
+    slot. One vector instead of separate starts\/lens halves the table's
+    memory (a 1e8-row build side is a 2^28-slot table: 2.1GB instead of
+    4.3GB) and saves a random cache-line read per lookup hit.
+    -}
     , ciMask :: {-# UNPACK #-} !Int
     }
+
+-- | Pack a run's @(start, len)@ 32\/32 into one non-negative 'Int'.
+ciPackRun :: Int -> Int -> Int
+ciPackRun !start !len = (start `unsafeShiftL` 32) .|. len
+{-# INLINE ciPackRun #-}
+
+-- | Start field of a packed run.
+ciRunStart :: Int -> Int
+ciRunStart !w = w `unsafeShiftR` 32
+{-# INLINE ciRunStart #-}
+
+-- | Length field of a packed run.
+ciRunLen :: Int -> Int
+ciRunLen !w = w .&. 0xFFFF_FFFF
+{-# INLINE ciRunLen #-}
+
+{- | Home slot of a hash: the top @log2 cap@ bits of a Fibonacci multiply.
+The row hash's final FxHash step is a multiply, which leaves its LOW bits
+poorly diffused (text keys cluster catastrophically: contiguous-pileup chains
+in the hundreds), so the table must never index by @h .&. mask@ directly.
+@shift@ is @64 - log2 cap@.
+-}
+ciSlot :: Int -> Int -> Int
+ciSlot !shift !h =
+    fromIntegral
+        ((fromIntegral h * (0x9E37_79B9_7F4A_7C15 :: Word64)) `unsafeShiftR` shift)
+{-# INLINE ciSlot #-}
+
+-- | @64 - log2 cap@ for a table with slot mask @mask@ (@cap@ a power of two).
+ciShiftFor :: Int -> Int
+ciShiftFor !mask = 64 - popCount mask
+{-# INLINE ciShiftFor #-}
 
 {- | Look up a hash in the open-addressing table.
 Returns @(start, len)@ of the matching run, or @(-1, 0)@ on a miss.
 -}
 ciLookup :: CompactIndex -> Int -> (Int, Int)
-ciLookup ci !h = go (h .&. mask)
+ciLookup ci !h = go (ciSlot shift h)
   where
     !mask = ciMask ci
+    !shift = ciShiftFor mask
     !keys = ciKeys ci
-    !starts = ciStarts ci
-    !lens = ciLens ci
+    !runs = ciRuns ci
     go !slot =
-        let !s = starts `VU.unsafeIndex` slot
-         in if s < 0
+        let !w = runs `VU.unsafeIndex` slot
+         in if w < 0
                 then (-1, 0)
                 else
                     if keys `VU.unsafeIndex` slot == h
-                        then (s, lens `VU.unsafeIndex` slot)
+                        then (ciRunStart w, ciRunLen w)
                         else go ((slot + 1) .&. mask)
 {-# INLINE ciLookup #-}
 
@@ -153,36 +191,38 @@ contiguous runs, insert each run into an open-addressing table. Capacity is
 sized for the worst case (every row distinct) so building never resizes.
 -}
 buildCompactIndex :: VU.Vector Int -> CompactIndex
+buildCompactIndex hashes
+    | VU.length hashes > 0x7FFF_FFFF =
+        error
+            "buildCompactIndex: build side exceeds 2^31 rows (packed run fields are 32-bit)"
 buildCompactIndex hashes =
     let n = VU.length hashes
         (sortedHashes, sortedIndices) = parSortByHash n hashes
         !cap = nextPow2Above (2 * n)
         !mask = cap - 1
-        (keys, starts, lens) = runST $ do
+        !shift = ciShiftFor mask
+        (keys, runs) = runST $ do
             mKeys <- VUM.unsafeNew cap
-            mStarts <- VUM.replicate cap (-1)
-            mLens <- VUM.unsafeNew cap
+            mRuns <- VUM.replicate cap (-1)
             let insert !i
                     | i >= n = return ()
                     | otherwise = do
                         let !h = sortedHashes `VU.unsafeIndex` i
                             !end = findGroupEnd sortedHashes h (i + 1) n
-                        probe h (h .&. mask) i (end - i)
+                        probe h (ciSlot shift h) i (end - i)
                         insert end
                 probe !h !slot !start !len = do
-                    s <- VUM.unsafeRead mStarts slot
-                    if s < 0
+                    w <- VUM.unsafeRead mRuns slot
+                    if w < 0
                         then do
                             VUM.unsafeWrite mKeys slot h
-                            VUM.unsafeWrite mStarts slot start
-                            VUM.unsafeWrite mLens slot len
+                            VUM.unsafeWrite mRuns slot (ciPackRun start len)
                         else probe h ((slot + 1) .&. mask) start len
             insert 0
-            (,,)
+            (,)
                 <$> VU.unsafeFreeze mKeys
-                <*> VU.unsafeFreeze mStarts
-                <*> VU.unsafeFreeze mLens
-     in CompactIndex sortedIndices keys starts lens mask
+                <*> VU.unsafeFreeze mRuns
+     in CompactIndex sortedIndices keys runs mask
 
 -- | Find the end of a contiguous run of equal values starting at @j@.
 findGroupEnd :: VU.Vector Int -> Int -> Int -> Int -> Int
@@ -326,9 +366,21 @@ parInnerKernel ::
 parInnerKernel probeHashes buildHashes =
     let !ci = buildCompactIndex buildHashes
         (pf, bf) =
-            unsafePerformIO (parInnerProbe (ciSortedIndices ci) (ciLookup ci) probeHashes)
+            unsafePerformIO (parInnerProbe (ciProbeTable ci) probeHashes)
      in (pf, bf)
 {-# NOINLINE parInnerKernel #-}
+
+{- | The raw table fields of a 'CompactIndex', in the closure-free shape the
+parallel probe kernels consume.
+-}
+ciProbeTable :: CompactIndex -> ProbeTable
+ciProbeTable ci =
+    ProbeTable
+        { ptSorted = ciSortedIndices ci
+        , ptKeys = ciKeys ci
+        , ptRuns = ciRuns ci
+        , ptMask = ciMask ci
+        }
 
 -- | Compute hashes for the given key column names in a DataFrame.
 buildHashColumn :: [T.Text] -> DataFrame -> VU.Vector Int
@@ -692,7 +744,7 @@ parLeftKernel ::
     VU.Vector Int -> VU.Vector Int -> (VU.Vector Int, VU.Vector Int)
 parLeftKernel leftHashes rightHashes =
     let !ci = buildCompactIndex rightHashes
-     in unsafePerformIO (parLeftProbe (ciSortedIndices ci) (ciLookup ci) leftHashes)
+     in unsafePerformIO (parLeftProbe (ciProbeTable ci) leftHashes)
 {-# NOINLINE parLeftKernel #-}
 
 {- | Hash-based left join kernel, returning @(leftExpandedIndices,
@@ -981,34 +1033,32 @@ hashFullOuterKernel leftHashes rightHashes = runST $ do
         leftSI = ciSortedIndices leftCI
         rightSI = ciSortedIndices rightCI
         leftKeys = ciKeys leftCI
-        leftStarts = ciStarts leftCI
-        leftLens = ciLens leftCI
+        leftRuns = ciRuns leftCI
         rightKeys = ciKeys rightCI
-        rightStarts = ciStarts rightCI
-        rightLens = ciLens rightCI
-        !leftCap = VU.length leftStarts
-        !rightCap = VU.length rightStarts
+        rightRuns = ciRuns rightCI
+        !leftCap = VU.length leftRuns
+        !rightCap = VU.length rightRuns
 
     let countLeft !slot !acc
             | slot >= leftCap = acc
             | otherwise =
-                let !lStart = leftStarts `VU.unsafeIndex` slot
-                 in if lStart < 0
+                let !lw = leftRuns `VU.unsafeIndex` slot
+                 in if lw < 0
                         then countLeft (slot + 1) acc
                         else
                             let !h = leftKeys `VU.unsafeIndex` slot
-                                !ll = leftLens `VU.unsafeIndex` slot
+                                !ll = ciRunLen lw
                                 (!rs, !rl) = ciLookup rightCI h
                              in countLeft (slot + 1) (acc + if rs < 0 then ll else ll * rl)
         countRightOnly !slot !acc
             | slot >= rightCap = acc
             | otherwise =
-                let !rStart = rightStarts `VU.unsafeIndex` slot
-                 in if rStart < 0
+                let !rw = rightRuns `VU.unsafeIndex` slot
+                 in if rw < 0
                         then countRightOnly (slot + 1) acc
                         else
                             let !h = rightKeys `VU.unsafeIndex` slot
-                                !rl = rightLens `VU.unsafeIndex` slot
+                                !rl = ciRunLen rw
                                 (!ls, _) = ciLookup leftCI h
                              in countRightOnly (slot + 1) (acc + if ls < 0 then rl else 0)
         !leftPlusMatched = countLeft 0 0
@@ -1022,12 +1072,13 @@ hashFullOuterKernel leftHashes rightHashes = runST $ do
     let fillLeft !slot
             | slot >= leftCap = return ()
             | otherwise = do
-                let !lStart = leftStarts `VU.unsafeIndex` slot
-                if lStart < 0
+                let !lw = leftRuns `VU.unsafeIndex` slot
+                if lw < 0
                     then fillLeft (slot + 1)
                     else do
                         let !h = leftKeys `VU.unsafeIndex` slot
-                            !lLen = leftLens `VU.unsafeIndex` slot
+                            !lStart = ciRunStart lw
+                            !lLen = ciRunLen lw
                             (!rStart, !rLen) = ciLookup rightCI h
                         !p <- readSTRef posRef
                         if rStart < 0
@@ -1058,12 +1109,13 @@ hashFullOuterKernel leftHashes rightHashes = runST $ do
     let fillRightOnly !slot
             | slot >= rightCap = return ()
             | otherwise = do
-                let !rStart = rightStarts `VU.unsafeIndex` slot
-                if rStart < 0
+                let !rw = rightRuns `VU.unsafeIndex` slot
+                if rw < 0
                     then fillRightOnly (slot + 1)
                     else do
                         let !h = rightKeys `VU.unsafeIndex` slot
-                            !rLen = rightLens `VU.unsafeIndex` slot
+                            !rStart = ciRunStart rw
+                            !rLen = ciRunLen rw
                             (!ls, _) = ciLookup leftCI h
                         if ls >= 0
                             then fillRightOnly (slot + 1)

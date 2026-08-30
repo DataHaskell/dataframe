@@ -44,7 +44,7 @@ local `dataframe-core` / `dataframe-operations` / `dataframe-viz` working trees:
 -- cabal: default-extensions: DataKinds, TypeOperators, FlexibleContexts
 import DataFrame.Internal.DataFrame (DataFrame, fromNamedColumns)
 import DataFrame.Internal.Column (fromList)
-import DataFrame.Operators ((|>))
+import DataFrame.Expression.Operators ((|>))
 import qualified DataFrame.Functions as F
 import DataFrame.Typed.Types (TypedDataFrame)
 import DataFrame.Typed.Freeze (freeze)

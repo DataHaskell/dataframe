@@ -8,7 +8,34 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 
-module DataFrame.Internal.DataFrame where
+module DataFrame.Internal.DataFrame (
+    DataFrame (..),
+    forceDataFrame,
+    GroupedDataFrame (.., Grouped),
+    TruncateConfig (..),
+    defaultTruncateConfig,
+    ellipsisText,
+    toMarkdown,
+    toMarkdown',
+    asText,
+    asTextWith,
+    pickColumns,
+    insertAt,
+    truncateCell,
+    empty,
+    columnNames,
+    insertColumn,
+    fromNamedColumns,
+    getColumn,
+    unsafeGetColumn,
+    null,
+    toCsv,
+    toCsv',
+    toSeparated,
+    getRowAsText,
+    showElement,
+    stripJust,
+) where
 
 import qualified Data.Map as M
 import qualified Data.Text as T
@@ -24,14 +51,30 @@ import Data.Type.Equality (
     type (:~:) (Refl),
     type (:~~:) (HRefl),
  )
-import DataFrame.Display.Terminal.PrettyPrint
-import DataFrame.Errors
-import DataFrame.Internal.Column
+import DataFrame.Display.Terminal.PrettyPrint (
+    RenderFormat (..),
+    showTable,
+ )
+import DataFrame.Errors (
+    DataFrameException (ColumnsNotFoundException),
+ )
+import DataFrame.Internal.Column (
+    Column (..),
+    columnLength,
+    columnToTextVec,
+    columnTypeString,
+    expandColumn,
+    forceColumn,
+    materializeMerged,
+    parBackpermute2Int,
+    sliceColumn,
+    takeColumn,
+ )
 import DataFrame.Internal.Column.Bitmap (bitmapTestBit)
+import DataFrame.Internal.Data.PackedText (packedIndexText)
 import DataFrame.Internal.Expression
-import DataFrame.Internal.PackedText (packedIndexText)
-import Text.Printf
-import Type.Reflection (Typeable, eqTypeRep, typeRep, pattern App)
+import Text.Printf (printf)
+import Type.Reflection (eqTypeRep, typeRep, pattern App)
 import Prelude hiding (null)
 
 data DataFrame = DataFrame
@@ -54,17 +97,63 @@ forceDataFrame df@(DataFrame cols idx dims _exprs) =
 {- | A record that contains information about how and what
 rows are grouped in the dataframe. This can only be used with
 `aggregate`.
+
+Laziness contract: every field except 'valueIndices' and 'groupRepRows' is
+computed eagerly by the grouping paths. 'valueIndices' may be a lazy thunk (the
+low-cardinality direct grouping defers the O(n) stable placement pass until a
+consumer — grouped median/top-k gathers, set ops, the interpreter's
+group-slicing — actually demands the permutation); forcing it always yields the
+unique stable counting-sort permutation of 'rowToGroup', so WHAT it evaluates to
+is independent of when it is forced. 'groupRepRows' is the per-group
+representative row (the first original row of each group, in canonical group
+order); aggregation uses it to materialize the key columns without demanding
+'valueIndices'. It may also be a thunk; its value always equals
+@VU.map (valueIndices !) (VU.init offsets)@.
 -}
-data GroupedDataFrame = Grouped
+data GroupedDataFrame = GroupedInternal
     { fullDataframe :: DataFrame
     , groupedColumns :: [T.Text]
     , valueIndices :: VU.Vector Int
+    -- ^ Rows sorted by group id (stable); possibly an unevaluated thunk.
     , offsets :: VU.Vector Int
     , rowToGroup :: VU.Vector Int
     {- ^ rowToGroup[i] = group index for row i.  Length n (one per row).
     Built once in 'groupBy'; reused by every aggregation.
     -}
+    , groupRepRows :: VU.Vector Int
+    -- ^ First original row of each group, length nGroups. See laziness note.
     }
+
+{- | The historical five-field view of 'GroupedDataFrame'. Matching ignores
+'groupRepRows'; building derives it lazily from @valueIndices@/@offsets@ (the
+thunk only forces them if something actually reads the representative rows).
+The direct grouping paths construct 'GroupedInternal' directly instead so the
+representative rows never demand the placement pass.
+-}
+pattern Grouped ::
+    DataFrame ->
+    [T.Text] ->
+    VU.Vector Int ->
+    VU.Vector Int ->
+    VU.Vector Int ->
+    GroupedDataFrame
+pattern Grouped df cols vis offs rtg <- GroupedInternal df cols vis offs rtg _
+    where
+        Grouped df cols vis offs rtg =
+            GroupedInternal
+                df
+                cols
+                vis
+                offs
+                rtg
+                {- Parallel gather (still a deferred thunk; forcing it forces
+                vis/offs as before). Indices are grouping-produced and
+                in-bounds by construction: offs has nGroups+1 entries and
+                offs!g < length vis for every non-empty group. Values are
+                identical to the historical @VU.map (vis !) (VU.init offs)@. -}
+                (parBackpermute2Int vis offs)
+
+{-# COMPLETE Grouped #-}
 
 instance Show GroupedDataFrame where
     show (Grouped df cols _indices _os _rtg) =
@@ -151,8 +240,8 @@ asTextWith fmt mTrunc d =
                 (takeColumn rowCap)
                 ((V.!?) (columns d) ((M.!) (columnIndices d) name))
         survivingCols = map lookupCol visibleHeaders
-        survivingTypes = map (maybe "" getType) survivingCols
-        survivingData = map get survivingCols
+        survivingTypes = map (maybe "" (T.pack . columnTypeString)) survivingCols
+        survivingData = map (maybe V.empty columnToTextVec) survivingCols
 
         clipCell = case mTrunc of
             Just cfg | maxCellWidth cfg > 0 -> truncateCell (maxCellWidth cfg)
@@ -166,42 +255,6 @@ asTextWith fmt mTrunc d =
                     , insertAt i ellipsisText survivingTypes
                     , insertAt i ellipsisCol survivingData
                     )
-
-        getType :: Column -> T.Text
-        showMaybeType :: forall a. (Typeable a) => String
-        showMaybeType =
-            let s = show (typeRep @a)
-             in "Maybe " <> if ' ' `elem` s then "(" <> s <> ")" else s
-        getType (BoxedColumn Nothing (_ :: V.Vector a)) = T.pack $ show (typeRep @a)
-        getType (BoxedColumn (Just _) (_ :: V.Vector a)) = T.pack $ showMaybeType @a
-        getType (UnboxedColumn Nothing (_ :: VU.Vector a)) = T.pack $ show (typeRep @a)
-        getType (UnboxedColumn (Just _) (_ :: VU.Vector a)) = T.pack $ showMaybeType @a
-        getType (PackedText Nothing _) = T.pack $ show (typeRep @T.Text)
-        getType (PackedText (Just _) _) = T.pack $ showMaybeType @T.Text
-        getType c@(MergedColumn _ _) = getType (mergedHead c)
-
-        get :: Maybe Column -> V.Vector T.Text
-        get (Just c@(MergedColumn _ _)) = get (Just (materializeMerged c))
-        get (Just (BoxedColumn (Just bm) (column :: V.Vector a))) =
-            V.generate (V.length column) $ \i ->
-                if bitmapTestBit bm i
-                    then T.pack (show (Just (V.unsafeIndex column i)))
-                    else "Nothing"
-        get (Just (BoxedColumn Nothing (column :: V.Vector a))) =
-            case testEquality (typeRep @a) (typeRep @T.Text) of
-                Just Refl -> column
-                Nothing -> case testEquality (typeRep @a) (typeRep @String) of
-                    Just Refl -> V.map T.pack column
-                    Nothing -> V.map (T.pack . show) column
-        get (Just (UnboxedColumn (Just bm) column)) =
-            V.generate (VU.length column) $ \i ->
-                if bitmapTestBit bm i
-                    then T.pack (show (Just (VU.unsafeIndex column i)))
-                    else "Nothing"
-        get (Just (UnboxedColumn Nothing column)) =
-            V.generate (VU.length column) (T.pack . show . VU.unsafeIndex column)
-        get (Just c@(PackedText _ _)) = get (Just (materializePacked c))
-        get Nothing = V.empty
      in showTable
             fmt
             (map clipCell finalHeaders)

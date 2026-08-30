@@ -22,7 +22,7 @@ Starting with a small test file.
 -- cabal: default-extensions: FlexibleContexts, ScopedTypeVariables, UndecidableInstances
 import qualified DataFrame as D
 import qualified DataFrame.Lazy as L
-import DataFrame.Operators
+import DataFrame.Expression.Operators
 import Data.Text (Text)
 import System.Directory (removeFile)
 

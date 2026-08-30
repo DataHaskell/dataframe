@@ -1,6 +1,6 @@
 cabal-version:      3.4
 name:               dataframe-operations
-version:            2.4.1.0
+version:            2.5.0.0
 synopsis:           Column operations, expression DSL, and statistics for the dataframe ecosystem.
 description:
     Untyped column operations (select, filter, sort, join, groupBy,
@@ -33,12 +33,12 @@ library
                         DataFrame.Internal.Statistics
                         DataFrame.Functions
                         DataFrame.Monad
-                        DataFrame.Operations.AggregateScatter
+                        DataFrame.Operations.Aggregation.Run
                         DataFrame.Operations.Aggregation
                         DataFrame.Operations.Core
                         DataFrame.Operations.Inference
                         DataFrame.Operations.Join
-                        DataFrame.Operations.JoinPar
+                        DataFrame.Operations.Join.Parallel
                         DataFrame.Operations.Merge
                         DataFrame.Operations.Permutation
                         DataFrame.Operations.SetOps
@@ -58,7 +58,7 @@ library
     build-depends:      base >= 4 && < 5,
                         bytestring >= 0.11 && < 0.14,
                         containers >= 0.6.7 && < 0.10,
-                        dataframe-core >= 2.4.1 && < 2.5,
+                        dataframe-core >= 2.5 && < 2.6,
                         dataframe-parsing >= 2.2 && < 2.3,
                         random >= 1.2 && < 2,
                         regex-tdfa >= 1.3.0 && < 2,

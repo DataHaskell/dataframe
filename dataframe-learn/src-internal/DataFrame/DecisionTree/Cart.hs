@@ -19,6 +19,7 @@ module DataFrame.DecisionTree.Cart (
 
 import DataFrame.DecisionTree.Types (Tree (..), TreeConfig (..))
 import DataFrame.Errors (DataFrameException (..), TypeErrorContext (..))
+import DataFrame.Expression.Operators
 import qualified DataFrame.Functions as F
 import DataFrame.Internal.Column
 import DataFrame.Internal.DataFrame (
@@ -29,9 +30,7 @@ import DataFrame.Internal.DataFrame (
  )
 import DataFrame.Internal.Expression (Expr (..))
 import DataFrame.Internal.Interpreter (interpret)
-import DataFrame.Internal.Types
 import DataFrame.Operations.Core (nRows)
-import DataFrame.Operators
 
 import Control.Exception (throw)
 import Data.Either (fromRight)

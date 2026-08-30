@@ -34,13 +34,13 @@ import DataFrame.Internal.Column (
     atIndicesStable,
     materializeMerged,
  )
+import DataFrame.Internal.Data.PackedText (packedSlice, sliceCmpBytes)
 import DataFrame.Internal.DataFrame (
     DataFrame (..),
     columnNames,
     unsafeGetColumn,
  )
 import DataFrame.Internal.Expression (Expr (Col), getColumns)
-import DataFrame.Internal.PackedText (packedSlice, sliceCmpBytes)
 import DataFrame.Operations.Core (dimensions)
 import DataFrame.Operations.Transformations (derive)
 import System.Random (Random (randomR), RandomGen)
@@ -191,14 +191,12 @@ shuffledIndices pureGen k
     shuffleVec :: (RandomGen g) => g -> VU.Vector Int
     shuffleVec g = runST $ do
         vm <- VUM.generate k id
-        let (n, nGen) = randomR (1, k - 1) g
-        go vm n nGen
+        go vm (k - 1) g
         VU.unsafeFreeze vm
 
-    go _v (-1) _ = pure ()
-    go _v 0 _ = pure ()
-    go v maxInd gen =
+    go _v i _ | i <= 0 = pure ()
+    go v i gen =
         let
-            (n, nextGen) = randomR (1, maxInd) gen
+            (j, nextGen) = randomR (0, i) gen
          in
-            VUM.swap v 0 n *> go (VUM.tail v) (maxInd - 1) nextGen
+            VUM.swap v i j *> go v (i - 1) nextGen

@@ -184,7 +184,7 @@ momentOracle n =
         assertEqual ("oracle group-row count n=" ++ show n) refN outN
 
 {- | The low-cardinality DIRECT-INDEXED grouping fast path
-('DataFrame.Internal.GroupingDirect') fires from 'D.groupBy' on a single clean
+('DataFrame.Internal.Grouping.Direct') fires from 'D.groupBy' on a single clean
 small-range Int key. It emits groups in ascending key-value order rather than the
 hash path's order, so we cannot compare index structures directly; instead we
 assert it produces the SAME per-key aggregate values as the hash 'groupBySeq'

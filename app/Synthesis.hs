@@ -10,8 +10,8 @@ import Data.Char
 import qualified Data.Text as T
 import qualified DataFrame as D
 import DataFrame.DecisionTree
+import DataFrame.Expression.Operators
 import qualified DataFrame.Functions as F
-import DataFrame.Operators
 import qualified DataFrame.Typed as DT
 import System.Random
 

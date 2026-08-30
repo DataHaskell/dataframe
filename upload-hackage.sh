@@ -21,8 +21,9 @@ SDIST="dist-newstyle/sdist"
 # fragile than reviewing this list by hand when a new inter-package
 # dependency is introduced.
 #
-# "dataframe" is the umbrella package (root dataframe.cabal); it must go
-# out before dataframe-arrow, which depends on its `arrow-bridge` sublib.
+# "dataframe" is the umbrella package (root dataframe.cabal). The Arrow
+# bridge is its own package (dataframe-arrow-bridge) and must go out before
+# dataframe-arrow and dataframe-fusion, which both depend on it.
 ALL_PKGS=(
   dataframe-core
   dataframe-parsing
@@ -38,6 +39,7 @@ ALL_PKGS=(
   dataframe-expr-serializer
   dataframe-hasktorch
   dataframe-lazy
+  dataframe-arrow-bridge
   dataframe-learn
   dataframe-persistent
   dataframe-fusion

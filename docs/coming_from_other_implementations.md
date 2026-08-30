@@ -391,7 +391,7 @@ workflow written in all three API layers.  We use the random-data DataFrame from
 ```haskell
 import qualified DataFrame as D
 import qualified DataFrame.Functions as F
-import DataFrame.Operators
+import DataFrame.Expression.Operators
 
 df |> D.derive "doubled_A" (F.col @Double "A" * F.lit 2)
    |> D.filterWhere (F.col @Double "doubled_A" .>. F.lit 1.0)
@@ -632,7 +632,7 @@ print(result)
 import qualified DataFrame as D
 import qualified Data.Text as T
 import qualified DataFrame.Functions as F
-import DataFrame.Operators ((|>))
+import DataFrame.Expression.Operators ((|>))
 import Data.Time.Calendar (toGregorian)
 
 main :: IO ()
@@ -885,7 +885,7 @@ result = df.group_by(
 **Our version:**
 
 ```haskell
--- import DataFrame.Operators
+-- import DataFrame.Expression.Operators
 let decade d = let (y, _, _) = toGregorian d 
                 in (y `div` 10) * 10
 
@@ -938,7 +938,7 @@ result = (
 
 ```haskell
 import qualified Data.Text as T
-import DataFrame.Operators
+import DataFrame.Expression.Operators
 
 let decade d = let (y, _, _) = toGregorian d 
                 in (y `div` 10) * 10
@@ -1066,7 +1066,7 @@ result = (
 ```haskell
 import qualified DataFrame.Lazy as L
 import qualified DataFrame.Functions as F
-import DataFrame.Operators
+import DataFrame.Expression.Operators
 import DataFrame.Schema (Schema, schemaType)
 import Data.Proxy (Proxy (..))
 
@@ -1339,7 +1339,7 @@ starwars %>%
 **Our version:**
 
 ```haskell
--- import DataFrame.Operators
+-- import DataFrame.Expression.Operators
 starwars 
   |> D.select ["species", "mass"]
   |> D.groupBy ["species"]
@@ -1500,7 +1500,7 @@ streaming-to-in-memory load before you've done anything with the data.
 
 import qualified DataFrame as D
 import qualified DataFrame.Functions as F
-import DataFrame.Operators
+import DataFrame.Expression.Operators
 
 main :: IO ()
 main = do
@@ -1738,7 +1738,7 @@ the vinyl overhead:
 import qualified DataFrame as D
 import qualified DataFrame.Typed as T
 import Data.Text (Text)
-import DataFrame.Operators
+import DataFrame.Expression.Operators
 
 type PurchaseSchema =
     '[ '("country", Text)

@@ -18,7 +18,6 @@ import Control.Monad (void)
 import Control.Monad.ST (stToIO)
 
 import Data.Int (Int32)
-import DataFrame.IO.CSV.Fast.Workers (pooledRun)
 import DataFrame.Internal.Column (Column (..))
 import DataFrame.Internal.Column.Bitmap (Validity (Validity))
 import DataFrame.Internal.Column.Merge (
@@ -27,7 +26,11 @@ import DataFrame.Internal.Column.Merge (
     mergeTextChunks,
     tcRows,
  )
-import DataFrame.Internal.PackedText (mkPackedContiguous, mkPackedContiguous32)
+import DataFrame.Internal.Control.Concurrent (pooledRun)
+import DataFrame.Internal.Data.PackedText (
+    mkPackedContiguous,
+    mkPackedContiguous32,
+ )
 
 {- | Merge text chunks with @width@-way parallel byte copies + offset
 rebase, then wrap the shared buffer as 'PackedText'. Single chunks take

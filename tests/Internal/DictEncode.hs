@@ -22,7 +22,7 @@ import Data.Text.Encoding (encodeUtf8)
 import Data.Word (Word8)
 import qualified DataFrame.Internal.Column as DI
 import DataFrame.Internal.Column.Encode (dictEncodeColumn, dictEncodeColumnUpTo)
-import DataFrame.Internal.PackedText (mkPackedContiguous)
+import DataFrame.Internal.Data.PackedText (mkPackedContiguous)
 import Test.HUnit
 
 sampleRows :: [T.Text]

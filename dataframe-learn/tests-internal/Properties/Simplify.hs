@@ -11,13 +11,13 @@ module Properties.Simplify (tests) where
 import DataFrame.DecisionTree.Predict (predictWithTree)
 import DataFrame.DecisionTree.Prune (pruneDead)
 import DataFrame.DecisionTree.Types (Tree (..))
+import DataFrame.Expression.Operators
 import qualified DataFrame.Functions as F
 import DataFrame.Internal.Column (TypedColumn (TColumn), toVector)
 import qualified DataFrame.Internal.Column as DI
 import DataFrame.Internal.Expression (Expr, eqExpr)
+import DataFrame.Internal.Expression.Simplify (simplify)
 import DataFrame.Internal.Interpreter (interpret)
-import DataFrame.Internal.Simplify (simplify)
-import DataFrame.Operators
 import qualified DataFrameApi as D
 
 import qualified Data.Text as T

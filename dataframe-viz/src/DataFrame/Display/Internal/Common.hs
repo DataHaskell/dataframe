@@ -54,8 +54,8 @@ import DataFrame.Internal.Column (
     materializeMerged,
     materializePacked,
  )
+import DataFrame.Internal.Column.Types
 import DataFrame.Internal.DataFrame (DataFrame (..), getColumn)
-import DataFrame.Internal.Types
 
 -- | Aggregation strategy for grouped/categorical plots.
 data Agg

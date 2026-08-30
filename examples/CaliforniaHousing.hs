@@ -22,7 +22,7 @@ import System.Random
 import Torch
 
 import Data.Text (Text)
-import DataFrame.Operators
+import DataFrame.Expression.Operators
 
 $( D.declareColumnsFromCsvWithOpts
     (D.defaultReadOptions{D.typeSpec = D.InferFromSample 300})

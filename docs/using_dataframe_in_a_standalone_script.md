@@ -135,7 +135,7 @@ module Main where
 import qualified DataFrame as D
 import qualified DataFrame.Functions as F
 
-import DataFrame.Operators
+import DataFrame.Expression.Operators
 
 $(D.declareColumnsFromCsvFile "./housing.csv")
 
@@ -161,7 +161,7 @@ module Main where
 import qualified DataFrame as D
 import qualified DataFrame.Functions as F
 
-import DataFrame.Operators
+import DataFrame.Expression.Operators
 
 import DataFrame.Monad
 
@@ -319,7 +319,7 @@ Once your dataframe is safely frozen, you can perform transformations with compl
 import qualified DataFrame as D
 import qualified DataFrame.Typed as DT
 
-import DataFrame.Operators ((|>))
+import DataFrame.Expression.Operators ((|>))
 
 $(DT.deriveSchemaFromCsvFile "Housing" "./data/housing.csv")
 
@@ -350,7 +350,7 @@ import qualified DataFrame as D
 import qualified DataFrame.Functions as F
 import qualified DataFrame.Typed as DT
 
-import DataFrame.Operators ((|>))
+import DataFrame.Expression.Operators ((|>))
 
 $(DT.deriveSchemaFromCsvFile "Housing" "./data/housing.csv")
 

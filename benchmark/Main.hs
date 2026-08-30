@@ -9,9 +9,9 @@ import qualified DataFrame.Functions as F
 import Control.DeepSeq (NFData (..))
 import Control.Monad (void)
 import Criterion.Main
+import DataFrame.Expression.Operators
 import DataFrame.Internal.DataFrame (forceDataFrame)
 import DataFrame.Operations.Join
-import DataFrame.Operators
 import System.Process hiding (env)
 import System.Random.Stateful
 

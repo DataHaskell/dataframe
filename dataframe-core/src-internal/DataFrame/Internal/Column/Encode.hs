@@ -26,11 +26,16 @@ import qualified Data.Vector.Unboxed as VU
 import qualified Data.Vector.Unboxed.Mutable as VUM
 import Type.Reflection (typeRep)
 
+import DataFrame.Internal.Algorithms.Hash (
+    fnvOffset,
+    mixBytes,
+    mixText,
+    nullSalt,
+ )
 import DataFrame.Internal.Column (Column (..))
 import DataFrame.Internal.Column.Bitmap (Bitmap, bitmapTestBit)
-import DataFrame.Internal.Hash (fnvOffset, mixBytes, mixText, nullSalt)
-import DataFrame.Internal.HashTable (htInsert, newHashTable)
-import DataFrame.Internal.PackedText (
+import DataFrame.Internal.Data.HashTable (htInsert, newHashTable)
+import DataFrame.Internal.Data.PackedText (
     PackedTextData (..),
     mkOffsets,
     mkSel,

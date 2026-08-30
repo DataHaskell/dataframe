@@ -1,6 +1,6 @@
 cabal-version:      3.4
 name:               dataframe
-version:            3.5.0.0
+version:            3.6.0.0
 synopsis: A fast, safe, and intuitive DataFrame library.
 
 description: A fast, safe, and intuitive DataFrame library for exploratory data analysis.
@@ -15,8 +15,7 @@ copyright: (c) 2024-2026 Michael Chavinda
 category: Data
 tested-with: GHC ==9.4.8 || ==9.6.7 || ==9.8.4 || ==9.10.3 || ==9.12.2
 extra-doc-files: CHANGELOG.md README.md
-extra-source-files: cbits/arrow_abi.h
-                    tests/data/typing/texts.txt
+extra-source-files: tests/data/typing/texts.txt
                     tests/data/typing/texts_with_empties.txt
                     tests/data/typing/texts_with_empties_and_nullish.txt
                     data/titanic/*.csv
@@ -88,7 +87,7 @@ library
                         DataFrame.Operations.Core,
                         DataFrame.Operations.Join,
                         DataFrame.Operations.Merge,
-                        DataFrame.Operators,
+                        DataFrame.Expression.Operators,
                         DataFrame.Operations.Permutation,
                         DataFrame.Operations.Subset,
                         DataFrame.Operations.Statistics,
@@ -128,13 +127,13 @@ library
                         DataFrame.Typed.Record,
                         DataFrame.Typed.Generic
     build-depends:    base >= 4 && <5,
-                      dataframe-core >= 2.4.1&& < 2.5,
+                      dataframe-core >= 2.5 && < 2.6,
                       dataframe-json >= 1.2.0.1 && < 1.3,
-                      dataframe-expr-serializer >= 1.2.0.1 && < 1.3,
-                      dataframe-operations >= 2.4 && < 2.5,
+                      dataframe-expr-serializer >= 1.2.1 && < 1.3,
+                      dataframe-operations >= 2.5 && < 2.6,
                       dataframe-parsing >= 2.2 && < 2.3,
-                      dataframe-viz >= 1.3 && < 1.4,
-                      dataframe-learn >= 2.4 && < 2.5
+                      dataframe-viz >= 1.3.2 && < 1.4,
+                      dataframe-learn >= 2.4.2 && < 2.5
 
     if !flag(no-csv)
         reexported-modules: DataFrame.IO.CSV,
@@ -158,7 +157,7 @@ library
                             DataFrame.IO.Parquet.Time,
                             DataFrame.IO.Utils.RandomAccess,
                             DataFrame.Typed.IO.Parquet
-        build-depends:   dataframe-parquet >= 1.5 && < 1.6
+        build-depends:   dataframe-parquet >= 1.5.0.1 && < 1.6
         cpp-options:     -DWITH_PARQUET
 
     -- The lazy executor calls both CSV and Parquet readers directly, so
@@ -168,11 +167,11 @@ library
                             DataFrame.Lazy.IO.Binary,
                             DataFrame.Lazy.IO.CSV,
                             DataFrame.Typed.Lazy
-        build-depends:   dataframe-lazy >= 2.4 && < 2.5
+        build-depends:   dataframe-lazy >= 2.4.1 && < 2.5
         cpp-options:     -DWITH_LAZY
 
     if !flag(no-th)
-        build-depends:   dataframe-th >= 2.2 && < 2.3
+        build-depends:   dataframe-th >= 2.2.1 && < 2.3
         cpp-options:     -DWITH_TH
         exposed-modules: DataFrame.TH,
                          DataFrame.Typed.TH
@@ -188,44 +187,12 @@ library
     hs-source-dirs:   src
     default-language: Haskell2010
 
-library arrow-bridge
-    import: warnings
-    visibility: public
-    hs-source-dirs:   ffi
-    exposed-modules:  DataFrame.IO.Arrow
-                      DataFrame.IR
-    -- The expr/pipeline JSON codec now lives in its own lightweight package;
-    -- re-export it so the Python FFI and Haskell consumers keep importing
-    -- @DataFrame.IR.ExprJson@ unchanged.
-    reexported-modules: DataFrame.IR.ExprJson
-    -- The Arrow bridge IR loads CSV + Parquet readers, so it requires
-    -- both backends. If either flag is off, skip building it.
-    if flag(no-csv) || flag(no-parquet)
-        buildable: False
-    build-depends:
-        base        >= 4   && < 5,
-        dataframe-core >= 2.4.1&& < 2.5,
-        dataframe-expr-serializer >= 1.2.0.1 && < 1.3,
-        dataframe-csv >= 2.3 && < 2.4,
-        dataframe-json >= 1.2.0.1 && < 1.3,
-        dataframe-lazy >= 2.4 && < 2.5,
-        dataframe-operations >= 2.4 && < 2.5,
-        dataframe-parquet >= 1.5 && < 1.6,
-        dataframe-parsing >= 2.2 && < 2.3,
-        text        >= 2.1 && < 3,
-        aeson       >= 0.11 && < 3,
-        bytestring  >= 0.11 && < 0.14,
-        containers  >= 0.6.7 && < 0.10,
-        vector      >= 0.13 && < 0.15
-    include-dirs:     cbits
-    default-language: Haskell2010
-
 executable dataframe-benchmark-example
     import: warnings
     main-is: Benchmark.hs
     build-depends:    base >= 4 && < 5,
-                      dataframe >= 3.5 && < 3.6,
-                      dataframe-operations >= 2.4 && < 2.5,
+                      dataframe >= 3.6 && < 3.7,
+                      dataframe-operations >= 2.5 && < 2.6,
                       random >= 1 && < 2,
                       time >= 1.12 && < 2,
                       vector >= 0.13 && < 0.15,
@@ -237,10 +204,10 @@ executable synthesis
     import: warnings
     main-is: Synthesis.hs
     build-depends:    base >= 4 && < 5,
-                      dataframe >= 3.5 && < 3.6,
-                      dataframe-core >= 2.4.1&& < 2.5,
-                      dataframe-learn >= 2.4 && < 2.5,
-                      dataframe-operations >= 2.4 && < 2.5,
+                      dataframe >= 3.6 && < 3.7,
+                      dataframe-core >= 2.5 && < 2.6,
+                      dataframe-learn >= 2.4.2 && < 2.5,
+                      dataframe-operations >= 2.5 && < 2.6,
                       random >= 1 && < 2,
                       text >= 2.1 && < 3
     hs-source-dirs:   app
@@ -271,9 +238,9 @@ executable lazy-bench
     build-depends:    base >= 4 && < 5,
                       bytestring >= 0.11 && < 0.14,
                       containers >= 0.6.7 && < 0.10,
-                      dataframe >= 3.5 && < 3.6,
-                      dataframe-core >= 2.4.1&& < 2.5,
-                      dataframe-lazy >= 2.4 && < 2.5,
+                      dataframe >= 3.6 && < 3.7,
+                      dataframe-core >= 2.5 && < 2.6,
+                      dataframe-lazy >= 2.4.1 && < 2.5,
                       dataframe-parsing >= 2.2 && < 2.3,
                       directory >= 1.3.0.0 && < 2,
                       random >= 1 && < 2,
@@ -292,9 +259,9 @@ benchmark dataframe-benchmark
                    criterion >= 1 && < 2,
                    deepseq >= 1.4 && < 2,
                    process >= 1.6 && < 2,
-                   dataframe >= 3.5 && < 3.6,
-                   dataframe-core >= 2.4.1&& < 2.5,
-                   dataframe-operations >= 2.4 && < 2.5,
+                   dataframe >= 3.6 && < 3.7,
+                   dataframe-core >= 2.5 && < 2.6,
+                   dataframe-operations >= 2.5 && < 2.6,
                    random >= 1 && < 2,
     default-language: Haskell2010
     ghc-options:
@@ -378,17 +345,17 @@ test-suite tests
     build-depends:  base >= 4 && < 5,
                     aeson >= 0.11.0.0 && < 3,
                     bytestring >= 0.11 && < 0.14,
-                    dataframe >= 3.5 && < 3.6,
-                    dataframe-core >= 2.4.1&& < 2.5,
-                    dataframe-core >= 2.4.1&& < 2.5,
+                    dataframe >= 3.6 && < 3.7,
+                    dataframe-core >= 2.5 && < 2.6,
+                    dataframe-core >= 2.5 && < 2.6,
                     dataframe-csv >= 2.3 && < 2.4,
-                    dataframe-expr-serializer >= 1.2.0.1 && < 1.3,
+                    dataframe-expr-serializer >= 1.2.1 && < 1.3,
                     dataframe-fastcsv >= 1.4.0.1 && < 1.5,
                     dataframe-json >= 1.2.0.1 && < 1.3,
-                    dataframe-lazy >= 2.4 && < 2.5,
-                    dataframe-learn >= 2.4 && < 2.5,
-                    dataframe-operations >= 2.4 && < 2.5,
-                    dataframe-parquet >= 1.5 && < 1.6,
+                    dataframe-lazy >= 2.4.1 && < 2.5,
+                    dataframe-learn >= 2.4.2 && < 2.5,
+                    dataframe-operations >= 2.5 && < 2.6,
+                    dataframe-parquet >= 1.5.0.1 && < 1.6,
                     dataframe-parsing >= 2.2 && < 2.3,
                     HUnit >= 1.6 && < 1.8,
                     QuickCheck >= 2 && < 3,
@@ -414,9 +381,9 @@ test-suite packed-text
     other-modules: Internal.PackedText
     build-depends:  base >= 4 && < 5,
                     bytestring >= 0.11 && < 0.14,
-                    dataframe >= 3.5 && < 3.6,
-                    dataframe-core >= 2.4.1&& < 2.5,
-                    dataframe-operations >= 2.4 && < 2.5,
+                    dataframe >= 3.6 && < 3.7,
+                    dataframe-core >= 2.5 && < 2.6,
+                    dataframe-operations >= 2.5 && < 2.6,
                     HUnit >= 1.6 && < 1.8,
                     text >= 2.1 && < 3,
                     vector >= 0.13 && < 0.15

@@ -40,9 +40,9 @@ import GHC.TypeLits (Symbol)
 
 import qualified Data.Text as T
 import DataFrame.Internal.Column (Columnable)
+import DataFrame.Internal.Column.Types (These (..))
 import qualified DataFrame.Internal.DataFrame as D
 import DataFrame.Internal.Expression (Expr, NamedExpr, UExpr (..))
-import DataFrame.Internal.Types (These (..))
 
 {- | A phantom-typed wrapper over the untyped 'DataFrame'.
 

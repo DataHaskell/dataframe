@@ -11,7 +11,7 @@ import qualified DataFrame.Internal.Column as DI
 import qualified DataFrame.Typed as DT
 
 import Data.Function
-import DataFrame.Operators
+import DataFrame.Expression.Operators
 import Test.HUnit
 
 values :: [(T.Text, DI.Column)]

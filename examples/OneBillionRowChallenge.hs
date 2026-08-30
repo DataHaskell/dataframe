@@ -11,7 +11,7 @@ import qualified DataFrame.Lazy as L
 
 import Data.Text (Text)
 import Data.Time
-import DataFrame.Operators
+import DataFrame.Expression.Operators
 import DataFrame.Schema (Schema (..), schemaType)
 
 run :: IO ()

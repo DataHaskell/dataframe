@@ -21,9 +21,9 @@ import qualified Data.Text.IO.Utf8 as TIO
 import GHC.Generics (Generic)
 
 import qualified DataFrame as D
+import DataFrame.Expression.Operators
 import qualified DataFrame.Functions as F
 import qualified DataFrame.Internal.Column as DI
-import DataFrame.Operators
 import qualified DataFrame.Schema as IS
 import DataFrame.Typed (Schema)
 import qualified DataFrame.Typed as DT

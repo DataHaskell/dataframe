@@ -20,7 +20,7 @@ import Data.Word (Word8)
 
 import qualified DataFrame as D
 import qualified DataFrame.Internal.Column as DI
-import DataFrame.Internal.PackedText (mkPackedContiguous)
+import DataFrame.Internal.Data.PackedText (mkPackedContiguous)
 
 import DataFrame.DecisionTree (defaultTreeConfig)
 import DataFrame.DecisionTree.Model ()

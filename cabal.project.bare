@@ -1,7 +1,7 @@
 -- Stripped-down project for exercising the meta `dataframe` package's
 -- cabal flags. Contains only the dataframe-* packages so the solver
 -- doesn't trip on peer satellites whose `buildable:` clauses depend on
--- arrow-bridge / lazy / etc. being available.
+-- the Arrow bridge / lazy / etc. being available.
 --
 -- Used by ./scripts/presubmit.sh to build lib:dataframe under each
 -- (+no-th / +no-csv / +no-parquet) opt-out flag combination.

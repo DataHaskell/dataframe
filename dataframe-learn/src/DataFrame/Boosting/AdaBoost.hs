@@ -35,6 +35,7 @@ import DataFrame.DecisionTree.Cart (
  )
 import DataFrame.DecisionTree.Fit (treeToExpr)
 import DataFrame.DecisionTree.Types (Tree (..))
+import DataFrame.Expression.Operators ((.*.), (.+.), (.==.))
 import DataFrame.Featurize.Internal (argMaxExpr, targetValues)
 import qualified DataFrame.Functions as F
 import DataFrame.Internal.Column (Columnable, TypedColumn (..), toVector)
@@ -42,7 +43,6 @@ import DataFrame.Internal.DataFrame (DataFrame)
 import DataFrame.Internal.Expression (Expr (..))
 import DataFrame.Internal.Interpreter (interpret)
 import DataFrame.Model
-import DataFrame.Operators ((.*.), (.+.), (.==.))
 
 data AdaBoostConfig = AdaBoostConfig
     { abNEstimators :: !Int

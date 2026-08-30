@@ -47,8 +47,9 @@ jobs:
           # entire value is treated as one path. Keep every body line at the
           # same indent so `>-` folds it all into one line.
           path: >-
-            ["src/", "app/", "benchmark/", "examples/", "ffi/", "tests/",
-            "dataframe-arrow/", "dataframe-core/", "dataframe-csv/",
+            ["src/", "app/", "benchmark/", "examples/", "tests/",
+            "dataframe-arrow/", "dataframe-arrow-bridge/",
+            "dataframe-core/", "dataframe-csv/",
             "dataframe-csv-th/", "dataframe-fastcsv/", "dataframe-fusion/",
             "dataframe-hasktorch/", "dataframe-huggingface/",
             "dataframe-json/", "dataframe-lazy/",

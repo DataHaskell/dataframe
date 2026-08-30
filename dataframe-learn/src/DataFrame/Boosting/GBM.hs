@@ -35,6 +35,7 @@ import DataFrame.DecisionTree.Cart (cartFeatures)
 import DataFrame.DecisionTree.Fit (treeToExpr)
 import DataFrame.DecisionTree.Regression (RegTreeConfig (..), fitRegTreeOn)
 import DataFrame.DecisionTree.Types (Tree)
+import DataFrame.Expression.Operators ((.*.), (.+.), (.>.))
 import DataFrame.Featurize.Internal (targetDoubles)
 import qualified DataFrame.Functions as F
 import DataFrame.Internal.Column (TypedColumn (..), toVector)
@@ -42,7 +43,6 @@ import DataFrame.Internal.DataFrame (DataFrame)
 import DataFrame.Internal.Expression (Expr (..), getColumns)
 import DataFrame.Internal.Interpreter (interpret)
 import DataFrame.Model
-import DataFrame.Operators ((.*.), (.+.), (.>.))
 
 -- | The boosting loss.
 data GBLoss = SquaredError | LogisticDeviance

@@ -36,7 +36,7 @@ You can run standalone scripts with minimal setup using cabal scripts.
 import qualified DataFrame as D
 import qualified DataFrame.Functions as F
 
-import DataFrame.Operators
+import DataFrame.Expression.Operators
 
 -- Creates the column references used below (namely total_rooms and households)
 -- This gives us type-safe column access.
@@ -119,7 +119,7 @@ dataframe> :declareColumns df
 We can use the generated columns in expressions.
 
 ```haskell
-dataframe> import DataFrame.Operators
+dataframe> import DataFrame.Expression.Operators
 dataframe> df |> D.groupBy ["ocean_proximity"] |> D.aggregate [(F.mean median_house_value) `as` "avg_house_value" ]
 -------------------------------------
  ocean_proximity |  avg_house_value  

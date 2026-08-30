@@ -1,6 +1,6 @@
 cabal-version:      3.4
 name:               dataframe-core
-version:            2.4.1.0
+version:            2.5.0.1
 synopsis:           Core data structures for the dataframe library.
 description:
     Minimal interchange-format types for the @dataframe@ ecosystem:
@@ -32,43 +32,57 @@ library
     import:             warnings
     exposed-modules:
                         DataFrame.Core
+                        DataFrame.Errors
+                        DataFrame.Expression.Operators
                         DataFrame.Typed.Freeze
                         DataFrame.Typed.Generic
                         DataFrame.Typed.Record
                         DataFrame.Typed.Schema
                         DataFrame.Typed.Types
                         DataFrame.Typed.Util
-                        DataFrame.Errors
-                        DataFrame.Operators
                         DataFrame.Display.Terminal.Colours
                         DataFrame.Display.Terminal.PrettyPrint
-                        DataFrame.Internal.AggKernel
-                        DataFrame.Internal.AggKernelDirect
-                        DataFrame.Internal.AggKernelPar
-                        DataFrame.Internal.AggPlan
-                        DataFrame.Internal.Column.Bitmap
-                        DataFrame.Internal.GroupingDirect
+                        -- Concurrency
+                        DataFrame.Internal.Control.Concurrent
+                        -- Aggregation kernels and planning.
+                        DataFrame.Internal.Aggregation.Kernel.Dense
+                        DataFrame.Internal.Aggregation.Kernel.Fused
+                        DataFrame.Internal.Aggregation.Kernel.Moments
+                        DataFrame.Internal.Aggregation.Kernel.Scatter
+                        DataFrame.Internal.Aggregation.Plan
+                        DataFrame.Internal.Aggregation.Reduction
+                        -- Shared algorithms.
+                        DataFrame.Internal.Algorithms.Hash
+                        DataFrame.Internal.Algorithms.Rank.Radix
+                        DataFrame.Internal.Algorithms.Sort.Radix.Parallel
+                        -- The column representation.
                         DataFrame.Internal.Column
+                        DataFrame.Internal.Column.Base
+                        DataFrame.Internal.Column.Bitmap
                         DataFrame.Internal.Column.Builder
+                        DataFrame.Internal.Column.Conversion
                         DataFrame.Internal.Column.Encode
                         DataFrame.Internal.Column.Merge
+                        DataFrame.Internal.Column.Operations
+                        DataFrame.Internal.Column.Properties
+                        DataFrame.Internal.Column.Types
+                        -- Backing data structures.
+                        DataFrame.Internal.Data.HashTable
+                        DataFrame.Internal.Data.PackedText
+                        DataFrame.Internal.Data.PackedText.Utf8
                         DataFrame.Internal.DataFrame
+                        DataFrame.Internal.Display.Pretty
+                        -- Expressions: syntax, operators, simplification.
                         DataFrame.Internal.Expression
+                        DataFrame.Internal.Expression.Operators
+                        DataFrame.Internal.Expression.Operators.Nullable
+                        DataFrame.Internal.Expression.Simplify
                         DataFrame.Internal.Grouping
-                        DataFrame.Internal.GroupingPar
-                        DataFrame.Internal.Hash
-                        DataFrame.Internal.HashTable
+                        DataFrame.Internal.Grouping.Direct
+                        DataFrame.Internal.Grouping.Partitioned
                         DataFrame.Internal.Interpreter
-                        DataFrame.Internal.Nullable
-                        DataFrame.Internal.PackedText
-                        DataFrame.Internal.ParRadixSort
-                        DataFrame.Internal.Pretty
-                        DataFrame.Internal.RadixRank
-                        DataFrame.Internal.RowHash
                         DataFrame.Internal.Row
-                        DataFrame.Internal.Simplify
-                        DataFrame.Internal.Types
-                        DataFrame.Internal.Utf8
+                        DataFrame.Internal.Row.RowHash
     build-depends:      base >= 4 && < 5,
                         containers >= 0.6.7 && < 0.10,
                         primitive >= 0.7 && < 0.11,

@@ -8,8 +8,8 @@ commutative chains, and short expressions staying on one line.
 module PrettyPrint (tests) where
 
 import qualified Data.Text as T
+import DataFrame.Expression.Operators
 import DataFrame.Internal.Expression (Expr, prettyPrint, prettyPrintWidth)
-import DataFrame.Operators
 import Test.HUnit
 
 a, b, c :: Expr Double

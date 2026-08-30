@@ -15,12 +15,12 @@ import Test.HUnit
 
 import qualified Data.Vector.Unboxed as VU
 import qualified DataFrame as D
+import DataFrame.Expression.Operators (ifThenElse, (.>.))
 import qualified DataFrame.Functions as F
 import DataFrame.Internal.Column (Columnable, TypedColumn (..), toVector)
 import qualified DataFrame.Internal.Column as DI
 import DataFrame.Internal.Expression (Expr, UExpr (..))
 import DataFrame.Internal.Interpreter (interpret)
-import DataFrame.Operators (ifThenElse, (.>.))
 
 import DataFrame.LinearModel (defaultLinearConfig)
 import DataFrame.Model (fit, predict)
