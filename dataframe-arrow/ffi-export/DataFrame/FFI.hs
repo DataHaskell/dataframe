@@ -179,7 +179,7 @@ instance Aeson.FromJSON TreeConfigJson where
 
 treeConfigFromJson :: TreeConfigJson -> TreeConfig
 treeConfigFromJson j =
-    TreeConfig
+    defaultTreeConfig
         { maxTreeDepth = pick jcMaxDepth maxTreeDepth
         , minSamplesSplit = pick jcMinSamplesSplit minSamplesSplit
         , minLeafSize = pick jcMinLeafSize minLeafSize
@@ -189,7 +189,7 @@ treeConfigFromJson j =
         , taoConvergenceTol = pick jcTaoConvergenceTol taoConvergenceTol
         , columnOrdering = defaultColumnOrdering
         , synthConfig =
-            SynthConfig
+            defaultSynthConfig
                 { maxExprDepth = pickS jcMaxExprDepth maxExprDepth
                 , boolExpansion = pickS jcBoolExpansion boolExpansion
                 , disallowedCombinations = []
