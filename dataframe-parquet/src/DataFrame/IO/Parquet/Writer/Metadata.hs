@@ -137,15 +137,28 @@ mkRowGroup chunks totalCompressed totalUncompressed rgRows =
         }
 
 writeFooter ::
-    WritableBinaryHandle -> [SchemaElement] -> Int -> [RowGroup] -> IO ()
-writeFooter output schemaElements numRows rowGroupMetadata = do
+    WritableBinaryHandle ->
+    [SchemaElement] ->
+    Int ->
+    [RowGroup] ->
+    [(T.Text, T.Text)] ->
+    IO ()
+writeFooter output schemaElements numRows rowGroupMetadata keyValues = do
     let metadata =
             FileMetadata
                 { version = putField 1
                 , schema = putField schemaElements
                 , num_rows = putField (fromIntegral numRows)
                 , row_groups = putField rowGroupMetadata
-                , key_value_metadata = putField Nothing
+                , key_value_metadata =
+                    putField $
+                        if null keyValues
+                            then Nothing
+                            else
+                                Just
+                                    [ KeyValue (putField k) (putField (Just v))
+                                    | (k, v) <- keyValues
+                                    ]
                 , created_by = putField (Just "dataframe-parquet")
                 , column_orders = putField Nothing
                 , encryption_algorithm = putField Nothing

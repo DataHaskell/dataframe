@@ -7,9 +7,11 @@ module DataFrame.IO.Parquet.Writer (
     ParquetWriteOptions (..),
     WriterStrategy (..),
     defaultParquetWriteOptions,
+    nativeTypeKeyPrefix,
+    nativeTypeKeyValues,
 ) where
 
-import Control.Monad (when)
+import Control.Monad (forM_, unless, when)
 import qualified Data.ByteString as BS
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import Data.Int (Int64)
@@ -53,7 +55,7 @@ import DataFrame.IO.Utils.RandomAccess (
     writeByteStringToFile,
     writeWord32LE,
  )
-import DataFrame.Internal.Column (Column, hasMissing)
+import DataFrame.Internal.Column (Column, columnTypeString, hasMissing)
 import DataFrame.Internal.DataFrame (
     DataFrame,
     columnNames,
@@ -61,6 +63,9 @@ import DataFrame.Internal.DataFrame (
     getColumn,
  )
 import qualified Pinch
+import System.Directory (createDirectoryIfMissing)
+import System.FilePath (takeDirectory)
+import Text.Printf (printf)
 import qualified Snappy
 
 data ParquetWriterState = ParquetWriterState
@@ -92,7 +97,7 @@ writeParquet :: FilePath -> DataFrame -> IO ()
 writeParquet = writeParquetWithOptions defaultParquetWriteOptions
 
 writeParquetWithOptions :: ParquetWriteOptions -> FilePath -> DataFrame -> IO ()
-writeParquetWithOptions options path_ df = do
+writeParquetWithOptions options path df = do
     when (options.strategy == TwoPass) $
         error
             "The Two Pass Strategy for the Parquet Writer has not yet been implemented"
@@ -100,8 +105,45 @@ writeParquetWithOptions options path_ df = do
         UNCOMPRESSED _ -> pure ()
         SNAPPY _ -> pure ()
         other -> error ("writeParquet: unsupported codec " <> show other)
-    let (maxRows, _) = dataframeDimensions df
-        names = columnNames df
+    let (totalRows, _) = dataframeDimensions df
+    case options.maxRowsPerFile of
+        Nothing -> do
+            when (isShardPattern path) $
+                error
+                    ( "writeParquet: path "
+                        <> show path
+                        <> " contains a '*' placeholder but maxRowsPerFile is not set"
+                    )
+            writeShard options path df 0 totalRows
+        Just rowsPerFile -> do
+            when (rowsPerFile <= 0) $
+                error "writeParquet: maxRowsPerFile must be positive"
+            unless (isShardPattern path) $
+                error
+                    ( "writeParquet: maxRowsPerFile requires a path with a '*' placeholder, got "
+                        <> show path
+                    )
+            let starts = case [0, rowsPerFile .. totalRows - 1] of
+                    [] -> [0] -- empty frame still produces one (empty) shard
+                    ss -> ss
+            forM_ (zip [0 ..] starts) $ \(shardIndex, start) -> do
+                let shardPath = shardPathFor path shardIndex
+                createDirectoryIfMissing True (takeDirectory shardPath)
+                writeShard options shardPath df start (min totalRows (start + rowsPerFile))
+
+isShardPattern :: FilePath -> Bool
+isShardPattern = elem '*'
+
+-- | Replace every @*@ in the pattern with a zero-padded shard index.
+shardPathFor :: FilePath -> Int -> FilePath
+shardPathFor pattern_ shardIndex =
+    concatMap (\c -> if c == '*' then printf "%05d" shardIndex else [c]) pattern_
+
+-- | Write rows @[startRow, endRow)@ of the frame to a single Parquet file.
+writeShard :: ParquetWriteOptions -> FilePath -> DataFrame -> Int -> Int -> IO ()
+writeShard options path_ df startRow endRow = do
+    let names = columnNames df
+        shardRows = max 0 (endRow - startRow)
     columnChunks_ <-
         VB.fromList
             <$> mapM
@@ -129,21 +171,37 @@ writeParquetWithOptions options path_ df = do
             interval = max 1 options.batchRows
             loop :: Int -> IO ()
             loop rowNum
-                | rowNum >= maxRows = pure ()
+                | rowNum >= endRow = pure ()
                 | otherwise = do
                     VB.forM_ columnChunks_ (writeRow options scratchBuffer_ rowNum)
                     modifyIORef' rowNumberRef_ (+ 1)
-                    when ((rowNum + 1) `mod` interval == 0) $ do
+                    when ((rowNum - startRow + 1) `mod` interval == 0) $ do
                         size <- bufferedSize columnChunks_
                         when (size >= options.rowGroupSize) (flushRowGroup options writerState)
                     loop (rowNum + 1)
-        loop 0
+        loop startRow
         flushRowGroup options writerState
         rowGroupMetadata <- reverse <$> readIORef rowGroupMetadataRef_
         let schemaElements =
                 rootSchemaElement (VB.length columnChunks_)
                     : VB.toList (VB.map schema columnChunks_)
-        writeFooter output schemaElements maxRows rowGroupMetadata
+        writeFooter
+            output
+            schemaElements
+            shardRows
+            rowGroupMetadata
+            (nativeTypeKeyValues names df)
+
+nativeTypeKeyPrefix :: T.Text
+nativeTypeKeyPrefix = "dataframe.type."
+
+-- | The type stamp for every column of @df@, as footer key-value pairs.
+nativeTypeKeyValues :: [T.Text] -> DataFrame -> [(T.Text, T.Text)]
+nativeTypeKeyValues names df =
+    [ (nativeTypeKeyPrefix <> name, T.pack (columnTypeString col))
+    | name <- names
+    , Just col <- [getColumn name df]
+    ]
 
 writeRow ::
     ParquetWriteOptions -> MemoryBuffer -> Int -> ColumnChunkState -> IO ()

@@ -1,13 +1,19 @@
+{-# LANGUAGE OverloadedStrings #-}
+
 -- | Tests for the writer-buffer logic in "DataFrame.IO.Utils.RandomAccess".
 module Main where
 
+import Control.Exception (SomeException, catch, evaluate)
 import qualified Data.ByteString as BS
+import Data.List (sortOn)
 import qualified System.Exit as Exit
 import System.FilePath ((</>))
 import System.IO.Temp (withSystemTempDirectory)
 import Test.HUnit
 
-import DataFrame.IO.Parquet (readParquet)
+import Control.Monad (unless)
+import DataFrame.IO.Parquet (readParquet, readParquetFiles)
+import System.Directory (listDirectory)
 import DataFrame.IO.Parquet.Writer (
     ParquetWriteOptions (..),
     defaultParquetWriteOptions,
@@ -15,6 +21,11 @@ import DataFrame.IO.Parquet.Writer (
     writeParquetWithOptions,
  )
 import DataFrame.IO.Utils.RandomAccess
+import DataFrame.Internal.Column (columnTypeString, fromList)
+import DataFrame.Internal.DataFrame (DataFrame, columnNames, fromNamedColumns, getColumn)
+import Data.Int (Int32, Int64)
+import Data.Maybe (fromJust)
+import qualified Data.Text as T
 
 directWrites :: Test
 directWrites = TestCase $ do
@@ -112,6 +123,74 @@ writerRoundTripTiny label path = TestCase $
         df' <- readParquet out
         assertEqual label df df'
 
+{- | Sharded writes: @maxRowsPerFile@ splits the frame across a glob pattern,
+and reading the shards back reproduces the original frame.
+-}
+writerRoundTripSharded :: String -> FilePath -> Int -> Int -> Test
+writerRoundTripSharded label path rowsPerFile expectedShards = TestCase $
+    withSystemTempDirectory "dfpq-writer" $ \dir -> do
+        df <- readParquet path
+        let pattern_ = dir </> "shards" </> "part-*.parquet"
+        writeParquetWithOptions
+            defaultParquetWriteOptions{maxRowsPerFile = Just rowsPerFile}
+            pattern_
+            df
+        shards <- listDirectory (dir </> "shards")
+        assertEqual (label <> ": shard count") expectedShards (Prelude.length shards)
+        assertEqual
+            (label <> ": shard names")
+            ["part-" <> pad i <> ".parquet" | i <- [0 .. expectedShards - 1]]
+            (sortOn id shards)
+        df' <- readParquetFiles pattern_
+        assertEqual (label <> ": shards round-trip") df df'
+  where
+    pad i = let s = show i in replicate (5 - Prelude.length s) '0' <> s
+
+-- | A path without a @*@ placeholder is rejected when sharding is requested.
+shardedWriteRequiresPattern :: Test
+shardedWriteRequiresPattern = TestCase $
+    withSystemTempDirectory "dfpq-writer" $ \dir -> do
+        df <- readParquet "tests/data/mtcars.parquet"
+        threw <-
+            (False <$ writeParquetWithOptions
+                    defaultParquetWriteOptions{maxRowsPerFile = Just 4}
+                    (dir </> "out.parquet")
+                    df)
+                `catch` (\e -> True <$ evaluate (Prelude.length (show (e :: SomeException))))
+        unless threw (assertFailure "expected an error for a path without '*'")
+
+{- | Parquet has one 64-bit integer type, so @Int@, @Int64@ and @Integer@
+columns all land in the file as @INT64@. The writer stamps the original
+Haskell type in the footer so the reader can put it back; without that, a
+CSV-inferred @Int@ column silently widens to @Int64@ on a round trip.
+-}
+writerRoundTripNativeIntTypes :: Test
+writerRoundTripNativeIntTypes = TestCase $
+    withSystemTempDirectory "dfpq-writer" $ \dir -> do
+        let df =
+                fromNamedColumns
+                    [ ("int", fromList [1 :: Int, 2, 3])
+                    , ("int64", fromList [1 :: Int64, 2, 3])
+                    , ("int32", fromList [1 :: Int32, 2, 3])
+                    , ("integer", fromList [1 :: Integer, 2, 3])
+                    , ("nullableInt", fromList [Just (1 :: Int), Nothing, Just 3])
+                    , ("nullableInt64", fromList [Just (1 :: Int64), Nothing, Just 3])
+                    ]
+            out = dir </> "int-types.parquet"
+        writeParquet out df
+        df' <- readParquet out
+        assertEqual
+            "native int types: column types"
+            (columnTypes df)
+            (columnTypes df')
+        assertEqual "native int types: frame" df df'
+
+columnTypes :: DataFrame -> [(String, String)]
+columnTypes df =
+    [ (T.unpack name, columnTypeString (fromJust (getColumn name df)))
+    | name <- columnNames df
+    ]
+
 tinyWriteOpts :: ParquetWriteOptions
 tinyWriteOpts =
     defaultParquetWriteOptions
@@ -154,6 +233,18 @@ tests =
         , TestLabel
             "writer roundtrip: int64_decimal"
             (writerRoundTrip "int64_decimal" "tests/data/int64_decimal.parquet")
+        , TestLabel
+            "writer roundtrip: sharded mtcars"
+            (writerRoundTripSharded "sharded mtcars" "tests/data/mtcars.parquet" 10 4)
+        , TestLabel
+            "writer roundtrip: sharded exact multiple"
+            (writerRoundTripSharded "sharded exact" "tests/data/mtcars.parquet" 32 1)
+        , TestLabel
+            "sharded write requires a '*' pattern"
+            shardedWriteRequiresPattern
+        , TestLabel
+            "writer roundtrip: Int/Integer keep their Haskell type"
+            writerRoundTripNativeIntTypes
         , TestLabel
             "writer roundtrip: alltypes_plain multi-page"
             ( writerRoundTripTiny

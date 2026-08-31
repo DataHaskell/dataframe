@@ -17,6 +17,7 @@ data ParquetWriteOptions = ParquetWriteOptions
     , subBatchRows :: !Int
     , compressionCodec :: !CompressionCodec
     , strategy :: !WriterStrategy
+    , maxRowsPerFile :: !(Maybe Int)
     }
     deriving (Eq, Show)
 
@@ -29,4 +30,5 @@ defaultParquetWriteOptions =
         , subBatchRows = 2048
         , compressionCodec = SNAPPY enum
         , strategy = InMemory
+        , maxRowsPerFile = Nothing
         }

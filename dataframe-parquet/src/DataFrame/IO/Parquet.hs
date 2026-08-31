@@ -1,3 +1,4 @@
+{-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE CPP #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE MonoLocalBinds #-}
@@ -7,7 +8,61 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 
-module DataFrame.IO.Parquet where
+module DataFrame.IO.Parquet (
+    -- * Reading
+    readParquet,
+    readParquetWithOpts,
+    readParquetFiles,
+    readParquetFilesWithOpts,
+
+    -- * Writing
+    writeParquet,
+    writeParquetWithOptions,
+
+    -- * Options
+    ParquetReadOptions (..),
+    defaultParquetReadOptions,
+    ParquetWriteOptions (..),
+    WriterStrategy (..),
+    defaultParquetWriteOptions,
+
+    -- * File metadata
+    parseFileMetadata,
+    readMetadataFromPath,
+    readMetadataFromHandle,
+    columnChunksForAll,
+
+    -- * Schema description
+    ColumnDescription (..),
+    generateColumnDescriptions,
+    getColumnNames,
+
+    -- * Decoding
+    parseParquetWithOpts,
+    parseColumnChunks,
+    getNonNullableColumn,
+    getNullableColumn,
+    getRepeatedColumn,
+    applyDescLogicalType,
+    applyLogicalType,
+    nativeTypeHints,
+    restoreNativeType,
+
+    -- * Applying read options to a decoded frame
+    applyReadOptions,
+    applyPredicate,
+    applySelectedColumns,
+    applyRowRange,
+    applySafeRead,
+
+    -- * Data sources
+    RandomAccess (..),
+    ReaderIO (runReaderIO),
+    FileBufferedOrSeekable,
+    ForceNonSeekable,
+    withFileBufferedOrSeekable,
+    _readParquetWithOpts,
+) where
 
 import Control.Exception (throw)
 import Control.Monad
@@ -48,7 +103,7 @@ import DataFrame.IO.Parquet.Page (
     int96Decoder,
  )
 import DataFrame.IO.Parquet.Seeking (
-    FileBufferedOrSeekable,
+    FileBufferedOrSeekable (..),
     ForceNonSeekable,
     withFileBufferedOrSeekable,
  )
@@ -56,6 +111,7 @@ import DataFrame.IO.Parquet.Thrift (
     ColumnChunk (..),
     DecimalType (..),
     FileMetadata (..),
+    KeyValue (..),
     LogicalType (..),
     RowGroup (..),
     ThriftType (..),
@@ -74,11 +130,25 @@ import DataFrame.IO.Parquet.Utils (
     generateColumnDescriptions,
     getColumnNames,
  )
+import DataFrame.IO.Parquet.Writer (
+    ParquetWriteOptions (..),
+    WriterStrategy (..),
+    defaultParquetWriteOptions,
+    nativeTypeKeyPrefix,
+    writeParquet,
+    writeParquetWithOptions,
+ )
 import DataFrame.IO.Utils.RandomAccess (
     RandomAccess (..),
     ReaderIO (runReaderIO),
  )
 import DataFrame.Internal.Column (Column, Columnable)
+import DataFrame.Schema (
+    Schema (..),
+    SchemaType,
+    makeSchema,
+    schemaType,
+ )
 import qualified DataFrame.Internal.Column as DI
 import DataFrame.Internal.Column.Builder (
     freezeTextChunk,
@@ -299,7 +369,12 @@ parseParquetWithOpts opts = do
 
     rawCols <- zipWithM (parseColumnChunks vectorLength) keptChunks keptDescs
 
-    let finalCols = zipWith applyDescLogicalType keptDescs rawCols
+    let hints = nativeTypeHints metadata
+        finalCols =
+            zipWith
+                (restoreNativeType hints)
+                keptNames
+                (zipWith applyDescLogicalType keptDescs rawCols)
         indices = Map.fromList $ zip keptNames [0 ..]
         dimensions = (vectorLength, length finalCols)
 
@@ -613,6 +688,55 @@ applyLogicalType (Just (LT_DECIMAL f)) col =
                         Left _ -> col
                     else col
 applyLogicalType _ col = col
+
+nativeTypeHints :: FileMetadata -> Schema
+nativeTypeHints metadata =
+    makeSchema
+        [ (name, ty)
+        | kv <- concat (unField metadata.key_value_metadata)
+        , Just name <- [T.stripPrefix nativeTypeKeyPrefix (unField kv.kv_key)]
+        , Just value <- [unField kv.kv_value]
+        , Just ty <- [Map.lookup value stampedSchemaTypes]
+        ]
+
+stampedSchemaTypes :: Map.Map T.Text SchemaType
+stampedSchemaTypes =
+    Map.fromList $
+        concat
+            [ entry @Int "Int"
+            , entry @Int32 "Int32"
+            , entry @Int64 "Int64"
+            , entry @Integer "Integer"
+            , entry @Float "Float"
+            , entry @Double "Double"
+            , entry @Bool "Bool"
+            , entry @T.Text "Text"
+            , entry @UTCTime "UTCTime"
+            ]
+  where
+    entry ::
+        forall a.
+        (Columnable a, Read a, Columnable (Maybe a)) =>
+        T.Text ->
+        [(T.Text, SchemaType)]
+    entry name =
+        [ (name, schemaType @a)
+        , ("Maybe " <> name, schemaType @(Maybe a))
+        ]
+
+restoreNativeType :: Schema -> T.Text -> DI.Column -> DI.Column
+restoreNativeType hints name col = case Map.lookup leaf (elements hints) of
+    Just ty
+        | stampedAs @Int ty -> narrow (fromIntegral @Int64 @Int)
+        | stampedAs @Integer ty -> narrow (fromIntegral @Int64 @Integer)
+    _ -> col
+  where
+    leaf = last (T.splitOn "." name)
+    stampedAs ::
+        forall a. (Columnable a, Read a, Columnable (Maybe a)) => SchemaType -> Bool
+    stampedAs ty = ty == schemaType @a || ty == schemaType @(Maybe a)
+    narrow :: (Columnable a) => (Int64 -> a) -> DI.Column
+    narrow f = fromRight col (DI.mapColumn f col)
 
 {- | Convert an epoch timestamp expressed as @ticksPerSecond@ ticks/second
 (each tick = @psPerTick@ picoseconds) to 'UTCTime', at full precision.
