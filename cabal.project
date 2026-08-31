@@ -1,3 +1,5 @@
+multi-repl: True
+
 packages:
     .
     dataframe-core
@@ -21,3 +23,4 @@ packages:
     dataframe-arrow-bridge
     dataframe-arrow
     dataframe-fusion
+    addiction
