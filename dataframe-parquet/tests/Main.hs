@@ -12,8 +12,10 @@ import System.IO.Temp (withSystemTempDirectory)
 import Test.HUnit
 
 import Control.Monad (unless)
+import Data.Int (Int32, Int64)
+import Data.Maybe (fromJust)
+import qualified Data.Text as T
 import DataFrame.IO.Parquet (readParquet, readParquetFiles)
-import System.Directory (listDirectory)
 import DataFrame.IO.Parquet.Writer (
     ParquetWriteOptions (..),
     defaultParquetWriteOptions,
@@ -22,10 +24,13 @@ import DataFrame.IO.Parquet.Writer (
  )
 import DataFrame.IO.Utils.RandomAccess
 import DataFrame.Internal.Column (columnTypeString, fromList)
-import DataFrame.Internal.DataFrame (DataFrame, columnNames, fromNamedColumns, getColumn)
-import Data.Int (Int32, Int64)
-import Data.Maybe (fromJust)
-import qualified Data.Text as T
+import DataFrame.Internal.DataFrame (
+    DataFrame,
+    columnNames,
+    fromNamedColumns,
+    getColumn,
+ )
+import System.Directory (listDirectory)
 
 directWrites :: Test
 directWrites = TestCase $ do
@@ -152,10 +157,12 @@ shardedWriteRequiresPattern = TestCase $
     withSystemTempDirectory "dfpq-writer" $ \dir -> do
         df <- readParquet "tests/data/mtcars.parquet"
         threw <-
-            (False <$ writeParquetWithOptions
+            ( False
+                <$ writeParquetWithOptions
                     defaultParquetWriteOptions{maxRowsPerFile = Just 4}
                     (dir </> "out.parquet")
-                    df)
+                    df
+            )
                 `catch` (\e -> True <$ evaluate (Prelude.length (show (e :: SomeException))))
         unless threw (assertFailure "expected an error for a path without '*'")
 

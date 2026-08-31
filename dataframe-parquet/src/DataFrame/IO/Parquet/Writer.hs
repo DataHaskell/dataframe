@@ -63,10 +63,10 @@ import DataFrame.Internal.DataFrame (
     getColumn,
  )
 import qualified Pinch
+import qualified Snappy
 import System.Directory (createDirectoryIfMissing)
 import System.FilePath (takeDirectory)
 import Text.Printf (printf)
-import qualified Snappy
 
 data ParquetWriterState = ParquetWriterState
     { outputFileHandle :: !WritableBinaryHandle
@@ -140,7 +140,8 @@ shardPathFor pattern_ shardIndex =
     concatMap (\c -> if c == '*' then printf "%05d" shardIndex else [c]) pattern_
 
 -- | Write rows @[startRow, endRow)@ of the frame to a single Parquet file.
-writeShard :: ParquetWriteOptions -> FilePath -> DataFrame -> Int -> Int -> IO ()
+writeShard ::
+    ParquetWriteOptions -> FilePath -> DataFrame -> Int -> Int -> IO ()
 writeShard options path_ df startRow endRow = do
     let names = columnNames df
         shardRows = max 0 (endRow - startRow)

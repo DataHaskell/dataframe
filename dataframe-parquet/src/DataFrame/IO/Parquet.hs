@@ -143,12 +143,6 @@ import DataFrame.IO.Utils.RandomAccess (
     ReaderIO (runReaderIO),
  )
 import DataFrame.Internal.Column (Column, Columnable)
-import DataFrame.Schema (
-    Schema (..),
-    SchemaType,
-    makeSchema,
-    schemaType,
- )
 import qualified DataFrame.Internal.Column as DI
 import DataFrame.Internal.Column.Builder (
     freezeTextChunk,
@@ -159,6 +153,12 @@ import DataFrame.Internal.DataFrame (DataFrame (..))
 import DataFrame.Internal.Expression (Expr, getColumns)
 import DataFrame.Operations.Merge ()
 import qualified DataFrame.Operations.Subset as DS
+import DataFrame.Schema (
+    Schema (..),
+    SchemaType,
+    makeSchema,
+    schemaType,
+ )
 import qualified Pinch
 import System.Directory (doesDirectoryExist)
 import System.FilePath ((</>))
