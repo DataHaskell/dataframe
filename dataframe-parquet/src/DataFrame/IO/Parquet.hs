@@ -277,7 +277,7 @@ readParquetFilesWithOpts opts path = do
 
     matches <- glob pat
 
-    files <- filterM (fmap not . doesDirectoryExist) matches
+    files <- L.sort <$> filterM (fmap not . doesDirectoryExist) matches
 
     case files of
         [] ->
