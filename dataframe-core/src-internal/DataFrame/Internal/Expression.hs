@@ -361,26 +361,24 @@ eqExpr l r = eqNormalized (normalize l) (normalize r)
     eqNormalized _ _ = False
 
 replaceExpr ::
-    forall a b c.
-    (Columnable a, Columnable b, Columnable c) =>
-    Expr a -> Expr b -> Expr c -> Expr c
-replaceExpr new old expr = case testEquality (typeRep @b) (typeRep @c) of
-    Just Refl -> case testEquality (typeRep @a) (typeRep @c) of
-        Just Refl -> if eqExpr old expr then new else replace'
-        Nothing -> expr
+    forall a b.
+    (Columnable a, Columnable b) =>
+    Expr a -> Expr a -> Expr b -> Expr b
+replaceExpr old new expr = case testEquality (typeRep @a) (typeRep @b) of
+    Just Refl -> if eqExpr old expr then new else replace'
     Nothing -> replace'
   where
     replace' = case expr of
         (Col _) -> expr
         (CastWith{}) -> expr
-        (CastExprWith t f e) -> CastExprWith t f (replaceExpr new old e)
+        (CastExprWith t f e) -> CastExprWith t f (replaceExpr old new e)
         (Lit _) -> expr
         (If cond l r) ->
-            If (replaceExpr new old cond) (replaceExpr new old l) (replaceExpr new old r)
-        (Unary op value) -> Unary op (replaceExpr new old value)
-        (Binary op l r) -> Binary op (replaceExpr new old l) (replaceExpr new old r)
-        (Agg op inner) -> Agg op (replaceExpr new old inner)
-        (Over keys inner) -> Over keys (replaceExpr new old inner)
+            If (replaceExpr old new cond) (replaceExpr old new l) (replaceExpr old new r)
+        (Unary op value) -> Unary op (replaceExpr old new value)
+        (Binary op l r) -> Binary op (replaceExpr old new l) (replaceExpr old new r)
+        (Agg op inner) -> Agg op (replaceExpr old new inner)
+        (Over keys inner) -> Over keys (replaceExpr old new inner)
 
 {- | Simultaneously substitute 'Col' references from a name→expression map in a
 single parallel pass, so a swap like @{a ↦ col b, b ↦ col a}@ works. Raw-text
@@ -441,8 +439,9 @@ prettyPrint :: Expr a -> String
 prettyPrint = prettyPrintWidth P.defaultWidth
 
 {- | Render an expression as readable, width-aware pseudo-code: long binary chains
-wrap onto aligned continuation lines, @if@/@then@/@else@ break onto their own lines
-(nested @else if@ form a flat ladder), and sub-exprs are parenthesized by precedence.
+wrap onto aligned continuation lines, conditionals are laid out like Python
+statements (@if cond@ / @else if cond@ / @else@ with 4-space indented branches, so
+nested conditionals nest visually), and sub-exprs are parenthesized by precedence.
 -}
 prettyPrintWidth :: Int -> Expr a -> String
 prettyPrintWidth width = P.render width . toDoc 0
@@ -505,8 +504,7 @@ prettyPrintWidth width = P.render width . toDoc 0
     renderIf prec (If c t e) =
         let blk =
                 P.text "if" P.<+> P.nest 3 (P.group (toDoc 0 c))
-                    <> P.hardline
-                    <> P.text "then" P.<+> toDoc 0 t
+                    <> P.nest indentWidth (P.hardline <> toDoc 0 t)
                     <> P.hardline
                     <> renderElse e
          in if prec > 0 then P.parens (P.nest 2 blk) else blk
@@ -514,9 +512,11 @@ prettyPrintWidth width = P.render width . toDoc 0
 
     renderElse :: Expr x -> P.Doc
     renderElse (If c t e) =
-        P.text "else if" P.<+> P.nest 8 (P.group (toDoc 0 c))
-            <> P.hardline
-            <> P.text "then" P.<+> toDoc 0 t
+        P.text "else if" P.<+> P.nest 5 (P.group (toDoc 0 c))
+            <> P.nest indentWidth (P.hardline <> toDoc 0 t)
             <> P.hardline
             <> renderElse e
-    renderElse other = P.text "else" P.<+> toDoc 0 other
+    renderElse other =
+        P.text "else" <> P.nest indentWidth (P.hardline <> toDoc 0 other)
+    indentWidth :: Int
+    indentWidth = 4
