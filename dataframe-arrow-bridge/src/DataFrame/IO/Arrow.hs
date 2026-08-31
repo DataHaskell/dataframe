@@ -226,7 +226,7 @@ readArrowBitmap :: Ptr Word8 -> Int -> IO DI.Bitmap
 readArrowBitmap bitmapPtr n = VU.generateM ((n + 7) `div` 8) (peekElemOff bitmapPtr)
 
 columnToArrow :: T.Text -> Column -> IO (Ptr ArrowSchema, Ptr ArrowArray)
-columnToArrow colName (UnboxedColumn _ (vec :: VU.Vector a))
+columnToArrow colName (UnboxedColumn Nothing (vec :: VU.Vector a))
     | Just Refl <- testEquality (typeRep @a) (typeRep @Int) = do
         let n = VU.length vec
         dataPtr <- mallocArray (max 1 n) :: IO (Ptr Int64)
@@ -234,7 +234,7 @@ columnToArrow colName (UnboxedColumn _ (vec :: VU.Vector a))
         sPtr <- makeLeafSchema "l" colName
         aPtr <- makeLeafArray n 0 [nullPtr, castPtr dataPtr] (free dataPtr)
         return (sPtr, aPtr)
-columnToArrow colName (UnboxedColumn _ (vec :: VU.Vector a))
+columnToArrow colName (UnboxedColumn Nothing (vec :: VU.Vector a))
     | Just Refl <- testEquality (typeRep @a) (typeRep @Double) = do
         let n = VU.length vec
         dataPtr <- mallocArray (max 1 n) :: IO (Ptr Double)
@@ -350,6 +350,10 @@ columnToArrow colName (BoxedColumn (Just bm) (vec :: V.Vector a))
                 [castPtr bitmapPtr, castPtr offPtr, castPtr charsPtr]
                 (free bitmapPtr >> free offPtr >> free charsPtr)
         return (sPtr, aPtr)
+columnToArrow colName c@(PackedText _ _) =
+    columnToArrow colName (DI.materializePacked c)
+columnToArrow colName c@(MergedColumn _ _) =
+    columnToArrow colName (DI.materializeMerged c)
 columnToArrow colName _ =
     error $
         "DataFrame.IO.Arrow.columnToArrow: unsupported column type for '"
