@@ -14,6 +14,7 @@ module DataFrame.IO.Utils.RandomAccess (
     withWritableBinaryFile,
     atomicallyWriteFile,
     MemoryBuffer (..),
+    ensureCapacity,
     mallocBuffer,
     writeByteString,
     appendTextArraySlice,
@@ -21,6 +22,9 @@ module DataFrame.IO.Utils.RandomAccess (
     writeWord32LE,
     writeWord64LE,
     writeInteger64,
+    writeWord32At,
+    writeWord64At,
+    writeInteger64At,
     writeFloatLE,
     writeDoubleLE,
     bufferResidency,
@@ -252,17 +256,28 @@ writeByteString buffer bs =
 writeWord32LE :: MemoryBuffer -> Word32 -> IO ()
 writeWord32LE buffer w = do
     position <- readIORef buffer.positionRef
-    array <- ensureCapacity buffer (position + 4)
-    writeByteArray array position (fromIntegral w :: Word8)
-    writeByteArray array (position + 1) (fromIntegral (w `shiftR` 8) :: Word8)
-    writeByteArray array (position + 2) (fromIntegral (w `shiftR` 16) :: Word8)
-    writeByteArray array (position + 3) (fromIntegral (w `shiftR` 24) :: Word8)
+    writeWord32At buffer position w
     writeIORef buffer.positionRef (position + 4)
 {-# INLINE writeWord32LE #-}
 
 writeWord64LE :: MemoryBuffer -> Word64 -> IO ()
 writeWord64LE buffer w = do
     position <- readIORef buffer.positionRef
+    writeWord64At buffer position w
+    writeIORef buffer.positionRef (position + 8)
+{-# INLINE writeWord64LE #-}
+
+writeWord32At :: MemoryBuffer -> Int -> Word32 -> IO ()
+writeWord32At buffer position w = do
+    array <- ensureCapacity buffer (position + 4)
+    writeByteArray array position (fromIntegral w :: Word8)
+    writeByteArray array (position + 1) (fromIntegral (w `shiftR` 8) :: Word8)
+    writeByteArray array (position + 2) (fromIntegral (w `shiftR` 16) :: Word8)
+    writeByteArray array (position + 3) (fromIntegral (w `shiftR` 24) :: Word8)
+{-# INLINE writeWord32At #-}
+
+writeWord64At :: MemoryBuffer -> Int -> Word64 -> IO ()
+writeWord64At buffer position w = do
     array <- ensureCapacity buffer (position + 8)
     writeByteArray array position (fromIntegral w :: Word8)
     writeByteArray array (position + 1) (fromIntegral (w `shiftR` 8) :: Word8)
@@ -272,17 +287,26 @@ writeWord64LE buffer w = do
     writeByteArray array (position + 5) (fromIntegral (w `shiftR` 40) :: Word8)
     writeByteArray array (position + 6) (fromIntegral (w `shiftR` 48) :: Word8)
     writeByteArray array (position + 7) (fromIntegral (w `shiftR` 56) :: Word8)
-    writeIORef buffer.positionRef (position + 8)
-{-# INLINE writeWord64LE #-}
+{-# INLINE writeWord64At #-}
 
 writeInteger64 :: MemoryBuffer -> Integer -> IO ()
-writeInteger64 buffer value
+writeInteger64 buffer value = do
+    position <- readIORef buffer.positionRef
+    newPosition <- writeInteger64At buffer position value
+    writeIORef buffer.positionRef newPosition
+{-# INLINE writeInteger64 #-}
+
+writeInteger64At :: MemoryBuffer -> Int -> Integer -> IO Int
+writeInteger64At buffer position value
     | value < toInteger (minBound :: Int64) = outOfRange
     | value > toInteger (maxBound :: Int64) = outOfRange
-    | otherwise = writeWord64LE buffer (fromIntegral value)
+    | otherwise = do
+        writeWord64At buffer position (fromIntegral value)
+        pure (position + 8)
   where
-    outOfRange = ioError (userError "writeParquet: Integer value is outside the INT64 range")
-{-# INLINE writeInteger64 #-}
+    outOfRange =
+        ioError (userError "writeParquet: Integer value is outside the INT64 range")
+{-# INLINE writeInteger64At #-}
 
 writeFloatLE :: MemoryBuffer -> Float -> IO ()
 writeFloatLE buffer = writeWord32LE buffer . castFloatToWord32

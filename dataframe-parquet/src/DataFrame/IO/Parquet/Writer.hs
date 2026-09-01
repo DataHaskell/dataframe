@@ -1,3 +1,4 @@
+{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 
@@ -16,6 +17,7 @@ import qualified Data.ByteString as BS
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import Data.Int (Int64)
 import Data.Maybe (fromJust)
+import Data.Primitive.ByteArray (getSizeofMutableByteArray)
 import qualified Data.Text as T
 import qualified Data.Vector as VB
 import DataFrame.IO.Parquet.Thrift hiding (schema)
@@ -41,11 +43,12 @@ import DataFrame.IO.Parquet.Writer.Options (
     defaultParquetWriteOptions,
  )
 import DataFrame.IO.Utils.RandomAccess (
-    MemoryBuffer,
+    MemoryBuffer (..),
     WritableBinaryHandle,
     atomicallyWriteFile,
     bufferResidency,
     bufferToByteString,
+    ensureCapacity,
     flushBufferToBuffer,
     flushBufferToFile,
     mallocBuffer,
@@ -170,16 +173,24 @@ writeShard options path_ df startRow endRow = do
                     rowGroupMetadataRef_
                     rowNumberRef_
             interval = max 1 options.batchRows
+            subBatch = max 1 options.subBatchRows
+            writeBatch :: Int -> Int -> IO ()
+            writeBatch rowNum batchEnd
+                | rowNum >= batchEnd = pure ()
+                | otherwise = do
+                    let count = min subBatch (batchEnd - rowNum)
+                    VB.forM_ columnChunks_ (writeRows options scratchBuffer_ rowNum count)
+                    modifyIORef' rowNumberRef_ (+ count)
+                    writeBatch (rowNum + count) batchEnd
             loop :: Int -> IO ()
             loop rowNum
                 | rowNum >= endRow = pure ()
                 | otherwise = do
-                    VB.forM_ columnChunks_ (writeRow options scratchBuffer_ rowNum)
-                    modifyIORef' rowNumberRef_ (+ 1)
-                    when ((rowNum - startRow + 1) `mod` interval == 0) $ do
-                        size <- bufferedSize columnChunks_
-                        when (size >= options.rowGroupSize) (flushRowGroup options writerState)
-                    loop (rowNum + 1)
+                    let batchEnd = rowNum + min interval (endRow - rowNum)
+                    writeBatch rowNum batchEnd
+                    size <- bufferedSize columnChunks_
+                    when (size >= options.rowGroupSize) (flushRowGroup options writerState)
+                    loop batchEnd
         loop startRow
         flushRowGroup options writerState
         rowGroupMetadata <- reverse <$> readIORef rowGroupMetadataRef_
@@ -204,30 +215,53 @@ nativeTypeKeyValues names df =
     , Just col <- [getColumn name df]
     ]
 
-writeRow ::
-    ParquetWriteOptions -> MemoryBuffer -> Int -> ColumnChunkState -> IO ()
-writeRow options scratch rowNum columnChunkState = do
-    let page = columnChunkState.pageState
-    notNull <- columnChunkState.encoder.writeValue page.pageBuffer rowNum
-    when columnChunkState.nullable $
-        pushDef page.definitionLevels (if notNull then 1 else 0)
-    modifyIORef' page.currentRowCount (+ 1)
-    pageRowCount <- readIORef page.currentRowCount
-    let subInterval = max 1 options.subBatchRows
-    when (pageRowCount `mod` subInterval == 0) $ do
-        flushDef page.definitionLevels
-        pageBufferResidency <- bufferResidency page.pageBuffer
-        defLevelsResidency <- bufferResidency page.definitionLevels.dlBuf
-        when
-            (pageBufferResidency + defLevelsResidency >= options.pageSize)
-            (flushPage options scratch columnChunkState)
+writeRows ::
+    ParquetWriteOptions -> MemoryBuffer -> Int -> Int -> ColumnChunkState -> IO ()
+writeRows options scratch firstRow count ccs = do
+    let page = ccs.pageState
+        buf = page.pageBuffer
+        encode = ccs.encoder.encodeValue
+        dl = page.definitionLevels
+        end = firstRow + count
+
+    pos0 <- readIORef buf.positionRef
+    let margin = options.pageSize
+    arr0 <- ensureCapacity buf (pos0 + max margin (count * 64))
+    size0 <- getSizeofMutableByteArray arr0
+
+    let go !size !pos !row
+            | row >= end = writeIORef buf.positionRef pos
+            | pos + margin > size = do
+                -- Rare: buffer nearly full, grow it
+                writeIORef buf.positionRef pos
+                arr' <- ensureCapacity buf (pos + max margin ((end - row) * 64))
+                size' <- getSizeofMutableByteArray arr'
+                go size' pos row
+            | otherwise = do
+                (pos', notNull) <- encode buf pos row
+                when ccs.nullable $
+                    pushDef dl (if notNull then 1 else 0)
+                go size pos' (row + 1)
+
+    go size0 pos0 firstRow
+
+    -- Batch bookkeeping: once per sub-batch instead of per value
+    modifyIORef' page.currentRowCount (+ count)
+    flushDef dl
+    pageRes <- bufferResidency buf
+    defRes <- bufferResidency dl.dlBuf
+    when
+        (pageRes + defRes >= options.pageSize)
+        (flushPage options scratch ccs)
 
 flushPage :: ParquetWriteOptions -> MemoryBuffer -> ColumnChunkState -> IO ()
 flushPage options scratch columnChunkState = do
     let page = columnChunkState.pageState
     numPageRows <- readIORef page.currentRowCount
     when (numPageRows > 0) $ do
-        columnChunkState.encoder.finishValues page.pageBuffer
+        pos <- readIORef page.pageBuffer.positionRef
+        pos' <- columnChunkState.encoder.finishValues page.pageBuffer pos
+        writeIORef page.pageBuffer.positionRef pos'
         body <- assemblePageBody scratch columnChunkState
         writeDataPage options.compressionCodec numPageRows body columnChunkState
         resetPosition page.pageBuffer

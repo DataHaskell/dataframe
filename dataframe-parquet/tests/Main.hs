@@ -128,6 +128,20 @@ writerRoundTripTiny label path = TestCase $
         df' <- readParquet out
         assertEqual label df df'
 
+writerRoundTripLargeText :: Test
+writerRoundTripLargeText = TestCase $
+    withSystemTempDirectory "dfpq-writer" $ \dir -> do
+        let payload = T.replicate 4096 "abcdefgh"
+            df = fromNamedColumns [("text", fromList [payload, "short"])]
+            firstOut = dir </> "large-text-1.parquet"
+            secondOut = dir </> "large-text-2.parquet"
+        writeParquetWithOptions tinyWriteOpts firstOut df
+        firstRoundTrip <- readParquet firstOut
+        writeParquetWithOptions tinyWriteOpts secondOut firstRoundTrip
+        secondRoundTrip <- readParquet secondOut
+        assertEqual "large text first round-trip" df firstRoundTrip
+        assertEqual "large text second round-trip" df secondRoundTrip
+
 {- | Sharded writes: @maxRowsPerFile@ splits the frame across a glob pattern,
 and reading the shards back reproduces the original frame.
 -}
@@ -258,6 +272,7 @@ tests =
                 "alltypes_plain multi-page"
                 "tests/data/alltypes_plain.parquet"
             )
+        , TestLabel "writer roundtrip: large text" writerRoundTripLargeText
         ]
 
 main :: IO ()

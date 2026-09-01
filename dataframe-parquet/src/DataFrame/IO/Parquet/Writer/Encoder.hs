@@ -10,10 +10,14 @@ module DataFrame.IO.Parquet.Writer.Encoder (
     buildEncoder,
 ) where
 
-import Control.Monad (when)
+import Control.Monad.ST (stToIO)
 import Data.Bits (shiftL, (.|.))
 import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.Int (Int32, Int64)
+import Data.Primitive.ByteArray (
+    withMutableByteArrayContents,
+    writeByteArray,
+ )
 import qualified Data.Text as T
 import qualified Data.Text.Array as TA
 import Data.Text.Internal (Text (Text))
@@ -25,14 +29,11 @@ import qualified Data.Vector.Unboxed as VU
 import Data.Word (Word8)
 import DataFrame.IO.Parquet.Thrift
 import DataFrame.IO.Utils.RandomAccess (
-    MemoryBuffer,
-    appendTextArraySlice,
-    writeDoubleLE,
-    writeFloatLE,
-    writeInteger64,
-    writeWord32LE,
-    writeWord64LE,
-    writeWord8,
+    MemoryBuffer (..),
+    ensureCapacity,
+    writeInteger64At,
+    writeWord32At,
+    writeWord64At,
  )
 import DataFrame.Internal.Column (
     Column (..),
@@ -49,6 +50,8 @@ import DataFrame.Internal.Data.PackedText (
     offAt,
     selAt,
  )
+import Foreign (plusPtr)
+import GHC.Float (castDoubleToWord64, castFloatToWord32)
 import Pinch (enum, putField)
 import Type.Reflection (typeRep)
 
@@ -56,8 +59,8 @@ data Encoder = Encoder
     { encType :: !ThriftType
     , convertedType :: !(Maybe ConvertedType)
     , logicalType :: !(Maybe LogicalType)
-    , writeValue :: !(MemoryBuffer -> Int -> IO Bool)
-    , finishValues :: !(MemoryBuffer -> IO ())
+    , encodeValue :: !(MemoryBuffer -> Int -> Int -> IO (Int, Bool))
+    , finishValues :: !(MemoryBuffer -> Int -> IO Int)
     }
 
 buildEncoder :: Column -> IO Encoder
@@ -68,7 +71,7 @@ buildEncoder col
                 (INT32 enum)
                 Nothing
                 Nothing
-                (\buffer -> writeWord32LE buffer . fromIntegral)
+                (\buffer pos v -> writeWord32At buffer pos (fromIntegral v) >> pure (pos + 4))
                 col
     | hasElemType @Int64 col =
         pure $
@@ -76,7 +79,7 @@ buildEncoder col
                 (INT64 enum)
                 Nothing
                 Nothing
-                (\buffer -> writeWord64LE buffer . fromIntegral)
+                (\buffer pos v -> writeWord64At buffer pos (fromIntegral v) >> pure (pos + 8))
                 col
     -- Ints in GHC can be 32 bit or 64 bit integers depending on the
     -- underlying computers architecture. So we'll do 64bit integers
@@ -87,7 +90,7 @@ buildEncoder col
                 (INT64 enum)
                 Nothing
                 Nothing
-                (\buffer -> writeWord64LE buffer . fromIntegral)
+                (\buffer pos v -> writeWord64At buffer pos (fromIntegral v) >> pure (pos + 8))
                 col
     | hasElemType @Integer col =
         pure $
@@ -95,12 +98,24 @@ buildEncoder col
                 (INT64 enum)
                 Nothing
                 Nothing
-                writeInteger64
+                writeInteger64At
                 col
     | hasElemType @Float col =
-        pure $ scalarEncoder @Float (FLOAT enum) Nothing Nothing writeFloatLE col
+        pure $
+            scalarEncoder @Float
+                (FLOAT enum)
+                Nothing
+                Nothing
+                (\buffer pos v -> writeWord32At buffer pos (castFloatToWord32 v) >> pure (pos + 4))
+                col
     | hasElemType @Double col =
-        pure $ scalarEncoder @Double (DOUBLE enum) Nothing Nothing writeDoubleLE col
+        pure $
+            scalarEncoder @Double
+                (DOUBLE enum)
+                Nothing
+                Nothing
+                (\buffer pos v -> writeWord64At buffer pos (castDoubleToWord64 v) >> pure (pos + 8))
+                col
     | hasElemType @Bool col = boolEncoder col
     | hasElemType @T.Text col = pure (textEncoder col)
     | hasElemType @UTCTime col = pure (timestampEncoder col)
@@ -113,17 +128,17 @@ scalarEncoder ::
     ThriftType ->
     Maybe ConvertedType ->
     Maybe LogicalType ->
-    (MemoryBuffer -> a -> IO ()) ->
+    (MemoryBuffer -> Int -> a -> IO Int) ->
     Column ->
     Encoder
-scalarEncoder tt conv logical writeValue col =
-    Encoder tt conv logical (columnWriter @a col writeValue) (const (pure ()))
+scalarEncoder tt conv logical writePrim col =
+    Encoder tt conv logical (columnWriter @a col writePrim) (\_ pos -> pure pos)
 {-# INLINEABLE scalarEncoder #-}
 {-# SPECIALIZE scalarEncoder ::
     ThriftType ->
     Maybe ConvertedType ->
     Maybe LogicalType ->
-    (MemoryBuffer -> Int32 -> IO ()) ->
+    (MemoryBuffer -> Int -> Int32 -> IO Int) ->
     Column ->
     Encoder
     #-}
@@ -131,7 +146,7 @@ scalarEncoder tt conv logical writeValue col =
     ThriftType ->
     Maybe ConvertedType ->
     Maybe LogicalType ->
-    (MemoryBuffer -> Int64 -> IO ()) ->
+    (MemoryBuffer -> Int -> Int64 -> IO Int) ->
     Column ->
     Encoder
     #-}
@@ -139,7 +154,7 @@ scalarEncoder tt conv logical writeValue col =
     ThriftType ->
     Maybe ConvertedType ->
     Maybe LogicalType ->
-    (MemoryBuffer -> Float -> IO ()) ->
+    (MemoryBuffer -> Int -> Float -> IO Int) ->
     Column ->
     Encoder
     #-}
@@ -147,7 +162,7 @@ scalarEncoder tt conv logical writeValue col =
     ThriftType ->
     Maybe ConvertedType ->
     Maybe LogicalType ->
-    (MemoryBuffer -> Double -> IO ()) ->
+    (MemoryBuffer -> Int -> Double -> IO Int) ->
     Column ->
     Encoder
     #-}
@@ -155,7 +170,7 @@ scalarEncoder tt conv logical writeValue col =
     ThriftType ->
     Maybe ConvertedType ->
     Maybe LogicalType ->
-    (MemoryBuffer -> Int -> IO ()) ->
+    (MemoryBuffer -> Int -> Int -> IO Int) ->
     Column ->
     Encoder
     #-}
@@ -163,7 +178,7 @@ scalarEncoder tt conv logical writeValue col =
     ThriftType ->
     Maybe ConvertedType ->
     Maybe LogicalType ->
-    (MemoryBuffer -> Integer -> IO ()) ->
+    (MemoryBuffer -> Int -> Integer -> IO Int) ->
     Column ->
     Encoder
     #-}
@@ -172,11 +187,12 @@ columnWriter ::
     forall a.
     (Columnable a) =>
     Column ->
-    (MemoryBuffer -> a -> IO ()) ->
+    (MemoryBuffer -> Int -> a -> IO Int) ->
     MemoryBuffer ->
     Int ->
-    IO Bool
-columnWriter col writeValue = case col of
+    Int ->
+    IO (Int, Bool)
+columnWriter col writePrim = case col of
     BoxedColumn bitmap (values :: VB.Vector b) ->
         case testEquality (typeRep @a) (typeRep @b) of
             Just Refl -> writeFrom bitmap (VB.unsafeIndex values)
@@ -187,36 +203,78 @@ columnWriter col writeValue = case col of
             Nothing -> mismatch
     _ -> mismatch
   where
-    writeFrom bitmap at buffer row
-        | isPresent bitmap row = writeValue buffer (at row) >> pure True
-        | otherwise = pure False
+    writeFrom bitmap at buffer pos row
+        | isPresent bitmap row = do
+            pos' <- writePrim buffer pos (at row)
+            pure (pos', True)
+        | otherwise = pure (pos, False)
     mismatch =
         error
             ("writeParquet: incompatible column representation for " <> columnTypeString col)
 {-# INLINEABLE columnWriter #-}
 {-# SPECIALIZE columnWriter ::
-    Column -> (MemoryBuffer -> Int32 -> IO ()) -> MemoryBuffer -> Int -> IO Bool
+    Column ->
+    (MemoryBuffer -> Int -> Int32 -> IO Int) ->
+    MemoryBuffer ->
+    Int ->
+    Int ->
+    IO (Int, Bool)
     #-}
 {-# SPECIALIZE columnWriter ::
-    Column -> (MemoryBuffer -> Int64 -> IO ()) -> MemoryBuffer -> Int -> IO Bool
+    Column ->
+    (MemoryBuffer -> Int -> Int64 -> IO Int) ->
+    MemoryBuffer ->
+    Int ->
+    Int ->
+    IO (Int, Bool)
     #-}
 {-# SPECIALIZE columnWriter ::
-    Column -> (MemoryBuffer -> Float -> IO ()) -> MemoryBuffer -> Int -> IO Bool
+    Column ->
+    (MemoryBuffer -> Int -> Float -> IO Int) ->
+    MemoryBuffer ->
+    Int ->
+    Int ->
+    IO (Int, Bool)
     #-}
 {-# SPECIALIZE columnWriter ::
-    Column -> (MemoryBuffer -> Double -> IO ()) -> MemoryBuffer -> Int -> IO Bool
+    Column ->
+    (MemoryBuffer -> Int -> Double -> IO Int) ->
+    MemoryBuffer ->
+    Int ->
+    Int ->
+    IO (Int, Bool)
     #-}
 {-# SPECIALIZE columnWriter ::
-    Column -> (MemoryBuffer -> Bool -> IO ()) -> MemoryBuffer -> Int -> IO Bool
+    Column ->
+    (MemoryBuffer -> Int -> Bool -> IO Int) ->
+    MemoryBuffer ->
+    Int ->
+    Int ->
+    IO (Int, Bool)
     #-}
 {-# SPECIALIZE columnWriter ::
-    Column -> (MemoryBuffer -> UTCTime -> IO ()) -> MemoryBuffer -> Int -> IO Bool
+    Column ->
+    (MemoryBuffer -> Int -> UTCTime -> IO Int) ->
+    MemoryBuffer ->
+    Int ->
+    Int ->
+    IO (Int, Bool)
     #-}
 {-# SPECIALIZE columnWriter ::
-    Column -> (MemoryBuffer -> Int -> IO ()) -> MemoryBuffer -> Int -> IO Bool
+    Column ->
+    (MemoryBuffer -> Int -> Int -> IO Int) ->
+    MemoryBuffer ->
+    Int ->
+    Int ->
+    IO (Int, Bool)
     #-}
 {-# SPECIALIZE columnWriter ::
-    Column -> (MemoryBuffer -> Integer -> IO ()) -> MemoryBuffer -> Int -> IO Bool
+    Column ->
+    (MemoryBuffer -> Int -> Integer -> IO Int) ->
+    MemoryBuffer ->
+    Int ->
+    Int ->
+    IO (Int, Bool)
     #-}
 
 isPresent :: Maybe Bitmap -> Int -> Bool
@@ -228,19 +286,35 @@ boolEncoder :: Column -> IO Encoder
 boolEncoder col = do
     bitsRef <- newIORef (0 :: Word8)
     countRef <- newIORef (0 :: Int)
-    let addBit buffer value = do
+    let addBit buffer pos value = do
             bits <- readIORef bitsRef
             count <- readIORef countRef
             let bits' = if value then bits .|. ((1 :: Word8) `shiftL` count) else bits
                 count' = count + 1
             if count' == 8
-                then writeWord8 buffer bits' >> writeIORef bitsRef 0 >> writeIORef countRef 0
-                else writeIORef bitsRef bits' >> writeIORef countRef count'
-        finish buffer = do
+                then do
+                    arr <- readIORef buffer.arrayRef
+                    writeByteArray arr pos bits'
+                    writeIORef bitsRef 0
+                    writeIORef countRef 0
+                    pure (pos + 1)
+                else do
+                    writeIORef bitsRef bits'
+                    writeIORef countRef count'
+                    pure pos
+        finish buffer pos = do
             count <- readIORef countRef
-            when (count > 0) (readIORef bitsRef >>= writeWord8 buffer)
+            pos' <-
+                if count > 0
+                    then do
+                        bits <- readIORef bitsRef
+                        arr <- readIORef buffer.arrayRef
+                        writeByteArray arr pos bits
+                        pure (pos + 1)
+                    else pure pos
             writeIORef bitsRef 0
             writeIORef countRef 0
+            pure pos'
     pure
         (Encoder (BOOLEAN enum) Nothing Nothing (columnWriter @Bool col addBit) finish)
 
@@ -251,7 +325,7 @@ textEncoder col =
         (Just (UTF8 enum))
         (Just (LT_STRING (putField StringType)))
         writePresent
-        (const (pure ()))
+        (\_ pos -> pure pos)
   where
     writePresent = case col of
         BoxedColumn bitmap (values :: VB.Vector a) ->
@@ -260,31 +334,31 @@ textEncoder col =
                 Nothing -> mismatch
         PackedText bitmap packed -> writePacked bitmap packed
         _ -> mismatch
-    writeBoxed bitmap values buffer row
-        | isPresent bitmap row =
-            writeText buffer (VB.unsafeIndex values row) >> pure True
-        | otherwise = pure False
-    writePacked bitmap packed buffer row
+    writeBoxed bitmap values buffer pos row
+        | isPresent bitmap row = do
+            let Text bytes offset count = VB.unsafeIndex values row
+            pos' <- writeTextSlice buffer pos bytes offset count
+            pure (pos', True)
+        | otherwise = pure (pos, False)
+    writePacked bitmap packed buffer pos row
         | isPresent bitmap row = do
             let baseRow = maybe row (`selAt` row) packed.ptSel
                 start = offAt packed.ptOffsets baseRow
                 end = offAt packed.ptOffsets (baseRow + 1)
-            writeTextSlice buffer packed.ptBytes start (end - start)
-            pure True
-        | otherwise = pure False
+            pos' <- writeTextSlice buffer pos packed.ptBytes start (end - start)
+            pure (pos', True)
+        | otherwise = pure (pos, False)
+    writeTextSlice buffer pos bytes offset count = do
+        writeIORef buffer.positionRef pos
+        _ <- ensureCapacity buffer (pos + 4 + count)
+        writeWord32At buffer pos (fromIntegral count)
+        arr <- readIORef buffer.arrayRef
+        withMutableByteArrayContents arr $ \ptr ->
+            stToIO (TA.copyToPointer bytes offset (ptr `plusPtr` (pos + 4)) count)
+        pure (pos + 4 + count)
     mismatch =
         error
             ("writeParquet: incompatible text representation for " <> columnTypeString col)
-
-writeText :: MemoryBuffer -> T.Text -> IO ()
-writeText buffer (Text bytes offset count) = writeTextSlice buffer bytes offset count
-{-# INLINE writeText #-}
-
-writeTextSlice :: MemoryBuffer -> TA.Array -> Int -> Int -> IO ()
-writeTextSlice buffer bytes offset count = do
-    writeWord32LE buffer (fromIntegral count)
-    appendTextArraySlice buffer bytes offset count
-{-# INLINE writeTextSlice #-}
 
 timestampEncoder :: Column -> Encoder
 timestampEncoder col =
@@ -293,9 +367,11 @@ timestampEncoder col =
         (Just (TIMESTAMP_MICROS enum))
         (Just timestampLogical)
         (columnWriter @UTCTime col writeMicros)
-        (const (pure ()))
+        (\_ pos -> pure pos)
   where
-    writeMicros buffer t = writeWord64LE buffer (fromIntegral (utcToMicros t))
+    writeMicros buffer pos t = do
+        writeWord64At buffer pos (fromIntegral (utcToMicros t))
+        pure (pos + 8)
 
 timestampLogical :: LogicalType
 timestampLogical =
