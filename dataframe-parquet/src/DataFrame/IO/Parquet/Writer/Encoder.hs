@@ -106,7 +106,8 @@ buildEncoder col
                 (FLOAT enum)
                 Nothing
                 Nothing
-                (\buffer pos v -> writeWord32At buffer pos (castFloatToWord32 v) >> pure (pos + 4))
+                ( \buffer pos v -> writeWord32At buffer pos (castFloatToWord32 v) >> pure (pos + 4)
+                )
                 col
     | hasElemType @Double col =
         pure $
@@ -114,7 +115,8 @@ buildEncoder col
                 (DOUBLE enum)
                 Nothing
                 Nothing
-                (\buffer pos v -> writeWord64At buffer pos (castDoubleToWord64 v) >> pure (pos + 8))
+                ( \buffer pos v -> writeWord64At buffer pos (castDoubleToWord64 v) >> pure (pos + 8)
+                )
                 col
     | hasElemType @Bool col = boolEncoder col
     | hasElemType @T.Text col = pure (textEncoder col)
