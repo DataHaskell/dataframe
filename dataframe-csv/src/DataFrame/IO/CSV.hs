@@ -163,7 +163,6 @@ decodeSeparated opts csvData = decodeSeparatedStrict opts (BL.toStrict csvData)
 {- | Decode a strict in-memory CSV buffer into a dataframe. The result is
 fully forced. As with 'decodeSeparated', this function does not strip a UTF-8
 BOM; callers reading the start of a file should strip it first.
-
 -}
 decodeSeparatedStrict :: CsvBytesReader
 decodeSeparatedStrict = decodeCsvStrict
