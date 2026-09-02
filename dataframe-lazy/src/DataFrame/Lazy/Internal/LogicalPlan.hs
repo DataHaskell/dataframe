@@ -3,7 +3,7 @@
 module DataFrame.Lazy.Internal.LogicalPlan where
 
 import qualified Data.Text as T
-import DataFrame.IO.CSV (CsvReader)
+import DataFrame.IO.CSV (CsvBytesReader, CsvReader)
 import qualified DataFrame.Internal.DataFrame as D
 import qualified DataFrame.Internal.Expression as E
 import DataFrame.Operations.Join (JoinType)
@@ -14,6 +14,7 @@ data DataSource
     = -- | path, separator, CSV reader (e.g. attoparsec or SIMD)
       CsvSource FilePath Char CsvReader
     | CsvSourceStreaming FilePath Char CsvReader
+    | CsvSourceStreamingBytes FilePath Char CsvBytesReader
     | ParquetSource FilePath
 
 instance Show DataSource where
@@ -21,6 +22,8 @@ instance Show DataSource where
         "CsvSource " ++ show path ++ " " ++ show sep ++ " <reader>"
     show (CsvSourceStreaming path sep _) =
         "CsvSourceStreaming " ++ show path ++ " " ++ show sep ++ " <reader>"
+    show (CsvSourceStreamingBytes path sep _) =
+        "CsvSourceStreamingBytes " ++ show path ++ " " ++ show sep ++ " <reader>"
     show (ParquetSource path) = "ParquetSource " ++ show path
 
 -- | Sort direction used in Sort nodes and the public API.

@@ -49,56 +49,56 @@ import Data.Int (Int16, Int32, Int64, Int8)
 -- Specializations for common aggregation types to avoid dictionary overhead.
 -- foldLinearGroups: mean accumulator
 {-# SPECIALIZE foldLinearGroups ::
-    (MeanAcc -> Double -> MeanAcc) ->
-    MeanAcc ->
+    ((Double, Int) -> Double -> (Double, Int)) ->
+    (Double, Int) ->
     Column ->
     VU.Vector Int ->
     Int ->
     Either DataFrameException Column
     #-}
 {-# SPECIALIZE foldLinearGroups ::
-    (MeanAcc -> Float -> MeanAcc) ->
-    MeanAcc ->
+    ((Double, Int) -> Float -> (Double, Int)) ->
+    (Double, Int) ->
     Column ->
     VU.Vector Int ->
     Int ->
     Either DataFrameException Column
     #-}
 {-# SPECIALIZE foldLinearGroups ::
-    (MeanAcc -> Int -> MeanAcc) ->
-    MeanAcc ->
+    ((Double, Int) -> Int -> (Double, Int)) ->
+    (Double, Int) ->
     Column ->
     VU.Vector Int ->
     Int ->
     Either DataFrameException Column
     #-}
 {-# SPECIALIZE foldLinearGroups ::
-    (MeanAcc -> Int8 -> MeanAcc) ->
-    MeanAcc ->
+    ((Double, Int) -> Int8 -> (Double, Int)) ->
+    (Double, Int) ->
     Column ->
     VU.Vector Int ->
     Int ->
     Either DataFrameException Column
     #-}
 {-# SPECIALIZE foldLinearGroups ::
-    (MeanAcc -> Int16 -> MeanAcc) ->
-    MeanAcc ->
+    ((Double, Int) -> Int16 -> (Double, Int)) ->
+    (Double, Int) ->
     Column ->
     VU.Vector Int ->
     Int ->
     Either DataFrameException Column
     #-}
 {-# SPECIALIZE foldLinearGroups ::
-    (MeanAcc -> Int32 -> MeanAcc) ->
-    MeanAcc ->
+    ((Double, Int) -> Int32 -> (Double, Int)) ->
+    (Double, Int) ->
     Column ->
     VU.Vector Int ->
     Int ->
     Either DataFrameException Column
     #-}
 {-# SPECIALIZE foldLinearGroups ::
-    (MeanAcc -> Int64 -> MeanAcc) ->
-    MeanAcc ->
+    ((Double, Int) -> Int64 -> (Double, Int)) ->
+    (Double, Int) ->
     Column ->
     VU.Vector Int ->
     Int ->
@@ -213,7 +213,7 @@ import Data.Int (Int16, Int32, Int64, Int8)
 
 -- mapColumn: finalize
 {-# SPECIALIZE mapColumn ::
-    (MeanAcc -> Double) -> Column -> Either DataFrameException Column
+    ((Double, Int) -> Double) -> Column -> Either DataFrameException Column
     #-}
 {-# SPECIALIZE mapColumn ::
     (Double -> Double) -> Column -> Either DataFrameException Column

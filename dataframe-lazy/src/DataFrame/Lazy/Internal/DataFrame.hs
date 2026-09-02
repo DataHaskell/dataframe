@@ -8,7 +8,12 @@
 module DataFrame.Lazy.Internal.DataFrame where
 
 import qualified Data.Text as T
-import DataFrame.IO.CSV (CsvReader, readSeparated)
+import DataFrame.IO.CSV (
+    CsvBytesReader,
+    CsvReader,
+    decodeSeparatedStrict,
+    readSeparated,
+ )
 import qualified DataFrame.Internal.Column as C
 import qualified DataFrame.Internal.DataFrame as D
 import qualified DataFrame.Internal.Expression as E
@@ -88,9 +93,28 @@ scanCsvWith reader schema path =
         , batchSize = 1_000_000
         }
 
-{- | Like 'scanCsvWith', but the file is read in bounded-memory windows
-instead of one pass per chunk — for files too large to hold in memory even
-after the schema's projection.
+{- | Scan a CSV file in bounded-memory windows with the default in-tree
+strict reader. Windows are decoded directly from memory, without temporary
+files.
+
+Use this for files too large to hold in memory even after the schema's
+projection.
+
+==== __Example__
+@
+ghci> L.runDataFrame (L.scanCsvStreaming schema "huge.csv")
+
+@
+-}
+scanCsvStreaming :: Schema -> T.Text -> LazyDataFrame
+scanCsvStreaming = scanCsvStreamingBytesWith decodeSeparatedStrict
+
+{- | Like 'scanCsvWith', but the file is read in bounded-memory windows.
+
+This compatibility entry point accepts an existing path-based 'CsvReader'.
+Because such a reader can only consume file paths, each window is staged in a
+temporary file. New readers should use 'scanCsvStreamingBytesWith' to decode
+windows directly from memory.
 
 ==== __Example__
 @
@@ -102,6 +126,23 @@ scanCsvStreamingWith :: CsvReader -> Schema -> T.Text -> LazyDataFrame
 scanCsvStreamingWith reader schema path =
     LazyDataFrame
         { plan = Scan (CsvSourceStreaming (T.unpack path) ',' reader) schema
+        , batchSize = 1_000_000
+        }
+
+{- | Stream a CSV file in bounded-memory windows decoded by an in-memory
+'CsvBytesReader'. This avoids the temporary-file staging required by
+'scanCsvStreamingWith'.
+
+==== __Example__
+@
+ghci> L.runDataFrame (L.scanCsvStreamingBytesWith decodeSeparatedStrict schema "huge.csv")
+
+@
+-}
+scanCsvStreamingBytesWith :: CsvBytesReader -> Schema -> T.Text -> LazyDataFrame
+scanCsvStreamingBytesWith reader schema path =
+    LazyDataFrame
+        { plan = Scan (CsvSourceStreamingBytes (T.unpack path) ',' reader) schema
         , batchSize = 1_000_000
         }
 

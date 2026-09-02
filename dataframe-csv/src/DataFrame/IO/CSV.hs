@@ -13,8 +13,10 @@ module DataFrame.IO.CSV (
     readSeparated,
     readCsvWithSchema,
     CsvReader,
+    CsvBytesReader,
     schemaReadOptions,
     decodeSeparated,
+    decodeSeparatedStrict,
     fromCsv,
     fromCsvBytes,
 
@@ -67,6 +69,8 @@ myReader opts path = D.readCsvWithOpts opts path
 @
 -}
 type CsvReader = ReadOptions -> FilePath -> IO DataFrame
+
+type CsvBytesReader = ReadOptions -> BS.ByteString -> IO DataFrame
 
 {- | Read options a scan derives from its 'Schema': the schema assigns the
 column types /and/ selects the columns, so a scan reads only what its
@@ -142,7 +146,7 @@ readSeparated opts path = do
     validateReadOptions opts
     let stripUtf8Bom b = fromMaybe b (BS.stripPrefix "\xEF\xBB\xBF" b)
     csvData <- stripUtf8Bom <$> BS.readFile path
-    decodeCsvStrict opts csvData
+    decodeSeparatedStrict opts csvData
 
 {- | Decode in-memory CSV bytes into a dataframe. The result is fully
 forced. (Note: unlike 'readSeparated', no UTF-8 BOM is stripped.)
@@ -154,7 +158,15 @@ ghci> D.decodeSeparated D.defaultReadOptions "id,name\\n1,Ada\\n"
 @
 -}
 decodeSeparated :: ReadOptions -> BL.ByteString -> IO DataFrame
-decodeSeparated opts csvData = decodeCsvStrict opts (BL.toStrict csvData)
+decodeSeparated opts csvData = decodeSeparatedStrict opts (BL.toStrict csvData)
+
+{- | Decode a strict in-memory CSV buffer into a dataframe. The result is
+fully forced. As with 'decodeSeparated', this function does not strip a UTF-8
+BOM; callers reading the start of a file should strip it first.
+
+-}
+decodeSeparatedStrict :: CsvBytesReader
+decodeSeparatedStrict = decodeCsvStrict
 
 {- | Write a dataframe to a comma-separated file.
 

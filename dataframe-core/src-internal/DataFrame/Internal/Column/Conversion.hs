@@ -411,10 +411,15 @@ columnToTextVec (BoxedColumn bm (col' :: VB.Vector a)) =
         Nothing -> case testEquality (typeRep @a) (typeRep @T.Text) of
             Just Refl -> col'
             Nothing -> VB.map (T.pack . show) col'
-        Just bitmap ->
-            VB.imap
-                (\i x -> if bitmapTestBit bitmap i then T.pack (show x) else "null")
-                col'
+        Just bitmap -> case testEquality (typeRep @a) (typeRep @T.Text) of
+            Just Refl ->
+                VB.imap
+                    (\i x -> if bitmapTestBit bitmap i then x else "null")
+                    col'
+            Nothing ->
+                VB.imap
+                    (\i x -> if bitmapTestBit bitmap i then T.pack (show x) else "null")
+                    col'
 columnToTextVec (UnboxedColumn bm col') =
     case bm of
         Nothing -> VB.map (T.pack . show) (VB.convert col')

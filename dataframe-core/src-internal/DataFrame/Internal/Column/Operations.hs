@@ -801,23 +801,26 @@ zipColumns l@(MergedColumn _ _) r = zipColumns (materializeMerged l) r
 zipColumns l r@(MergedColumn _ _) = zipColumns l (materializeMerged r)
 zipColumns l@(PackedText _ _) r = zipColumns (materializePacked l) r
 zipColumns l r@(PackedText _ _) = zipColumns l (materializePacked r)
-zipColumns (BoxedColumn _ column) (BoxedColumn _ other) = BoxedColumn Nothing (VG.zip column other)
-zipColumns (BoxedColumn _ column) (UnboxedColumn _ other) =
-    BoxedColumn
-        Nothing
-        ( VB.generate
-            (min (VG.length column) (VG.length other))
-            (\i -> (column VG.! i, other VG.! i))
-        )
-zipColumns (UnboxedColumn _ column) (BoxedColumn _ other) =
-    BoxedColumn
-        Nothing
-        ( VB.generate
-            (min (VG.length column) (VG.length other))
-            (\i -> (column VG.! i, other VG.! i))
-        )
-zipColumns (UnboxedColumn _ column) (UnboxedColumn _ other) = UnboxedColumn Nothing (VG.zip column other)
+zipColumns (BoxedColumn _ column) (BoxedColumn _ other) = zipVectors column other
+zipColumns (BoxedColumn _ column) (UnboxedColumn _ other) = zipVectors column other
+zipColumns (UnboxedColumn _ column) (BoxedColumn _ other) = zipVectors column other
+zipColumns (UnboxedColumn _ column) (UnboxedColumn _ other) = zipVectors column other
 {-# INLINE zipColumns #-}
+
+zipVectors ::
+    forall a b va vb.
+    (Columnable a, Columnable b, VG.Vector va a, VG.Vector vb b) =>
+    va a -> vb b -> Column
+zipVectors column other =
+    case sUnbox @a of
+        STrue -> case sUnbox @b of
+            STrue -> UnboxedColumn Nothing (VU.generate n pairAt)
+            SFalse -> BoxedColumn Nothing (VB.generate n pairAt)
+        SFalse -> BoxedColumn Nothing (VB.generate n pairAt)
+  where
+    !n = min (VG.length column) (VG.length other)
+    pairAt i = (VG.unsafeIndex column i, VG.unsafeIndex other i)
+{-# INLINE zipVectors #-}
 
 -- | An internal, column version of zipWith.
 zipWithColumns ::

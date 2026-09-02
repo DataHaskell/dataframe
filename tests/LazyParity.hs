@@ -142,5 +142,46 @@ groupByPipelineParity =
                 (show eager)
                 (show lazy)
 
+streamingMeanParity :: Test
+streamingMeanParity =
+    TestCase $
+        withCsv input $ \csvPath -> do
+            case DI.fromList [(0, 0) :: (Double, Int)] of
+                DI.UnboxedColumn{} -> pure ()
+                _ -> assertFailure "streaming mean tuple must stay unboxed"
+            let valueD = F.col @Double "amount"
+                valueI = F.col @Int "order_id"
+                aggs =
+                    [ F.mean valueD `as` "mean_double"
+                    , F.mean valueI `as` "mean_int"
+                    ]
+                query =
+                    (L.scanCsvStreamingWith Csv.readSeparated ordersSchema (T.pack csvPath))
+                        { L.batchSize = 2
+                        }
+                        |> L.groupBy ["customer_id"] aggs
+                        |> L.sortBy [("customer_id", Descending)]
+            actual <- L.runDataFrame query
+            let expected =
+                    Perm.sortBy [Perm.Desc (E.Col @Int "customer_id")] $
+                        Agg.aggregate aggs $
+                            Agg.groupBy ["customer_id"] input
+            assertEqual
+                "streaming partial mean == eager mean"
+                (show expected)
+                (show actual)
+  where
+    input =
+        D.fromNamedColumns
+            [ ("order_id", DI.fromList [1 .. 12 :: Int])
+            , ("customer_id", DI.fromList [0, 1, 2, 0, 1, 2, 0, 1, 2, 0, 1, 2 :: Int])
+            ,
+                ( "amount"
+                , DI.fromList
+                    [0.5, 10.25, -3.0, 1.5, 11.25, -1.0, 2.5, 12.25, 1.0, 3.5, 13.25, 3.0 :: Double]
+                )
+            , ("discount", DI.fromList (replicate 12 (0 :: Double)))
+            ]
+
 tests :: [Test]
-tests = [joinPipelineParity, groupByPipelineParity]
+tests = [joinPipelineParity, groupByPipelineParity, streamingMeanParity]

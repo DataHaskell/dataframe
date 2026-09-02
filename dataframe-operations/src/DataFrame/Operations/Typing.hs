@@ -355,7 +355,10 @@ parseWithTypes resolveMode ts df
         EitherRead -> fromVector (V.map ((readEitherRaw @a) . toStr) col)
 
     asType :: SafeReadMode -> SchemaType -> Column -> Column
-    asType mode st c@(PackedText _ _) = asType mode st (materializePacked c)
+    asType mode st@(SType (_ :: P.Proxy a)) c@(PackedText _ _) =
+        case testEquality (typeRep @a) (typeRep @T.Text) of
+            Just Refl -> c
+            Nothing -> asType mode st (materializePacked c)
     asType mode (SType (_ :: P.Proxy a)) c@(BoxedColumn _ (col :: V.Vector b)) = case typeRep @a of
         App t1 _t2 -> case eqTypeRep t1 (typeRep @Maybe) of
             Just HRefl -> case testEquality (typeRep @a) (typeRep @b) of

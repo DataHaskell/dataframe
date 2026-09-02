@@ -115,6 +115,10 @@ capBails =
             "cap 3 bails"
             Nothing
             (dictEncodeColumnUpTo 3 (packedFromTexts sampleRows))
+        assertEqual
+            "cap bails when the final row crosses it"
+            Nothing
+            (dictEncodeColumnUpTo 2 (packedFromTexts ["a", "b", "c"]))
         -- a generous cap still encodes.
         assertBool
             "cap 100 encodes"

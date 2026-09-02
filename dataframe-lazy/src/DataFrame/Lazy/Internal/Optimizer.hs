@@ -103,7 +103,7 @@ referencedCols (Join _ l r left right) =
     let keySet = S.fromList [l, r]
         lRef = fmap (S.union keySet) (referencedCols left)
         rRef = fmap (S.union keySet) (referencedCols right)
-     in liftMaybe2 S.union lRef rRef
+     in liftA2 S.union lRef rRef
 referencedCols (Aggregate keys aggs child) =
     let aggCols = S.fromList (keys <> concatMap (uExprCols . snd) aggs)
      in fmap (S.union aggCols) (referencedCols child)
@@ -111,10 +111,6 @@ referencedCols (Sort cols child) =
     fmap (S.union (S.fromList (fmap fst cols))) (referencedCols child)
 referencedCols (Limit _ child) = referencedCols child
 referencedCols (SourceDF _) = Nothing
-
-liftMaybe2 :: (a -> b -> c) -> Maybe a -> Maybe b -> Maybe c
-liftMaybe2 f (Just a) (Just b) = Just (f a b)
-liftMaybe2 _ _ _ = Nothing
 
 uExprCols :: E.UExpr -> [T.Text]
 uExprCols (E.UExpr expr) = E.getColumns expr
@@ -177,6 +173,14 @@ toPhysical batchSz (Filter p (Scan (CsvSourceStreaming path sep reader) schema))
 toPhysical batchSz (Scan (CsvSourceStreaming path sep reader) schema) =
     PhysicalScan
         (CsvSourceStreaming path sep reader)
+        (ScanConfig batchSz sep schema Nothing)
+toPhysical batchSz (Filter p (Scan (CsvSourceStreamingBytes path sep reader) schema)) =
+    PhysicalScan
+        (CsvSourceStreamingBytes path sep reader)
+        (ScanConfig batchSz sep schema (Just p))
+toPhysical batchSz (Scan (CsvSourceStreamingBytes path sep reader) schema) =
+    PhysicalScan
+        (CsvSourceStreamingBytes path sep reader)
         (ScanConfig batchSz sep schema Nothing)
 toPhysical batchSz (Filter p (Scan (ParquetSource path) schema)) =
     PhysicalScan

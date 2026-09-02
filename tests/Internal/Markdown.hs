@@ -8,7 +8,7 @@ module Internal.Markdown (tests) where
 import qualified Data.Text as T
 
 import DataFrame.Display.Terminal.PrettyPrint (escapeMarkdownCell)
-import DataFrame.Internal.Column (fromList)
+import DataFrame.Internal.Column (ensureOptional, fromList)
 import qualified DataFrame.Internal.DataFrame as D
 import Test.HUnit
 
@@ -42,4 +42,14 @@ tests =
             assertBool
                 ("rows misaligned, delimiter counts: " ++ show delims)
                 (case delims of [] -> False; (d : ds) -> all (== d) ds)
+    , TestLabel "nullable boxed Text renders without quotes" $
+        TestCase $ do
+            let df =
+                    D.fromNamedColumns
+                        [("name", ensureOptional (fromList ["Ada" :: T.Text]))]
+                md = D.toMarkdown df
+            assertBool
+                "nullable Text value is missing"
+                ("Ada" `T.isInfixOf` md)
+            assertBool "nullable Text contains quotes" (not ("\"Ada\"" `T.isInfixOf` md))
     ]

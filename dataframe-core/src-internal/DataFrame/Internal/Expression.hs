@@ -71,9 +71,6 @@ instance BinaryOp BinUDF where
     binaryCommutative (MkBinaryOp{binaryCommutative = c}) = c
     binaryPrecedence (MkBinaryOp{binaryPrecedence = p}) = p
 
-data MeanAcc = MeanAcc {-# UNPACK #-} !Double {-# UNPACK #-} !Int
-    deriving (Show, Eq, Ord, Read)
-
 data AggStrategy a b where
     CollectAgg ::
         (VG.Vector v b, Typeable v) => T.Text -> (v b -> a) -> AggStrategy a b

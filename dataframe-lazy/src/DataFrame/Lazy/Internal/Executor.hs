@@ -18,11 +18,11 @@ module DataFrame.Lazy.Internal.Executor (
     foldBatches,
 ) where
 
-import Control.Concurrent (forkIO, getNumCapabilities)
+import Control.Concurrent (forkFinally, forkIO, getNumCapabilities)
 import Control.Concurrent.Async (mapConcurrently)
 import Control.Concurrent.STM (atomically)
 import Control.Concurrent.STM.TBQueue (newTBQueueIO, readTBQueue, writeTBQueue)
-import Control.Exception (evaluate)
+import Control.Exception (evaluate, finally, throwIO)
 import Control.Monad (filterM, forM, forM_, unless, when)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as C8
@@ -37,7 +37,12 @@ import Data.Typeable (Typeable)
 import qualified Data.Vector as VB
 import qualified Data.Vector.Unboxed as VU
 import Data.Word (Word16, Word32, Word64, Word8)
-import DataFrame.IO.CSV (CsvReader, ReadOptions (..), schemaReadOptions)
+import DataFrame.IO.CSV (
+    CsvBytesReader,
+    CsvReader,
+    ReadOptions (..),
+    schemaReadOptions,
+ )
 import qualified DataFrame.IO.Parquet as Parquet
 import qualified DataFrame.Internal.Column as C
 import qualified DataFrame.Internal.DataFrame as D
@@ -56,7 +61,7 @@ import DataFrame.Schema (elements)
 import System.Directory (doesDirectoryExist, removeFile)
 import System.FilePath ((</>))
 import System.FilePath.Glob (glob)
-import System.IO (IOMode (ReadMode), hIsEOF, withFile)
+import System.IO (IOMode (ReadMode), withFile)
 import System.IO.Temp (emptySystemTempFile)
 import Type.Reflection (typeRep)
 
@@ -115,6 +120,7 @@ online/streaming sources, which keep the constant-memory streaming paths.
 isBounded :: PhysicalPlan -> Bool
 isBounded (PhysicalScan (CsvSource{}) _) = True
 isBounded (PhysicalScan (CsvSourceStreaming{}) _) = False
+isBounded (PhysicalScan (CsvSourceStreamingBytes{}) _) = False
 isBounded (PhysicalScan (ParquetSource _) _) = True
 isBounded (PhysicalProject _ c) = isBounded c
 isBounded (PhysicalFilter _ c) = isBounded c
@@ -162,6 +168,8 @@ buildStream (PhysicalScan (CsvSource path sep reader) cfg) =
     executeCsvScan path sep reader cfg
 buildStream (PhysicalScan (CsvSourceStreaming path sep reader) cfg) =
     executeCsvScanStreaming path sep reader cfg
+buildStream (PhysicalScan (CsvSourceStreamingBytes path sep reader) cfg) =
+    executeCsvScanStreamingBytes path sep reader cfg
 buildStream (PhysicalScan (ParquetSource path) cfg) =
     executeParquetScan path cfg
 buildStream (PhysicalSpill child path) = do
@@ -445,7 +453,7 @@ buildAggPlan aggs = foldl combine ([], [], id) (map processAgg aggs)
                 let partialExpr =
                         E.UExpr
                             ( E.Agg
-                                (E.MergeAgg n seed step merge (id :: acc -> acc))
+                                (E.FoldAgg ("partial_" <> n) (Just seed) step)
                                 inner
                             )
                     mergeExpr =
@@ -543,43 +551,106 @@ executeCsvScan path sep reader cfg = do
 
 executeCsvScanStreaming ::
     FilePath -> Char -> CsvReader -> ScanConfig -> IO Stream
-executeCsvScanStreaming path sep reader cfg = do
+executeCsvScanStreaming path sep reader =
+    executeCsvScanStreamingWith path sep (Left reader)
+
+executeCsvScanStreamingBytes ::
+    FilePath -> Char -> CsvBytesReader -> ScanConfig -> IO Stream
+executeCsvScanStreamingBytes path sep reader =
+    executeCsvScanStreamingWith path sep (Right reader)
+
+executeCsvScanStreamingWith ::
+    FilePath ->
+    Char ->
+    Either CsvReader CsvBytesReader ->
+    ScanConfig ->
+    IO Stream
+executeCsvScanStreamingWith path sep reader cfg = do
     let opts = scanReadOptions sep cfg
         batchSz = scanBatchSize cfg
         windowBytes = 64 * 1024 * 1024 :: Int
     queue <- newTBQueueIO 8
-    _ <- forkIO $
-        withFile path ReadMode $ \h -> do
-            header <- C8.hGetLine h
-            let feed bytes =
-                    unless (BS.null bytes) $ do
-                        p <- emptySystemTempFile "lazy_csv_win_.csv"
-                        BS.writeFile p (header <> BS.singleton nl <> bytes)
-                        df <- reader opts p
-                        removeFile p
-                        forM_ (sliceIntoBatches batchSz df) $ \b ->
-                            atomically (writeTBQueue queue (Just b))
-                loop leftover = do
-                    eof <- hIsEOF h
-                    if eof
-                        then feed leftover >> atomically (writeTBQueue queue Nothing)
-                        else do
-                            chunk <- BS.hGetSome h windowBytes
-                            let buf = leftover <> chunk
-                            case BS.elemIndexEnd nl buf of
-                                Nothing -> loop buf
-                                Just i -> feed (BS.take i buf) >> loop (BS.drop (i + 1) buf)
-            loop BS.empty
+    _ <-
+        forkFinally
+            ( withFile path ReadMode $ \h -> do
+                rawHeader <- C8.hGetLine h
+                let header = stripUtf8Bom rawHeader
+                let feed bytes =
+                        unless (BS.null bytes) $ do
+                            let window = header <> BS.singleton nl <> bytes
+                            parsed <- case reader of
+                                Right bytesReader -> bytesReader opts window
+                                Left pathReader -> do
+                                    p <- emptySystemTempFile "lazy_csv_win_.csv"
+                                    (BS.writeFile p window >> pathReader opts p)
+                                        `finally` removeFile p
+                            forM_ (sliceIntoBatches batchSz parsed) $ \b ->
+                                atomically (writeTBQueue queue (Right (Just b)))
+                    loop leftover = do
+                        chunk <- BS.hGet h windowBytes
+                        if BS.null chunk
+                            then feed leftover
+                            else do
+                                let buf = leftover <> chunk
+                                case lastCompleteRecordNewline buf of
+                                    Nothing -> loop buf
+                                    Just i -> feed (BS.take i buf) >> loop (BS.drop (i + 1) buf)
+                loop BS.empty
+            )
+            ( \result ->
+                atomically $
+                    writeTBQueue queue $
+                        case result of
+                            Left err -> Left err
+                            Right () -> Right Nothing
+            )
     return . Stream $ do
-        mb <- atomically (readTBQueue queue)
-        case mb of
-            Nothing -> atomically (writeTBQueue queue Nothing) >> return Nothing
-            Just df ->
+        item <- atomically (readTBQueue queue)
+        case item of
+            Left err -> throwIO err
+            Right Nothing ->
+                atomically (writeTBQueue queue (Right Nothing)) >> return Nothing
+            Right (Just df) ->
                 let df' = case scanPushdownPredicate cfg of
                         Nothing -> df
                         Just p -> Sub.filterWhere p df
                  in return (Just df')
   where
+    nl :: Word8
+    nl = 0x0A
+
+    stripUtf8Bom bytes =
+        case BS.stripPrefix "\xEF\xBB\xBF" bytes of
+            Just withoutBom -> withoutBom
+            Nothing -> bytes
+
+{- | Find the last record-ending LF in a CSV buffer. The common unquoted case
+uses bytestring's optimized reverse search; only buffers containing a quote
+need the scalar RFC 4180 quote-state scan. The buffer always starts at a record
+boundary, so rescanning it after an incomplete quoted record is sufficient to
+handle a doubled or closing quote split across read windows.
+-}
+lastCompleteRecordNewline :: BS.ByteString -> Maybe Int
+lastCompleteRecordNewline bytes
+    | not (BS.elem quote bytes) = BS.elemIndexEnd nl bytes
+    | otherwise = go 0 False Nothing
+  where
+    !len = BS.length bytes
+
+    go !i !inside !lastNewline
+        | i >= len = lastNewline
+        | current == quote =
+            if inside && i + 1 < len && BS.index bytes (i + 1) == quote
+                then go (i + 2) True lastNewline
+                else go (i + 1) (not inside) lastNewline
+        | current == nl && not inside = go (i + 1) inside (Just i)
+        | otherwise = go (i + 1) inside lastNewline
+      where
+        current = BS.index bytes i
+
+    quote :: Word8
+    quote = 0x22
+
     nl :: Word8
     nl = 0x0A
 

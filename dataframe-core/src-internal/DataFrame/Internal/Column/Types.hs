@@ -58,6 +58,7 @@ type family Unboxable (a :: Type) :: Bool where
     Unboxable Bool = 'True
     Unboxable Double = 'True
     Unboxable Float = 'True
+    Unboxable (a, b) = If (Unboxable a) (Unboxable b) 'False
     Unboxable _ = 'False
 
 type family Numeric (a :: Type) :: Bool where

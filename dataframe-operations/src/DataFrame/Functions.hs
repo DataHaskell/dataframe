@@ -1,3 +1,4 @@
+{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE DisambiguateRecordFields #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
@@ -317,10 +318,10 @@ mean =
     Agg
         ( MergeAgg
             "mean"
-            (MeanAcc 0.0 0)
-            (\(MeanAcc s c) x -> MeanAcc (s + realToFrac x) (c + 1))
-            (\(MeanAcc s1 c1) (MeanAcc s2 c2) -> MeanAcc (s1 + s2) (c1 + c2))
-            (\(MeanAcc s c) -> if c == 0 then 0 / 0 else s / fromIntegral c)
+            ((0.0, 0) :: (Double, Int))
+            (\(!s, !c) x -> (s + realToFrac x, c + 1))
+            (\(!s1, !c1) (!s2, !c2) -> (s1 + s2, c1 + c2))
+            (\(s, c) -> if c == 0 then 0 / 0 else s / fromIntegral c)
         )
 {-# SPECIALIZE mean :: Expr Double -> Expr Double #-}
 {-# SPECIALIZE mean :: Expr Float -> Expr Double #-}

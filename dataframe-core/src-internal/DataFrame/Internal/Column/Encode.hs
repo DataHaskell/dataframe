@@ -126,8 +126,8 @@ buildCodes maxCard n hashAt eqAt
         ht <- newHashTable (min n (maxCard + 1))
         codes <- VUM.new n
         let go !i !next
-                | i >= n = pure (Just next)
                 | next > maxCard = pure Nothing
+                | i >= n = pure (Just next)
                 | otherwise = do
                     let !h = hashAt i
                     (code, isNew) <- htInsert ht eqAt next i h
