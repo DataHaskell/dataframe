@@ -26,6 +26,7 @@ import Control.Exception (evaluate, finally, throwIO)
 import Control.Monad (filterM, forM, forM_, unless, when)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as C8
+import qualified Data.ByteString.Unsafe as BSU
 import Data.IORef
 import Data.Int (Int16, Int32, Int64, Int8)
 import qualified Data.Map as M
@@ -620,9 +621,7 @@ executeCsvScanStreamingWith path sep reader cfg = do
     nl = 0x0A
 
     stripUtf8Bom bytes =
-        case BS.stripPrefix "\xEF\xBB\xBF" bytes of
-            Just withoutBom -> withoutBom
-            Nothing -> bytes
+        Data.Maybe.fromMaybe bytes (BS.stripPrefix "\xEF\xBB\xBF" bytes)
 
 {- | Find the last record-ending LF in a CSV buffer. The common unquoted case
 uses bytestring's optimized reverse search; only buffers containing a quote
@@ -637,16 +636,23 @@ lastCompleteRecordNewline bytes
   where
     !len = BS.length bytes
 
+    -- Every read stays inside the branch that has already bounds-checked its
+    -- offset: a guard binding shared across alternatives can be forced on the
+    -- terminating @i == len@ iteration, indexing one byte past the buffer.
     go !i !inside !lastNewline
         | i >= len = lastNewline
-        | current == quote =
-            if inside && i + 1 < len && BS.index bytes (i + 1) == quote
-                then go (i + 2) True lastNewline
-                else go (i + 1) (not inside) lastNewline
-        | current == nl && not inside = go (i + 1) inside (Just i)
-        | otherwise = go (i + 1) inside lastNewline
-      where
-        current = BS.index bytes i
+        | otherwise = case BSU.unsafeIndex bytes i of
+            current
+                | current == quote ->
+                    if inside && quoteAt (i + 1)
+                        then go (i + 2) True lastNewline
+                        else go (i + 1) (not inside) lastNewline
+                | current == nl && not inside -> go (i + 1) inside (Just i)
+                | otherwise -> go (i + 1) inside lastNewline
+
+    quoteAt !i
+        | i >= len = False
+        | otherwise = BSU.unsafeIndex bytes i == quote
 
     quote :: Word8
     quote = 0x22

@@ -16,6 +16,11 @@ category: Data
 tested-with: GHC ==9.8.3 || ==9.6.6 || ==9.10.1
 extra-doc-files: README.md
 
+flag with-hasktorch
+  description: Build with hasktorch support (requires ghc-typelits-natnormalise)
+  default:     False
+  manual:      True
+
 source-repository head
   type:     git
   location: https://github.com/mchav/dataframe
@@ -25,7 +30,6 @@ executable examples
     ghc-options:   -O2 -threaded -rtsopts -with-rtsopts=-N -Wunused-packages
     default-extensions: Strict
     other-modules: Chipotle,
-                   CaliforniaHousing,
                    OneBillionRowChallenge,
                    Iris,
                    DataFrame,

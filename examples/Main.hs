@@ -13,8 +13,6 @@ main = do
         ["chipotle"] -> Chipotle.run
         ["california_housing"] -> CaliforniaHousing.run
         ["one_billion_row_challenge"] -> OneBillionRowChallenge.run
-        ["one_billion_row_challenge", path] ->
-            OneBillionRowChallenge.runCalculation path
         ["iris"] -> Iris.run
         _ ->
             putStrLn
