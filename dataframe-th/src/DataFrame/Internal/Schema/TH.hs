@@ -10,16 +10,22 @@ Kept in a separate module so the runtime schema types in
 -}
 module DataFrame.Internal.Schema.TH (
     deriveSchema,
+    schemaTypeE,
     camelToSnake,
 ) where
 
 import Data.Char (isUpper, toLower, toUpper)
+import qualified Data.Proxy as P
 import qualified Data.Text as T
 import Language.Haskell.TH
 
 import DataFrame.Expression.Operators (col)
 import DataFrame.Internal.Expression (Expr)
-import DataFrame.Schema (Schema, makeSchema, schemaType)
+import DataFrame.Schema (Schema, SchemaType (..), makeSchema)
+
+schemaTypeE :: Type -> Exp
+schemaTypeE ty =
+    ConE 'SType `AppE` SigE (ConE 'P.Proxy) (ConT ''P.Proxy `AppT` ty)
 
 {- | Auto-generate a runtime 'Schema' (and per-column @'Expr'@ accessors)
 from a record ADT. Emits @\<tyName\>Schema@ plus one accessor per field
@@ -39,7 +45,7 @@ deriveSchema tyName = do
         tupleE (colName, _, fTy) =
             TupE
                 [ Just (AppE (VarE 'T.pack) (LitE (StringL colName)))
-                , Just (AppTypeE (VarE 'schemaType) fTy)
+                , Just (schemaTypeE fTy)
                 ]
         schemaBody =
             AppE (VarE 'makeSchema) (ListE (map tupleE entries))

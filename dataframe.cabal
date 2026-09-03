@@ -171,17 +171,17 @@ library
         cpp-options:     -DWITH_LAZY
 
     if !flag(no-th)
-        build-depends:   dataframe-th >= 2.2.1 && < 2.3
+        build-depends:   dataframe-th >= 2.3 && < 2.4
         cpp-options:     -DWITH_TH
         exposed-modules: DataFrame.TH,
                          DataFrame.Typed.TH
 
     if !flag(no-th) && !flag(no-csv)
-        build-depends:   dataframe-csv-th >= 1.3 && < 1.4
+        build-depends:   dataframe-csv-th >= 1.4 && < 1.5
         cpp-options:     -DWITH_CSV_TH
 
     if !flag(no-th) && !flag(no-parquet)
-        build-depends:   dataframe-parquet-th >= 1.3 && < 1.4
+        build-depends:   dataframe-parquet-th >= 1.4 && < 1.5
         cpp-options:     -DWITH_PARQUET_TH
 
     hs-source-dirs:   src

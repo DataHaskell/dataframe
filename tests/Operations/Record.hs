@@ -42,6 +42,13 @@ data Order = Order
 $(DT.deriveSchemaFromType ''Order)
 $(D.deriveSchemaValues ''Order)
 
+$(D.deriveSchemaValuesFromCsvFile "housing" "./tests/data/housing.csv")
+
+$( D.deriveSchemaValuesFromParquetFile
+    "alltypes"
+    "./tests/data/alltypes_plain.parquet"
+ )
+
 -- Nullable fields (Maybe Text -> RNullableBoxed; Maybe Int -> RNullableUnboxed).
 data User = User
     { userId :: Int64
@@ -353,6 +360,77 @@ labelColumnFilter = TestCase $ do
                 [Order 1 "us" 10.0]
                 xs
 
+deriveSchemaValuesFromCsv :: Test
+deriveSchemaValuesFromCsv = TestCase $ do
+    assertEqual
+        "csv-derived schema column names"
+        [ "households"
+        , "housing_median_age"
+        , "latitude"
+        , "longitude"
+        , "median_house_value"
+        , "median_income"
+        , "ocean_proximity"
+        , "population"
+        , "total_bedrooms"
+        , "total_rooms"
+        ]
+        (M.keys (IS.elements housingSchema))
+    assertEqual
+        "csv-derived schema infers Double"
+        (Just (IS.schemaType @Double))
+        (M.lookup "median_income" (IS.elements housingSchema))
+    assertEqual
+        "csv-derived schema infers Text"
+        (Just (IS.schemaType @T.Text))
+        (M.lookup "ocean_proximity" (IS.elements housingSchema))
+
+deriveSchemaValuesFromCsvAccessors :: Test
+deriveSchemaValuesFromCsvAccessors = TestCase $ do
+    df <- D.readCsvWithSchema housingSchema "./tests/data/housing.csv"
+    assertEqual
+        "prefixed accessor reads its column"
+        [8.3252, 8.3014]
+        (take 2 (D.columnAsList housingMedianIncome df))
+    assertEqual
+        "snake_case column becomes a camelCased accessor"
+        ["NEAR BAY", "NEAR BAY"]
+        (take 2 (D.columnAsList housingOceanProximity df))
+
+deriveSchemaValuesFromParquet :: Test
+deriveSchemaValuesFromParquet = TestCase $ do
+    assertEqual
+        "parquet-derived schema column names"
+        [ "bigint_col"
+        , "bool_col"
+        , "date_string_col"
+        , "double_col"
+        , "float_col"
+        , "id"
+        , "int_col"
+        , "smallint_col"
+        , "string_col"
+        , "timestamp_col"
+        , "tinyint_col"
+        ]
+        (M.keys (IS.elements alltypesSchema))
+    assertEqual
+        "parquet-derived schema infers Double"
+        (Just (IS.schemaType @Double))
+        (M.lookup "double_col" (IS.elements alltypesSchema))
+
+deriveSchemaValuesFromParquetAccessors :: Test
+deriveSchemaValuesFromParquetAccessors = TestCase $ do
+    df <- D.readParquet "./tests/data/alltypes_plain.parquet"
+    assertEqual
+        "prefixed accessor reads its parquet column"
+        (D.columnAsList (D.col @Double "double_col") df)
+        (D.columnAsList alltypesDoubleCol df)
+    assertEqual
+        "snake_case parquet column becomes a camelCased accessor"
+        (D.columnAsList (D.col @T.Text "date_string_col") df)
+        (D.columnAsList alltypesDateStringCol df)
+
 tests :: [Test]
 tests =
     [ TestLabel "basicTypedRoundTrip" basicTypedRoundTrip
@@ -373,4 +451,12 @@ tests =
     , TestLabel "deriveSchemaReadsCsv" deriveSchemaReadsCsv
     , TestLabel "deriveSchemaAccessorFilter" deriveSchemaAccessorFilter
     , TestLabel "deriveSchemaAccessorDerive" deriveSchemaAccessorDerive
+    , TestLabel "deriveSchemaValuesFromCsv" deriveSchemaValuesFromCsv
+    , TestLabel
+        "deriveSchemaValuesFromCsvAccessors"
+        deriveSchemaValuesFromCsvAccessors
+    , TestLabel "deriveSchemaValuesFromParquet" deriveSchemaValuesFromParquet
+    , TestLabel
+        "deriveSchemaValuesFromParquetAccessors"
+        deriveSchemaValuesFromParquetAccessors
     ]

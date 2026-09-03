@@ -291,12 +291,16 @@ import DataFrame.TH as TH (
 #ifdef WITH_CSV_TH
     declareColumnsFromCsvFile,
     declareColumnsFromCsvWithOpts,
+    deriveSchemaValuesFromCsvFile,
+    deriveSchemaValuesFromCsvWithOpts,
 #endif
 #ifdef WITH_PARQUET_TH
     declareColumnsFromParquetFile,
+    deriveSchemaValuesFromParquetFile,
 #endif
     declareColumnsWithPrefix,
     declareColumnsWithPrefix',
+    declareSchemaValues,
  )
 #endif
 import DataFrame.Typed.Record as Record (

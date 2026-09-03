@@ -282,6 +282,35 @@ df |> D.derive "rooms_per_household"
 > | -122.29             | 37.82              | 49.0                         | 135.0                 | Just 29.0                      | 86.0                 | 23.0                 | 6.1183                  | 75000.0                      | NEAR BAY                | 5.869565217391305             |
 
 
+### Generate a runtime schema from a CSV
+
+`deriveSchemaValuesFromCsvFile` creates a
+runtime `Schema` you can use with `readCsvWithSchema` or lazy CSV scans
+to get both the schema and expression references to interact with a dataframe:
+
+
+```haskell
+-- Generates:
+--   housingSchema         :: Schema
+--   housingLatitude       :: Expr Double
+--   housingTotalRooms     :: Expr Double
+--   housingOceanProximity :: Expr Text
+--   ... one accessor per column
+$(D.deriveSchemaValuesFromCsvFile "housing" "./data/housing.csv")
+```
+
+The first argument is the prefix that will be prepended to the schema and expression names. Only the first megabyte of the
+file is read at compile time so this is
+safe to use on files larger than memory. Use
+`deriveSchemaValuesFromCsvWithOpts` for more control of how much to read.
+
+`deriveSchemaValuesFromParquetFile` does the same for parquet, reading only the file footer (so file size is irrelevant) and accepting a directory of `*.parquet` shards:
+
+
+```haskell
+$(D.deriveSchemaValuesFromParquetFile "trip" "./data/trips.parquet")
+```
+
 ### Generate a schema type from a CSV
 
 `deriveSchemaFromCsvFile` generates a type synonym for use with the typed API — instead of manually writing out every column name and type:

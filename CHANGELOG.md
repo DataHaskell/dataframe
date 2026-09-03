@@ -1,5 +1,9 @@
 # Revision history for dataframe
 
+## Unreleased
+
+* splices for deriving schema
+
 ## 3.6.0.0
 
 ### Breaking changes

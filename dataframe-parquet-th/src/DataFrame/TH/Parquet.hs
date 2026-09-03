@@ -9,6 +9,7 @@ path so @dataframe-th@ stays IO-agnostic.
 -}
 module DataFrame.TH.Parquet (
     declareColumnsFromParquetFile,
+    deriveSchemaValuesFromParquetFile,
 ) where
 
 import Control.Monad (filterM)
@@ -36,19 +37,27 @@ import DataFrame.IO.Parquet.Thrift (
     unField,
  )
 import qualified DataFrame.Internal.DataFrame as DI
-import DataFrame.TH.Records (declareColumns)
+import DataFrame.TH.Records (declareColumns, declareSchemaValues)
 import Prelude as P
 
 {- | Splice a binding for every column of a parquet file (or directory of
 parquet files). The schema is read from each file's metadata and merged.
 -}
 declareColumnsFromParquetFile :: String -> DecsQ
-declareColumnsFromParquetFile path = do
-    isDir <- liftIO $ doesDirectoryExist path
+declareColumnsFromParquetFile path =
+    liftIO (emptyFrameFromParquet path) >>= declareColumns
+
+deriveSchemaValuesFromParquetFile :: String -> String -> DecsQ
+deriveSchemaValuesFromParquetFile prefix path =
+    liftIO (emptyFrameFromParquet path) >>= declareSchemaValues prefix
+
+emptyFrameFromParquet :: String -> IO DI.DataFrame
+emptyFrameFromParquet path = do
+    isDir <- doesDirectoryExist path
     let pat = if isDir then path </> "*.parquet" else path
-    matches <- liftIO $ glob pat
-    files <- liftIO $ filterM (fmap P.not . doesDirectoryExist) matches
-    metas <- liftIO $ mapM Parquet.readMetadataFromPath files
+    matches <- glob pat
+    files <- filterM (fmap P.not . doesDirectoryExist) matches
+    metas <- mapM Parquet.readMetadataFromPath files
     let nullableCols :: S.Set T.Text
         nullableCols =
             S.fromList
@@ -66,15 +75,13 @@ declareColumnsFromParquetFile path = do
                             Maybe.fromMaybe 0 (unField $ stats_null_count stats)
                 , nc > 0
                 ]
-    let df =
-            foldl
-                ( \acc meta ->
-                    acc
-                        <> schemaToEmptyDataFrame
-                            nullableCols
-                            (unField (schema meta))
-                )
-                DI.empty
-                metas
-
-    declareColumns df
+    pure $
+        foldl
+            ( \acc meta ->
+                acc
+                    <> schemaToEmptyDataFrame
+                        nullableCols
+                        (unField (schema meta))
+            )
+            DI.empty
+            metas
