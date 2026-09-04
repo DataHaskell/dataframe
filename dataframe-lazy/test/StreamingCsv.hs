@@ -5,6 +5,7 @@
 module Main (main) where
 
 import Control.Exception (SomeException, bracket, try)
+import Control.Monad (when)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as C8
 import Data.IORef (modifyIORef', newIORef, readIORef)
@@ -188,6 +189,4 @@ tests =
 main :: IO ()
 main = do
     result <- runTestTT tests
-    if failures result > 0 || errors result > 0
-        then Exit.exitFailure
-        else pure ()
+    when (failures result > 0 || errors result > 0) Exit.exitFailure

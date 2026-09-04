@@ -23,17 +23,18 @@ golden label want got =
 
 tests :: [Test]
 tests =
-    [ -- A short conditional stays compact; then/else still break onto own lines.
+    [ -- Conditionals lay out like Python statements: branches indented 4 under
+      -- their `if cond` / `else` header even when the whole thing is short.
       golden
         "fits on one line"
-        "if x .>=. 0.0\nthen \"pos\"\nelse \"neg\""
+        "if x .>=. 0.0\n    \"pos\"\nelse\n    \"neg\""
         ( prettyPrint
             (ifThenElse (col @Double "x" .>=. lit 0.0) (lit @T.Text "pos") (lit "neg"))
         )
     , -- Nested else-if forms a flat ladder (no staircase indentation).
       golden
         "flat else-if ladder"
-        "if a .>. 1.0\nthen \"x\"\nelse if b .>. 2.0\nthen \"y\"\nelse \"z\""
+        "if a .>. 1.0\n    \"x\"\nelse if b .>. 2.0\n    \"y\"\nelse\n    \"z\""
         ( prettyPrint
             ( ifThenElse
                 (col @Double "a" .>. lit 1.0)

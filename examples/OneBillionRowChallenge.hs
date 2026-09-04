@@ -12,9 +12,11 @@ import Data.Time
 import DataFrame.Expression.Operators
 import DataFrame.IO.CSV (readSeparated)
 
+-- The full 1brc file is not checked in; derive the schema from a small sample
+-- with the same header so the example builds in CI.
 $( D.deriveSchemaValuesFromCsvFile
     "measurement"
-    "../../1brc/measurements.txt"
+    "../data/measurements_sample.csv"
  )
 
 run :: IO ()
