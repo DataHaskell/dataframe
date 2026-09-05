@@ -103,7 +103,7 @@ referencedCols (Join _ l r left right) =
     let keySet = S.fromList [l, r]
         lRef = fmap (S.union keySet) (referencedCols left)
         rRef = fmap (S.union keySet) (referencedCols right)
-     in liftA2 S.union lRef rRef
+     in S.union <$> lRef <*> rRef
 referencedCols (Aggregate keys aggs child) =
     let aggCols = S.fromList (keys <> concatMap (uExprCols . snd) aggs)
      in fmap (S.union aggCols) (referencedCols child)
