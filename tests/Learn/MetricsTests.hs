@@ -1,7 +1,10 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 
 module Learn.MetricsTests (tests) where
+
+import qualified Control.Exception as E
 
 import qualified DataFrame as D
 import qualified DataFrame.Functions as F
@@ -43,6 +46,16 @@ testRegressionMetrics = TestCase $ do
     assertBool "rmse" (close 1e-9 (rmse p t) 0.5)
     assertBool "mae" (close 1e-9 (mae p t) 0.25)
     assertBool "r2 in range" (r2 p t <= 1)
+    assertBool
+        "mse averages over compared pairs"
+        (close 1e-9 (mse (VU.fromList [2, 2]) (VU.fromList [0, 0, 0, 0])) 4)
+    assertBool
+        "mae averages over compared pairs"
+        (close 1e-9 (mae (VU.fromList [2, 2]) (VU.fromList [0, 0, 0, 0])) 2)
+    r <- E.try (E.evaluate (mse VU.empty (VU.fromList [5, 5, 5])))
+    case r of
+        Left (_ :: E.SomeException) -> pure ()
+        Right v -> assertFailure ("mse with no pairs returned " ++ show v)
 
 testMulticlassMetrics :: Test
 testMulticlassMetrics = TestCase $ do
