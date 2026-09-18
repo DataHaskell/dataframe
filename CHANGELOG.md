@@ -1,8 +1,13 @@
 # Revision history for dataframe
 
-## Unreleased
+## 3.6.1.0
 
 * splices for deriving schema
+* writeParquet and friends added.
+* skewness computed as g1
+* throw on empty dataset for statistical functions
+* streaming reads for lazy CSV
+* shuffling now uses fischer yates
 
 ## 3.6.0.0
 
