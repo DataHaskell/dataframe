@@ -117,12 +117,18 @@ import DataFrame.Expr.Serialize ()
 #ifdef WITH_PARQUET
 import DataFrame.IO.Parquet as Parquet (
     ParquetReadOptions (..),
+    ParquetWriteOptions (..),
+    WriterStrategy (..),
     defaultParquetReadOptions,
+    defaultParquetWriteOptions,
     readParquet,
     readParquetFiles,
     readParquetFilesWithOpts,
     readParquetWithOpts,
+    writeParquet,
+    writeParquetWithOptions,
  )
+
 #endif
 import DataFrame.Core as CoreTypes (
     Any,
