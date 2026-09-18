@@ -66,25 +66,25 @@ build-depends: base >= 4, dataframe
 Works with GHC 9.4 through 9.12. A custom REPL with all imports pre-loaded is available after installing:
 
 ```bash
-dataframe
+$ dataframe
+dataframe> df = D.fromNamedColumns [("product", D.fromList [1, 1, 2, 2, 3, 3 :: Int]), ("amount",  D.fromList [100, 120, 50, 20, 40, 30 :: Int]) ]
+dataframe> df |> D.groupBy ["product"] |> ["total" .= F.countAll ]
+
 ```
 
 ## Quick Start
 
 Group sales by product and compute totals. The first block carries the
-`scripths` cabal directives and the imports shared by the rest of the document;
-you can also drop the same code into an `Example.hs` and run it with
-`cabal run Example.hs` after adding a `#!/usr/bin/env cabal` header.
+`scripths` cabal directives; each later section imports what it needs where it
+first uses it. You can also drop the same code into an `Example.hs` and run it
+with `cabal run Example.hs` after adding a `#!/usr/bin/env cabal` header.
 
 ```haskell
 -- cabal: build-depends: dataframe, text
 -- cabal: default-extensions: OverloadedStrings, TypeApplications, TemplateHaskell, DataKinds, TypeFamilies, FlexibleInstances, FlexibleContexts, ScopedTypeVariables, DeriveGeneric, UndecidableInstances
 import qualified DataFrame as D
 import qualified DataFrame.Functions as F
-import qualified DataFrame.Typed as DT
 import DataFrame.Expression.Operators
-import Data.Text (Text)
-import Data.Int (Int64)
 
 sales = D.fromNamedColumns
     [ ("product", D.fromList [1, 1, 2, 2, 3, 3 :: Int])
@@ -199,6 +199,8 @@ df |> D.derive "rooms_per_household"
 `deriveSchemaFromCsvFile` generates a type synonym for use with the typed API — instead of manually writing out every column name and type:
 
 ```haskell
+import qualified DataFrame.Typed as DT
+
 -- Generates:
 -- type HousingSchema = '[ '("longitude", Double)
 --                       , '("latitude", Double)
@@ -216,6 +218,9 @@ instance that converts between `[Order]` and a `DataFrame` (or
 `TypedDataFrame OrderSchema`) at runtime:
 
 ```haskell
+import Data.Text (Text)
+import Data.Int (Int64)
+
 data Order = Order
     { orderId :: Int64
     , region  :: Text
@@ -258,11 +263,11 @@ the translation with `deriveSchemaFromTypeWith
 defaultSchemaOptions{nameTransform = id}` (or any `String -> String`).
 
 If all you need is a runtime `Schema` to drive `readCsvWithSchema` (no
-typed-dataframe machinery), there's a companion splice in
-`DataFrame.Internal.Schema` (re-exported from `DataFrame`):
+typed-dataframe machinery), `deriveSchemaValues` (in
+`DataFrame.Typed.TH.Records`, re-exported from `DataFrame`) is the companion splice:
 
 ```haskell
-$(D.deriveSchema ''Order)
+$(D.deriveSchemaValues ''Order)
 -- emits:
 --   orderSchema     :: Schema
 --   orderSchema     = makeSchema [("order_id", schemaType @Int64), ...]
