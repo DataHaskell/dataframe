@@ -33,7 +33,7 @@ import Control.Monad.ST (runST)
 import Data.Bits (setBit, shiftL, shiftR)
 import Data.Int (Int32)
 import Data.Kind (Type)
-import Data.Maybe (catMaybes, fromMaybe, isNothing)
+import Data.Maybe (catMaybes, isNothing)
 import Data.Type.Equality (TestEquality (..))
 import Data.Word (Word8)
 import DataFrame.Errors (
@@ -1057,18 +1057,7 @@ concatManyColumns (c0 : cs) = case c0 of
             rest = map getCol cs
             allVecs = v0 : map snd rest
             allBms = bm0 : map fst rest
-            newBm
-                | all isNothing allBms = Nothing
-                | otherwise =
-                    let pairs = zip allVecs allBms
-                        expandedBms = map (\(v, mb) -> fromMaybe (allValidBitmap (VB.length v)) mb) pairs
-                        go b1 n1 b2 n2 = bitmapConcat n1 b1 n2 b2
-                        concatBms [] = VU.empty
-                        concatBms [(b, _v)] = b
-                        concatBms ((b1, v1) : (b2, v2) : rest') =
-                            let merged = go b1 (VB.length v1) b2 (VB.length v2)
-                             in concatBms ((merged, v1 <> v2) : rest')
-                     in Just $ concatBms (zip expandedBms allVecs)
+            newBm = concatValidity (zipWith Validity allBms (map VB.length allVecs))
          in BoxedColumn newBm (VB.concat allVecs)
     UnboxedColumn bm0 v0 ->
         let getCol (UnboxedColumn bm v) = case testEquality (typeOf v0) (typeOf v) of
@@ -1078,18 +1067,7 @@ concatManyColumns (c0 : cs) = case c0 of
             rest = map getCol cs
             allVecs = v0 : map snd rest
             allBms = bm0 : map fst rest
-            newBm
-                | all isNothing allBms = Nothing
-                | otherwise =
-                    let pairs = zip allVecs allBms
-                        expandedBms = map (\(v, mb) -> fromMaybe (allValidBitmap (VU.length v)) mb) pairs
-                        go b1 n1 b2 n2 = bitmapConcat n1 b1 n2 b2
-                        concatBms [] = VU.empty
-                        concatBms [(b, _)] = b
-                        concatBms ((b1, v1) : (b2, v2) : rest') =
-                            let merged = go b1 (VU.length v1) b2 (VU.length v2)
-                             in concatBms ((merged, v1 <> v2) : rest')
-                     in Just $ concatBms (zip expandedBms allVecs)
+            newBm = concatValidity (zipWith Validity allBms (map VU.length allVecs))
          in UnboxedColumn newBm (VU.concat allVecs)
     PackedText _ _ -> concatManyColumns (map materializePacked (c0 : cs))
     MergedColumn _ _ -> concatManyColumns (map materializeMerged (c0 : cs))
