@@ -3,6 +3,7 @@
 
 module Functions where
 
+import Data.Time.Calendar (Day, fromGregorian)
 import qualified DataFrame as D
 import DataFrame.Functions (
     sanitize,
@@ -79,8 +80,40 @@ testSum =
             (D.derive "sum" (F.sum (F.col @Int "A")) df)
         )
 
+testPow :: Test
+testPow =
+    TestCase
+        ( assertEqual
+            "pow of a compound base"
+            [4, 9, 16, 25, 36, 49, 64, 81, 100, 121]
+            ( D.columnAsList @Int
+                (F.col "sq")
+                (D.derive "sq" (F.pow (F.col @Int "A" + F.lit 1) 2) df)
+            )
+        )
+
+testDaysBetween :: Test
+testDaysBetween =
+    TestCase
+        ( assertEqual
+            "daysBetween d1 d2 is d1 minus d2 in either argument order"
+            ([-9], [9])
+            ( days (F.col @Day "start") (F.col @Day "end")
+            , days (F.col @Day "end") (F.col @Day "start")
+            )
+        )
+  where
+    dates =
+        D.fromNamedColumns
+            [ ("start", DI.fromList [fromGregorian 2024 3 1])
+            , ("end", DI.fromList [fromGregorian 2024 3 10])
+            ]
+    days a b = D.columnAsList @Int (F.col "d") (D.derive "d" (F.daysBetween a b) dates)
+
 tests :: [Test]
 tests =
     [ TestLabel "sanitizeIdentifiers" sanitizeIdentifiers
     , TestLabel "testSum" testSum
+    , TestLabel "testPow" testPow
+    , TestLabel "testDaysBetween" testDaysBetween
     ]
