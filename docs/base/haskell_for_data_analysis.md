@@ -661,7 +661,7 @@ TIO.putStrLn $ D.toMarkdown withDates
 
 ```haskell
 -- This requires two Day columns; here we illustrate the pattern:
--- D.derive "days_until" (F.daysBetween today_col deadline_col) df
+-- D.derive "days_until" (F.daysBetween deadline_col today_col) df
 ```
 
 ### Opting into stronger type safety

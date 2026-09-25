@@ -460,7 +460,7 @@ zScore :: Expr Double -> Expr Double
 zScore c = (c - mean c) / stddev c
 
 pow :: (Columnable a, Num a) => Expr a -> Int -> Expr a
-pow expr i = lift2Decorated (^) "pow" (Just "^") True 8 expr (Lit i)
+pow expr i = lift2Decorated (^) "pow" (Just "^") False 8 expr (Lit i)
 {-# SPECIALIZE pow :: Expr Double -> Int -> Expr Double #-}
 {-# SPECIALIZE pow :: Expr Float -> Int -> Expr Float #-}
 {-# SPECIALIZE pow :: Expr Int -> Int -> Expr Int #-}
@@ -645,7 +645,7 @@ daysBetween =
         (\d1 d2 -> fromIntegral (diffDays d1 d2))
         "daysBetween"
         Nothing
-        True
+        False
         2
 
 bind ::
