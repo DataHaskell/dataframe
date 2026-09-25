@@ -823,6 +823,19 @@ int64Decimal =
             )
         )
 
+nullableIntDecimal :: Test
+nullableIntDecimal = testBothReadParquetPaths $ \readParquet ->
+    TestCase
+        ( assertEqual
+            "nullableIntDecimal"
+            ( D.fromNamedColumns
+                [ ("int32_dec", D.fromList [Just (1 :: Double), Nothing, Just 2.5, Just 0.75])
+                , ("int64_dec", D.fromList [Nothing, Just (1234.5 :: Double), Nothing, Just (-5)])
+                ]
+            )
+            (unsafePerformIO (readParquet "./tests/data/nullable_int_decimal.parquet"))
+        )
+
 byteArrayDecimal :: Test
 byteArrayDecimal =
     TestCase
@@ -1394,6 +1407,7 @@ tests =
     , -- Group 7: decimal types
       int32Decimal
     , int64Decimal
+    , nullableIntDecimal
     , byteArrayDecimal
     , fixedLengthDecimal
     , fixedLengthDecimalLegacy
