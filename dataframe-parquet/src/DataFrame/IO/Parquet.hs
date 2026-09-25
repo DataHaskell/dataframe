@@ -674,18 +674,14 @@ applyLogicalType (Just (LT_DECIMAL f)) col =
         scale = unField dt.decimal_scale
         precision = unField dt.decimal_precision
      in if precision <= 9
-            then case DI.toVector @Int32 @VU.Vector col of
-                Right xs ->
-                    DI.fromUnboxedVector $
-                        VU.map (\raw -> fromIntegral @Int32 @Double raw / 10 ^ scale) xs
-                Left _ -> col
+            then
+                fromRight col $
+                    DI.mapColumn (\raw -> fromIntegral @Int32 @Double raw / 10 ^ scale) col
             else
                 if precision <= 18
-                    then case DI.toVector @Int64 @VU.Vector col of
-                        Right xs ->
-                            DI.fromUnboxedVector $
-                                VU.map (\raw -> fromIntegral @Int64 @Double raw / 10 ^ scale) xs
-                        Left _ -> col
+                    then
+                        fromRight col $
+                            DI.mapColumn (\raw -> fromIntegral @Int64 @Double raw / 10 ^ scale) col
                     else col
 applyLogicalType _ col = col
 
