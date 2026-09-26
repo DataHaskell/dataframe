@@ -150,7 +150,12 @@ shardPathFor pattern_ shardIndex =
 
 -- | Write rows @[startRow, endRow)@ of the frame to a single Parquet file.
 writeShard ::
-    ParquetWriteOptions -> FilePath -> DataFrame -> Int -> Int -> IO ()
+    ParquetWriteOptions ->
+    FilePath ->
+    DataFrame ->
+    Int ->
+    Int ->
+    IO ()
 writeShard options path_ df startRow endRow = do
     let names = columnNames df
         shardRows = max 0 (endRow - startRow)
