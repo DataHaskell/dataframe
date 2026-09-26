@@ -357,7 +357,13 @@ textEncoder col =
         writeWord32At buffer pos (fromIntegral count)
         arr <- readIORef buffer.arrayRef
         withMutableByteArrayContents arr $ \ptr ->
-            stToIO (TA.copyToPointer bytes offset (ptr `plusPtr` (pos + 4)) count)
+            stToIO
+                ( TA.copyToPointer
+                    bytes
+                    offset
+                    (ptr `plusPtr` (pos + 4))
+                    count
+                )
         pure (pos + 4 + count)
     mismatch =
         error
