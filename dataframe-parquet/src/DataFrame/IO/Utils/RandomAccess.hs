@@ -272,7 +272,8 @@ writeWord64LE buffer w = do
     writeIORef buffer.positionRef (position + 8)
 {-# INLINE writeWord64LE #-}
 
-writeWord32At :: MemoryBuffer -> Int -> Word32 -> IO ()
+writeWord32At ::
+    MemoryBuffer -> Int -> Word32 -> IO ()
 writeWord32At buffer position w = do
     array <- ensureCapacity buffer (position + 4)
     writeByteArray array position (fromIntegral w :: Word8)
