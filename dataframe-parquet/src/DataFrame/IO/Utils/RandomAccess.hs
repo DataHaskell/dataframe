@@ -348,7 +348,8 @@ flushBufferToBuffer source destination
 {-# INLINE flushBufferToBuffer #-}
 
 bufferToByteString ::
-    MemoryBuffer -> IO ByteString
+    MemoryBuffer ->
+    IO ByteString
 bufferToByteString buffer = do
     array <- readIORef buffer.arrayRef
     position <- readIORef buffer.positionRef
