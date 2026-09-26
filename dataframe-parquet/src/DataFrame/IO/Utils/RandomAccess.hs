@@ -244,7 +244,8 @@ writeWord8 buffer b = do
     writeIORef buffer.positionRef (position + 1)
 {-# INLINE writeWord8 #-}
 
-writeByteString :: MemoryBuffer -> ByteString -> IO ()
+writeByteString ::
+    MemoryBuffer -> ByteString -> IO ()
 writeByteString buffer bs =
     BU.unsafeUseAsCStringLen bs $ \(source, len) -> do
         position <- readIORef buffer.positionRef
