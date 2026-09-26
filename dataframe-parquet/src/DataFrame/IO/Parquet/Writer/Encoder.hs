@@ -326,7 +326,9 @@ boolEncoder col = do
     pure
         (Encoder (BOOLEAN enum) Nothing Nothing (columnWriter @Bool col addBit) finish)
 
-textEncoder :: Column -> Encoder
+textEncoder ::
+    Column ->
+    Encoder
 textEncoder col =
     Encoder
         (BYTE_ARRAY enum)
