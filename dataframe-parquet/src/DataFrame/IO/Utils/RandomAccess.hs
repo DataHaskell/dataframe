@@ -162,7 +162,10 @@ openWritableBinaryFile filepath = do
     hSetBuffering h NoBuffering
     pure . WritableBinaryHandle $ h
 
-atomicallyWriteFile :: FilePath -> (FilePath -> IO a) -> IO a
+atomicallyWriteFile ::
+    FilePath ->
+    (FilePath -> IO a) ->
+    IO a
 atomicallyWriteFile path action =
     bracketOnError
         openAction
