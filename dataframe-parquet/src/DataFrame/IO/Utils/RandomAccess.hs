@@ -220,7 +220,8 @@ mallocBuffer capacity
 -- is just a matter of adding a new buffer to the array (which we can
 -- pre-allocate to three elements to begin with and grow it only on the
 -- off chance that a buffer required more than three grows).
-ensureCapacity :: MemoryBuffer -> Int -> IO (MutableByteArray RealWorld)
+ensureCapacity ::
+    MemoryBuffer -> Int -> IO (MutableByteArray RealWorld)
 ensureCapacity buffer needed = do
     array <- readIORef buffer.arrayRef
     maxSize <- getSizeofMutableByteArray array
