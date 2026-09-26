@@ -376,7 +376,9 @@ textEncoder col =
         error
             ("writeParquet: incompatible text representation for " <> columnTypeString col)
 
-timestampEncoder :: Column -> Encoder
+timestampEncoder ::
+    Column ->
+    Encoder
 timestampEncoder col =
     Encoder
         (INT64 enum)
