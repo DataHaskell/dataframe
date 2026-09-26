@@ -198,7 +198,8 @@ writeShard options path_ df startRow endRow = do
                     let batchEnd = rowNum + min interval (endRow - rowNum)
                     writeBatch rowNum batchEnd
                     size <- bufferedSize columnChunks_
-                    when (size >= options.rowGroupSize) (flushRowGroup options writerState)
+                    when (size >= options.rowGroupSize) $
+                        flushRowGroup options writerState
                     loop batchEnd
         loop startRow
         flushRowGroup options writerState
