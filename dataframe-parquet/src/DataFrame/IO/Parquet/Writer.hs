@@ -288,7 +288,9 @@ flushPage options scratch columnChunkState = do
         writeIORef page.currentRowCount 0
 
 assemblePageBody ::
-    MemoryBuffer -> ColumnChunkState -> IO MemoryBuffer
+    MemoryBuffer ->
+    ColumnChunkState ->
+    IO MemoryBuffer
 assemblePageBody scratch columnChunkState
     | not columnChunkState.nullable = pure columnChunkState.pageState.pageBuffer
     | otherwise = do
