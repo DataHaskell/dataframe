@@ -14,7 +14,13 @@ module DataFrame.IO.Parquet.Writer (
 
 import Control.Monad (forM_, unless, when)
 import qualified Data.ByteString as BS
-import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
+import Data.IORef (
+    IORef,
+    modifyIORef',
+    newIORef,
+    readIORef,
+    writeIORef,
+ )
 import Data.Int (Int64)
 import Data.Maybe (fromJust)
 import Data.Primitive.ByteArray (getSizeofMutableByteArray)
