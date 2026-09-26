@@ -316,7 +316,7 @@ writeInteger64At buffer position value
         pure (position + 8)
   where
     outOfRange =
-        ioError (userError "writeParquet: Integer value is outside the INT64 range")
+        (ioError (userError "writeParquet: Integer value is outside the INT64 range"))
 {-# INLINE writeInteger64At #-}
 
 writeFloatLE :: MemoryBuffer -> Float -> IO ()
