@@ -34,6 +34,7 @@ import Data.Int
 import qualified Data.List as L
 import qualified Data.Map as M
 import qualified Data.Maybe as Maybe
+import qualified Data.Set as S
 import qualified Data.Text as T
 import Data.Time
 import Data.Type.Equality (testEquality, type (:~:) (Refl))
@@ -236,6 +237,25 @@ count = Agg (MergeAgg "count" (0 :: Int) (\c _ -> c + 1) (+) id)
 {-# SPECIALIZE count :: Expr Int32 -> Expr Int #-}
 {-# SPECIALIZE count :: Expr Int64 -> Expr Int #-}
 {-# INLINEABLE count #-}
+
+-- | Number of distinct values, the equivalent of SQL's @COUNT(DISTINCT x)@.
+countDistinct :: forall a. (Columnable a, Ord a) => Expr a -> Expr Int
+countDistinct =
+    Agg
+        ( MergeAgg
+            "countDistinct"
+            (S.empty :: S.Set a)
+            (flip S.insert)
+            S.union
+            S.size
+        )
+{-# SPECIALIZE countDistinct :: Expr Double -> Expr Int #-}
+{-# SPECIALIZE countDistinct :: Expr Float -> Expr Int #-}
+{-# SPECIALIZE countDistinct :: Expr Int -> Expr Int #-}
+{-# SPECIALIZE countDistinct :: Expr Int8 -> Expr Int #-}
+{-# SPECIALIZE countDistinct :: Expr Int16 -> Expr Int #-}
+{-# SPECIALIZE countDistinct :: Expr Int32 -> Expr Int #-}
+{-# SPECIALIZE countDistinct :: Expr Int64 -> Expr Int #-}
 
 -- | Row count, the equivalent of SQL's @COUNT(*)@.
 countAll :: Expr Int
