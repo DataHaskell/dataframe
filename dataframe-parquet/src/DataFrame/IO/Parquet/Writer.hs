@@ -316,7 +316,10 @@ writeDataPage codec numPageRows body columnChunkState = do
         columnChunkState.uncompressedBufferSize
         (+ fromIntegral (BS.length headerBytes + uncompressedPageSize))
 
-flushRowGroup :: ParquetWriteOptions -> ParquetWriterState -> IO ()
+flushRowGroup ::
+    ParquetWriteOptions ->
+    ParquetWriterState ->
+    IO ()
 flushRowGroup options writerState = do
     rowNumber <- readIORef writerState.rowNumberRef
     when (rowNumber > 0) $ do
