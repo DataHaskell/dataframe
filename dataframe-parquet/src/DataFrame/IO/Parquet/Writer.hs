@@ -395,7 +395,9 @@ flushRowGroup options writerState = do
             )
         writeIORef writerState.rowNumberRef 0
 
-bufferedSize :: VB.Vector ColumnChunkState -> IO Int
+bufferedSize ::
+    VB.Vector ColumnChunkState ->
+    IO Int
 bufferedSize =
     VB.foldM'
         ( \total columnChunkState -> do
