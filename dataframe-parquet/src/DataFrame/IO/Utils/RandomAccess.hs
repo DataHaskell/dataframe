@@ -325,7 +325,8 @@ writeDoubleLE :: MemoryBuffer -> Double -> IO ()
 writeDoubleLE buffer = writeWord64LE buffer . castDoubleToWord64
 {-# INLINE writeDoubleLE #-}
 
-flushBufferToBuffer :: MemoryBuffer -> MemoryBuffer -> IO ()
+flushBufferToBuffer ::
+    MemoryBuffer -> MemoryBuffer -> IO ()
 flushBufferToBuffer source destination
     | source.arrayRef == destination.arrayRef = pure ()
     | otherwise = do
