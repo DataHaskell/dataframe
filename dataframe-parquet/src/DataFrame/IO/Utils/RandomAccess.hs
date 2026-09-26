@@ -414,7 +414,8 @@ writeByteStringToFile (WritableBinaryHandle h) bs =
 appendTextArraySlice ::
     MemoryBuffer -> TA.Array -> Int -> Int -> IO ()
 appendTextArraySlice buffer source offset count
-    | count < 0 = ioError $ userError "appendTextArraySlice: negative length"
+    | count < 0 =
+        ioError $ userError "appendTextArraySlice: negative length"
     | otherwise = do
         position <- readIORef buffer.positionRef
         array <- ensureCapacity buffer (position + count)
