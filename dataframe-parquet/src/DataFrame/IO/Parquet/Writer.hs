@@ -286,7 +286,11 @@ flushPage options scratch columnChunkState = do
         pos' <- columnChunkState.encoder.finishValues page.pageBuffer pos
         writeIORef page.pageBuffer.positionRef pos'
         body <- assemblePageBody scratch columnChunkState
-        writeDataPage options.compressionCodec numPageRows body columnChunkState
+        writeDataPage
+            options.compressionCodec
+            numPageRows
+            body
+            columnChunkState
         resetPosition page.pageBuffer
         resetPosition page.definitionLevels.dlBuf
         resetPosition scratch
