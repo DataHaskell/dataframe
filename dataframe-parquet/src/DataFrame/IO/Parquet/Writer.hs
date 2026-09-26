@@ -412,7 +412,10 @@ bufferedSize =
         0
 
 initColumnChunkState ::
-    ParquetWriteOptions -> T.Text -> Column -> IO ColumnChunkState
+    ParquetWriteOptions ->
+    T.Text ->
+    Column ->
+    IO ColumnChunkState
 initColumnChunkState options columnName_ column = do
     encoder_ <- buildEncoder column
     let nullable_ = hasMissing column
