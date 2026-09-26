@@ -399,9 +399,11 @@ bufferedSize =
     VB.foldM'
         ( \total columnChunkState -> do
             chunkSize <- bufferResidency columnChunkState.buffer
-            valuesSize <- bufferResidency columnChunkState.pageState.pageBuffer
+            valuesSize <-
+                bufferResidency columnChunkState.pageState.pageBuffer
             defLevelsSize <-
-                bufferResidency columnChunkState.pageState.definitionLevels.dlBuf
+                bufferResidency
+                    columnChunkState.pageState.definitionLevels.dlBuf
             pure (total + chunkSize + valuesSize + defLevelsSize)
         )
         0
