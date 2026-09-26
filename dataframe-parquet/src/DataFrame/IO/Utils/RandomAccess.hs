@@ -304,7 +304,8 @@ writeInteger64 buffer value = do
     writeIORef buffer.positionRef newPosition
 {-# INLINE writeInteger64 #-}
 
-writeInteger64At :: MemoryBuffer -> Int -> Integer -> IO Int
+writeInteger64At ::
+    MemoryBuffer -> Int -> Integer -> IO Int
 writeInteger64At buffer position value
     | value < toInteger (minBound :: Int64) = outOfRange
     | value > toInteger (maxBound :: Int64) = outOfRange
