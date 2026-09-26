@@ -59,7 +59,8 @@ data Encoder = Encoder
     { encType :: !ThriftType
     , convertedType :: !(Maybe ConvertedType)
     , logicalType :: !(Maybe LogicalType)
-    , encodeValue :: !(MemoryBuffer -> Int -> Int -> IO (Int, Bool))
+    , encodeValue ::
+        !(MemoryBuffer -> Int -> Int -> IO (Int, Bool))
     , finishValues :: !(MemoryBuffer -> Int -> IO Int)
     }
 
