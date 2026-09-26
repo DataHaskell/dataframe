@@ -345,7 +345,8 @@ flushBufferToBuffer source destination
         writeIORef source.positionRef 0
 {-# INLINE flushBufferToBuffer #-}
 
-bufferToByteString :: MemoryBuffer -> IO ByteString
+bufferToByteString ::
+    MemoryBuffer -> IO ByteString
 bufferToByteString buffer = do
     array <- readIORef buffer.arrayRef
     position <- readIORef buffer.positionRef
