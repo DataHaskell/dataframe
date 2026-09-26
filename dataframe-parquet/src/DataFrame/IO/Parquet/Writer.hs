@@ -269,7 +269,10 @@ writeRows options scratch firstRow count ccs = do
         (flushPage options scratch ccs)
 
 flushPage ::
-    ParquetWriteOptions -> MemoryBuffer -> ColumnChunkState -> IO ()
+    ParquetWriteOptions ->
+    MemoryBuffer ->
+    ColumnChunkState ->
+    IO ()
 flushPage options scratch columnChunkState = do
     let page = columnChunkState.pageState
     numPageRows <- readIORef page.currentRowCount
