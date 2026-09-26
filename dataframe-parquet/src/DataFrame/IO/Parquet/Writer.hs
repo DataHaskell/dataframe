@@ -250,7 +250,10 @@ writeRows options scratch firstRow count ccs = do
             | pos + margin > size = do
                 -- Rare: buffer nearly full, grow it
                 writeIORef buf.positionRef pos
-                arr' <- ensureCapacity buf (pos + max margin ((end - row) * 64))
+                arr' <-
+                    ensureCapacity
+                        buf
+                        (pos + max margin ((end - row) * 64))
                 size' <- getSizeofMutableByteArray arr'
                 go size' pos row
             | otherwise = do
