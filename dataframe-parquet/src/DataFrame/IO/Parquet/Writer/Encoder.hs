@@ -72,7 +72,7 @@ buildEncoder col
                 (INT32 enum)
                 Nothing
                 Nothing
-                (\buffer pos v -> writeWord32At buffer pos (fromIntegral v) >> pure (pos + 4))
+                (\buffer pos v -> write32 buffer pos (fromIntegral v))
                 col
     | hasElemType @Int64 col =
         pure $
@@ -80,7 +80,7 @@ buildEncoder col
                 (INT64 enum)
                 Nothing
                 Nothing
-                (\buffer pos v -> writeWord64At buffer pos (fromIntegral v) >> pure (pos + 8))
+                (\buffer pos v -> write64 buffer pos (fromIntegral v))
                 col
     -- Ints in GHC can be 32 bit or 64 bit integers depending on the
     -- underlying computers architecture. So we'll do 64bit integers
@@ -91,7 +91,7 @@ buildEncoder col
                 (INT64 enum)
                 Nothing
                 Nothing
-                (\buffer pos v -> writeWord64At buffer pos (fromIntegral v) >> pure (pos + 8))
+                (\buffer pos v -> write64 buffer pos (fromIntegral v))
                 col
     | hasElemType @Integer col =
         pure $
@@ -107,8 +107,7 @@ buildEncoder col
                 (FLOAT enum)
                 Nothing
                 Nothing
-                ( \buffer pos v -> writeWord32At buffer pos (castFloatToWord32 v) >> pure (pos + 4)
-                )
+                (\buffer pos v -> write32 buffer pos (castFloatToWord32 v))
                 col
     | hasElemType @Double col =
         pure $
@@ -116,14 +115,20 @@ buildEncoder col
                 (DOUBLE enum)
                 Nothing
                 Nothing
-                ( \buffer pos v -> writeWord64At buffer pos (castDoubleToWord64 v) >> pure (pos + 8)
-                )
+                (\buffer pos v -> write64 buffer pos (castDoubleToWord64 v))
                 col
     | hasElemType @Bool col = boolEncoder col
     | hasElemType @T.Text col = pure (textEncoder col)
     | hasElemType @UTCTime col = pure (timestampEncoder col)
     | otherwise =
         error ("writeParquet: unsupported column type " <> columnTypeString col)
+  where
+    write32 buffer pos value = do
+        writeWord32At buffer pos value
+        pure (pos + 4)
+    write64 buffer pos value = do
+        writeWord64At buffer pos value
+        pure (pos + 8)
 
 scalarEncoder ::
     forall a.
