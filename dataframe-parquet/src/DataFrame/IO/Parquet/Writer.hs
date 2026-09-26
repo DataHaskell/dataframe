@@ -185,7 +185,6 @@ writeShard options path_ df startRow endRow = do
                     rowNumberRef_
             interval = max 1 options.batchRows
             subBatch = max 1 options.subBatchRows
-            writeBatch :: Int -> Int -> IO ()
             writeBatch rowNum batchEnd
                 | rowNum >= batchEnd = pure ()
                 | otherwise = do
