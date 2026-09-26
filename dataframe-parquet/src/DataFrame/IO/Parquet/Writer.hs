@@ -304,7 +304,11 @@ assemblePageBody scratch columnChunkState
         pure scratch
 
 writeDataPage ::
-    CompressionCodec -> Int -> MemoryBuffer -> ColumnChunkState -> IO ()
+    CompressionCodec ->
+    Int ->
+    MemoryBuffer ->
+    ColumnChunkState ->
+    IO ()
 writeDataPage codec numPageRows body columnChunkState = do
     uncompressedPageSize <- bufferResidency body
     compressedBody <- case codec of
