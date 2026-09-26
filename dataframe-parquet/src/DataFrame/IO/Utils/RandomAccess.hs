@@ -420,6 +420,12 @@ appendTextArraySlice buffer source offset count
         position <- readIORef buffer.positionRef
         array <- ensureCapacity buffer (position + count)
         withMutableByteArrayContents array $ \destination ->
-            stToIO (TA.copyToPointer source offset (destination `plusPtr` position) count)
+            stToIO
+                ( TA.copyToPointer
+                    source
+                    offset
+                    (destination `plusPtr` position)
+                    count
+                )
         writeIORef buffer.positionRef (position + count)
 {-# INLINE appendTextArraySlice #-}
