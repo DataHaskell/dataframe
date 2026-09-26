@@ -203,7 +203,8 @@ writeShard options path_ df startRow endRow = do
                     loop batchEnd
         loop startRow
         flushRowGroup options writerState
-        rowGroupMetadata <- reverse <$> readIORef rowGroupMetadataRef_
+        rowGroupMetadata <-
+            reverse <$> readIORef rowGroupMetadataRef_
         let schemaElements =
                 rootSchemaElement (VB.length columnChunks_)
                     : VB.toList (VB.map schema columnChunks_)
