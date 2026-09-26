@@ -198,7 +198,8 @@ data MemoryBuffer = MemoryBuffer
     , positionRef :: !(IORef Int)
     }
 
-mallocBuffer :: Int -> IO MemoryBuffer
+mallocBuffer ::
+    Int -> IO MemoryBuffer
 mallocBuffer capacity
     | capacity < 0 = ioError $ userError "mallocBuffer: negative capacity"
     | otherwise = do
