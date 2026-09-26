@@ -383,7 +383,8 @@ resetPosition buffer = writeIORef buffer.positionRef 0
 -- So when writing to a file to minimize syscall overhead while
 -- trying not to create dirty pages in the kernel page cache, we'll
 -- be flushing in 256 KiB chunks.
-flushBufferToFile :: WritableBinaryHandle -> MemoryBuffer -> IO ()
+flushBufferToFile ::
+    WritableBinaryHandle -> MemoryBuffer -> IO ()
 flushBufferToFile (WritableBinaryHandle h) buffer = do
     array <- readIORef buffer.arrayRef
     position <- readIORef buffer.positionRef
