@@ -251,7 +251,10 @@ writeByteString buffer bs =
         position <- readIORef buffer.positionRef
         array <- ensureCapacity buffer (position + len)
         withMutableByteArrayContents array $ \dst ->
-            copyBytes (dst `plusPtr` position) (castPtr source) len
+            copyBytes
+                (dst `plusPtr` position)
+                (castPtr source)
+                len
         writeIORef buffer.positionRef (position + len)
 {-# INLINE writeByteString #-}
 
