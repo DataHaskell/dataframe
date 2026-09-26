@@ -222,7 +222,12 @@ nativeTypeKeyValues names df =
     ]
 
 writeRows ::
-    ParquetWriteOptions -> MemoryBuffer -> Int -> Int -> ColumnChunkState -> IO ()
+    ParquetWriteOptions ->
+    MemoryBuffer ->
+    Int ->
+    Int ->
+    ColumnChunkState ->
+    IO ()
 writeRows options scratch firstRow count ccs = do
     let page = ccs.pageState
         buf = page.pageBuffer
