@@ -322,7 +322,8 @@ writeDataPage codec numPageRows body columnChunkState = do
     uncompressedPageSize <- bufferResidency body
     compressedBody <- case codec of
         UNCOMPRESSED _ -> pure Nothing
-        SNAPPY _ -> Just . Snappy.compress <$> bufferToByteString body
+        SNAPPY _ ->
+            Just . Snappy.compress <$> bufferToByteString body
         other -> error ("writeParquet: unsupported codec " <> show other)
     let compressedPageSize = maybe uncompressedPageSize BS.length compressedBody
         headerBytes =
