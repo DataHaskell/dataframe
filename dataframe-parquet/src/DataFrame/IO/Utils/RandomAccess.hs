@@ -411,7 +411,8 @@ writeByteStringToFile (WritableBinaryHandle h) bs =
                     go (offset + n)
         go 0
 
-appendTextArraySlice :: MemoryBuffer -> TA.Array -> Int -> Int -> IO ()
+appendTextArraySlice ::
+    MemoryBuffer -> TA.Array -> Int -> Int -> IO ()
 appendTextArraySlice buffer source offset count
     | count < 0 = ioError $ userError "appendTextArraySlice: negative length"
     | otherwise = do
