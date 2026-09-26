@@ -187,7 +187,10 @@ atomicallyWriteFile path action =
                 pure tmpFile
             )
 
-withWritableBinaryFile :: FilePath -> (WritableBinaryHandle -> IO a) -> IO a
+withWritableBinaryFile ::
+    FilePath ->
+    (WritableBinaryHandle -> IO a) ->
+    IO a
 withWritableBinaryFile filepath =
     bracket
         (openWritableBinaryFile filepath)
