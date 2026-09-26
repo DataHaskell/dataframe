@@ -350,14 +350,22 @@ flushRowGroup options writerState = do
         (reversedColumnChunks, totalCompressed, totalUncompressed) <-
             VB.foldM'
                 ( \(acc, totalCompressedSize, totalUncompressedSize) columnChunkState -> do
-                    offset <- readIORef writerState.currentFileOffsetRef
-                    compressedSize <- bufferResidency columnChunkState.buffer
-                    uncompressedSize <- readIORef columnChunkState.uncompressedBufferSize
-                    flushBufferToFile writerState.outputFileHandle columnChunkState.buffer
+                    offset <-
+                        readIORef writerState.currentFileOffsetRef
+                    compressedSize <-
+                        bufferResidency columnChunkState.buffer
+                    uncompressedSize <-
+                        readIORef
+                            columnChunkState.uncompressedBufferSize
+                    flushBufferToFile
+                        writerState.outputFileHandle
+                        columnChunkState.buffer
                     writeIORef
                         writerState.currentFileOffsetRef
                         (offset + fromIntegral compressedSize)
-                    writeIORef columnChunkState.uncompressedBufferSize 0
+                    writeIORef
+                        columnChunkState.uncompressedBufferSize
+                        0
                     let columnChunk =
                             mkColumnChunk
                                 options.compressionCodec
