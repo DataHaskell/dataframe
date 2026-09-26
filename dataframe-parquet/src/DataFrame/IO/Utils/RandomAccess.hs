@@ -296,7 +296,8 @@ writeWord64At buffer position w = do
     writeByteArray array (position + 7) (fromIntegral (w `shiftR` 56) :: Word8)
 {-# INLINE writeWord64At #-}
 
-writeInteger64 :: MemoryBuffer -> Integer -> IO ()
+writeInteger64 ::
+    MemoryBuffer -> Integer -> IO ()
 writeInteger64 buffer value = do
     position <- readIORef buffer.positionRef
     newPosition <- writeInteger64At buffer position value
