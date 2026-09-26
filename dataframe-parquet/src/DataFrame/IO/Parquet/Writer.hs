@@ -192,7 +192,6 @@ writeShard options path_ df startRow endRow = do
                     VB.forM_ columnChunks_ (writeRows options scratchBuffer_ rowNum count)
                     modifyIORef' rowNumberRef_ (+ count)
                     writeBatch (rowNum + count) batchEnd
-            loop :: Int -> IO ()
             loop rowNum
                 | rowNum >= endRow = pure ()
                 | otherwise = do
