@@ -31,7 +31,7 @@ You can contribute in many ways:
 1. **Clone the repo**:
 
    ```bash
-   git clone https://github.com/mchav/dataframe.git
+   git clone https://github.com/DataHaskell/dataframe.git
    cd dataframe
 
 
