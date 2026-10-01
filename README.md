@@ -69,7 +69,7 @@ Works with GHC 9.4 through 9.12. A custom REPL with all imports pre-loaded is av
 
 ```bash
 $ dataframe
-dataframe> df = D.fromNamedColumns [("product", D.fromList [1, 1, 2, 2, 3, 3 :: Int]), ("amount",  D.fromList [100, 120, 50, 20, 40, 30 :: Int]) ]
+dataframe> df = D.fromNamedColumns ["product" =: [1, 1, 2, 2, 3, 3 :: Int], "amount" =: [100, 120, 50, 20, 40, 30 :: Int]]
 dataframe> df |> D.groupBy ["product"] |> ["total" .= F.countAll ]
 
 ```
@@ -89,8 +89,8 @@ import qualified DataFrame.Functions as F
 import DataFrame.Expression.Operators
 
 sales = D.fromNamedColumns
-    [ ("product", D.fromList [1, 1, 2, 2, 3, 3 :: Int])
-    , ("amount",  D.fromList [100, 120, 50, 20, 40, 30 :: Int])
+    [ "product" =: [1, 1, 2, 2, 3, 3 :: Int]
+    , "amount"  =: [100, 120, 50, 20, 40, 30 :: Int]
     ]
 
 -- Group by product and compute totals
@@ -443,8 +443,8 @@ tdf |> DT.filterWhere (DT.col @"name" DT..>. DT.lit 50000)
 type ScoreSchema = '[ '("name", Text), '("score", Maybe Double)]
 
 scoresDf = D.fromNamedColumns
-    [ ("name",  D.fromList ["a", "b", "c" :: Text])
-    , ("score", D.fromList [Just 1.0, Nothing, Just 3.0 :: Maybe Double])
+    [ "name"  =: ["a", "b", "c" :: Text]
+    , "score" =: [Just 1.0, Nothing, Just 3.0 :: Maybe Double]
     ]
 
 Just stdf = DT.freeze @ScoreSchema scoresDf

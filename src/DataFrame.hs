@@ -172,6 +172,7 @@ import DataFrame.Core as CoreTypes (
     toRowVector,
     toSeparated,
     toVector,
+    (=:),
  )
 import DataFrame.Schema as Schema (
     SchemaType (..),

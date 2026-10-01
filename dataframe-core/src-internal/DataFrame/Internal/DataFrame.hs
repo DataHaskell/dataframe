@@ -35,6 +35,7 @@ module DataFrame.Internal.DataFrame (
     getRowAsText,
     showElement,
     stripJust,
+    (=:),
 ) where
 
 import qualified Data.Map as M
@@ -60,11 +61,13 @@ import DataFrame.Errors (
  )
 import DataFrame.Internal.Column (
     Column (..),
+    Columnable,
     columnLength,
     columnToTextVec,
     columnTypeString,
     expandColumn,
     forceColumn,
+    fromList,
     materializeMerged,
     parBackpermute2Int,
     sliceColumn,
@@ -336,7 +339,14 @@ insertColumn name column d =
 
 -- | Build a DataFrame from a list of @(name, column)@ pairs using 'insertColumn'.
 fromNamedColumns :: [(T.Text, Column)] -> DataFrame
-fromNamedColumns = foldl (\df (name, column) -> insertColumn name column df) empty
+fromNamedColumns = foldl' (\df (name, column) -> insertColumn name column df) empty
+
+mkColumn :: (Columnable a) => T.Text -> [a] -> (T.Text, Column)
+mkColumn name column = (name, fromList column)
+
+infix 1 =:
+(=:) :: (Columnable a) => T.Text -> [a] -> (T.Text, Column)
+(=:) = mkColumn
 
 {- | Safely retrieves a column by name from the dataframe.
 

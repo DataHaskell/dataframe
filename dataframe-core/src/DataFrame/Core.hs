@@ -8,6 +8,7 @@ module DataFrame.Core (
     GroupedDataFrame,
     empty,
     fromNamedColumns,
+    (=:),
     insertColumn,
     columnNames,
     null,
@@ -88,6 +89,7 @@ import DataFrame.Internal.DataFrame (
     toMarkdown,
     toMarkdown',
     toSeparated,
+    (=:),
  )
 import DataFrame.Internal.Expression (
     Expr,
