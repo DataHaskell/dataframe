@@ -46,9 +46,9 @@ import qualified DataFrame.Internal.Schema.TH as SchemaTH
 import DataFrame.Typed.Record (
     HasSchema,
     Schema,
-    fromColumns,
+    recordsFromFrame,
+    recordsToColumns,
     requireColumn,
-    toColumns,
  )
 import DataFrame.Typed.Types (TypedDataFrame)
 import DataFrame.Typed.Util (camelToSnake)
@@ -211,8 +211,8 @@ mkHasSchemaInstance tyName schemaType conName fields = do
             []
             instType
             [ schemaInst
-            , FunD 'toColumns [toClause]
-            , FunD 'fromColumns [fromClause]
+            , FunD 'recordsToColumns [toClause]
+            , FunD 'recordsFromFrame [fromClause]
             ]
 
 mkToColumnsClause :: [(String, Name, Type)] -> Q Clause

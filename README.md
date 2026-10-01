@@ -299,8 +299,8 @@ $(DT.deriveSchemaFromType ''Order)
 --     '[ '("order_id", Int64), '("region", Text), '("amount", Double)]
 --   instance DT.HasSchema Order where
 --     type Schema Order = OrderSchema
---     toColumns   = ...
---     fromColumns = ...
+--     recordsToColumns   = ...
+--     recordsFromFrame = ...
 
 xs :: [Order]
 xs = [Order 1 "us" 10.0, Order 2 "eu" 20.5]
@@ -389,8 +389,8 @@ type OrderGSchema = DT.SchemaOf OrderG
 
 instance DT.HasSchema OrderG where
     type Schema OrderG = OrderGSchema
-    toColumns   = DT.genericToColumns
-    fromColumns = DT.genericFromColumns
+    recordsToColumns   = DT.genericToColumns
+    recordsFromFrame = DT.genericFromColumns
 ```
 
 > <!-- scripths:mime text/plain -->

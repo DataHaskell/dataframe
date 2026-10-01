@@ -29,8 +29,8 @@ data Order = Order
 type OrderSchema = SchemaOf Order
 
 instance HasSchema Order OrderSchema where
-  toColumns   = genericToColumns
-  fromColumns = genericFromColumns
+  recordsToColumns   = genericToColumns
+  recordsFromFrame = genericFromColumns
 @
 
 Field names are translated with the @CamelCase -> snake_case@ rule
@@ -183,20 +183,20 @@ instance
         v <- requireColumn @a colName df
         pure (map (M1 . K1) (VB.toList v))
 
-{- | Default implementation of 'DataFrame.Typed.Record.toColumns' for any
+{- | Default implementation of 'DataFrame.Typed.Record.recordsToColumns' for any
 @Generic@ record. Field names are translated with @camelCase -> snake_case@.
 
 @
 instance HasSchema Order (SchemaOf Order) where
-  toColumns   = genericToColumns
-  fromColumns = genericFromColumns
+  recordsToColumns   = genericToColumns
+  recordsFromFrame = genericFromColumns
 @
 -}
 genericToColumns ::
     forall a. (Generic a, GHasColumns (Rep a)) => [a] -> [(T.Text, C.Column)]
 genericToColumns = gToColumns . map from
 
-{- | Default implementation of 'DataFrame.Typed.Record.fromColumns' for any
+{- | Default implementation of 'DataFrame.Typed.Record.recordsFromFrame' for any
 @Generic@ record.
 -}
 genericFromColumns ::

@@ -112,8 +112,8 @@ type FooSchema = DT.SchemaOf Foo
 
 instance DT.HasSchema Foo where
     type Schema Foo = FooSchema
-    toColumns = DT.genericToColumns
-    fromColumns = DT.genericFromColumns
+    recordsToColumns = DT.genericToColumns
+    recordsFromFrame = DT.genericFromColumns
 
 orderSample :: [Order]
 orderSample =

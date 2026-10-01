@@ -47,14 +47,14 @@ instances can pick it up from a 'GHC.Generics.Rep' computation (see
 'DataFrame.Typed.Generic.SchemaOf') or from an explicit list emitted by
 'DataFrame.Typed.TH.deriveSchemaFromType'.
 
-@toColumns@ explodes a list of records into a list of named columns.
-@fromColumns@ reconstructs the records from a 'D.DataFrame', returning
+@recordsToColumns@ explodes a list of records into a list of named columns.
+@recordsFromFrame@ reconstructs the records from a 'D.DataFrame', returning
 @Left err@ if a column is missing or has the wrong type.
 -}
 class HasSchema a where
     type Schema a :: [(Symbol, Type)]
-    toColumns :: [a] -> [(T.Text, C.Column)]
-    fromColumns :: D.DataFrame -> Either T.Text [a]
+    recordsToColumns :: [a] -> [(T.Text, C.Column)]
+    recordsFromFrame :: D.DataFrame -> Either T.Text [a]
 
 {- | Build an untyped 'D.DataFrame' from a list of records.
 
@@ -70,14 +70,14 @@ df = fromRecords xs
 @
 -}
 fromRecords :: (HasSchema a) => [a] -> D.DataFrame
-fromRecords = fromNamedColumns . toColumns
+fromRecords = fromNamedColumns . recordsToColumns
 
 {- | Parse a list of records out of an untyped 'D.DataFrame'.
 
 Returns @Left err@ on schema mismatch (missing column, wrong type).
 -}
 toRecords :: (HasSchema a) => D.DataFrame -> Either T.Text [a]
-toRecords = fromColumns
+toRecords = recordsFromFrame
 
 -- | Like 'fromRecords' but returns a 'TypedDataFrame' tagged with the schema.
 fromRecordsTyped :: forall a. (HasSchema a) => [a] -> TypedDataFrame (Schema a)
@@ -86,7 +86,7 @@ fromRecordsTyped = TDF . fromRecords
 -- | Like 'toRecords' but accepts a 'TypedDataFrame'.
 toRecordsTyped ::
     forall a. (HasSchema a) => TypedDataFrame (Schema a) -> Either T.Text [a]
-toRecordsTyped (TDF df) = fromColumns df
+toRecordsTyped (TDF df) = recordsFromFrame df
 
 {- | Extract a column as a boxed vector by name, returning a 'T.Text' error
 on missing column or type mismatch.
