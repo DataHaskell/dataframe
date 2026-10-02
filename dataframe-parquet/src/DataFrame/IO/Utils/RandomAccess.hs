@@ -38,13 +38,12 @@ module DataFrame.IO.Utils.RandomAccess (
 import Control.Exception (bracket, bracketOnError, finally)
 import Control.Monad (when)
 import Control.Monad.IO.Class (MonadIO (..))
-import Control.Monad.Primitive (RealWorld)
+import Control.Monad.Primitive (PrimBase, PrimMonad, PrimState)
 import Control.Monad.ST (stToIO)
 import Data.Bits (shiftR)
 import qualified Data.ByteString as BS
 import Data.ByteString.Internal (ByteString (PS), create)
 import qualified Data.ByteString.Unsafe as BU
-import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Int (Int64)
 import Data.Primitive.ByteArray (
     MutableByteArray,
@@ -54,6 +53,7 @@ import Data.Primitive.ByteArray (
     withMutableByteArrayContents,
     writeByteArray,
  )
+import Data.Primitive.MutVar (MutVar, newMutVar, readMutVar, writeMutVar)
 import qualified Data.Text.Array as TA
 import qualified Data.Vector.Storable as VS
 import Data.Word (Word32, Word64, Word8)
@@ -200,18 +200,18 @@ withWritableBinaryFile filepath =
         (openWritableBinaryFile filepath)
         (hClose . unHandle)
 
-data MemoryBuffer = MemoryBuffer
-    { arrayRef :: !(IORef (MutableByteArray RealWorld))
-    , positionRef :: !(IORef Int)
+data MemoryBuffer s = MemoryBuffer
+    { arrayRef :: !(MutVar s (MutableByteArray s))
+    , positionRef :: !(MutVar s Int)
     }
 
 mallocBuffer ::
-    Int -> IO MemoryBuffer
+    (PrimMonad m, MonadIO m) => Int -> m (MemoryBuffer (PrimState m))
 mallocBuffer capacity
-    | capacity < 0 = ioError $ userError "mallocBuffer: negative capacity"
+    | capacity < 0 = liftIO $ ioError $ userError "mallocBuffer: negative capacity"
     | otherwise = do
         array <- newPinnedByteArray capacity
-        MemoryBuffer <$> newIORef array <*> newIORef 0
+        MemoryBuffer <$> newMutVar array <*> newMutVar 0
 
 -- We're using pinned ByteArrays so we must
 -- not use the grow function brovided by Data.Primitive
@@ -229,61 +229,64 @@ mallocBuffer capacity
 -- pre-allocate to three elements to begin with and grow it only on the
 -- off chance that a buffer required more than three grows).
 ensureCapacity ::
-    MemoryBuffer -> Int -> IO (MutableByteArray RealWorld)
+    (PrimMonad m) =>
+    MemoryBuffer (PrimState m) -> Int -> m (MutableByteArray (PrimState m))
 ensureCapacity buffer needed = do
-    array <- readIORef buffer.arrayRef
+    array <- readMutVar buffer.arrayRef
     maxSize <- getSizeofMutableByteArray array
     if needed <= maxSize
         then pure array
         else do
-            position <- readIORef buffer.positionRef
+            position <- readMutVar buffer.positionRef
             grown <- newPinnedByteArray (needed + (needed `div` 2))
             copyMutableByteArray grown 0 array 0 position
-            writeIORef buffer.arrayRef grown
+            writeMutVar buffer.arrayRef grown
             pure grown
 {-# INLINE ensureCapacity #-}
 
-writeWord8 :: MemoryBuffer -> Word8 -> IO ()
+writeWord8 :: (PrimMonad m) => MemoryBuffer (PrimState m) -> Word8 -> m ()
 writeWord8 buffer b = do
-    position <- readIORef buffer.positionRef
+    position <- readMutVar buffer.positionRef
     array <- ensureCapacity buffer (position + 1)
     writeByteArray array position b
-    writeIORef buffer.positionRef (position + 1)
+    writeMutVar buffer.positionRef (position + 1)
 {-# INLINE writeWord8 #-}
 
 writeByteString ::
-    MemoryBuffer ->
+    (PrimBase m, MonadIO m) =>
+    MemoryBuffer (PrimState m) ->
     ByteString ->
-    IO ()
+    m ()
 writeByteString buffer bs = do
-    position <- readIORef buffer.positionRef
+    position <- readMutVar buffer.positionRef
     let len = BS.length bs
     array <- ensureCapacity buffer (position + len)
     withMutableByteArrayContents array $ \dst ->
-        BU.unsafeUseAsCStringLen bs $ \(source, _) -> do
-            copyBytes
-                (dst `plusPtr` position)
-                (castPtr source)
-                len
-    writeIORef buffer.positionRef (position + len)
+        liftIO $
+            BU.unsafeUseAsCStringLen bs $ \(source, _) -> do
+                copyBytes
+                    (dst `plusPtr` position)
+                    (castPtr source)
+                    len
+    writeMutVar buffer.positionRef (position + len)
 {-# INLINE writeByteString #-}
 
-writeWord32LE :: MemoryBuffer -> Word32 -> IO ()
+writeWord32LE :: (PrimMonad m) => MemoryBuffer (PrimState m) -> Word32 -> m ()
 writeWord32LE buffer w = do
-    position <- readIORef buffer.positionRef
+    position <- readMutVar buffer.positionRef
     writeWord32At buffer position w
-    writeIORef buffer.positionRef (position + 4)
+    writeMutVar buffer.positionRef (position + 4)
 {-# INLINE writeWord32LE #-}
 
-writeWord64LE :: MemoryBuffer -> Word64 -> IO ()
+writeWord64LE :: (PrimMonad m) => MemoryBuffer (PrimState m) -> Word64 -> m ()
 writeWord64LE buffer w = do
-    position <- readIORef buffer.positionRef
+    position <- readMutVar buffer.positionRef
     writeWord64At buffer position w
-    writeIORef buffer.positionRef (position + 8)
+    writeMutVar buffer.positionRef (position + 8)
 {-# INLINE writeWord64LE #-}
 
 writeWord32At ::
-    MemoryBuffer -> Int -> Word32 -> IO ()
+    (PrimMonad m) => MemoryBuffer (PrimState m) -> Int -> Word32 -> m ()
 writeWord32At buffer position w = do
     array <- ensureCapacity buffer (position + 4)
     writeByteArray array position (fromIntegral w :: Word8)
@@ -293,7 +296,7 @@ writeWord32At buffer position w = do
 {-# INLINE writeWord32At #-}
 
 writeWord64At ::
-    MemoryBuffer -> Int -> Word64 -> IO ()
+    (PrimMonad m) => MemoryBuffer (PrimState m) -> Int -> Word64 -> m ()
 writeWord64At buffer position w = do
     array <- ensureCapacity buffer (position + 8)
     writeByteArray array position (fromIntegral w :: Word8)
@@ -307,15 +310,16 @@ writeWord64At buffer position w = do
 {-# INLINE writeWord64At #-}
 
 writeInteger64 ::
-    MemoryBuffer -> Integer -> IO ()
+    (PrimMonad m, MonadIO m) => MemoryBuffer (PrimState m) -> Integer -> m ()
 writeInteger64 buffer value = do
-    position <- readIORef buffer.positionRef
+    position <- readMutVar buffer.positionRef
     newPosition <- writeInteger64At buffer position value
-    writeIORef buffer.positionRef newPosition
+    writeMutVar buffer.positionRef newPosition
 {-# INLINE writeInteger64 #-}
 
 writeInteger64At ::
-    MemoryBuffer -> Int -> Integer -> IO Int
+    (PrimMonad m, MonadIO m) =>
+    MemoryBuffer (PrimState m) -> Int -> Integer -> m Int
 writeInteger64At buffer position value
     | value < toInteger (minBound :: Int64) = outOfRange
     | value > toInteger (maxBound :: Int64) = outOfRange
@@ -324,25 +328,27 @@ writeInteger64At buffer position value
         pure (position + 8)
   where
     outOfRange =
-        (ioError (userError "writeParquet: Integer value is outside the INT64 range"))
+        liftIO
+            (ioError (userError "writeParquet: Integer value is outside the INT64 range"))
 {-# INLINE writeInteger64At #-}
 
-writeFloatLE :: MemoryBuffer -> Float -> IO ()
+writeFloatLE :: (PrimMonad m) => MemoryBuffer (PrimState m) -> Float -> m ()
 writeFloatLE buffer = writeWord32LE buffer . castFloatToWord32
 {-# INLINE writeFloatLE #-}
 
-writeDoubleLE :: MemoryBuffer -> Double -> IO ()
+writeDoubleLE :: (PrimMonad m) => MemoryBuffer (PrimState m) -> Double -> m ()
 writeDoubleLE buffer = writeWord64LE buffer . castDoubleToWord64
 {-# INLINE writeDoubleLE #-}
 
 flushBufferToBuffer ::
-    MemoryBuffer -> MemoryBuffer -> IO ()
+    (PrimMonad m) =>
+    MemoryBuffer (PrimState m) -> MemoryBuffer (PrimState m) -> m ()
 flushBufferToBuffer source destination
     | source.arrayRef == destination.arrayRef = pure ()
     | otherwise = do
-        sourceArray <- readIORef source.arrayRef
-        sourcePosition <- readIORef source.positionRef
-        destinationPosition <- readIORef destination.positionRef
+        sourceArray <- readMutVar source.arrayRef
+        sourcePosition <- readMutVar source.positionRef
+        destinationPosition <- readMutVar destination.positionRef
         destinationArray <-
             ensureCapacity destination (destinationPosition + sourcePosition)
         copyMutableByteArray
@@ -351,26 +357,28 @@ flushBufferToBuffer source destination
             sourceArray
             0
             sourcePosition
-        writeIORef destination.positionRef (destinationPosition + sourcePosition)
-        writeIORef source.positionRef 0
+        writeMutVar destination.positionRef (destinationPosition + sourcePosition)
+        writeMutVar source.positionRef 0
 {-# INLINE flushBufferToBuffer #-}
 
 bufferToByteString ::
-    MemoryBuffer ->
-    IO ByteString
+    (PrimBase m, MonadIO m) =>
+    MemoryBuffer (PrimState m) ->
+    m ByteString
 bufferToByteString buffer = do
-    array <- readIORef buffer.arrayRef
-    position <- readIORef buffer.positionRef
+    array <- readMutVar buffer.arrayRef
+    position <- readMutVar buffer.positionRef
     withMutableByteArrayContents array $ \src ->
-        create position $ \dst ->
-            copyBytes dst (castPtr src) position
+        liftIO $
+            create position $ \dst ->
+                copyBytes dst (castPtr src) position
 
-bufferResidency :: MemoryBuffer -> IO Int
-bufferResidency buffer = readIORef buffer.positionRef
+bufferResidency :: (PrimMonad m) => MemoryBuffer (PrimState m) -> m Int
+bufferResidency buffer = readMutVar buffer.positionRef
 {-# INLINE bufferResidency #-}
 
-resetPosition :: MemoryBuffer -> IO ()
-resetPosition buffer = writeIORef buffer.positionRef 0
+resetPosition :: (PrimMonad m) => MemoryBuffer (PrimState m) -> m ()
+resetPosition buffer = writeMutVar buffer.positionRef 0
 {-# INLINE resetPosition #-}
 
 -- I tested write speeds by doing (on Apple Silicon)
@@ -395,11 +403,12 @@ resetPosition buffer = writeIORef buffer.positionRef 0
 -- trying not to create dirty pages in the kernel page cache, we'll
 -- be flushing in 256 KiB chunks.
 flushBufferToFile ::
-    WritableBinaryHandle -> MemoryBuffer -> IO ()
+    (PrimBase m, MonadIO m) =>
+    WritableBinaryHandle -> MemoryBuffer (PrimState m) -> m ()
 flushBufferToFile (WritableBinaryHandle h) buffer = do
-    array <- readIORef buffer.arrayRef
-    position <- readIORef buffer.positionRef
-    withMutableByteArrayContents array $ \ptr -> do
+    array <- readMutVar buffer.arrayRef
+    position <- readMutVar buffer.positionRef
+    withMutableByteArrayContents array $ \ptr -> liftIO $ do
         let chunkSize = 262144
             go offset
                 | offset >= position = pure ()
@@ -408,7 +417,7 @@ flushBufferToFile (WritableBinaryHandle h) buffer = do
                     hPutBuf h (ptr `plusPtr` offset) n
                     go (offset + n)
         go 0
-    writeIORef buffer.positionRef 0
+    writeMutVar buffer.positionRef 0
 
 writeByteStringToFile :: WritableBinaryHandle -> ByteString -> IO ()
 writeByteStringToFile (WritableBinaryHandle h) bs =
@@ -423,20 +432,22 @@ writeByteStringToFile (WritableBinaryHandle h) bs =
         go 0
 
 appendTextArraySlice ::
-    MemoryBuffer -> TA.Array -> Int -> Int -> IO ()
+    (PrimBase m, MonadIO m) =>
+    MemoryBuffer (PrimState m) -> TA.Array -> Int -> Int -> m ()
 appendTextArraySlice buffer source offset count
     | count < 0 =
-        ioError $ userError "appendTextArraySlice: negative length"
+        liftIO $ ioError $ userError "appendTextArraySlice: negative length"
     | otherwise = do
-        position <- readIORef buffer.positionRef
+        position <- readMutVar buffer.positionRef
         array <- ensureCapacity buffer (position + count)
         withMutableByteArrayContents array $ \destination ->
-            stToIO
-                ( TA.copyToPointer
-                    source
-                    offset
-                    (destination `plusPtr` position)
-                    count
-                )
-        writeIORef buffer.positionRef (position + count)
+            liftIO $
+                stToIO
+                    ( TA.copyToPointer
+                        source
+                        offset
+                        (destination `plusPtr` position)
+                        count
+                    )
+        writeMutVar buffer.positionRef (position + count)
 {-# INLINE appendTextArraySlice #-}

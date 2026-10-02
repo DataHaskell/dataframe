@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 module DataFrame.IO.Parquet.Writer.Metadata (
@@ -10,6 +11,8 @@ module DataFrame.IO.Parquet.Writer.Metadata (
     magic,
 ) where
 
+import Control.Monad.IO.Class (MonadIO)
+import Control.Monad.Primitive (PrimBase)
 import qualified Data.ByteString as BS
 import Data.Int (Int64)
 import qualified Data.Text as T
@@ -137,12 +140,13 @@ mkRowGroup chunks totalCompressed totalUncompressed rgRows =
         }
 
 writeFooter ::
+    (PrimBase m, MonadIO m) =>
     WritableBinaryHandle ->
     [SchemaElement] ->
     Int ->
     [RowGroup] ->
     [(T.Text, T.Text)] ->
-    IO ()
+    m ()
 writeFooter output schemaElements numRows rowGroupMetadata keyValues = do
     let metadata =
             FileMetadata
