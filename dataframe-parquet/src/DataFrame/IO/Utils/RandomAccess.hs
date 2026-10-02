@@ -41,6 +41,7 @@ import Control.Monad.IO.Class (MonadIO (..))
 import Control.Monad.Primitive (RealWorld)
 import Control.Monad.ST (stToIO)
 import Data.Bits (shiftR)
+import qualified Data.ByteString as BS
 import Data.ByteString.Internal (ByteString (PS), create)
 import qualified Data.ByteString.Unsafe as BU
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
@@ -255,8 +256,9 @@ writeByteString ::
     ByteString ->
     IO ()
 writeByteString buffer bs =
-    BU.unsafeUseAsCStringLen bs $ \(source, len) -> do
+    BU.unsafeUseAsCStringLen bs $ \(source, _) -> do
         position <- readIORef buffer.positionRef
+        let len = BS.length bs
         array <- ensureCapacity buffer (position + len)
         withMutableByteArrayContents array $ \dst ->
             copyBytes
