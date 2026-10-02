@@ -182,7 +182,7 @@ schemaNameOverride = TestCase $ do
 typeMismatchError :: Test
 typeMismatchError = TestCase $ do
     let badDf =
-            D.fromNamedColumns
+            D.fromColumns
                 [ ("order_id", DI.fromList ([1, 2, 3] :: [Int]))
                 , ("region", DI.fromList (["us", "eu", "ap"] :: [T.Text]))
                 , ("amount", DI.fromList ([10.0, 20.5, 30.0] :: [Double]))
@@ -197,7 +197,7 @@ typeMismatchError = TestCase $ do
 missingColumnError :: Test
 missingColumnError = TestCase $ do
     let badDf =
-            D.fromNamedColumns
+            D.fromColumns
                 [ ("region", DI.fromList (["us"] :: [T.Text]))
                 , ("amount", DI.fromList ([10.0] :: [Double]))
                 ]

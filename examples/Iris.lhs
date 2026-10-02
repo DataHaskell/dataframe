@@ -370,7 +370,7 @@ Step 6: Evaluate on training set
 >     let confusionTrain = confusionMatrix 3 (VU.toList trainLabels) predTrain
 >     putStrLn $ pprintMatrix confusionTrain
 >     putStrLn "=========== Classwise Metrics ============="
->     print $ D.fromNamedColumns
+>     print $ D.fromColumns
 >         [ ("variety" , D.fromList (map (toEnum @Iris) [0 .. 2]))
 >         , ("precision", D.fromList (classwisePrecision confusionTrain))
 >         , ("recall", D.fromList (classwiseRecall confusionTrain))]
@@ -389,7 +389,7 @@ it has never seen before?
 >     let confusionTest = confusionMatrix 3 (VU.toList testLabels) predTest
 >     putStrLn $ pprintMatrix confusionTest
 >     putStrLn "=========== Classwise Metrics ============="
->     print $ D.fromNamedColumns
+>     print $ D.fromColumns
 >         [ ("variety" , D.fromList (map (toEnum @Iris) [0 .. 2]))
 >         , ("precision", D.fromList (classwisePrecision confusionTest))
 >         , ("recall", D.fromList (classwiseRecall confusionTest))]

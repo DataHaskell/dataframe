@@ -40,7 +40,7 @@ local `dataframe-core` / `dataframe-operations` / `dataframe-viz` working trees:
 -- cabal: packages: ../../../dataframe-operations, ../../../dataframe-viz
 -- cabal: default-extensions: OverloadedStrings, TypeApplications, OverloadedLabels
 -- cabal: default-extensions: DataKinds, TypeOperators, FlexibleContexts
-import DataFrame.Core (DataFrame, fromNamedColumns, fromList)
+import DataFrame.Core (DataFrame, fromColumns)
 import DataFrame.Expression.Operators ((|>))
 import qualified DataFrame.Functions as F
 import DataFrame.Typed.Types (Column, TypedDataFrame)
@@ -56,11 +56,12 @@ import Data.Aeson (Value (Object))
 import Data.Aeson.Text (encodeToLazyText)
 import qualified Data.Aeson.KeyMap as KM
 import qualified Data.Text.Lazy as TL
+import DataFrame ((=:))
 
-df = fromNamedColumns
-    [ ("income", fromList [1.5, 2.0, 3.1, 4.2, 5.0, 2.2, 3.3, 1.1 :: Double])
-    , ("value",  fromList [100, 150, 200, 250, 300, 180, 220, 90 :: Double])
-    , ("region", fromList (["INLAND","NEAR BAY","INLAND","NEAR OCEAN","ISLAND","INLAND","NEAR BAY","INLAND"] :: [Text]))
+df = fromColumns
+    [ "income" =: [1.5, 2.0, 3.1, 4.2, 5.0, 2.2, 3.3, 1.1 :: Double]
+    , "value"  =: [100, 150, 200, 250, 300, 180, 220, 90 :: Double]
+    , "region" =: ["INLAND","NEAR BAY","INLAND","NEAR OCEAN","ISLAND","INLAND","NEAR BAY","INLAND"] :: [Text]
     ]
 
 income = F.col @Double "income"

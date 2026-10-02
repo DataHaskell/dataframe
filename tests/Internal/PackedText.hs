@@ -67,8 +67,8 @@ boxedCol = boxedFromTexts sampleRows
 
 -- Single-column dataframes for groupBy / hashing.
 packedDf, boxedDf :: D.DataFrame
-packedDf = D.fromNamedColumns [("k", packedCol)]
-boxedDf = D.fromNamedColumns [("k", boxedCol)]
+packedDf = D.fromColumns [("k", packedCol)]
+boxedDf = D.fromColumns [("k", boxedCol)]
 
 displayParity :: Test
 displayParity =
@@ -116,9 +116,9 @@ groupByParity =
 
 joinParity :: Test
 joinParity = TestCase $ do
-    let lhsP = D.fromNamedColumns [("k", packedCol)]
-        lhsB = D.fromNamedColumns [("k", boxedCol)]
-        rhs = D.fromNamedColumns [("k", boxedFromTexts ["apple", "banana", "日本語"])]
+    let lhsP = D.fromColumns [("k", packedCol)]
+        lhsB = D.fromColumns [("k", boxedCol)]
+        rhs = D.fromColumns [("k", boxedFromTexts ["apple", "banana", "日本語"])]
         joinedP = D.innerJoin ["k"] lhsP rhs
         joinedB = D.innerJoin ["k"] lhsB rhs
     assertBool "inner join parity" (joinedP == joinedB)
@@ -151,15 +151,15 @@ sortPreservesPacked = TestCase $ do
 -- column stays packed, builds the correct null bitmap, and equals boxed.
 leftJoinSentinelPreservesPacked :: Test
 leftJoinSentinelPreservesPacked = TestCase $ do
-    let lhsP = D.fromNamedColumns [("k", packedCol)]
-        lhsB = D.fromNamedColumns [("k", boxedCol)]
+    let lhsP = D.fromColumns [("k", packedCol)]
+        lhsB = D.fromColumns [("k", boxedCol)]
         rhsP =
-            D.fromNamedColumns
+            D.fromColumns
                 [ ("k", packedFromTexts ["apple", "banana", "日本語"])
                 , ("v", packedFromTexts ["RA", "RB", "RC"])
                 ]
         rhsB =
-            D.fromNamedColumns
+            D.fromColumns
                 [ ("k", boxedFromTexts ["apple", "banana", "日本語"])
                 , ("v", boxedFromTexts ["RA", "RB", "RC"])
                 ]

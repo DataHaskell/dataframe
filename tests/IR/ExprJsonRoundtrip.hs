@@ -52,11 +52,11 @@ close :: [Double] -> [Double] -> Bool
 close a b = length a == length b && and (zipWith (\x y -> abs (x - y) <= 1e-9) a b)
 
 df3 :: D.DataFrame
-df3 = D.fromNamedColumns [("x", DI.fromList [1, 2, 3 :: Double])]
+df3 = D.fromColumns [("x", DI.fromList [1, 2, 3 :: Double])]
 
 regDF :: D.DataFrame
 regDF =
-    D.fromNamedColumns
+    D.fromColumns
         [ ("x1", DI.fromList xs1)
         , ("x2", DI.fromList xs2)
         , ("y", DI.fromList [2 * a - 3 * b + 1 | (a, b) <- zip xs1 xs2])

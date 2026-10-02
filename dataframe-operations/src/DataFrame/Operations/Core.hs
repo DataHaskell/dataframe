@@ -86,7 +86,7 @@ import DataFrame.Internal.DataFrame (
     columnNames,
     derivingExpressions,
     empty,
-    fromNamedColumns,
+    fromColumns,
     getColumn,
     insertColumn,
     null,
@@ -104,7 +104,7 @@ import Prelude hiding (null)
 @
 >>> :set -XOverloadedStrings
 >>> import qualified DataFrame as D
->>> df = D.fromNamedColumns [("a", D.fromList [1..100]), ("b", D.fromList [1..100]), ("c", D.fromList [1..100])]
+>>> df = D.fromColumns [("a", D.fromList [1..100]), ("b", D.fromList [1..100]), ("c", D.fromList [1..100])]
 >>> D.dimensions df
 
 (100, 3)
@@ -120,7 +120,7 @@ dimensions = dataframeDimensions
 @
 >>> :set -XOverloadedStrings
 >>> import qualified DataFrame as D
->>> df = D.fromNamedColumns [("a", D.fromList [1..100]), ("b", D.fromList [1..100]), ("c", D.fromList [1..100])]
+>>> df = D.fromColumns [("a", D.fromList [1..100]), ("b", D.fromList [1..100]), ("c", D.fromList [1..100])]
 >>> D.nRows df
 100
 @
@@ -134,7 +134,7 @@ nRows = fst . dataframeDimensions
 @
 >>> :set -XOverloadedStrings
 >>> import qualified DataFrame as D
->>> df = D.fromNamedColumns [("a", D.fromList [1..100]), ("b", D.fromList [1..100]), ("c", D.fromList [1..100])]
+>>> df = D.fromColumns [("a", D.fromList [1..100]), ("b", D.fromList [1..100]), ("c", D.fromList [1..100])]
 >>> D.nColumns df
 3
 @
@@ -148,7 +148,7 @@ nColumns = snd . dataframeDimensions
 @
 >>> :set -XOverloadedStrings
 >>> import qualified DataFrame as D
->>> df = D.fromNamedColumns [("a", D.fromList [1..100]), ("b", D.fromList [1..100]), ("c", D.fromList [1..100])]
+>>> df = D.fromColumns [("a", D.fromList [1..100]), ("b", D.fromList [1..100]), ("c", D.fromList [1..100])]
 >>> D.columnNames df
 
 ["a", "b", "c"]
@@ -247,7 +247,7 @@ insert name xs = insertColumn name (fromList (Fold.foldr' (:) [] xs))
 >>> :set -XOverloadedStrings
 >>> import qualified Data.Vector as V
 >>> import qualified DataFrame as D
->>> df = D.fromNamedColumns [("x", D.fromList [(1 :: Int)..10])]
+>>> df = D.fromColumns [("x", D.fromList [(1 :: Int)..10])]
 >>> D.insertVectorWithDefault 0 "numbers" (V.fromList [(1 :: Int),2,3]) df
 
 -------------
@@ -291,7 +291,7 @@ insertVectorWithDefault defaultValue name xs d =
 @
 >>> :set -XOverloadedStrings
 >>> import qualified DataFrame as D
->>> df = D.fromNamedColumns [("x", D.fromList [(1 :: Int)..10])]
+>>> df = D.fromColumns [("x", D.fromList [(1 :: Int)..10])]
 >>> D.insertWithDefault 0 "numbers" [(1 :: Int),2,3] df
 
 -------------
@@ -594,7 +594,7 @@ nulls _ = 0
 
 ==== __Example__
 @
->>> df = D.fromNamedColumns [("numbers", D.fromList [1..10]), ("others", D.fromList [11..20])]
+>>> df = D.fromColumns [("numbers", D.fromList [1..10]), ("others", D.fromList [11..20])]
 >>> df
 -----------------
  numbers | others
@@ -615,7 +615,7 @@ nulls _ = 0
 @
 -}
 
--- 'fromNamedColumns' is now defined in "DataFrame.Internal.DataFrame".
+-- 'fromColumns' is now defined in "DataFrame.Internal.DataFrame".
 
 {- | Create a dataframe from a list of columns. The column names are "0", "1"... etc.
 Useful for quick exploration but you should probably always rename the columns after
@@ -644,7 +644,7 @@ or drop the ones you don't want.
 @
 -}
 fromUnnamedColumns :: [Column] -> DataFrame
-fromUnnamedColumns = fromNamedColumns . zip (map (T.pack . show) [(0 :: Int) ..])
+fromUnnamedColumns = fromColumns . zip (map (T.pack . show) [(0 :: Int) ..])
 
 {- | Create a dataframe from a list of column names and rows.
 
@@ -728,7 +728,7 @@ This makes it easier to chain operations.
 
 ==== __Example__
 @
->>> df = D.fromNamedColumns [("x", D.fromList [1..100]), ("y", D.fromList [11..110])]
+>>> df = D.fromColumns [("x", D.fromList [1..100]), ("y", D.fromList [11..110])]
 >>> D.fold D.dropLast [1..5] df
 
 ---------

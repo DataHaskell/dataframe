@@ -17,21 +17,21 @@ sortByA = D.sortBy [D.Asc (F.col @Int "A")]
 
 dfA :: D.DataFrame
 dfA =
-    D.fromNamedColumns
+    D.fromColumns
         [ ("A", DI.fromList [1 :: Int, 2, 3, 3])
         , ("B", DI.fromList ['a', 'b', 'c', 'c'])
         ]
 
 dfB :: D.DataFrame
 dfB =
-    D.fromNamedColumns
+    D.fromColumns
         [ ("A", DI.fromList [3 :: Int, 4])
         , ("B", DI.fromList ['c', 'd'])
         ]
 
 expect :: [Int] -> [Char] -> D.DataFrame
 expect as bs =
-    D.fromNamedColumns
+    D.fromColumns
         [ ("A", DI.fromList as)
         , ("B", DI.fromList bs)
         ]

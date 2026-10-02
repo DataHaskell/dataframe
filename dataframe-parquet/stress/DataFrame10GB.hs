@@ -19,7 +19,7 @@ import Data.Word (Word8)
 import DataFrame.Internal.Column (Column (..))
 import DataFrame.Internal.Column.Bitmap (Bitmap)
 import DataFrame.Internal.Data.PackedText (mkPackedContiguous32)
-import DataFrame.Internal.DataFrame (DataFrame, fromNamedColumns)
+import DataFrame.Internal.DataFrame (DataFrame, fromColumns)
 
 stressRows :: Int
 stressRows = 1_000_000
@@ -40,7 +40,7 @@ stressResidentBytesLowerBound =
         * fromIntegral (2 * textBytesPerRow + 2 * (4 + 8 + 4 + 8))
 
 stressDataFrame :: DataFrame
-stressDataFrame = fromNamedColumns (concatMap columnGroup [0 .. stressGroups - 1])
+stressDataFrame = fromColumns (concatMap columnGroup [0 .. stressGroups - 1])
 
 columnGroup :: Int -> [(T.Text, Column)]
 columnGroup group =

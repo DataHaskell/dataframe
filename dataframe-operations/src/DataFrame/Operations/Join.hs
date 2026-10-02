@@ -296,8 +296,8 @@ Returns only rows where the key values exist in both dataframes.
 
 ==== __Example__
 @
-ghci> df = D.fromNamedColumns [("key", D.fromList ["K0", "K1", "K2", "K3"]), ("A", D.fromList ["A0", "A1", "A2", "A3"])]
-ghci> other = D.fromNamedColumns [("key", D.fromList ["K0", "K1", "K2"]), ("B", D.fromList ["B0", "B1", "B2"])]
+ghci> df = D.fromColumns [("key", D.fromList ["K0", "K1", "K2", "K3"]), ("A", D.fromList ["A0", "A1", "A2", "A3"])]
+ghci> other = D.fromColumns [("key", D.fromList ["K0", "K1", "K2"]), ("B", D.fromList ["B0", "B1", "B2"])]
 ghci> D.innerJoin ["key"] df other
 
 -----------------
@@ -683,8 +683,8 @@ Non-matching rows will have Nothing/null values for columns from the right dataf
 
 ==== __Example__
 @
-ghci> df = D.fromNamedColumns [("key", D.fromList ["K0", "K1", "K2", "K3"]), ("A", D.fromList ["A0", "A1", "A2", "A3"])]
-ghci> other = D.fromNamedColumns [("key", D.fromList ["K0", "K1", "K2"]), ("B", D.fromList ["B0", "B1", "B2"])]
+ghci> df = D.fromColumns [("key", D.fromList ["K0", "K1", "K2", "K3"]), ("A", D.fromList ["A0", "A1", "A2", "A3"])]
+ghci> other = D.fromColumns [("key", D.fromList ["K0", "K1", "K2"]), ("B", D.fromList ["B0", "B1", "B2"])]
 ghci> D.leftJoin ["key"] df other
 
 ------------------------
@@ -976,8 +976,8 @@ Non-matching rows will have Nothing/null values for columns from the left datafr
 
 ==== __Example__
 @
-ghci> df = D.fromNamedColumns [("key", D.fromList ["K0", "K1", "K2", "K3"]), ("A", D.fromList ["A0", "A1", "A2", "A3"])]
-ghci> other = D.fromNamedColumns [("key", D.fromList ["K0", "K1"]), ("B", D.fromList ["B0", "B1"])]
+ghci> df = D.fromColumns [("key", D.fromList ["K0", "K1", "K2", "K3"]), ("A", D.fromList ["A0", "A1", "A2", "A3"])]
+ghci> other = D.fromColumns [("key", D.fromList ["K0", "K1"]), ("B", D.fromList ["B0", "B1"])]
 ghci> D.rightJoin ["key"] df other
 
 -----------------

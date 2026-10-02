@@ -105,14 +105,10 @@ concatBatches :: [D.DataFrame] -> D.DataFrame
 concatBatches [] = D.empty
 concatBatches [df] = df
 concatBatches batches@(first : _) =
-    D.fromNamedColumns
+    D.fromColumns
         [ (name, C.concatManyColumns [D.unsafeGetColumn name b | b <- batches])
         | name <- D.columnNames first
         ]
-
--- ---------------------------------------------------------------------------
--- Boundedness analysis
--- ---------------------------------------------------------------------------
 
 {- | True when every scan leaf is a finite local source, so the whole result can
 be materialised and routed through the eager whole-frame ops. False for
@@ -133,10 +129,6 @@ isBounded (PhysicalSpill c _) = isBounded c
 isBounded (PhysicalSourceDF _ _) = True
 isBounded (PhysicalHashJoin _ _ _ l r) = isBounded l && isBounded r
 isBounded (PhysicalSortMergeJoin _ _ _ l r) = isBounded l && isBounded r
-
--- ---------------------------------------------------------------------------
--- Top-level entry point
--- ---------------------------------------------------------------------------
 
 {- | Execute a physical plan, returning the complete result as a single
 'DataFrame'.
@@ -159,10 +151,6 @@ foldBatches f seed plan = do
                     !acc' <- f acc batch
                     loop acc'
     loop seed
-
--- ---------------------------------------------------------------------------
--- Per-operator stream builders
--- ---------------------------------------------------------------------------
 
 buildStream :: PhysicalPlan -> IO Stream
 buildStream (PhysicalScan (CsvSource path sep reader) cfg) =
@@ -315,10 +303,6 @@ buildStream (PhysicalSortMergeJoin jt leftKey rightKey leftPlan rightPlan) = do
     leftDf <- execute leftPlan
     rightDf <- execute rightPlan
     materialized (performJoin jt leftKey rightKey leftDf rightDf)
-
--- ---------------------------------------------------------------------------
--- Streaming aggregation helpers
--- ---------------------------------------------------------------------------
 
 {- | One worker's loop: pull batches off the shared child stream until
 exhausted, building up a per-worker accumulator.
@@ -477,10 +461,6 @@ buildAggPlan aggs = foldl combine ([], [], id) (map processAgg aggs)
                     )
         _ -> ([(name, ue)], [(name, ue)], id)
 
--- ---------------------------------------------------------------------------
--- Parquet scan implementation
--- ---------------------------------------------------------------------------
-
 {- | Scan a Parquet file, directory, or glob.  Each file becomes one batch.
 Column projection and predicate pushdown are forwarded to 'readParquetWithOpts'
 via 'ParquetReadOptions'.
@@ -506,10 +486,6 @@ executeParquetScan path cfg = do
             (f : rest) -> do
                 writeIORef ref rest
                 Just <$> Parquet.readParquetWithOpts opts f
-
--- ---------------------------------------------------------------------------
--- CSV scan implementation
--- ---------------------------------------------------------------------------
 
 {- | The options a CSV scan reads with: the plan's schema supplies the column
 types and the projection, the source supplies the separator.
@@ -712,10 +688,6 @@ performJoin jt leftKey rightKey leftDf rightDf =
     rightRenamed
         | leftKey == rightKey = rightDf
         | otherwise = Core.rename rightKey leftKey rightDf
-
--- ---------------------------------------------------------------------------
--- Sort order conversion
--- ---------------------------------------------------------------------------
 
 {- | Convert a plan-level @(column, direction)@ into a Permutation 'SortOrder',
 emitting @E.Col@ at the materialised column's element type so 'Perm.sortBy'

@@ -70,7 +70,7 @@ top2Sum = Agg (CollectAgg "top2Sum" f)
 
 grid :: Int -> D.DataFrame
 grid n =
-    D.fromNamedColumns
+    D.fromColumns
         [ ("ki", DI.fromList [i `mod` 17 | i <- [0 .. n - 1]])
         , ("kt", DI.fromList [T.pack ('g' : show (i `mod` 11)) | i <- [0 .. n - 1]])
         , -- A high-cardinality key so the parallel group-range split sees many

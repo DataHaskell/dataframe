@@ -34,7 +34,7 @@ values =
     ]
 
 testData :: D.DataFrame
-testData = D.fromNamedColumns values
+testData = D.fromColumns values
 
 applyBoxedToUnboxed :: Test
 applyBoxedToUnboxed =
@@ -93,14 +93,14 @@ applyIntroducesNulls =
         )
   where
     nullableApplyData =
-        D.fromNamedColumns [("test", DI.fromList ["", "b" :: String])]
+        D.fromColumns [("test", DI.fromList ["", "b" :: String])]
 
 applyManyOnlyGivenFields :: Test
 applyManyOnlyGivenFields =
     TestCase
         ( assertEqual
             "Applies function to many fields"
-            ( D.fromNamedColumns
+            ( D.fromColumns
                 ( map (,D.fromList $ replicate 26 (1 :: Integer)) ["test4", "test6"]
                     ++
                     -- All other fields should have their original values.
@@ -119,7 +119,7 @@ applyManyBoxedToBoxed =
     TestCase
         ( assertEqual
             "Applies function to many fields"
-            ( D.fromNamedColumns
+            ( D.fromColumns
                 (map (,D.fromList $ replicate 26 (1 :: Integer)) ["test4", "test6", "test8"])
             )
             ( D.select ["test4", "test6", "test8"] $
@@ -135,7 +135,7 @@ applyManyBoxedToUnboxed =
     TestCase
         ( assertEqual
             "Unboxes fields when necessary"
-            ( D.fromNamedColumns
+            ( D.fromColumns
                 (map (,D.fromList $ replicate 26 (1 :: Int)) ["test4", "test6", "test8"])
             )
             ( D.select ["test4", "test6", "test8"] $
@@ -229,7 +229,7 @@ applyWhereWAI =
 
 imputeData :: D.DataFrame
 imputeData =
-    D.fromNamedColumns
+    D.fromColumns
         [ ("opt", DI.fromList [Just (1 :: Int), Nothing, Just 3])
         , ("plain", DI.fromList [10 :: Int, 20, 30])
         ]

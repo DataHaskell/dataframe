@@ -34,7 +34,7 @@ import DataFrame.Featurize.Internal (
  )
 import qualified DataFrame.Functions as F
 import qualified DataFrame.Internal.Column as DI
-import DataFrame.Internal.DataFrame (DataFrame, fromNamedColumns)
+import DataFrame.Internal.DataFrame (DataFrame, fromColumns)
 import DataFrame.Internal.Expression (Expr)
 import DataFrame.LinearAlgebra (epsNeighbors)
 import DataFrame.Model
@@ -117,6 +117,6 @@ dbscanSurrogateExpr cfg features model df =
     clusterCol = "__cluster__"
     cols = map (\e -> (columnExprName e, materializeColumn df e)) features
     augmented =
-        fromNamedColumns $
-            [(n, DI.fromList (VU.toList v)) | (n, v) <- cols]
-                ++ [(clusterCol, DI.fromList (VU.toList (dbLabels model)))]
+        fromColumns $
+            [(n, DI.fromUnboxedVector v) | (n, v) <- cols]
+                ++ [(clusterCol, DI.fromUnboxedVector (dbLabels model))]

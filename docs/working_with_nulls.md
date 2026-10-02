@@ -13,7 +13,7 @@ import qualified DataFrame.Core as DI
 
 -- Manually build a frame with a nullable Int column
 df :: D.DataFrame
-df = D.fromNamedColumns
+df = D.fromColumns
     [ ("id",    DI.fromList [1, 2, 3 :: Int])
     , ("score", DI.fromList [Just 90, Nothing, Just 75 :: Maybe Int])
     ]

@@ -25,7 +25,7 @@ values =
     ]
 
 testData :: D.DataFrame
-testData = D.fromNamedColumns values
+testData = D.fromColumns values
 
 filterColumnDoesNotExist :: Test
 filterColumnDoesNotExist =
@@ -86,10 +86,10 @@ filterJustWAI =
     TestCase
         ( assertEqual
             "Filters out Nothing and unwraps Maybe"
-            (D.fromNamedColumns [("test", D.fromList $ replicate 5 (1 :: Int))])
+            (D.fromColumns [("test", D.fromList $ replicate 5 (1 :: Int))])
             ( D.filterJust
                 "test"
-                ( D.fromNamedColumns
+                ( D.fromColumns
                     [("test", D.fromList $ take 10 $ cycle [Just (1 :: Int), Nothing])]
                 )
             )

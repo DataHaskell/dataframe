@@ -16,7 +16,7 @@ import Test.HUnit
 
 quad :: D.DataFrame
 quad =
-    D.fromNamedColumns
+    D.fromColumns
         [ ("x", D.fromList xs)
         , ("y", D.fromList (map (\x -> x * x) xs))
         ]
@@ -25,7 +25,7 @@ quad =
 
 ratio :: D.DataFrame
 ratio =
-    D.fromNamedColumns
+    D.fromColumns
         [ ("a", D.fromList ([2, 6, 12, 20, 30, 42] :: [Double]))
         , ("b", D.fromList ([1, 2, 3, 4, 5, 6] :: [Double]))
         , ("y", D.fromList ([2, 3, 4, 5, 6, 7] :: [Double]))
@@ -100,7 +100,7 @@ acceptsSmallSearch = TestCase $ do
 -- | 12 features over 3000 rows: the shape that killed the kernel.
 wide :: D.DataFrame
 wide =
-    D.fromNamedColumns
+    D.fromColumns
         ( ("y", D.fromList (map (\i -> fromIntegral (i `mod` 7) :: Double) idx))
             : [ ( "f" <> T.pack (show c)
                 , D.fromList (map (\i -> fromIntegral ((i * c) `mod` 13) :: Double) idx)

@@ -18,7 +18,7 @@ import DataFrame.Internal.Row (toRowList)
 import Test.HUnit
 
 maybeIntCol :: [Maybe Int] -> D.DataFrame
-maybeIntCol xs = D.fromNamedColumns [("k", DI.fromList xs)]
+maybeIntCol xs = D.fromColumns [("k", DI.fromList xs)]
 
 -- | distinct must keep @Nothing@ and @Just 0@ as two distinct rows.
 distinctSeparatesNullFromZero :: Test
@@ -40,7 +40,7 @@ distinctSeparatesNullRow =
             ( fst
                 ( D.dimensions
                     ( D.distinct
-                        ( D.fromNamedColumns
+                        ( D.fromColumns
                             [ ("k", DI.fromList [Just (0 :: Int), Nothing])
                             , ("v", DI.fromList ['a', 'a'])
                             ]
@@ -91,7 +91,7 @@ denseIntGridNoCollisions =
     let d = [-4 .. 4 :: Int]
         rows = [(a, b, c) | a <- d, b <- d, c <- d]
         df =
-            D.fromNamedColumns
+            D.fromColumns
                 [ ("a", DI.fromList (map (\(a, _, _) -> a) rows))
                 , ("b", DI.fromList (map (\(_, b, _) -> b) rows))
                 , ("c", DI.fromList (map (\(_, _, c) -> c) rows))
@@ -112,7 +112,7 @@ joinDenseGridNoCollisions =
     let d = [-4 .. 4 :: Int]
         rows = [(a, b) | a <- d, b <- d]
         df =
-            D.fromNamedColumns
+            D.fromColumns
                 [ ("a", DI.fromList (map fst rows))
                 , ("b", DI.fromList (map snd rows))
                 ]
@@ -129,7 +129,7 @@ denseNullableGridNoCollisions =
     let d = Nothing : map Just [-3 .. 3 :: Int]
         rows = [(a, b) | a <- d, b <- d]
         df =
-            D.fromNamedColumns
+            D.fromColumns
                 [ ("a", DI.fromList (map fst rows))
                 , ("b", DI.fromList (map snd rows))
                 ]

@@ -49,7 +49,7 @@ closeList tol as bs = length as == length bs && and (zipWith (close tol) as bs)
 -- Build a regression frame from explicit feature/target lists.
 mkRegDF :: [(T.Text, [Double])] -> [Double] -> D.DataFrame
 mkRegDF feats ys =
-    D.fromNamedColumns
+    D.fromColumns
         ([(n, DI.fromList vs) | (n, vs) <- feats] ++ [("y", DI.fromList ys)])
 
 -- Base design: a noiseless linear target so OLS recovers a unique solution.
@@ -329,7 +329,7 @@ testTargetNeverAFeature :: Test
 testTargetNeverAFeature = TestCase $ do
     let n = 40 :: Int
         leakDF =
-            D.fromNamedColumns
+            D.fromColumns
                 [ ("y", DI.fromList [if even i then 1.0 else 0.0 :: Double | i <- [0 .. n - 1]])
                 , ("a", DI.fromList [fromIntegral (i `div` 4) :: Double | i <- [0 .. n - 1]])
                 , ("b", DI.fromList [fromIntegral (i `mod` 3) :: Double | i <- [0 .. n - 1]])

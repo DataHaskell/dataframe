@@ -191,7 +191,7 @@ summarizeOptional =
             3 -- The three columns should be Statistics, A, and B
             ( D.nColumns
                 ( D.summarize
-                    ( D.fromNamedColumns
+                    ( D.fromColumns
                         [ ("A", D.fromList [1 :: Int, 2])
                         , ("B", D.fromList [Just (1 :: Int), Nothing])
                         ]
@@ -206,7 +206,7 @@ at the column's length rather than fold the whole byte vector.
 -}
 sixteenNullableRows :: D.DataFrame
 sixteenNullableRows =
-    D.fromNamedColumns
+    D.fromColumns
         [ ("x", D.fromList (map (Just . fromIntegral) [1 .. 16 :: Int] :: [Maybe Double]))
         ]
 
@@ -247,14 +247,14 @@ allMissingAfterSlice =
 
 allNullRows :: D.DataFrame
 allNullRows =
-    D.fromNamedColumns
+    D.fromColumns
         [("x", DI.fromList (replicate 16 (Nothing :: Maybe Double)))]
 
 -- correlation
 
 correlationDf :: D.DataFrame
 correlationDf =
-    D.fromNamedColumns
+    D.fromColumns
         [ ("x", DI.fromList [1 :: Int, 2, 3, 4, 5])
         , ("y_pos", DI.fromList [1 :: Int, 2, 3, 4, 5])
         , ("y_neg", DI.fromList [5 :: Int, 4, 3, 2, 1])

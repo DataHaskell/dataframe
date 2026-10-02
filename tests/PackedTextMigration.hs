@@ -60,7 +60,7 @@ crashed on.
 treeOnTextFeature :: Test
 treeOnTextFeature = TestCase $ do
     let df mk =
-            D.fromNamedColumns
+            D.fromColumns
                 [ ("color", mk ["red", "red", "blue", "blue", "green", "green"])
                 , ("y", DI.fromList ([0, 0, 1, 1, 2, 2] :: [Double]))
                 ]
@@ -77,7 +77,7 @@ Cart.cartTargetLabels). Packed target must give the same tree as a boxed one.
 classifierOnTextTarget :: Test
 classifierOnTextTarget = TestCase $ do
     let df mk =
-            D.fromNamedColumns
+            D.fromColumns
                 [ ("x", DI.fromList ([1, 2, 3, 4, 5, 6] :: [Double]))
                 , ("label", mk ["a", "a", "a", "b", "b", "b"])
                 ]
@@ -95,10 +95,10 @@ match the boxed-key join and recover all four distinct keys.
 fullOuterJoinOnTextKey :: Test
 fullOuterJoinOnTextKey = TestCase $ do
     let l mk =
-            D.fromNamedColumns
+            D.fromColumns
                 [("k", mk ["a", "b", "c"]), ("lv", DI.fromList ([1, 2, 3] :: [Double]))]
         r mk =
-            D.fromNamedColumns
+            D.fromColumns
                 [("k", mk ["b", "c", "d"]), ("rv", DI.fromList ([20, 30, 40] :: [Double]))]
         packedJoin = fullOuterJoin ["k"] (l packed) (r packed)
         boxedJoin = fullOuterJoin ["k"] (l boxed) (r boxed)

@@ -23,7 +23,7 @@ values =
     ]
 
 testData :: D.DataFrame
-testData = D.fromNamedColumns values
+testData = D.fromColumns values
 
 groupBySingleRowWAI :: Test
 groupBySingleRowWAI =
@@ -68,7 +68,7 @@ groupingInvariantHolds =
     -- Repeated, interleaved keys across two columns; the dense int grid is the
     -- classic hash-collision stressor.
     df =
-        D.fromNamedColumns
+        D.fromColumns
             [ ("k1", DI.fromList (map (`mod` 5) [0 .. 199 :: Int]))
             , ("k2", DI.fromList (map (\i -> (i * 7) `mod` 3) [0 .. 199 :: Int]))
             , ("v", DI.fromList [0 .. 199 :: Int])

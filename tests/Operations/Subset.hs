@@ -96,7 +96,7 @@ prop_sampleEmptyApprox df =
 prop_stratifiedSplit_deterministic :: DataFrame -> Bool
 prop_stratifiedSplit_deterministic _ =
     let df =
-            D.fromNamedColumns
+            D.fromColumns
                 [ ("label", Col.fromList (replicate 50 ("A" :: T.Text) ++ replicate 50 "B"))
                 , ("val", Col.fromList ([1 .. 100] :: [Int]))
                 ]
@@ -105,7 +105,7 @@ prop_stratifiedSplit_deterministic _ =
 
 strataDf :: DataFrame
 strataDf =
-    D.fromNamedColumns
+    D.fromColumns
         [ ("label", Col.fromList (replicate 5 ("A" :: T.Text) ++ replicate 5 "B"))
         , ("val", Col.fromList ([1 .. 10] :: [Int]))
         ]
@@ -132,7 +132,7 @@ unit_stratifiedSplit_singleRowStratum :: Test
 unit_stratifiedSplit_singleRowStratum =
     TestCase $
         let tinyDf =
-                D.fromNamedColumns
+                D.fromColumns
                     [ ("label", Col.fromList (["A", "A", "A", "A", "A", "B"] :: [T.Text]))
                     , ("val", Col.fromList ([1 .. 6] :: [Int]))
                     ]
@@ -158,7 +158,7 @@ unit_stratifiedSplit_proportions =
         let aCount = 100
             bCount = 50
             df =
-                D.fromNamedColumns
+                D.fromColumns
                     [
                         ( "label"
                         , Col.fromList (replicate aCount ("A" :: T.Text) ++ replicate bCount "B")
@@ -191,7 +191,7 @@ unit_stratifiedSplit_proportions =
                     (abs (vaProp - origProp) < tol)
 
 tenRows :: DataFrame
-tenRows = fromNamedColumns [("x", Col.fromList ([0 .. 9] :: [Int]))]
+tenRows = fromColumns [("x", Col.fromList ([0 .. 9] :: [Int]))]
 
 -- Endpoints that overflow Int if the length is computed before clamping.
 unit_rangeExtremeEndpoints :: Test

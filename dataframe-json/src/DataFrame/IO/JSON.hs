@@ -34,7 +34,7 @@ readJSONEither bs = do
         let col = buildColumn rows c
         pure (c, col)
 
-    pure $ D.fromNamedColumns columns
+    pure $ D.fromColumns columns
 
 readJSON :: FilePath -> IO D.DataFrame
 readJSON path = do

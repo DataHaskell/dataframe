@@ -32,7 +32,7 @@ type S =
 
 sampleDF :: D.DataFrame
 sampleDF =
-    D.fromNamedColumns
+    D.fromColumns
         [ ("x", DI.fromList [1, 2, 3 :: Int])
         , ("y", DI.fromList [1.5, 2.5, 3.5 :: Double])
         , ("g", DI.fromList ["a", "b", "c" :: T.Text])
@@ -91,7 +91,7 @@ typedReadSharesTypes = TestCase $ withSystemTempFile "typed_types.csv" $ \fp h -
         (Just (DI.fromList ["1", "2", "3" :: T.Text]))
         (getColumn "n" typed)
   where
-    digits = D.fromNamedColumns [("n", DI.fromList [1, 2, 3 :: Int])]
+    digits = D.fromColumns [("n", DI.fromList [1, 2, 3 :: Int])]
 
 tests :: [Test]
 tests =

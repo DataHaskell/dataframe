@@ -27,7 +27,7 @@ import DataFrame.Internal.Column (columnTypeString, fromList)
 import DataFrame.Internal.DataFrame (
     DataFrame,
     columnNames,
-    fromNamedColumns,
+    fromColumns,
     getColumn,
  )
 import System.Directory (listDirectory)
@@ -132,7 +132,7 @@ writerRoundTripLargeText :: Test
 writerRoundTripLargeText = TestCase $
     withSystemTempDirectory "dfpq-writer" $ \dir -> do
         let payload = T.replicate 4096 "abcdefgh"
-            df = fromNamedColumns [("text", fromList [payload, "short"])]
+            df = fromColumns [("text", fromList [payload, "short"])]
             firstOut = dir </> "large-text-1.parquet"
             secondOut = dir </> "large-text-2.parquet"
         writeParquetWithOptions tinyWriteOpts firstOut df
@@ -189,7 +189,7 @@ writerRoundTripNativeIntTypes :: Test
 writerRoundTripNativeIntTypes = TestCase $
     withSystemTempDirectory "dfpq-writer" $ \dir -> do
         let df =
-                fromNamedColumns
+                fromColumns
                     [ ("int", fromList [1 :: Int, 2, 3])
                     , ("int64", fromList [1 :: Int64, 2, 3])
                     , ("int32", fromList [1 :: Int32, 2, 3])

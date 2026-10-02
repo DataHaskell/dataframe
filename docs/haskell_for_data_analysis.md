@@ -65,7 +65,7 @@ Suppose you want to track a week of Seattle temperatures (a legitimate non-small
 
 
 ```haskell
-weather = D.fromNamedColumns
+weather = D.fromColumns
     [ ("Day",                      D.fromList ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday" :: T.Text])
     , ("High Temperature (C)",     D.fromList [24, 20, 22, 23, 25, 26, 26 :: Double])
     , ("Low Temperature (C)",      D.fromList [14, 13, 13, 13, 14, 15, 15 :: Double])
@@ -86,7 +86,7 @@ TIO.putStrLn $ D.toMarkdown weather
 > | Sunday      | 26.0                           | 15.0                          |
 
 
-`fromNamedColumns` takes a list of `(name, column)` pairs. For data without column names there is `fromUnnamedColumns`, which assigns numeric names automatically.
+`fromColumns` takes a list of `(name, column)` pairs. For data without column names there is `fromUnnamedColumns`, which assigns numeric names automatically.
 
 
 ```haskell
@@ -298,7 +298,7 @@ Potentially-missing values are represented by `Maybe`. `Just x` means the value 
 
 
 ```haskell
-messy = D.fromNamedColumns
+messy = D.fromColumns
     [ ("id",    D.fromList [Just 1, Just 2, Nothing, Nothing  :: Maybe Int])
     , ("score", D.fromList [Just 6.5, Nothing, Nothing, Just 6.5 :: Maybe Double])
     , ("rate",  D.fromList [Just 3.0, Nothing, Nothing, Just 3.0 :: Maybe Double])
@@ -408,7 +408,7 @@ TIO.putStrLn $ D.toMarkdown $ D.take 10
 
 
 ```haskell
-dupData = D.fromNamedColumns
+dupData = D.fromColumns
     [ ("k1", D.fromList (take 6 (cycle ["one","two"]) ++ ["two"]))
     , ("k2", D.fromList [1, 1, 2, 3, 3, 4, 4 :: Int])
     ]
@@ -466,7 +466,7 @@ Most datasets need some reshaping before analysis. Take this hypothetical meat d
 foodOptions  = ["bacon","pulled pork","bacon","pastrami","corned beef","bacon","pastrami","honey ham","nova lox" :: T.Text]
 measurements = [4, 3, 12, 6, 7.5, 8, 3, 5, 6 :: Double]
 
-meat = D.fromNamedColumns
+meat = D.fromColumns
     [ ("food",   D.fromList foodOptions)
     , ("ounces", D.fromList measurements)
     ]
@@ -935,7 +935,7 @@ Three functions handle column re-typing with different failure modes:
 
 
 ```haskell
-messyNums = D.fromNamedColumns
+messyNums = D.fromColumns
     [ ("raw", D.fromList ["1.5", "2.0", "bad", "3.7", "" :: T.Text]) ]
 
 withCast = D.derive "as_double" (F.cast @Double "raw") messyNums
@@ -978,7 +978,7 @@ Three functions manipulate `Text` columns inside expressions.
 
 
 ```haskell
-emails = D.fromNamedColumns
+emails = D.fromColumns
     [ ("email", D.fromList ["alice@example.com", "bob@haskell.org", "cara@data.io" :: T.Text]) ]
 
 emailParts = D.derive "parts" (F.splitOn "@" (F.col @T.Text "email")) emails
@@ -1021,7 +1021,7 @@ TIO.putStrLn $ D.toMarkdown withWords
 ```haskell
 import Data.Time (Day)
 
-events = D.fromNamedColumns
+events = D.fromColumns
     [ ("name",       D.fromList ["release","conference","deadline" :: T.Text])
     , ("date_text",  D.fromList ["2025-03-01","2025-06-15","2025-09-30" :: T.Text])
     ]
@@ -1110,13 +1110,13 @@ Joins combine rows from two tables based on a shared key.
 
 
 ```haskell
-customers = D.fromNamedColumns
+customers = D.fromColumns
     [ ("customer_id", D.fromList [1, 2, 3, 4 :: Int])
     , ("name",        D.fromList ["Alice","Bob","Cara","Dave" :: T.Text])
     , ("city",        D.fromList ["Seattle","Portland","Austin","Denver" :: T.Text])
     ]
 
-orders = D.fromNamedColumns
+orders = D.fromColumns
     [ ("customer_id", D.fromList [1, 2, 2, 3, 5 :: Int])
     , ("product",     D.fromList ["laptop","keyboard","mouse","monitor","tablet" :: T.Text])
     , ("amount",      D.fromList [1200.0, 85.0, 30.0, 350.0, 600.0 :: Double])

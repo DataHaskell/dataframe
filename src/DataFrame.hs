@@ -150,7 +150,7 @@ import DataFrame.Core as CoreTypes (
     empty,
     fromAny,
     fromList,
-    fromNamedColumns,
+    fromColumns,
     fromUnboxedVector,
     fromVector,
     hasElemType,

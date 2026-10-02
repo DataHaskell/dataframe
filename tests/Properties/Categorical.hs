@@ -57,7 +57,7 @@ genBase = do
     nRowsG <- choose (0, 60)
     let names = take nCols ["c0", "c1", "c2", "c3"]
     cols <- mapM (const (genCol nRowsG)) names
-    pure (D.fromNamedColumns (zip names cols))
+    pure (D.fromColumns (zip names cols))
   where
     genCol n =
         oneof

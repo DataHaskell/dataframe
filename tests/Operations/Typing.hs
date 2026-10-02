@@ -18,7 +18,7 @@ import Test.HUnit (Test (TestCase, TestLabel), assertEqual, assertFailure)
 
 testData :: D.DataFrame
 testData =
-    D.fromNamedColumns
+    D.fromColumns
         [ ("test1", DI.fromList ([1 .. 26] :: [Int]))
         , ("test2", DI.fromList ['a' .. 'z'])
         ]
@@ -913,7 +913,7 @@ parseDatesWithEitherRead =
 parseDefaultsPerColumnOverrides :: Test
 parseDefaultsPerColumnOverrides = TestCase $ do
     let df =
-            D.fromNamedColumns
+            D.fromColumns
                 [ ("ages", DI.fromList @T.Text ["1", "2", "3"])
                 , ("notes", DI.fromList @T.Text ["hello", "", "world"])
                 ]
@@ -949,7 +949,7 @@ parseDefaultsPerColumnOverrides = TestCase $ do
 parseDefaultsNoSafeReadWithMaybeOverride :: Test
 parseDefaultsNoSafeReadWithMaybeOverride = TestCase $ do
     let df =
-            D.fromNamedColumns
+            D.fromColumns
                 [ ("x", DI.fromList @T.Text ["1", "2", "3"])
                 , ("y", DI.fromList @T.Text ["a", "", "c"])
                 ]
@@ -979,7 +979,7 @@ parseDefaultsNoSafeReadWithMaybeOverride = TestCase $ do
 parseDefaultsEitherReadWithNoSafeOverride :: Test
 parseDefaultsEitherReadWithNoSafeOverride = TestCase $ do
     let df =
-            D.fromNamedColumns
+            D.fromColumns
                 [ ("nums", DI.fromList @T.Text ["10", "20", "30"])
                 , ("tags", DI.fromList @T.Text ["foo", "", "baz"])
                 ]
@@ -1010,7 +1010,7 @@ parseDefaultsEitherReadWithNoSafeOverride = TestCase $ do
 parseDefaultsEmptyOverrides :: Test
 parseDefaultsEmptyOverrides = TestCase $ do
     let df =
-            D.fromNamedColumns
+            D.fromColumns
                 [("v", DI.fromList @T.Text ["1", "2", "3"])]
         opts1 = D.defaultParseOptions{D.sampleSize = 3}
         opts2 = opts1{D.parseSafeOverrides = []}
@@ -1023,7 +1023,7 @@ parseDefaultsEmptyOverrides = TestCase $ do
 parseDefaultsNonExistentOverride :: Test
 parseDefaultsNonExistentOverride = TestCase $ do
     let df =
-            D.fromNamedColumns
+            D.fromColumns
                 [("a", DI.fromList @T.Text ["1", "2", "3"])]
         opts =
             D.defaultParseOptions

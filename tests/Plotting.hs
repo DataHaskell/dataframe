@@ -40,14 +40,14 @@ import DataFrame.Display.Web.Plot (Scatter (includeZero))
 
 numFrame :: D.DataFrame
 numFrame =
-    D.fromNamedColumns
+    D.fromColumns
         [ ("a", D.fromList ([1.0, 2.0, 3.0, 4.0] :: [Double]))
         , ("b", D.fromList ([10.0, 20.0, 30.0, 40.0] :: [Double]))
         ]
 
 mixedFrame :: D.DataFrame
 mixedFrame =
-    D.fromNamedColumns
+    D.fromColumns
         [ ("a", D.fromList ([1.0, 2.0, 3.0] :: [Double]))
         , ("g", D.fromList (["x", "y", "x"] :: [T.Text]))
         ]
@@ -107,7 +107,7 @@ legacyBoxIsBoxplot = TestCase $ do
 
 nanBecomesNull :: Test
 nanBecomesNull = TestCase $ do
-    let df = D.fromNamedColumns [("a", D.fromList ([0 / 0, 1.0] :: [Double]))]
+    let df = D.fromColumns [("a", D.fromList ([0 / 0, 1.0] :: [Double]))]
         spec = C.toVegaSpec (C.chart df & C.enc C.Y (col @Double "a"))
         firstA = lookupKey "a" (fromMaybe Null (dataValues spec V.!? 0))
     assertEqual "NaN inlines as null" (Just Null) firstA
@@ -115,7 +115,7 @@ nanBecomesNull = TestCase $ do
 escapingSafe :: Test
 escapingSafe = TestCase $ do
     let weird = "we\"ir\\d"
-        df = D.fromNamedColumns [(weird, D.fromList ([1.0, 2.0] :: [Double]))]
+        df = D.fromColumns [(weird, D.fromList ([1.0, 2.0] :: [Double]))]
         spec = C.toVegaSpec (C.chart df & C.enc C.X (col @Double weird))
         row0 = fromMaybe Null (dataValues spec V.!? 0)
     assertBool

@@ -75,7 +75,7 @@ import DataFrame.IO.Persistent.Read.Columns
 import DataFrame.IO.Persistent.Read.Sqlite (runNamedQuery)
 import DataFrame.IO.Persistent.Schema.Introspect
 import DataFrame.Internal.Column (fromList)
-import DataFrame.Internal.DataFrame (DataFrame, fromNamedColumns)
+import DataFrame.Internal.DataFrame (DataFrame, fromColumns)
 import DataFrame.Typed.Schema (KnownSchema)
 import DataFrame.Typed.Types (TypedDataFrame)
 
@@ -204,7 +204,7 @@ describeTableConn table = schemaFrame <$> introspectTableConn table
 
 schemaFrame :: [ColumnInfo] -> DataFrame
 schemaFrame cols =
-    fromNamedColumns
+    fromColumns
         [ ("Column Name", fromList (map ciName cols))
         , ("Type", fromList (map columnHaskellType cols))
         , ("SQLite Type", fromList (map ciDeclType cols))
@@ -258,13 +258,13 @@ readColumnsConn table cols q = do
 
 assembleColumns :: [(Text, ColumnReader)] -> [[PersistValue]] -> DataFrame
 assembleColumns cols rows =
-    fromNamedColumns (zipWith apply cols (cells (length cols) rows))
+    fromColumns (zipWith apply cols (cells (length cols) rows))
   where
     apply (name, rdr) pvs = (name, rdr pvs)
 
 assembleInferred :: [Text] -> [[PersistValue]] -> DataFrame
 assembleInferred names rows =
-    fromNamedColumns (zip names (map inferColumn (cells (length names) rows)))
+    fromColumns (zip names (map inferColumn (cells (length names) rows)))
 
 {- | Transpose rows into per-column value lists, padding to @n@ empty columns
 when there are no rows (so column structure survives an empty result).

@@ -28,7 +28,7 @@ import Test.QuickCheck
 -- A fixture spanning the interesting rows: exact thresholds, gaps, NaN, null.
 fixtureDF :: D.DataFrame
 fixtureDF =
-    D.fromNamedColumns
+    D.fromColumns
         [
             ( "x"
             , DI.fromList ([10, 20, 25, 30, 35, 40, 50, 0 / 0, -(1 / 0), 1 / 0] :: [Double])

@@ -23,11 +23,11 @@ values =
         ]
 
 testData :: D.DataFrame
-testData = D.fromNamedColumns values
+testData = D.fromColumns values
 
 moreTestData :: D.DataFrame
 moreTestData =
-    D.fromNamedColumns
+    D.fromColumns
         [ ("test1", DI.fromList $ replicate 10 (0 :: Int) ++ replicate 10 1)
         , ("test2", DI.fromList $ [1 :: Int .. 10] ++ [1 .. 10])
         ]
@@ -37,7 +37,7 @@ sortByAscendingWAI =
     TestCase
         ( assertEqual
             "Sorting rows by ascending works as intended"
-            ( D.fromNamedColumns
+            ( D.fromColumns
                 [ ("test1", DI.fromList [(1 :: Int) .. 26])
                 , ("test2", DI.fromList ['a' .. 'z'])
                 ]
@@ -50,7 +50,7 @@ sortByDescendingWAI =
     TestCase
         ( assertEqual
             "Sorting rows by descending works as intended"
-            ( D.fromNamedColumns
+            ( D.fromColumns
                 [ ("test1", DI.fromList $ reverse [(1 :: Int) .. 26])
                 , ("test2", DI.fromList $ reverse ['a' .. 'z'])
                 ]
@@ -72,7 +72,7 @@ sortByOneColumnAscOneColumnDesc =
     TestCase
         ( assertEqual
             "Sorting moreTestData by Desc of test2 reverses the order of the second column."
-            ( D.fromNamedColumns
+            ( D.fromColumns
                 [ ("test1", DI.fromList $ replicate 10 (0 :: Int) ++ replicate 10 1)
                 , ("test2", DI.fromList $ [10 :: Int, 9 .. 1] ++ [10, 9 .. 1])
                 ]
@@ -91,7 +91,7 @@ sortByColumnDoesNotExist =
 
 compoundTestData :: D.DataFrame
 compoundTestData =
-    D.fromNamedColumns
+    D.fromColumns
         [ ("a", DI.fromList ([3, 1, 4, 1, 5] :: [Int]))
         , ("b", DI.fromList ([10, 40, 20, 30, 50] :: [Int]))
         ]
@@ -101,7 +101,7 @@ sortByCompoundExpression =
     TestCase
         ( assertEqual
             "Sorting by Asc (a + b) orders rows by the sum without leaking a synthetic column"
-            ( D.fromNamedColumns
+            ( D.fromColumns
                 [ ("a", DI.fromList ([3, 4, 1, 1, 5] :: [Int]))
                 , ("b", DI.fromList ([10, 20, 30, 40, 50] :: [Int]))
                 ]
@@ -114,7 +114,7 @@ sortByCompoundExpressionDescending =
     TestCase
         ( assertEqual
             "Sorting by Desc (b - a) orders rows by descending difference"
-            ( D.fromNamedColumns
+            ( D.fromColumns
                 [ ("a", DI.fromList ([5, 1, 1, 4, 3] :: [Int]))
                 , ("b", DI.fromList ([50, 40, 30, 20, 10] :: [Int]))
                 ]
@@ -127,7 +127,7 @@ sortByCompoundMixedWithBareColumn =
     TestCase
         ( assertEqual
             "Mixing a compound Asc key with a bare Desc tie-breaker works"
-            ( D.fromNamedColumns
+            ( D.fromColumns
                 [ ("a", DI.fromList ([1, 1, 3, 4, 5] :: [Int]))
                 , ("b", DI.fromList ([40, 30, 10, 20, 50] :: [Int]))
                 ]

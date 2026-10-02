@@ -40,7 +40,7 @@ type Houses =
 
 regDF :: D.DataFrame
 regDF =
-    D.fromNamedColumns
+    D.fromColumns
         [ ("x1", DI.fromList xs1)
         , ("x2", DI.fromList xs2)
         , ("y", DI.fromList [2 * a - 3 * b + 1 | (a, b) <- zip xs1 xs2])

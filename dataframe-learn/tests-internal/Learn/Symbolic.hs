@@ -35,7 +35,7 @@ testSRRecovers :: Test
 testSRRecovers = TestCase $ do
     let xs = [-3, -2, -1, 0, 1, 2, 3, 4, 5, 6] :: [Double]
         df =
-            D.fromNamedColumns
+            D.fromColumns
                 [ ("x", DI.fromList xs)
                 , ("y", DI.fromList [x * x + x | x <- xs])
                 ]
@@ -59,7 +59,7 @@ testSRDeterminism :: Test
 testSRDeterminism = TestCase $ do
     let xs = [1 .. 8] :: [Double]
         df =
-            D.fromNamedColumns
+            D.fromColumns
                 [ ("x", DI.fromList xs)
                 , ("y", DI.fromList (map (\x -> 2 * x + 1) xs))
                 ]
@@ -93,7 +93,7 @@ testSimplifyPreservesEval = TestCase $ do
 testKernelPCA :: Test
 testKernelPCA = TestCase $ do
     let df =
-            D.fromNamedColumns
+            D.fromColumns
                 [ ("a", DI.fromList ([0, 0.2, -0.1, 0.1, 8, 8.1, 7.9, 8.2] :: [Double]))
                 , ("b", DI.fromList ([0, -0.1, 0.2, 0.0, 5, 5.2, 4.9, 5.1] :: [Double]))
                 ]
@@ -116,7 +116,7 @@ testKernelPCA = TestCase $ do
 testRFFSVM :: Test
 testRFFSVM = TestCase $ do
     let df =
-            D.fromNamedColumns
+            D.fromColumns
                 [ ("x", DI.fromList ([-3, -2, -1, -0.5, 0.5, 1, 2, 3] :: [Double]))
                 , ("label", DI.fromList ([0, 0, 0, 0, 1, 1, 1, 1] :: [Int]))
                 ]

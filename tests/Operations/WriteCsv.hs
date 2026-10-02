@@ -15,7 +15,7 @@ import Test.HUnit
 toCsvBasic :: Test
 toCsvBasic = TestLabel "toCsv_basic" $ TestCase $ do
     let df =
-            D.fromNamedColumns
+            D.fromColumns
                 [ ("name", DI.fromList @T.Text ["Alice", "Bob", "Charlie"])
                 , ("age", DI.fromList @Int [30, 25, 35])
                 ]
@@ -25,7 +25,7 @@ toCsvBasic = TestLabel "toCsv_basic" $ TestCase $ do
 toCsvWithNulls :: Test
 toCsvWithNulls = TestLabel "toCsv_withNulls" $ TestCase $ do
     let df =
-            D.fromNamedColumns
+            D.fromColumns
                 [
                     ( "name"
                     , DI.fromList @(Maybe T.Text) [Nothing, Just "Alice", Just "Bob", Just "Charlie"]
@@ -46,7 +46,7 @@ toCsvEmpty =
 toSeparatedTab :: Test
 toSeparatedTab = TestLabel "toSeparated_tab" $ TestCase $ do
     let df =
-            D.fromNamedColumns
+            D.fromColumns
                 [ ("x", DI.fromList @Int [1, 2])
                 , ("y", DI.fromList @Int [3, 4])
                 ]
@@ -57,7 +57,7 @@ toSeparatedTab = TestLabel "toSeparated_tab" $ TestCase $ do
 toCsvDouble :: Test
 toCsvDouble = TestLabel "toCsv_double" $ TestCase $ do
     let df =
-            D.fromNamedColumns
+            D.fromColumns
                 [ ("value", DI.fromList @Double [1.5, 2.0, 2.5])
                 ]
         expected = "value\n1.5\n2.0\n2.5\n"
@@ -67,7 +67,7 @@ toCsvDouble = TestLabel "toCsv_double" $ TestCase $ do
 toCsvSingleColumn :: Test
 toCsvSingleColumn = TestLabel "toCsv_single_column" $ TestCase $ do
     let df =
-            D.fromNamedColumns
+            D.fromColumns
                 [ ("id", DI.fromList @Int [10, 20, 30])
                 ]
         expected = "id\n10\n20\n30\n"
@@ -77,7 +77,7 @@ toCsvSingleColumn = TestLabel "toCsv_single_column" $ TestCase $ do
 toCsvRoundTrip :: Test
 toCsvRoundTrip = TestLabel "toCsv_roundTrip" $ TestCase $ do
     let df =
-            D.fromNamedColumns
+            D.fromColumns
                 [ ("a", DI.fromList @Int [1, 2, 3])
                 , ("b", DI.fromList @T.Text ["hello", "world", "test"])
                 ]

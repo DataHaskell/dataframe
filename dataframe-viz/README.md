@@ -42,7 +42,7 @@ local `dataframe-core` / `dataframe-operations` / `dataframe-viz` working trees:
 -- cabal: packages: ../dataframe-operations, ../dataframe-viz
 -- cabal: default-extensions: OverloadedStrings, TypeApplications, OverloadedLabels
 -- cabal: default-extensions: DataKinds, TypeOperators, FlexibleContexts
-import DataFrame.Internal.DataFrame (DataFrame, fromNamedColumns)
+import DataFrame.Internal.DataFrame (DataFrame, fromColumns)
 import DataFrame.Internal.Column (fromList)
 import DataFrame.Expression.Operators ((|>))
 import qualified DataFrame.Functions as F
@@ -60,7 +60,7 @@ import Data.Aeson.Text (encodeToLazyText)
 import qualified Data.Aeson.KeyMap as KM
 import qualified Data.Text.Lazy as TL
 
-df = fromNamedColumns
+df = fromColumns
     [ ("income", fromList [1.5, 2.0, 3.1, 4.2, 5.0, 2.2, 3.3, 1.1 :: Double])
     , ("value",  fromList [100, 150, 200, 250, 300, 180, 220, 90 :: Double])
     , ("region", fromList (["INLAND","NEAR BAY","INLAND","NEAR OCEAN","ISLAND","INLAND","NEAR BAY","INLAND"] :: [Text]))

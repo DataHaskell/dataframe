@@ -8,7 +8,7 @@ import qualified DataFrame as D
 import qualified DataFrame.Functions as F
 
 df :: D.DataFrame
-df = D.fromNamedColumns [("plain", D.fromList [10 :: Int, 20, 30])]
+df = D.fromColumns [("plain", D.fromList [10 :: Int, 20, 30])]
 
 badImpute :: D.DataFrame
 badImpute = D.impute (F.col @Int "plain") 0 df

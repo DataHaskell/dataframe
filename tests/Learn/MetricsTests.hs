@@ -30,7 +30,7 @@ truth3 = VU.fromList [0, 0, 1, 2, 2, 2, 1, 0]
 
 reg :: D.DataFrame
 reg =
-    D.fromNamedColumns
+    D.fromColumns
         [ ("x", DI.fromList ([1 .. 20] :: [Double]))
         ,
             ( "y"

@@ -1,4 +1,4 @@
-<!-- scripths: 0.5.3.0 -->
+<!-- scripths: 0.5.5.0 -->
 
 <!--
   This README is a runnable scripths (https://github.com/DataHaskell/scripths)
@@ -33,11 +33,12 @@ and `predict` compiles it to an `Expr Double`.
 -- cabal: default-extensions: OverloadedStrings, TypeApplications, DataKinds, TypeOperators, FlexibleContexts
 -- cabal: ghc-options: -w
 import qualified DataFrame as D
+import DataFrame ((=:))
 import DataFrame.Learn
 
-sales = D.fromNamedColumns
-    [ ("x", D.fromList ([1, 2, 3, 4, 5, 6] :: [Double]))
-    , ("y", D.fromList ([2 * x + 1 | x <- [1, 2, 3, 4, 5, 6]] :: [Double]))
+sales = D.fromColumns
+    [ "x" =: [1, 2, 3, 4, 5, 6] :: [Double]
+    , "y" =: [2 * x + 1 | x <- [1, 2, 3, 4, 5, 6]] :: [Double]
     ]
 
 model = fit defaultLinearConfig (D.col @Double "y") sales
@@ -45,7 +46,33 @@ putStrLn (D.prettyPrint (predict model))
 ```
 
 > <!-- scripths:mime text/plain -->
-> 2.0 * x + 0.9999999999999989
+> <interactive>:17:7: error: [GHC-83865]
+>     • Couldn't match expected type: [Double]
+>                   with actual type: (Data.Text.Internal.Text, D.Column)
+>     • In the expression: "x" =: [1, 2, 3, ....] :: [Double]
+>       In the first argument of ‘D.fromColumns’, namely
+>         ‘["x" =: [1, 2, ....] :: [Double],
+>           "y" =: [2 * x + 1 | x <- [1, ....]] :: [Double]]’
+>       In the expression:
+>         D.fromColumns
+>           ["x" =: [1, 2, ....] :: [Double],
+>            "y" =: [2 * x + 1 | x <- [1, ....]] :: [Double]]
+> 
+> <interactive>:18:7: error: [GHC-83865]
+>     • Couldn't match expected type: [Double]
+>                   with actual type: (Data.Text.Internal.Text, D.Column)
+>     • In the expression:
+>           "y" =: [2 * x + 1 | x <- [1, 2, ....]] :: [Double]
+>       In the first argument of ‘D.fromColumns’, namely
+>         ‘["x" =: [1, 2, ....] :: [Double],
+>           "y" =: [2 * x + 1 | x <- [1, ....]] :: [Double]]’
+>       In the expression:
+>         D.fromColumns
+>           ["x" =: [1, 2, ....] :: [Double],
+>            "y" =: [2 * x + 1 | x <- [1, ....]] :: [Double]]
+> 
+> <interactive>:24:34: error: [GHC-88464]
+>     Variable not in scope: model
 
 ## Type-safe linear regression
 
@@ -67,18 +94,25 @@ putStr (unlines
 ```
 
 > <!-- scripths:mime text/plain -->
-> typed model:  2.0 * x + 0.9999999999999989
-> schema after: ["x","y","prediction"]
+> <interactive>:35:66: error: [GHC-88464]
+>     Variable not in scope: sales :: D.DataFrame
+>     Suggested fix: Perhaps use ‘salesT’ (line 35)
+> 
+> <interactive>:42:61: error: [GHC-88464]
+>     Variable not in scope: typedModel
+> 
+> <interactive>:43:47: error: [GHC-88464]
+>     Variable not in scope: scored :: T.TypedDataFrame cols1
 
 ## Decision trees
 
 The tree compiles to nested `if/then/else` over your columns:
 
 ```haskell
-flowers = D.fromNamedColumns
-    [ ("petal_length", D.fromList ([1.4, 1.3, 1.5, 1.4, 4.5, 4.7, 4.6, 4.4, 5.5, 5.8, 5.6, 5.7] :: [Double]))
-    , ("petal_width",  D.fromList ([0.2, 0.2, 0.1, 0.3, 1.5, 1.4, 1.6, 1.3, 2.0, 2.1, 1.9, 2.2] :: [Double]))
-    , ("species",      D.fromList ([0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2] :: [Double]))
+flowers = D.fromColumns
+    [ "petal_length" =: [1.4, 1.3, 1.5, 1.4, 4.5, 4.7, 4.6, 4.4, 5.5, 5.8, 5.6, 5.7] :: [Double]
+    , "petal_width"  =: [0.2, 0.2, 0.1, 0.3, 1.5, 1.4, 1.6, 1.3, 2.0, 2.1, 1.9, 2.2] :: [Double]
+    , "species"      =: [0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2] :: [Double]
     ]
 
 tree = fit defaultTreeConfig (D.col @Double "species") flowers
@@ -86,11 +120,51 @@ putStrLn (D.prettyPrint (predict tree))
 ```
 
 > <!-- scripths:mime text/plain -->
-> if petal_length .<=. 2.95
-> then 0.0
-> else if petal_length .<=. 5.1
-> then 1.0
-> else 2.0
+> <interactive>:52:7: error: [GHC-83865]
+>     • Couldn't match expected type: [Double]
+>                   with actual type: (Data.Text.Internal.Text, D.Column)
+>     • In the expression:
+>           "petal_length" =: [1.4, 1.3, 1.5, ....] :: [Double]
+>       In the first argument of ‘D.fromColumns’, namely
+>         ‘["petal_length" =: [1.4, 1.3, ....] :: [Double],
+>           "petal_width" =: [0.2, 0.2, ....] :: [Double],
+>           "species" =: [0, 0, ....] :: [Double]]’
+>       In the expression:
+>         D.fromColumns
+>           ["petal_length" =: [1.4, 1.3, ....] :: [Double],
+>            "petal_width" =: [0.2, 0.2, ....] :: [Double],
+>            "species" =: [0, 0, ....] :: [Double]]
+> 
+> <interactive>:53:7: error: [GHC-83865]
+>     • Couldn't match expected type: [Double]
+>                   with actual type: (Data.Text.Internal.Text, D.Column)
+>     • In the expression:
+>           "petal_width" =: [0.2, 0.2, 0.1, ....] :: [Double]
+>       In the first argument of ‘D.fromColumns’, namely
+>         ‘["petal_length" =: [1.4, 1.3, ....] :: [Double],
+>           "petal_width" =: [0.2, 0.2, ....] :: [Double],
+>           "species" =: [0, 0, ....] :: [Double]]’
+>       In the expression:
+>         D.fromColumns
+>           ["petal_length" =: [1.4, 1.3, ....] :: [Double],
+>            "petal_width" =: [0.2, 0.2, ....] :: [Double],
+>            "species" =: [0, 0, ....] :: [Double]]
+> 
+> <interactive>:54:7: error: [GHC-83865]
+>     • Couldn't match expected type: [Double]
+>                   with actual type: (Data.Text.Internal.Text, D.Column)
+>     • In the expression: "species" =: [0, 0, 0, ....] :: [Double]
+>       In the first argument of ‘D.fromColumns’, namely
+>         ‘["petal_length" =: [1.4, 1.3, ....] :: [Double],
+>           "petal_width" =: [0.2, 0.2, ....] :: [Double],
+>           "species" =: [0, 0, ....] :: [Double]]’
+>       In the expression:
+>         D.fromColumns
+>           ["petal_length" =: [1.4, 1.3, ....] :: [Double],
+>            "petal_width" =: [0.2, 0.2, ....] :: [Double],
+>            "species" =: [0, 0, ....] :: [Double]]
+> 
+> <interactive>:60:34: error: [GHC-88464] Variable not in scope: tree
 
 ## Symbolic regression discovers a formula
 
@@ -98,9 +172,9 @@ Genetic programming searches for an expression that fits the data, and returns
 it as a dataframe `Expr` plus the accuracy/complexity Pareto front:
 
 ```haskell
-curve = D.fromNamedColumns
-    [ ("x", D.fromList xs)
-    , ("y", D.fromList [x * x + x | x <- xs])
+curve = D.fromColumns
+    [ "x" =: xs
+    , "y" =: [x * x + x | x <- xs]
     ]
   where xs = [-3, -2, -1, 0, 1, 2, 3, 4, 5, 6] :: [Double]
 
@@ -122,7 +196,12 @@ D.columnNames (D.derive "prediction" (predict model) sales)
 ```
 
 > <!-- scripths:mime text/plain -->
-> ["x","y","prediction"]
+> <interactive>:87:47: error: [GHC-88464]
+>     Variable not in scope: model
+>     Suggested fix: Perhaps use ‘T.mode’ (imported from DataFrame.Typed)
+> 
+> <interactive>:87:54: error: [GHC-88464]
+>     Variable not in scope: sales :: D.DataFrame
 
 ## A model and its preprocessing compose by substitution
 
@@ -145,8 +224,19 @@ putStr (unlines
 ```
 
 > <!-- scripths:mime text/plain -->
-> trained in scaled space: 3.4156502553198655 * x + 8.0
-> folded to raw columns:   3.4156502553198655 * (x - 3.5) / 1.707825127659933 + 8.0
+> <interactive>:95:36: error: [GHC-88464]
+>     Variable not in scope: sales :: D.DataFrame
+> 
+> <interactive>:96:55: error: [GHC-88464]
+>     Variable not in scope: sales :: D.DataFrame
+> 
+> <interactive>:103:61: error: [GHC-88464]
+>     Variable not in scope: scaledModel
+>     Suggested fix:
+>       Perhaps use data constructor ‘ScalerModel’ (imported from DataFrame.Learn)
+> 
+> <interactive>:104:52: error: [GHC-88464]
+>     Variable not in scope: deployed :: D.Expr a1
 
 The folded expression is a function of the raw `x` alone, so it scores the
 original frame with no preprocessing step at inference time.
@@ -156,17 +246,21 @@ evaluate rmse deployed (D.col @Double "y") sales
 ```
 
 > <!-- scripths:mime text/plain -->
-> 3.6259732146947156e-16
+> <interactive>:112:15: error: [GHC-88464]
+>     Variable not in scope: deployed :: D.Expr Double
+> 
+> <interactive>:112:44: error: [GHC-88464]
+>     Variable not in scope: sales :: D.DataFrame
 
 ## Splitting the data, and evaluation
 
 ```haskell
 import qualified DataFrame as D
 
-realistic = D.fromNamedColumns
-    [ ("id", D.fromList [fromIntegral ((i * 7919) `mod` 97) | i <- [1 .. 40 :: Int]])
-    , ("x",  D.fromList xs)
-    , ("y",  D.fromList [2 * x + 1 + noise i | (i, x) <- zip [0 :: Int ..] xs])
+realistic = D.fromColumns
+    [ "id" =: [fromIntegral ((i * 7919) `mod` 97) | i <- [1 .. 40 :: Int]]
+    , "x"  =: xs
+    , "y"  =: [2 * x + 1 + noise i | (i, x) <- zip [0 :: Int ..] xs]
     ]
   where
     xs      = map fromIntegral [1 .. 40 :: Int] :: [Double]
@@ -224,14 +318,13 @@ putStr (show (classificationReportExpr (predict clf) (D.col @Double "species") f
 ```
 
 > <!-- scripths:mime text/plain -->
-> class       precision   recall      f1          support     
-> 0.0         1.0         1.0         1.0         4           
-> 1.0         1.0         1.0         1.0         4           
-> 2.0         1.0         1.0         1.0         4           
+> <interactive>:170:59: error: [GHC-88464]
+>     Variable not in scope: flowers :: D.DataFrame
 > 
-> accuracy    = 1.0
-> macro f1    = 1.0
-> weighted f1 = 1.0
+> <interactive>:173:49: error: [GHC-88464] Variable not in scope: clf
+> 
+> <interactive>:173:80: error: [GHC-88464]
+>     Variable not in scope: flowers :: D.DataFrame
 
 ## Pipelines compose as a monoid
 
@@ -249,7 +342,17 @@ D.columnNames (applyTransform pipeline flowers)
 ```
 
 > <!-- scripths:mime text/plain -->
-> ["petal_length","petal_width","species","pc1","pc2"]
+> <interactive>:182:36: error: [GHC-88464]
+>     Variable not in scope: flowers :: D.DataFrame
+> 
+> <interactive>:183:74: error: [GHC-88464]
+>     Variable not in scope: flowers :: D.DataFrame
+> 
+> <interactive>:188:31: error: [GHC-88464]
+>     Variable not in scope: pipeline :: Transform
+> 
+> <interactive>:188:40: error: [GHC-88464]
+>     Variable not in scope: flowers :: D.DataFrame
 
 ## Synthesize the feature you would have hand-engineered
 
@@ -261,10 +364,10 @@ discovers the term, and feeding it back as a column lifts the fit from mediocre
 to exact — still a formula you can read:
 
 ```haskell
-interactions = D.fromNamedColumns
-    [ ("a", D.fromList as)
-    , ("b", D.fromList bs)
-    , ("y", D.fromList (zipWith (*) as bs))
+interactions = D.fromColumns
+    [ "a" =: as
+    , "b" =: bs
+    , "y" =: zipWith (*) as bs
     ]
   where
     as = [-1, -1, 1, 1, -2, 2, -2, 2] :: [Double]

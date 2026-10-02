@@ -53,7 +53,7 @@ import DataFrame.Internal.DataFrame (
     DataFrame (..),
     columnNames,
     empty,
-    fromNamedColumns,
+    fromColumns,
     getColumn,
  )
 import DataFrame.Internal.Expression
@@ -303,7 +303,7 @@ this function:
 >>> :set -XOverloadedStrings
 >>> import qualified DataFrame as D
 >>> let df =
-...       D.fromNamedColumns
+...       D.fromColumns
 ...         [ ("age", D.fromList [Just 10, Nothing, Just 20 :: Maybe Int]) ]
 >>>
 >>> -- Impute missing ages with the mean of the observed ages
@@ -362,7 +362,7 @@ summarize df =
     fold
         columnStats
         (columnNames df)
-        ( fromNamedColumns
+        ( fromColumns
             [
                 ( "Statistic"
                 , fromList

@@ -16,7 +16,7 @@ import Test.HUnit
 -- Similar to example discussed in https://www.sumsar.net/blog/pandas-feels-clunky-when-coming-from-r/
 purchases :: D.DataFrame
 purchases =
-    D.fromNamedColumns
+    D.fromColumns
         [
             ( "country"
             , DI.fromList
@@ -57,7 +57,7 @@ overMedianFilterTest =
                 )
             & D.sortBy [D.Asc (F.col @T.Text "country"), D.Asc (F.col @Double "amount")]
     expected =
-        D.fromNamedColumns
+        D.fromColumns
             [
                 ( "country"
                 , DI.fromList (["France", "France", "France", "UK", "UK", "US", "US"] :: [T.Text])
@@ -99,7 +99,7 @@ overMeanDeriveTest =
         )
   where
     simpleData =
-        D.fromNamedColumns
+        D.fromColumns
             [ ("group", DI.fromList (["A", "A", "B", "B", "B"] :: [T.Text]))
             , ("value", DI.fromList ([10, 20, 30, 60, 90] :: [Double]))
             ]
@@ -123,7 +123,7 @@ overSumTest =
         )
   where
     simpleData =
-        D.fromNamedColumns
+        D.fromColumns
             [ ("group", DI.fromList (["X", "X", "Y", "Y"] :: [T.Text]))
             , ("value", DI.fromList ([10, 20, 100, 200] :: [Int]))
             ]
@@ -146,7 +146,7 @@ overCountTest =
         )
   where
     simpleData =
-        D.fromNamedColumns
+        D.fromColumns
             [ ("group", DI.fromList (["A", "A", "A", "B", "B"] :: [T.Text]))
             , ("value", DI.fromList ([1, 2, 3, 4, 5] :: [Int]))
             ]
@@ -169,7 +169,7 @@ mixedGlobalAndOverTest =
         )
   where
     simpleData =
-        D.fromNamedColumns
+        D.fromColumns
             [ ("group", DI.fromList (["A", "A", "B", "B"] :: [T.Text]))
             , ("value", DI.fromList ([10.0, 20.0, 100.0, 200.0] :: [Double]))
             ]
@@ -205,7 +205,7 @@ blogPostExampleGlobal =
     -- Global median = 60, threshold = 600 → removes 5000 and 800
     -- France: (30-1)+(40-2)+(35-1) = 101, UK: (50-2)+(60-3) = 105, US: (100-5)+(200-10) = 285
     expected =
-        D.fromNamedColumns
+        D.fromColumns
             [ ("country", DI.fromList (["France", "UK", "US"] :: [T.Text]))
             , ("total", DI.fromList ([101, 105, 285] :: [Double]))
             ]
@@ -228,7 +228,7 @@ blogPostExampleOver =
             & D.aggregate [F.sum (amount - discount) `as` "total"]
             & D.sortBy [D.Asc (F.col @T.Text "country")]
     expected =
-        D.fromNamedColumns
+        D.fromColumns
             [ ("country", DI.fromList (["France", "UK", "US"] :: [T.Text]))
             , ("total", DI.fromList ([101, 105, 285] :: [Double]))
             ]

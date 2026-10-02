@@ -146,7 +146,7 @@ predicateWithOpts =
     TestCase
         ( assertEqual
             "predicateWithOpts"
-            (D.fromNamedColumns [("id", D.fromList [6 :: Int32, 7])])
+            (D.fromColumns [("id", D.fromList [6 :: Int32, 7])])
             ( unsafePerformIO
                 ( D.readParquetWithOpts
                     ( D.defaultParquetReadOptions
@@ -169,7 +169,7 @@ predicateUsesNonSelectedColumnWithOpts =
     TestCase
         ( assertEqual
             "predicateUsesNonSelectedColumnWithOpts"
-            (D.fromNamedColumns [("bool_col", D.fromList [True, False])])
+            (D.fromColumns [("bool_col", D.fromList [True, False])])
             ( unsafePerformIO
                 ( D.readParquetWithOpts
                     ( D.defaultParquetReadOptions
@@ -828,7 +828,7 @@ nullableIntDecimal = testBothReadParquetPaths $ \readParquet ->
     TestCase
         ( assertEqual
             "nullableIntDecimal"
-            ( D.fromNamedColumns
+            ( D.fromColumns
                 [ ("int32_dec", D.fromList [Just (1 :: Double), Nothing, Just 2.5, Just 0.75])
                 , ("int64_dec", D.fromList [Nothing, Just (1234.5 :: Double), Nothing, Just (-5)])
                 ]
@@ -1331,7 +1331,7 @@ timestampNanos = testBothReadParquetPaths $ \readParquet ->
     TestCase $
         assertEqual
             "TIMESTAMP(NANOS) decodes to correct UTCTime"
-            ( D.fromNamedColumns
+            ( D.fromColumns
                 [
                     ( "ts"
                     , D.fromList

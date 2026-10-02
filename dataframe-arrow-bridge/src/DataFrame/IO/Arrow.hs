@@ -53,11 +53,7 @@ import Foreign.C.String (CString, newCString, peekCString)
 import Type.Reflection (typeRep)
 
 import DataFrame.Internal.Column (Column (..))
-import DataFrame.Internal.DataFrame (DataFrame (..), fromNamedColumns)
-
--- ---------------------------------------------------------------------------
--- Opaque phantom types for the Arrow structs
--- ---------------------------------------------------------------------------
+import DataFrame.Internal.DataFrame (DataFrame (..), fromColumns)
 
 data ArrowSchema
 data ArrowArray
@@ -112,10 +108,6 @@ _arrayDictionary = 56
 _arrayRelease = 64
 _arrayPrivateData = 72
 
--- ---------------------------------------------------------------------------
--- Helpers
--- ---------------------------------------------------------------------------
-
 -- Write a Storable value at a byte offset from a base pointer.
 at :: (Storable a) => Ptr b -> Int -> a -> IO ()
 at p off = poke (castPtr (p `plusPtr` off))
@@ -123,10 +115,6 @@ at p off = poke (castPtr (p `plusPtr` off))
 -- Read a Storable value at a byte offset from a base pointer.
 readAt :: (Storable a) => Ptr b -> Int -> IO a
 readAt p off = peek (castPtr (p `plusPtr` off))
-
--- ---------------------------------------------------------------------------
--- Release callbacks (self-import trick for compile-time-constant FunPtr)
--- ---------------------------------------------------------------------------
 
 foreign export ccall "df_release_schema"
     releaseSchemaImpl :: Ptr ArrowSchema -> IO ()
@@ -445,7 +433,7 @@ arrowToDataframe rawSchema rawArray = do
     relS <-
         readAt schemaPtr _schemaRelease :: IO (FunPtr (Ptr ArrowSchema -> IO ()))
     when (relS /= nullFunPtr) $ callRelSchema relS schemaPtr
-    return $ fromNamedColumns cols
+    return $ fromColumns cols
 
 readArrowColumn :: Ptr ArrowSchema -> Ptr ArrowArray -> IO (T.Text, Column)
 readArrowColumn schemaPtr arrayPtr = do

@@ -38,7 +38,7 @@ interpI df e = case interpret @Int df e of
 
 df :: D.DataFrame
 df =
-    D.fromNamedColumns
+    D.fromColumns
         [ ("x1", DI.fromList xs1)
         , ("x2", DI.fromList xs2)
         , ("y", DI.fromList [3 + 2 * a - 0.5 * b | (a, b) <- zip xs1 xs2])

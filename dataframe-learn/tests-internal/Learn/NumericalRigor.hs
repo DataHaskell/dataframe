@@ -200,7 +200,7 @@ testSplitProportions :: Test
 testSplitProportions = TestCase $ do
     let nRows = 4000
         frac = 0.7 :: Double
-        df = D.fromNamedColumns [("x", DI.fromList [1 .. nRows :: Int])]
+        df = D.fromColumns [("x", DI.fromList [1 .. nRows :: Int])]
         seeds = [1 .. 25] :: [Int]
         seFrac = sqrt (frac * (1 - frac) / fromIntegral nRows)
     mapM_
@@ -234,7 +234,7 @@ testKMeansInertiaStable = TestCase $ do
     let
         as = [0, 0.1, -0.1, 0.05, -0.05, 10, 10.1, 9.9, 10.05, 9.95] :: [Double]
         bs = [0, -0.1, 0.1, 0.05, -0.05, 10, 9.9, 10.1, 9.95, 10.05] :: [Double]
-        df = D.fromNamedColumns [("a", DI.fromList as), ("b", DI.fromList bs)]
+        df = D.fromColumns [("a", DI.fromList as), ("b", DI.fromList bs)]
         fitSeed s =
             kmInertia $
                 fit
@@ -277,7 +277,7 @@ testKMeansInertiaStable = TestCase $ do
 
 blobsDF :: D.DataFrame
 blobsDF =
-    D.fromNamedColumns
+    D.fromColumns
         [
             ( "a"
             , DI.fromList ([0, 0.2, -0.1, 0.1, 8, 8.1, 7.9, 8.2, 0.05, 8.05] :: [Double])
@@ -291,7 +291,7 @@ blobsDF =
 -- | Many-cluster frame so k-means++ seeding genuinely depends on the seed.
 spreadDF :: D.DataFrame
 spreadDF =
-    D.fromNamedColumns
+    D.fromColumns
         [ ("a", DI.fromList ([0, 1, 2, 10, 11, 12, 20, 21, 22, 30, 31, 32] :: [Double]))
         , ("b", DI.fromList ([0, 1, 0, 10, 11, 10, 0, 1, 0, 10, 11, 10] :: [Double]))
         ]
@@ -334,7 +334,7 @@ type only derives Show, so compare representative numeric fields directly.
 testRFFReproducible :: Test
 testRFFReproducible = TestCase $ do
     let clsDF =
-            D.fromNamedColumns
+            D.fromColumns
                 [ ("x", DI.fromList ([-3, -2, -1, -0.5, 0.5, 1, 2, 3] :: [Double]))
                 , ("label", DI.fromList ([0, 0, 0, 0, 1, 1, 1, 1] :: [Int]))
                 ]
@@ -360,7 +360,7 @@ partition.
 -}
 testSplitReproducible :: Test
 testSplitReproducible = TestCase $ do
-    let df = D.fromNamedColumns [("x", DI.fromList [1 .. 200 :: Int])]
+    let df = D.fromColumns [("x", DI.fromList [1 .. 200 :: Int])]
         (tr1, te1) = D.randomSplit (mkStdGen 42) 0.6 df
         (tr2, te2) = D.randomSplit (mkStdGen 42) 0.6 df
     assertBool "randomSplit same seed: same train" (tr1 == tr2)

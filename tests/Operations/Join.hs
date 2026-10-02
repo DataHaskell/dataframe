@@ -16,14 +16,14 @@ import Test.HUnit
 
 df1 :: D.DataFrame
 df1 =
-    D.fromNamedColumns
+    D.fromColumns
         [ ("key", D.fromList ["K0" :: Text, "K1", "K2", "K3", "K4", "K5"])
         , ("A", D.fromList ["A0" :: Text, "A1", "A2", "A3", "A4", "A5"])
         ]
 
 df2 :: D.DataFrame
 df2 =
-    D.fromNamedColumns
+    D.fromColumns
         [ ("key", D.fromList ["K0" :: Text, "K1", "K2"])
         , ("B", D.fromList ["B0" :: Text, "B1", "B2"])
         ]
@@ -48,7 +48,7 @@ testInnerJoin =
     TestCase
         ( assertEqual
             "Test inner join with single key"
-            ( D.fromNamedColumns
+            ( D.fromColumns
                 [ ("key", D.fromList ["K0" :: Text, "K1", "K2"])
                 , ("A", D.fromList ["A0" :: Text, "A1", "A2"])
                 , ("B", D.fromList ["B0" :: Text, "B1", "B2"])
@@ -62,7 +62,7 @@ testLeftJoin =
     TestCase
         ( assertEqual
             "Test left join with single key"
-            ( D.fromNamedColumns
+            ( D.fromColumns
                 [ ("key", D.fromList ["K0" :: Text, "K1", "K2", "K3", "K4", "K5"])
                 , ("A", D.fromList ["A0" :: Text, "A1", "A2", "A3", "A4", "A5"])
                 , ("B", D.fromList [Just "B0", Just "B1" :: Maybe Text, Just "B2"])
@@ -76,7 +76,7 @@ testRightJoin =
     TestCase
         ( assertEqual
             "Test right join with single key"
-            ( D.fromNamedColumns
+            ( D.fromColumns
                 [ ("key", D.fromList ["K0" :: Text, "K1", "K2"])
                 , ("A", D.fromList [Just "A0" :: Maybe Text, Just "A1", Just "A2"])
                 , ("B", D.fromList ["B0" :: Text, "B1", "B2"])
@@ -96,7 +96,7 @@ testInnerJoinTyped =
     TestCase
         ( assertEqual
             "Test typed inner join with single key"
-            ( D.fromNamedColumns
+            ( D.fromColumns
                 [ ("key", D.fromList ["K0" :: Text, "K1", "K2"])
                 , ("A", D.fromList ["A0" :: Text, "A1", "A2"])
                 , ("B", D.fromList ["B0" :: Text, "B1", "B2"])
@@ -110,7 +110,7 @@ testLeftJoinTyped =
     TestCase
         ( assertEqual
             "Test typed left join with single key"
-            ( D.fromNamedColumns
+            ( D.fromColumns
                 [ ("key", D.fromList ["K0" :: Text, "K1", "K2", "K3", "K4", "K5"])
                 , ("A", D.fromList ["A0" :: Text, "A1", "A2", "A3", "A4", "A5"])
                 , ("B", D.fromList [Just "B0", Just "B1" :: Maybe Text, Just "B2"])
@@ -122,7 +122,7 @@ testLeftJoinTyped =
 -- A right-hand frame whose payload column is already optional.
 dfOptional :: D.DataFrame
 dfOptional =
-    D.fromNamedColumns
+    D.fromColumns
         [ ("key", D.fromList ["K0" :: Text, "K1"])
         , ("C", D.fromList [Just 10 :: Maybe Int, Just 11])
         ]
@@ -140,7 +140,7 @@ testLeftJoinTypedOptional =
     TestCase
         ( assertEqual
             "Typed left join keeps an already-optional column single-Maybe"
-            ( D.fromNamedColumns
+            ( D.fromColumns
                 [ ("key", D.fromList ["K0" :: Text, "K1", "K2", "K3", "K4", "K5"])
                 , ("A", D.fromList ["A0" :: Text, "A1", "A2", "A3", "A4", "A5"])
                 ,
@@ -163,7 +163,7 @@ testRightJoinTyped =
     TestCase
         ( assertEqual
             "Test typed right join with single key"
-            ( D.fromNamedColumns
+            ( D.fromColumns
                 [ ("key", D.fromList ["K0" :: Text, "K1", "K2"])
                 , ("A", D.fromList [Just "A0" :: Maybe Text, Just "A1", Just "A2"])
                 , ("B", D.fromList ["B0" :: Text, "B1", "B2"])
@@ -195,7 +195,7 @@ testFullOuterJoin =
     TestCase
         ( assertEqual
             "Test full outer join with single key"
-            ( D.fromNamedColumns
+            ( D.fromColumns
                 [
                     ( "Name"
                     , D.fromList ["James" :: Text, "Kelly", "Mike", "Sally"]
@@ -224,7 +224,7 @@ testFullOuterJoinUnboxedKey =
     TestCase
         ( assertEqual
             "Full outer join on an unboxed (Int) key column coalesces correctly"
-            ( D.fromNamedColumns
+            ( D.fromColumns
                 [ ("customer_id", D.fromList [1 :: Int, 2, 3, 4])
                 ,
                     ( "amount"
@@ -244,21 +244,21 @@ testFullOuterJoinUnboxedKey =
 
 ordersDf :: D.DataFrame
 ordersDf =
-    D.fromNamedColumns
+    D.fromColumns
         [ ("customer_id", D.fromList [1 :: Int, 2, 4])
         , ("amount", D.fromList [250.0 :: Double, 80.0, 125.0])
         ]
 
 customersDf :: D.DataFrame
 customersDf =
-    D.fromNamedColumns
+    D.fromColumns
         [ ("customer_id", D.fromList [1 :: Int, 2, 3])
         , ("name", D.fromList ["Ada" :: Text, "Lin", "Grace"])
         ]
 
 dfL :: D.DataFrame
 dfL =
-    D.fromNamedColumns
+    D.fromColumns
         [ ("key", D.fromList ["K0" :: Text, "K1", "K2"])
         , ("X", D.fromList ["LX0" :: Text, "LX1", "LX2"])
         , ("Lonly", D.fromList ["L0" :: Text, "L1", "L2"])
@@ -266,7 +266,7 @@ dfL =
 
 dfR :: D.DataFrame
 dfR =
-    D.fromNamedColumns
+    D.fromColumns
         [ ("key", D.fromList ["K0" :: Text, "K1", "K3"])
         , ("X", D.fromList ["RX0" :: Text, "RX1", "RX3"])
         , ("Ronly", D.fromList [10 :: Int, 11, 13])
@@ -277,7 +277,7 @@ testInnerJoinWithCollisions =
     TestCase
         ( assertEqual
             "Test inner join with single key"
-            ( D.fromNamedColumns
+            ( D.fromColumns
                 [ ("key", D.fromList ["K0" :: Text, "K1"])
                 , ("X", D.fromList [These "LX0" "RX0" :: These Text Text, These "LX1" "RX1"])
                 , ("Lonly", D.fromList ["L0" :: Text, "L1"])
@@ -292,7 +292,7 @@ testLeftJoinWithCollisions =
     TestCase
         ( assertEqual
             "Test left join with single key"
-            ( D.fromNamedColumns
+            ( D.fromColumns
                 [ ("key", D.fromList ["K0" :: Text, "K1", "K2"])
                 ,
                     ( "X"
@@ -310,7 +310,7 @@ testRightJoinWithCollisions =
     TestCase
         ( assertEqual
             "Test right join with single key"
-            ( D.fromNamedColumns
+            ( D.fromColumns
                 [ ("key", D.fromList ["K0" :: Text, "K1", "K3"])
                 ,
                     ( "X"
@@ -328,7 +328,7 @@ testOuterJoinWithCollisions =
     TestCase
         ( assertEqual
             "Test right join with single key"
-            ( D.fromNamedColumns
+            ( D.fromColumns
                 [ ("key", D.fromList ["K0" :: Text, "K1", "K2", "K3"])
                 ,
                     ( "X"
@@ -390,7 +390,7 @@ testInnerJoinMissingKeysSuggestion :: Test
 testInnerJoinMissingKeysSuggestion =
     TestCase $
         let typoDf =
-                D.fromNamedColumns
+                D.fromColumns
                     [ ("hello", D.fromList ["H" :: Text])
                     , ("world", D.fromList ["W" :: Text])
                     ]
@@ -402,14 +402,14 @@ testInnerJoinMissingKeysSuggestion =
 -- Empty DataFrame fixtures: same schema as df1/df2 but zero rows.
 emptyDf1 :: D.DataFrame
 emptyDf1 =
-    D.fromNamedColumns
+    D.fromColumns
         [ ("key", D.fromList ([] :: [Text]))
         , ("A", D.fromList ([] :: [Text]))
         ]
 
 emptyDf2 :: D.DataFrame
 emptyDf2 =
-    D.fromNamedColumns
+    D.fromColumns
         [ ("key", D.fromList ([] :: [Text]))
         , ("B", D.fromList ([] :: [Text]))
         ]
@@ -456,14 +456,14 @@ testLeftJoinRightEmpty =
 -- Expected inner join: 1 K0 pair + 4 K1 pairs = 5 rows
 manyLeft :: D.DataFrame
 manyLeft =
-    D.fromNamedColumns
+    D.fromColumns
         [ ("key", D.fromList ["K0" :: Text, "K1", "K1"])
         , ("A", D.fromList ["A0" :: Text, "A1", "A2"])
         ]
 
 manyRight :: D.DataFrame
 manyRight =
-    D.fromNamedColumns
+    D.fromColumns
         [ ("key", D.fromList ["K0" :: Text, "K1", "K1"])
         , ("B", D.fromList ["B0" :: Text, "B1", "B2"])
         ]
@@ -490,14 +490,14 @@ testManyToManyLeftJoin =
 -- Left keys 0..9999, right keys 5000..14999 (overlap 5000..9999).
 bigLeft :: D.DataFrame
 bigLeft =
-    D.fromNamedColumns
+    D.fromColumns
         [ ("key", D.fromList [0 .. 9999 :: Int])
         , ("la", D.fromList [i * 2 | i <- [0 .. 9999 :: Int]])
         ]
 
 bigRight :: D.DataFrame
 bigRight =
-    D.fromNamedColumns
+    D.fromColumns
         [ ("key", D.fromList [5000 .. 14999 :: Int])
         , ("rb", D.fromList [i * 3 | i <- [5000 .. 14999 :: Int]])
         ]

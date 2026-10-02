@@ -23,7 +23,7 @@ values =
     ]
 
 testData :: D.DataFrame
-testData = D.fromNamedColumns values
+testData = D.fromColumns values
 
 deriveWAI :: Test
 deriveWAI =

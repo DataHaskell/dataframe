@@ -14,7 +14,7 @@ import Test.HUnit
 
 testData :: D.DataFrame
 testData =
-    D.fromNamedColumns
+    D.fromColumns
         [ ("test1", DI.fromList ([1 .. 26] :: [Int]))
         , ("test2", DI.fromList ['a' .. 'z'])
         , ("test3", DI.fromList ([1 .. 26] :: [Int]))
@@ -132,7 +132,7 @@ addLargerColumnBoxed =
     TestCase
         ( assertEqual
             "Smaller lists should grow and contain optionals"
-            ( D.fromNamedColumns
+            ( D.fromColumns
                 [
                     ( "new"
                     , D.fromList [Just "a" :: Maybe T.Text, Just "b", Just "c", Nothing, Nothing]
@@ -150,7 +150,7 @@ addLargerColumnUnboxed =
     TestCase
         ( assertEqual
             "Smaller lists should grow and contain optionals"
-            ( D.fromNamedColumns
+            ( D.fromColumns
                 [ ("old", D.fromList [Just 1 :: Maybe Int, Just 2, Nothing, Nothing, Nothing])
                 , ("new", D.fromList [Just 1 :: Maybe Int, Just 2, Just 3, Nothing, Nothing])
                 , ("newer", D.fromList [1 :: Int, 2, 3, 4, 5])

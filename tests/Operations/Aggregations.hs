@@ -25,14 +25,14 @@ values =
     ]
 
 testData :: D.DataFrame
-testData = D.fromNamedColumns values
+testData = D.fromColumns values
 
 foldAggregation :: Test
 foldAggregation =
     TestCase
         ( assertEqual
             "Counting elements after grouping gives correct numbers"
-            ( D.fromNamedColumns
+            ( D.fromColumns
                 [ ("test1", DI.fromList [1 :: Int, 2, 3])
                 , ("test2", DI.fromList [6 :: Int, 3, 3])
                 ]
@@ -49,7 +49,7 @@ countAllAggregation =
     TestCase
         ( assertEqual
             "countAll gives per-group row counts without a column argument"
-            ( D.fromNamedColumns
+            ( D.fromColumns
                 [ ("test1", DI.fromList [1 :: Int, 2, 3])
                 , ("n", DI.fromList [6 :: Int, 3, 3])
                 ]
@@ -66,7 +66,7 @@ countAllAggregationTyped =
     TestCase
         ( assertEqual
             "Typed countAll gives per-group row counts"
-            ( D.fromNamedColumns
+            ( D.fromColumns
                 [ ("test1", DI.fromList [1 :: Int, 2, 3])
                 , ("n", DI.fromList [6 :: Int, 3, 3])
                 ]
@@ -93,7 +93,7 @@ foldAggregationTyped =
     TestCase
         ( assertEqual
             "Typed counting elements after grouping gives correct numbers"
-            ( D.fromNamedColumns
+            ( D.fromColumns
                 [ ("test1", DI.fromList [1 :: Int, 2, 3])
                 , ("test2_count", DI.fromList [6 :: Int, 3, 3])
                 ]
@@ -120,7 +120,7 @@ numericAggregation =
     TestCase
         ( assertEqual
             "Mean works for ints"
-            ( D.fromNamedColumns
+            ( D.fromColumns
                 [ ("test1", DI.fromList [1 :: Int, 2, 3])
                 , ("test2", DI.fromList [6.5 :: Double, 8.0, 5.0])
                 ]
@@ -137,7 +137,7 @@ numericAggregationTyped =
     TestCase
         ( assertEqual
             "Typed ean works for ints"
-            ( D.fromNamedColumns
+            ( D.fromColumns
                 [ ("test1", DI.fromList [1 :: Int, 2, 3])
                 , ("test2_mean", DI.fromList [6.5 :: Double, 8.0, 5.0])
                 ]
@@ -164,7 +164,7 @@ numericAggregationOfUnaggregatedUnaryOp =
     TestCase
         ( assertEqual
             "Mean works for ints"
-            ( D.fromNamedColumns
+            ( D.fromColumns
                 [ ("test1", DI.fromList [1 :: Int, 2, 3])
                 , ("test2", DI.fromList [6.5 :: Double, 8.0, 5.0])
                 ]
@@ -183,7 +183,7 @@ numericAggregationOfUnaggregatedBinaryOp =
     TestCase
         ( assertEqual
             "Mean works for ints"
-            ( D.fromNamedColumns
+            ( D.fromColumns
                 [ ("test1", DI.fromList [1 :: Int, 2, 3])
                 , ("test2", DI.fromList [13 :: Double, 16, 10])
                 ]
@@ -200,7 +200,7 @@ reduceAggregationOfUnaggregatedUnaryOp =
     TestCase
         ( assertEqual
             "Mean works for ints"
-            ( D.fromNamedColumns
+            ( D.fromColumns
                 [ ("test1", DI.fromList [1 :: Int, 2, 3])
                 , ("test2", DI.fromList [12 :: Double, 9, 6])
                 ]
@@ -220,7 +220,7 @@ reduceAggregationOfUnaggregatedBinaryOp =
     TestCase
         ( assertEqual
             "Mean works for ints"
-            ( D.fromNamedColumns
+            ( D.fromColumns
                 [ ("test1", DI.fromList [1 :: Int, 2, 3])
                 , ("test2", DI.fromList [24 :: Int, 18, 12])
                 ]
@@ -238,7 +238,7 @@ aggregationOnNoRows =
     TestCase
         ( assertEqual
             "Aggregation on DataFrame with no rows"
-            ( D.fromNamedColumns
+            ( D.fromColumns
                 [ ("test1", DI.fromList ([] :: [Int]))
                 , ("sum(test2)", DI.fromList ([] :: [Int]))
                 ]
@@ -261,7 +261,7 @@ distinctRemovesDuplicates =
             3
             ( D.nRows
                 ( D.distinct
-                    ( D.fromNamedColumns
+                    ( D.fromColumns
                         [ ("x", DI.fromList [1 :: Int, 1, 2, 2, 3])
                         , ("y", DI.fromList [10 :: Int, 10, 20, 20, 30])
                         ]
@@ -278,7 +278,7 @@ distinctNoDuplicates =
             3
             ( D.nRows
                 ( D.distinct
-                    ( D.fromNamedColumns
+                    ( D.fromColumns
                         [ ("x", DI.fromList [1 :: Int, 2, 3])
                         , ("y", DI.fromList [10 :: Int, 20, 30])
                         ]
@@ -295,7 +295,7 @@ distinctAllSameRows =
             1
             ( D.nRows
                 ( D.distinct
-                    ( D.fromNamedColumns
+                    ( D.fromColumns
                         [("x", DI.fromList [42 :: Int, 42, 42, 42])]
                     )
                 )
@@ -305,7 +305,7 @@ distinctAllSameRows =
 -- groupBy on an Optional (nullable) column: Nothing values form their own group.
 optGroupByDf :: D.DataFrame
 optGroupByDf =
-    D.fromNamedColumns
+    D.fromColumns
         [ ("key", DI.fromList [Just 1 :: Maybe Int, Just 1, Just 2, Nothing, Nothing])
         , ("val", DI.fromList [10 :: Int, 20, 30, 40, 50])
         ]

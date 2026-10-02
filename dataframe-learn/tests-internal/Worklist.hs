@@ -43,7 +43,7 @@ import Test.QuickCheck
 -- must collapse them; z gives a third column for non-consolidating cross-column combos.
 fixtureDF :: D.DataFrame
 fixtureDF =
-    D.fromNamedColumns
+    D.fromColumns
         [ ("x", DI.fromList ([0, 1, 2, 3, 4, 5] :: [Double]))
         , ("y", DI.fromList ([5, 4, 3, 2, 1, 0] :: [Double]))
         , ("z", DI.fromList ([2, 5, 1, 4, 0, 3] :: [Double]))
@@ -108,7 +108,7 @@ collBase = [xGt 2, yLt 3, yGt 2]
 -- vectors — broader coverage for the truth-vector floor / dedup than the 6-row x/y fixture.
 wideDF :: D.DataFrame
 wideDF =
-    D.fromNamedColumns
+    D.fromColumns
         [ ("a", DI.fromList ([0, 1, 2, 3, 4, 5, 6, 7, 8, 9] :: [Double]))
         , ("b", DI.fromList ([9, 7, 5, 3, 1, 8, 6, 4, 2, 0] :: [Double]))
         , ("c", DI.fromList ([1, 1, 2, 2, 3, 3, 4, 4, 5, 5] :: [Double]))

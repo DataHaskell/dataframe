@@ -81,7 +81,7 @@ requireTargetInfo target df = case mkTargetInfo @T.Text target df of
 -- 4 rows: label = ["A","B","A","C"], x = [1.0,2.0,3.0,4.0]
 fixtureDF :: D.DataFrame
 fixtureDF =
-    D.fromNamedColumns
+    D.fromColumns
         [ ("label", DI.fromList (["A", "B", "A", "C"] :: [T.Text]))
         , ("x", DI.fromList ([1.0, 2.0, 3.0, 4.0] :: [Double]))
         ]
@@ -149,7 +149,7 @@ carePointsMixed = TestCase $ do
 carePointsBothCorrect :: Test
 carePointsBothCorrect = TestCase $ do
     let df2 =
-            D.fromNamedColumns
+            D.fromColumns
                 [ ("label", DI.fromList (["A", "A"] :: [T.Text]))
                 , ("x", DI.fromList ([1.0, 2.0] :: [Double]))
                 ]
@@ -169,7 +169,7 @@ carePointsBothCorrect = TestCase $ do
 majorityVoteTest :: Test
 majorityVoteTest = TestCase $ do
     let df =
-            D.fromNamedColumns
+            D.fromColumns
                 [ ("label", DI.fromList (["cat", "dog", "cat", "cat"] :: [T.Text]))
                 , ("x", DI.fromList ([1.0, 2.0, 3.0, 4.0] :: [Double]))
                 ]
@@ -181,7 +181,7 @@ majorityVoteTest = TestCase $ do
 majorityVoteSubset :: Test
 majorityVoteSubset = TestCase $ do
     let df =
-            D.fromNamedColumns
+            D.fromColumns
                 [ ("label", DI.fromList (["cat", "dog", "cat", "cat"] :: [T.Text]))
                 , ("x", DI.fromList ([1.0, 2.0, 3.0, 4.0] :: [Double]))
                 ]
@@ -195,7 +195,7 @@ majorityVoteSubset = TestCase $ do
 computeLossZero :: Test
 computeLossZero = TestCase $ do
     let df =
-            D.fromNamedColumns
+            D.fromColumns
                 [ ("label", DI.fromList (["A", "A", "B", "B"] :: [T.Text]))
                 , ("x", DI.fromList ([1.0, 2.0, 3.0, 4.0] :: [Double]))
                 ]
@@ -206,7 +206,7 @@ computeLossZero = TestCase $ do
 computeLossHalf :: Test
 computeLossHalf = TestCase $ do
     let df =
-            D.fromNamedColumns
+            D.fromColumns
                 [ ("label", DI.fromList (["A", "A", "B", "B"] :: [T.Text]))
                 , ("x", DI.fromList ([1.0, 2.0, 3.0, 4.0] :: [Double]))
                 ]
@@ -286,7 +286,7 @@ sepDF :: D.DataFrame
 sepDF =
     let xs = map fromIntegral [1 .. 20 :: Int] :: [Double]
         labels = map (\x -> if x <= 10.0 then "pos" else "neg") xs :: [T.Text]
-     in D.fromNamedColumns
+     in D.fromColumns
             [ ("label", DI.fromList labels)
             , ("x", DI.fromList xs)
             ]
@@ -343,7 +343,7 @@ taoMonotone = TestCase $ do
 taoConvergesPureLabels :: Test
 taoConvergesPureLabels = TestCase $ do
     let df =
-            D.fromNamedColumns
+            D.fromColumns
                 [ ("label", DI.fromList (replicate 10 ("A" :: T.Text)))
                 , ("x", DI.fromList ([1.0 .. 10.0] :: [Double]))
                 ]
@@ -373,7 +373,7 @@ gridPairs = [(x, y) | y <- [1 .. 4], x <- [1 .. 4]]
 
 gridBaseDF :: D.DataFrame
 gridBaseDF =
-    D.fromNamedColumns
+    D.fromColumns
         [ ("x", DI.fromList (map fst gridPairs))
         , ("y", DI.fromList (map snd gridPairs))
         ]
@@ -501,7 +501,7 @@ taoLinearRecoversObliqueFromAxisAlignedPool = TestCase $ do
 -- Just 7..12 -> "neg". Exercises the nullable numeric path.
 nullableSepDF :: D.DataFrame
 nullableSepDF =
-    D.fromNamedColumns
+    D.fromColumns
         [ ("label", DI.fromList (replicate 6 "pos" ++ replicate 6 "neg" :: [T.Text]))
         ,
             ( "x"
@@ -517,7 +517,7 @@ nullableSepDF =
 -- DF with genuine nulls interspersed.
 nullsMixedDF :: D.DataFrame
 nullsMixedDF =
-    D.fromNamedColumns
+    D.fromColumns
         [ ("label", DI.fromList (["pos", "pos", "pos", "neg", "neg", "neg"] :: [T.Text]))
         ,
             ( "x"
@@ -542,7 +542,7 @@ numericColsNullableDoubleTest = TestCase $ do
 numericColsNullableIntTest :: Test
 numericColsNullableIntTest = TestCase $ do
     let df =
-            D.fromNamedColumns
+            D.fromColumns
                 [ ("label", DI.fromList (["pos", "neg"] :: [T.Text]))
                 ,
                     ( "n"
@@ -564,7 +564,7 @@ numericCondsNullableNonEmptyTest =
 nullValueRoutesFalseTest :: Test
 nullValueRoutesFalseTest = TestCase $ do
     let df =
-            D.fromNamedColumns
+            D.fromColumns
                 [ ("label", DI.fromList (["A", "B"] :: [T.Text]))
                 ,
                     ( "x"
@@ -608,7 +608,7 @@ nullableFitWithNullsNoCrashTest = TestCase $ do
 numericExprsWithTermsMixedTest :: Test
 numericExprsWithTermsMixedTest = TestCase $ do
     let df =
-            D.fromNamedColumns
+            D.fromColumns
                 [
                     ( "x"
                     , DI.fromVector
@@ -662,7 +662,7 @@ missingnessCondVecTest = TestCase $ do
 observedOnlyThresholdsTest :: Test
 observedOnlyThresholdsTest = TestCase $ do
     let df =
-            D.fromNamedColumns
+            D.fromColumns
                 [
                     ( "x"
                     , DI.fromVector
@@ -699,7 +699,7 @@ arrayFromBytes ws = A.run $ do
 packedMissingnessTest :: Test
 packedMissingnessTest = TestCase $ do
     let df =
-            D.fromNamedColumns
+            D.fromColumns
                 [("s", packedFromTexts (Just [1, 3]) ["yes", "", "no", ""])]
         isMissingS = F.isNothing (F.col @(Maybe T.Text) "s")
         conds = missingnessConditions df
@@ -709,7 +709,7 @@ packedMissingnessTest = TestCase $ do
         "no missingness cond for non-nullable PackedText"
         ( null
             ( missingnessConditions
-                (D.fromNamedColumns [("t", packedFromTexts Nothing ["a", "b"])])
+                (D.fromColumns [("t", packedFromTexts Nothing ["a", "b"])])
             )
         )
     case filter (eqExpr isMissingS . cvExpr) (numericCondVecs defaultTreeConfig df df) of
@@ -723,7 +723,7 @@ packedMissingnessTest = TestCase $ do
 probsFromIndicesBasic :: Test
 probsFromIndicesBasic = TestCase $ do
     let df =
-            D.fromNamedColumns
+            D.fromColumns
                 [ ("label", DI.fromList (["A", "A", "B"] :: [T.Text]))
                 , ("x", DI.fromList ([1.0, 2.0, 3.0] :: [Double]))
                 ]
@@ -735,7 +735,7 @@ probsFromIndicesBasic = TestCase $ do
 probsFromIndicesSubset :: Test
 probsFromIndicesSubset = TestCase $ do
     let df =
-            D.fromNamedColumns
+            D.fromColumns
                 [ ("label", DI.fromList (["A", "A", "B", "B"] :: [T.Text]))
                 , ("x", DI.fromList ([1.0, 2.0, 3.0, 4.0] :: [Double]))
                 ]
@@ -752,7 +752,7 @@ probsFromIndicesSingleClass = TestCase $ do
 buildProbTreeLeaf :: Test
 buildProbTreeLeaf = TestCase $ do
     let df =
-            D.fromNamedColumns
+            D.fromColumns
                 [ ("label", DI.fromList (["A", "A", "A"] :: [T.Text]))
                 , ("x", DI.fromList ([1.0, 2.0, 3.0] :: [Double]))
                 ]
@@ -950,7 +950,7 @@ taoLinearProducesSparsity = TestCase $ do
             | i <- [0 .. n - 1]
             ]
         df =
-            D.fromNamedColumns
+            D.fromColumns
                 [ ("label", DI.fromList labels)
                 , ("a", DI.fromList avals)
                 , ("b", DI.fromList bs)
@@ -985,7 +985,7 @@ taoLinearDoesNotUseTarget = TestCase $ do
         bs = [fromIntegral (i `mod` 3) :: Double | i <- [0 .. n - 1]]
         targets = [if even i then 1.0 else 0.0 :: Double | i <- [0 .. n - 1]]
         df =
-            D.fromNamedColumns
+            D.fromColumns
                 [ ("target", DI.fromList targets)
                 , ("a", DI.fromList as)
                 , ("b", DI.fromList bs)
@@ -1173,7 +1173,7 @@ testCategoricalNullableBinary = TestCase $ do
 -- A small synthetic DataFrame to materialize CondVecs against.
 threshFixtureDF :: D.DataFrame
 threshFixtureDF =
-    D.fromNamedColumns
+    D.fromColumns
         [ ("x", DI.fromList ([0.0, 1.0, 2.0, 3.0, 4.0, 5.0] :: [Double]))
         , ("y", DI.fromList ([5.0, 4.0, 3.0, 2.0, 1.0, 0.0] :: [Double]))
         ]

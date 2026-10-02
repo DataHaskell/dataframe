@@ -10,7 +10,7 @@ import Test.HUnit
 
 testData :: D.DataFrame
 testData =
-    D.fromNamedColumns
+    D.fromColumns
         [ ("test1", DI.fromList ([1 .. 26] :: [Int]))
         , ("test2", DI.fromList ['a' .. 'z'])
         ]

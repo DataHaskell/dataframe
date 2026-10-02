@@ -46,7 +46,7 @@ fromCsvBytesHappyPath = TestLabel "fromCsvBytes_happy_path" $ TestCase $ do
 fromCsvRoundTrip :: Test
 fromCsvRoundTrip = TestLabel "fromCsv_roundTrip" $ TestCase $ do
     let df =
-            D.fromNamedColumns
+            D.fromColumns
                 [ ("a", DI.fromList @Int [1, 2, 3])
                 , ("b", DI.fromList @T.Text ["hello", "world", "test"])
                 ]
@@ -65,7 +65,7 @@ fromCsvRoundTrip = TestLabel "fromCsv_roundTrip" $ TestCase $ do
 fromCsvBytesRoundTrip :: Test
 fromCsvBytesRoundTrip = TestLabel "fromCsvBytes_roundTrip" $ TestCase $ do
     let df =
-            D.fromNamedColumns
+            D.fromColumns
                 [ ("x", DI.fromList @Int [10, 20])
                 , ("y", DI.fromList @Double [1.5, 2.5])
                 ]

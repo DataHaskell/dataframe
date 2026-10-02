@@ -69,7 +69,7 @@ Works with GHC 9.4 through 9.12. A custom REPL with all imports pre-loaded is av
 
 ```bash
 $ dataframe
-dataframe> df = D.fromNamedColumns ["product" =: [1, 1, 2, 2, 3, 3 :: Int], "amount" =: [100, 120, 50, 20, 40, 30 :: Int]]
+dataframe> df = D.fromColumns ["product" =: [1, 1, 2, 2, 3, 3 :: Int], "amount" =: [100, 120, 50, 20, 40, 30 :: Int]]
 dataframe> df |> D.groupBy ["product"] |> ["total" .= F.countAll ]
 
 ```
@@ -88,7 +88,7 @@ import qualified DataFrame as D
 import qualified DataFrame.Functions as F
 import DataFrame.Expression.Operators
 
-sales = D.fromNamedColumns
+sales = D.fromColumns
     [ "product" =: [1, 1, 2, 2, 3, 3 :: Int]
     , "amount"  =: [100, 120, 50, 20, 40, 30 :: Int]
     ]
@@ -442,7 +442,7 @@ tdf |> DT.filterWhere (DT.col @"name" DT..>. DT.lit 50000)
 ```haskell
 type ScoreSchema = '[ '("name", Text), '("score", Maybe Double)]
 
-scoresDf = D.fromNamedColumns
+scoresDf = D.fromColumns
     [ "name"  =: ["a", "b", "c" :: Text]
     , "score" =: [Just 1.0, Nothing, Just 3.0 :: Maybe Double]
     ]

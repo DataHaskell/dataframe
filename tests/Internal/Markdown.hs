@@ -31,7 +31,7 @@ tests =
     , TestLabel "toMarkdown keeps an operator name in one cell" $
         TestCase $ do
             let df =
-                    D.fromNamedColumns
+                    D.fromColumns
                         [ ("name", fromList ["plain" :: T.Text, "f<|>g"])
                         , ("mb", fromList [1.0 :: Double, 2.0])
                         ]
@@ -45,7 +45,7 @@ tests =
     , TestLabel "nullable boxed Text renders without quotes" $
         TestCase $ do
             let df =
-                    D.fromNamedColumns
+                    D.fromColumns
                         [("name", ensureOptional (fromList ["Ada" :: T.Text]))]
                 md = D.toMarkdown df
             assertBool

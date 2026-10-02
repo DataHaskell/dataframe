@@ -27,7 +27,7 @@ import Test.HUnit
 -- DataFrame with one plain Int column and one Maybe Int column
 testData :: D.DataFrame
 testData =
-    D.fromNamedColumns
+    D.fromColumns
         [ ("x", DI.fromList ([1, 2, 3] :: [Int]))
         , ("y", DI.fromVector (V.fromList [Just 10, Nothing, Just 30 :: Maybe Int]))
         ]
@@ -229,7 +229,7 @@ nullLift2IntInt =
 -- DataFrame with Int, Maybe Int, Double, Maybe Double columns
 crossData :: D.DataFrame
 crossData =
-    D.fromNamedColumns
+    D.fromColumns
         [ ("x", DI.fromList ([1, 2, 3] :: [Int]))
         , ("y", DI.fromVector (V.fromList [Just 10, Nothing, Just 30 :: Maybe Int]))
         , ("d", DI.fromList ([1.5, 2.5, 3.5] :: [Double]))
@@ -451,7 +451,7 @@ mulMaybeIntMaybeDouble =
 -- Division tests use clean-dividing data: x=[2,4,6], d=[1,2,3]
 divData :: D.DataFrame
 divData =
-    D.fromNamedColumns
+    D.fromColumns
         [ ("x", DI.fromList ([2, 4, 6] :: [Int]))
         , ("y", DI.fromVector (V.fromList [Just 4, Nothing, Just 6 :: Maybe Int]))
         , ("d", DI.fromList ([1.0, 2.0, 3.0] :: [Double]))
@@ -740,7 +740,7 @@ nullsInOneGroupValues =
 
 nullsInOneGroup :: D.DataFrame
 nullsInOneGroup =
-    D.fromNamedColumns
+    D.fromColumns
         [ ("k", DI.fromList interleavedKeys)
         , ("v", DI.fromVector (V.fromList nullsInOneGroupValues))
         ]
@@ -752,7 +752,7 @@ nullsInBothGroupsValues =
 
 nullsInBothGroups :: D.DataFrame
 nullsInBothGroups =
-    D.fromNamedColumns
+    D.fromColumns
         [ ("k", DI.fromList interleavedKeys)
         , ("v", DI.fromVector (V.fromList nullsInBothGroupsValues))
         ]
@@ -766,7 +766,7 @@ sumGroupedNullable df =
 
 expectedGroupSums :: [Double] -> D.DataFrame
 expectedGroupSums sums =
-    D.fromNamedColumns
+    D.fromColumns
         [ ("k", DI.fromList (["a", "b"] :: [T.Text]))
         , ("s", DI.fromList sums)
         ]

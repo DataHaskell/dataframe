@@ -34,14 +34,14 @@ interpI df e = case interpret @Int df e of
 
 clsDF :: D.DataFrame
 clsDF =
-    D.fromNamedColumns
+    D.fromColumns
         [ ("x", DI.fromList ([-3, -2, -1, -0.5, 0.5, 1, 2, 3] :: [Double]))
         , ("label", DI.fromList ([0, 0, 0, 0, 1, 1, 1, 1] :: [Int]))
         ]
 
 blobs :: D.DataFrame
 blobs =
-    D.fromNamedColumns
+    D.fromColumns
         [ ("a", DI.fromList ([0, 0.2, -0.1, 0.1, 8, 8.1, 7.9, 8.2] :: [Double]))
         , ("b", DI.fromList ([0, -0.1, 0.2, 0.0, 5, 5.2, 4.9, 5.1] :: [Double]))
         ]
@@ -49,7 +49,7 @@ blobs =
 testGBMRegression :: Test
 testGBMRegression = TestCase $ do
     let df =
-            D.fromNamedColumns
+            D.fromColumns
                 [ ("x", DI.fromList ([1 .. 12] :: [Double]))
                 ,
                     ( "y"
@@ -73,7 +73,7 @@ testGBMRegression = TestCase $ do
 testGBMStaged :: Test
 testGBMStaged = TestCase $ do
     let df =
-            D.fromNamedColumns
+            D.fromColumns
                 [ ("x", DI.fromList ([1 .. 8] :: [Double]))
                 , ("y", DI.fromList ([1 .. 8] :: [Double]))
                 ]
@@ -110,7 +110,7 @@ testGMM = TestCase $ do
 testDBSCAN :: Test
 testDBSCAN = TestCase $ do
     let df =
-            D.fromNamedColumns
+            D.fromColumns
                 [ ("a", DI.fromList ([0, 0.1, 0.2, 5, 5.1, 5.2, 50] :: [Double]))
                 , ("b", DI.fromList ([0, 0.1, 0.0, 5, 5.0, 5.1, 50] :: [Double]))
                 ]
@@ -132,7 +132,7 @@ testDBSCAN = TestCase $ do
 testGridSearch :: Test
 testGridSearch = TestCase $ do
     let df =
-            D.fromNamedColumns
+            D.fromColumns
                 [ ("x", DI.fromList ([1 .. 40] :: [Double]))
                 ,
                     ( "y"
@@ -163,7 +163,7 @@ the target is separable in rank but not in value.
 -}
 sigmoidCurveDF :: D.DataFrame
 sigmoidCurveDF =
-    D.fromNamedColumns
+    D.fromColumns
         [ ("x", DI.fromList (concatMap (replicate group . fst) cells))
         , ("label", DI.fromList (concatMap snd cells))
         ]

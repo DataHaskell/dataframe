@@ -33,7 +33,7 @@ import DataFrame.IO.Parquet.Thrift (
     unField,
  )
 import DataFrame.Internal.Column (Column, fromList)
-import DataFrame.Internal.DataFrame (DataFrame, fromNamedColumns)
+import DataFrame.Internal.DataFrame (DataFrame, fromColumns)
 
 {- | Build an empty 'DataFrame' from a flat list of parquet 'SchemaElement's.
 Only leaf elements (those with no children) become columns. Columns whose
@@ -43,7 +43,7 @@ schemaToEmptyDataFrame :: S.Set T.Text -> [SchemaElement] -> DataFrame
 schemaToEmptyDataFrame nullableCols elems =
     let leafElems =
             filter (\e -> Maybe.fromMaybe 0 (unField e.num_children) == 0) elems
-     in fromNamedColumns (map (schemaElemToColumn nullableCols) leafElems)
+     in fromColumns (map (schemaElemToColumn nullableCols) leafElems)
 
 {- | Convert a single parquet 'SchemaElement' into a named empty 'Column',
 picking a nullable or non-nullable representation based on @nullableCols@.

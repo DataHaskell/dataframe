@@ -200,14 +200,14 @@ testMeanSquaredErrorGuards = TestCase $ do
 testLogisticProbsExtremeFeatures :: Test
 testLogisticProbsExtremeFeatures = TestCase $ do
     let trainDf =
-            D.fromNamedColumns
+            D.fromColumns
                 [ ("x", DI.fromList ([-3, -2, -1, -0.5, 0.5, 1, 2, 3] :: [Double]))
                 , ("label", DI.fromList ([0, 0, 0, 0, 1, 1, 1, 1] :: [Int]))
                 ]
         m = fit defaultLogisticConfig (F.col @Int "label") trainDf
         probs = logisticProbExprs m
         extremeDf =
-            D.fromNamedColumns
+            D.fromColumns
                 [("x", DI.fromList ([-1e6, -1, 0, 1, 1e6] :: [Double]))]
     assertEqual "two one-vs-rest probability exprs" 2 (M.size probs)
     let allProbVals =
@@ -227,7 +227,7 @@ testLogisticProbsExtremeFeatures = TestCase $ do
 testOLSOneRow :: Test
 testOLSOneRow = TestCase $ do
     let df =
-            D.fromNamedColumns
+            D.fromColumns
                 [ ("x", DI.fromList ([2] :: [Double]))
                 , ("y", DI.fromList ([7] :: [Double]))
                 ]
@@ -244,7 +244,7 @@ testOLSOneRow = TestCase $ do
 testLogisticSingleClass :: Test
 testLogisticSingleClass = TestCase $ do
     let df =
-            D.fromNamedColumns
+            D.fromColumns
                 [ ("x", DI.fromList ([-2, -1, 0, 1, 2] :: [Double]))
                 , ("label", DI.fromList ([1, 1, 1, 1, 1] :: [Int]))
                 ]
@@ -261,7 +261,7 @@ testLogisticSingleClass = TestCase $ do
 testLogisticConstantFeatureIgnored :: Test
 testLogisticConstantFeatureIgnored = TestCase $ do
     let df =
-            D.fromNamedColumns
+            D.fromColumns
                 [ ("x", DI.fromList ([-3, -2, -1, -0.5, 0.5, 1, 2, 3] :: [Double]))
                 , ("const", DI.fromList (replicate 8 (5.0 :: Double)))
                 , ("label", DI.fromList ([0, 0, 0, 0, 1, 1, 1, 1] :: [Int]))
@@ -280,7 +280,7 @@ testLinearConstantFeatureZeroWeight :: Test
 testLinearConstantFeatureZeroWeight = TestCase $ do
     let xs = [1, 2, 3, 4, 5, 6] :: [Double]
         df =
-            D.fromNamedColumns
+            D.fromColumns
                 [ ("x", DI.fromList xs)
                 , ("const", DI.fromList (replicate 6 (5.0 :: Double)))
                 , ("y", DI.fromList [3 * x + 4 | x <- xs])
@@ -304,7 +304,7 @@ testLinearConstantFeatureZeroWeight = TestCase $ do
 testKMeansKGreaterThanN :: Test
 testKMeansKGreaterThanN = TestCase $ do
     let df =
-            D.fromNamedColumns
+            D.fromColumns
                 [ ("a", DI.fromList ([0, 5, 10] :: [Double]))
                 , ("b", DI.fromList ([0, 5, 10] :: [Double]))
                 ]
@@ -324,7 +324,7 @@ testKMeansKGreaterThanN = TestCase $ do
 testKMeansAllIdentical :: Test
 testKMeansAllIdentical = TestCase $ do
     let df =
-            D.fromNamedColumns
+            D.fromColumns
                 [ ("a", DI.fromList (replicate 6 (4.0 :: Double)))
                 , ("b", DI.fromList (replicate 6 (4.0 :: Double)))
                 ]
@@ -343,7 +343,7 @@ testKMeansAllIdentical = TestCase $ do
 testGMMKGreaterThanN :: Test
 testGMMKGreaterThanN = TestCase $ do
     let df =
-            D.fromNamedColumns
+            D.fromColumns
                 [ ("a", DI.fromList ([0, 10] :: [Double]))
                 , ("b", DI.fromList ([0, 10] :: [Double]))
                 ]
@@ -360,7 +360,7 @@ testGMMKGreaterThanN = TestCase $ do
 testPCAConstantColumn :: Test
 testPCAConstantColumn = TestCase $ do
     let df =
-            D.fromNamedColumns
+            D.fromColumns
                 [ ("x", DI.fromList ([-2, -1, 0, 1, 2] :: [Double]))
                 , ("const", DI.fromList (replicate 5 (3.0 :: Double)))
                 ]
@@ -387,7 +387,7 @@ testPCAConstantColumn = TestCase $ do
 testPCAExtremeScale :: Test
 testPCAExtremeScale = TestCase $ do
     let df =
-            D.fromNamedColumns
+            D.fromColumns
                 [ ("x", DI.fromList ([1e8 + 1, 1e8 + 2, 1e8 + 3, 1e8 + 4] :: [Double]))
                 , ("y", DI.fromList ([1e8 + 1, 1e8 + 2, 1e8 + 3, 1e8 + 4] :: [Double]))
                 ]

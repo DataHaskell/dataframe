@@ -18,7 +18,7 @@ import qualified DataFrame as D
 
 allTypes :: D.DataFrame
 allTypes =
-    D.fromNamedColumns
+    D.fromColumns
         [ ("id", D.fromList [4 :: Int32, 5, 6, 7, 2, 3, 0, 1])
         , ("bool_col", D.fromList [True, False, True, False, True, False, True, False])
         , ("tinyint_col", D.fromList [0 :: Int32, 1, 0, 1, 0, 1, 0, 1])
@@ -58,7 +58,7 @@ allTypes =
 
 tinyPagesLast10 :: D.DataFrame
 tinyPagesLast10 =
-    D.fromNamedColumns
+    D.fromColumns
         [ ("id", D.fromList @Int32 (reverse [6174 .. 6183]))
         , ("bool_col", D.fromList @Bool (take 10 (cycle [False, True])))
         , ("tinyint_col", D.fromList @Int32 [3, 2, 1, 0, 9, 8, 7, 6, 5, 4])
@@ -121,7 +121,7 @@ tinyPagesLast10 =
 
 transactions :: D.DataFrame
 transactions =
-    D.fromNamedColumns
+    D.fromColumns
         [ ("transaction_id", D.fromList [1 :: Int32, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12])
         ,
             ( "event_time"
@@ -279,7 +279,7 @@ transactions =
 
 mtCarsDataset :: D.DataFrame
 mtCarsDataset =
-    D.fromNamedColumns
+    D.fromColumns
         [
             ( "model"
             , D.fromList

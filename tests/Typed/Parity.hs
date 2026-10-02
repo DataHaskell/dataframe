@@ -25,7 +25,7 @@ type S =
 
 baseDF :: D.DataFrame
 baseDF =
-    D.fromNamedColumns
+    D.fromColumns
         [ ("x", DI.fromList [1, 2, 3, 4, 5, 6 :: Int])
         , ("y", DI.fromList [10.0, 25.0, 30.0, 5.0, 50.0, 12.0 :: Double])
         , ("g", DI.fromList ["a", "b", "a", "b", "a", "b" :: T.Text])
@@ -173,10 +173,10 @@ accessParity =
 
 -- Disjoint frames for the (|||) test.
 leftDF :: D.DataFrame
-leftDF = D.fromNamedColumns [("x", DI.fromList [1, 2 :: Int])]
+leftDF = D.fromColumns [("x", DI.fromList [1, 2 :: Int])]
 
 rightDF :: D.DataFrame
-rightDF = D.fromNamedColumns [("y", DI.fromList [1.0, 2.0 :: Double])]
+rightDF = D.fromColumns [("y", DI.fromList [1.0, 2.0 :: Double])]
 
 leftT :: DT.TypedDataFrame '[ '("x", Int)]
 leftT = either (error . show) id (DT.freezeWithError leftDF)
@@ -187,7 +187,7 @@ rightT = either (error . show) id (DT.freezeWithError rightDF)
 -- Numeric-only frame for the matrix test.
 numericDF :: D.DataFrame
 numericDF =
-    D.fromNamedColumns
+    D.fromColumns
         [ ("x", DI.fromList [1, 2, 3 :: Int])
         , ("y", DI.fromList [1.5, 2.5, 3.5 :: Double])
         ]

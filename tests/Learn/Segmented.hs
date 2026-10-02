@@ -44,7 +44,7 @@ close tol a b = abs (a - b) <= tol
 -- | A two-segment frame: y = 2x+1 on group "a", y = -3x+5 on group "b".
 twoSegDF :: D.DataFrame
 twoSegDF =
-    D.fromNamedColumns
+    D.fromColumns
         [ ("g", DI.fromList (replicate 4 ("a" :: T.Text) ++ replicate 4 "b"))
         , ("x", DI.fromList xs)
         ,
@@ -86,7 +86,7 @@ routingTests =
         let m = fit (lowFloor (segmented defaultLinearConfig)) (F.col @Double "y") twoSegDF
             fb = smFallback m
             unseen =
-                D.fromNamedColumns
+                D.fromColumns
                     [ ("g", DI.fromList (["c"] :: [T.Text]))
                     , ("x", DI.fromList ([2.0] :: [Double]))
                     , ("y", DI.fromList ([0.0] :: [Double]))
@@ -103,7 +103,7 @@ genericityTests =
     [ "logistic base composes" ~: do
         let labels = replicate 4 ("pos" :: T.Text) ++ replicate 4 "neg"
             df =
-                D.fromNamedColumns
+                D.fromColumns
                     [ ("g", DI.fromList (replicate 4 ("a" :: T.Text) ++ replicate 4 "b"))
                     , ("x", DI.fromList ([1, 2, 3, 4, 1, 2, 3, 4] :: [Double]))
                     , ("label", DI.fromList labels)
@@ -122,7 +122,7 @@ selectionTests :: [Test]
 selectionTests =
     [ "segmentOn picks only the named column" ~: do
         let df =
-                D.fromNamedColumns
+                D.fromColumns
                     [ ("g", DI.fromList (replicate 4 ("a" :: T.Text) ++ replicate 4 "b"))
                     , ("h", DI.fromList (cycle3 8))
                     , ("x", DI.fromList ([1, 2, 3, 4, 1, 2, 3, 4] :: [Double]))
@@ -136,7 +136,7 @@ selectionTests =
         assertEqual "only g" ["g"] (smCatCols m)
     , "cardinality cap skips high-cardinality text" ~: do
         let df =
-                D.fromNamedColumns
+                D.fromColumns
                     [ ("g", DI.fromList (replicate 4 ("a" :: T.Text) ++ replicate 4 "b"))
                     , ("k", DI.fromList (map (T.pack . show) [1 .. 8 :: Int]))
                     , ("x", DI.fromList ([1, 2, 3, 4, 1, 2, 3, 4] :: [Double]))
@@ -156,7 +156,7 @@ nullTests =
                 [Just "a", Just "a", Just "a", Nothing, Just "b", Just "b", Just "b", Nothing] ::
                     [Maybe T.Text]
             df =
-                D.fromNamedColumns
+                D.fromColumns
                     [ ("g", DI.fromList gcol)
                     , ("x", DI.fromList ([1, 2, 3, 9, 1, 2, 3, 9] :: [Double]))
                     , ("y", DI.fromList ([3, 5, 7, 0, 2, -1, -4, 0] :: [Double]))
@@ -180,7 +180,7 @@ guardTests :: [Test]
 guardTests =
     [ "int feature error points at toDouble" ~: do
         let df =
-                D.fromNamedColumns
+                D.fromColumns
                     [ ("g", DI.fromList (replicate 4 ("a" :: T.Text) ++ replicate 4 "b"))
                     , ("n", DI.fromList ([1, 2, 3, 4, 5, 6, 7, 8] :: [Int]))
                     , ("y", DI.fromList ([1, 2, 3, 4, 5, 6, 7, 8] :: [Double]))
@@ -194,7 +194,7 @@ guardTests =
             Right _ -> assertFailure "expected an actionable error for the Int feature"
     , "nullable feature error points at dropping" ~: do
         let df =
-                D.fromNamedColumns
+                D.fromColumns
                     [ ("g", DI.fromList (replicate 4 ("a" :: T.Text) ++ replicate 4 "b"))
                     ,
                         ( "z"
@@ -214,7 +214,7 @@ guardTests =
             Right _ -> assertFailure "expected an actionable error for the nullable feature"
     , "well-typed frame fits after casting/dropping" ~: do
         let df =
-                D.fromNamedColumns
+                D.fromColumns
                     [ ("g", DI.fromList (replicate 4 ("a" :: T.Text) ++ replicate 4 "b"))
                     , ("n", DI.fromList ([1, 2, 3, 4, 5, 6, 7, 8] :: [Double]))
                     , ("y", DI.fromList ([1, 2, 3, 4, 5, 6, 7, 8] :: [Double]))
@@ -227,7 +227,7 @@ diagnosticTests :: [Test]
 diagnosticTests =
     [ "undersized segment falls back, diagnostics correct" ~: do
         let df =
-                D.fromNamedColumns
+                D.fromColumns
                     [ ("g", DI.fromList (replicate 4 ("a" :: T.Text) ++ ["b"]))
                     , ("x", DI.fromList ([1, 2, 3, 4, 9] :: [Double]))
                     , ("y", DI.fromList ([3, 5, 7, 9, 0] :: [Double]))

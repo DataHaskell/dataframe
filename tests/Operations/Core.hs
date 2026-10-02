@@ -13,7 +13,7 @@ import Test.HUnit
 
 testData :: D.DataFrame
 testData =
-    D.fromNamedColumns
+    D.fromColumns
         [ ("A", DI.fromList ([1 .. 3] :: [Int]))
         , ("B", DI.fromList ['a' .. 'c'])
         ]
@@ -70,7 +70,7 @@ fromRowsKeepsNullsInPlace =
     TestCase
         ( assertEqual
             "null cell preserves row alignment"
-            ( D.fromNamedColumns
+            ( D.fromColumns
                 [("A", DI.fromList ([Just 1, Nothing, Just 3] :: [Maybe Int]))]
             )
             (D.fromRows ["A"] [[D.toAny (1 :: Int)], [Null], [D.toAny (3 :: Int)]])
@@ -95,7 +95,7 @@ fromRowsRoundTripsWithNulls :: Test
 fromRowsRoundTripsWithNulls =
     TestCase
         ( let df =
-                D.fromNamedColumns
+                D.fromColumns
                     [ ("A", DI.fromList ([Just 1, Nothing, Just 3] :: [Maybe Int]))
                     , ("B", DI.fromList (["x", "y", "z"] :: [T.Text]))
                     ]

@@ -119,15 +119,15 @@ mkOneToOne n overlap = do
     let leftKeys = [0 :: Int .. n - 1]
         leftVals = [0 :: Int .. n - 1]
         leftDf =
-            D.fromNamedColumns
-                [ ("key", D.fromList leftKeys)
-                , ("A", D.fromList leftVals)
+            D.fromColumns
+                [ "key" =: leftKeys
+                , "A" =: leftVals
                 ]
     -- Right: take first `rightSize` keys, add non-overlapping keys for the rest
     rightPayload <- mapM (\_ -> uniformRM (0 :: Int, 1_000_000) g) [1 .. rightSize]
     let rightKeys = [0 :: Int .. rightSize - 1]
         rightDf =
-            D.fromNamedColumns
+            D.fromColumns
                 [ ("key", D.fromList rightKeys)
                 , ("B", D.fromList rightPayload)
                 ]
@@ -145,14 +145,14 @@ mkManyToMany leftRows rightRows cardinality = do
     leftVals <- mapM (\_ -> uniformRM (0 :: Int, 1_000_000) g) [1 .. leftRows]
     rightVals <- mapM (\_ -> uniformRM (0 :: Int, 1_000_000) g) [1 .. rightRows]
     let leftDf =
-            D.fromNamedColumns
-                [ ("key", D.fromList leftKeys)
-                , ("A", D.fromList leftVals)
+            D.fromColumns
+                [ "key" =: leftKeys
+                , "A" =: leftVals
                 ]
         rightDf =
-            D.fromNamedColumns
-                [ ("key", D.fromList rightKeys)
-                , ("B", D.fromList rightVals)
+            D.fromColumns
+                [ "key" =: rightKeys
+                , "B" =: rightVals
                 ]
     return (leftDf, rightDf)
 
@@ -168,14 +168,14 @@ mkManyToOne factRows dimSize = do
     factVals <- mapM (\_ -> uniformRM (0 :: Int, 1_000_000) g) [1 .. factRows]
     dimVals <- mapM (\_ -> uniformRM (0 :: Int, 1_000_000) g) [1 .. dimSize]
     let factDf =
-            D.fromNamedColumns
-                [ ("key", D.fromList factKeys)
-                , ("A", D.fromList factVals)
+            D.fromColumns
+                [ "key" =: factKeys
+                , "A" =: factVals
                 ]
         dimDf =
-            D.fromNamedColumns
-                [ ("key", D.fromList [0 :: Int .. dimSize - 1])
-                , ("B", D.fromList dimVals)
+            D.fromColumns
+                [ "key" =: [0 :: Int .. dimSize - 1]
+                , "B" =: dimVals
                 ]
     return (factDf, dimDf)
 
@@ -189,16 +189,16 @@ mkMultiKey leftRows rightRows = do
     lv <- mapM (\_ -> uniformRM (0 :: Int, 1_000_000) g) [1 .. leftRows]
     rv <- mapM (\_ -> uniformRM (0 :: Int, 1_000_000) g) [1 .. rightRows]
     let leftDf =
-            D.fromNamedColumns
-                [ ("key1", D.fromList lk1)
-                , ("key2", D.fromList lk2)
-                , ("A", D.fromList lv)
+            D.fromColumns
+                [ "key1" =: lk1
+                , "key2" =: lk2
+                , "A" =: lv
                 ]
         rightDf =
-            D.fromNamedColumns
-                [ ("key1", D.fromList rk1)
-                , ("key2", D.fromList rk2)
-                , ("B", D.fromList rv)
+            D.fromColumns
+                [ "key1" =: rk1
+                , "key2" =: rk2
+                , "B" =: rv
                 ]
     return (leftDf, rightDf)
 

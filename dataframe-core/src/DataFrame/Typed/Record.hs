@@ -35,7 +35,7 @@ import qualified Data.Text as T
 import qualified Data.Vector as VB
 
 import qualified DataFrame.Internal.Column as C
-import DataFrame.Internal.DataFrame (fromNamedColumns)
+import DataFrame.Internal.DataFrame (fromColumns)
 import qualified DataFrame.Internal.DataFrame as D
 import DataFrame.Typed.Types (TypedDataFrame (..))
 import GHC.TypeLits
@@ -70,7 +70,7 @@ df = fromRecords xs
 @
 -}
 fromRecords :: (HasSchema a) => [a] -> D.DataFrame
-fromRecords = fromNamedColumns . recordsToColumns
+fromRecords = fromColumns . recordsToColumns
 
 {- | Parse a list of records out of an untyped 'D.DataFrame'.
 

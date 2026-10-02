@@ -46,7 +46,7 @@ mkMaybeInt name xs = (name, DI.fromList xs)
 -- | Build a frame of @n@ rows with several key columns and a value column.
 caseFrame :: Int -> DD.DataFrame
 caseFrame n =
-    D.fromNamedColumns
+    D.fromColumns
         [ mkInt "ki" [i `mod` 997 | i <- [0 .. n - 1]]
         , mkText "kt" [T.pack ("g" ++ show (i `mod` 503)) | i <- [0 .. n - 1]]
         , mkDouble "kd" [fromIntegral (i `mod` 311) / 7 | i <- [0 .. n - 1]]
@@ -60,7 +60,7 @@ caseFrame n =
 -- | Collision-heavy small grid (forces hash-collision key re-verification).
 collisionFrame :: DD.DataFrame
 collisionFrame =
-    D.fromNamedColumns
+    D.fromColumns
         [ mkInt "k1" (map (`mod` 5) [0 .. 999])
         , mkInt "k2" (map (\i -> (i * 7) `mod` 3) [0 .. 999])
         , mkInt "v" [0 .. 999]
@@ -129,7 +129,7 @@ input has columns the derive step turns into v1*v1, v1*v2, v2*v2.
 -}
 momentFrame :: Int -> DD.DataFrame
 momentFrame n =
-    D.fromNamedColumns
+    D.fromColumns
         [ mkInt "id2" [i `mod` 17 | i <- [0 .. n - 1]]
         , mkInt "id4" [(i * 3) `mod` 11 | i <- [0 .. n - 1]]
         , mkInt "v1" [(i * 7) `mod` 100 | i <- [0 .. n - 1]]

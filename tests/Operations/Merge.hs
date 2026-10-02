@@ -9,32 +9,32 @@ import Test.HUnit
 
 df1 :: D.DataFrame
 df1 =
-    D.fromNamedColumns
+    D.fromColumns
         [ ("A", DI.fromList [1 :: Int, 2])
         , ("B", DI.fromList ['a', 'b'])
         ]
 
 df2 :: D.DataFrame
 df2 =
-    D.fromNamedColumns
+    D.fromColumns
         [ ("A", DI.fromList [3 :: Int])
         , ("B", DI.fromList ['c'])
         ]
 
 dfOnlyA :: D.DataFrame
-dfOnlyA = D.fromNamedColumns [("A", DI.fromList [1 :: Int, 2])]
+dfOnlyA = D.fromColumns [("A", DI.fromList [1 :: Int, 2])]
 
 dfOnlyB :: D.DataFrame
-dfOnlyB = D.fromNamedColumns [("B", DI.fromList ['c', 'd'])]
+dfOnlyB = D.fromColumns [("B", DI.fromList ['c', 'd'])]
 
 dfSide1 :: D.DataFrame
 dfSide1 =
-    D.fromNamedColumns
+    D.fromColumns
         [("L", DI.fromList [10 :: Int, 20])]
 
 dfSide2 :: D.DataFrame
 dfSide2 =
-    D.fromNamedColumns
+    D.fromColumns
         [("R", DI.fromList ["x" :: String, "y"])]
 
 mergeVerticalWAI :: Test
@@ -42,7 +42,7 @@ mergeVerticalWAI =
     TestCase
         ( assertEqual
             "Vertical merge concatenates matching columns"
-            ( D.fromNamedColumns
+            ( D.fromColumns
                 [ ("A", DI.fromList [1 :: Int, 2, 3])
                 , ("B", DI.fromList ['a', 'b', 'c'])
                 ]
@@ -55,7 +55,7 @@ mergeVerticalDisjointSchemas =
     TestCase
         ( assertEqual
             "Disjoint schemas produce optional padding"
-            ( D.fromNamedColumns
+            ( D.fromColumns
                 [
                     ( "A"
                     , DI.fromList
@@ -102,7 +102,7 @@ mergeHorizontalWAI =
     TestCase
         ( assertEqual
             "Horizontal merge combines columns side by side"
-            ( D.fromNamedColumns
+            ( D.fromColumns
                 [ ("L", DI.fromList [10 :: Int, 20])
                 , ("R", DI.fromList ["x" :: String, "y"])
                 ]
@@ -131,14 +131,14 @@ mergeHorizontalWithEmptyLeft =
 mergeVerticalDifferentTypesSameColumnName :: Test
 mergeVerticalDifferentTypesSameColumnName =
     let
-        dfIntA = D.fromNamedColumns [("A", DI.fromList [1 :: Int, 2])]
+        dfIntA = D.fromColumns [("A", DI.fromList [1 :: Int, 2])]
 
-        dfTextA = D.fromNamedColumns [("A", DI.fromList ["x" :: String, "y"])]
+        dfTextA = D.fromColumns [("A", DI.fromList ["x" :: String, "y"])]
      in
         TestCase
             ( assertEqual
                 "Merging columns with same name but different types wraps the values in Either"
-                ( D.fromNamedColumns
+                ( D.fromColumns
                     [ ("A", DI.fromList [Left (1 :: Int), Left 2, Right ("x" :: String), Right "y"])
                     ]
                 )

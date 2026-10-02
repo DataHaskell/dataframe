@@ -41,7 +41,7 @@ tests = [prop_sampleM]
 
 verbFixture :: DataFrame
 verbFixture =
-    D.fromNamedColumns
+    D.fromColumns
         [ ("A", DI.fromList ([3, 1, 2] :: [Int]))
         , ("B", DI.fromList (["x", "y", "z"] :: [T.Text]))
         , ("C", DI.fromList ([1.0, 2.0, 3.0] :: [Double]))

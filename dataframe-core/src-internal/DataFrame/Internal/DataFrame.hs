@@ -25,7 +25,7 @@ module DataFrame.Internal.DataFrame (
     empty,
     columnNames,
     insertColumn,
-    fromNamedColumns,
+    fromColumns,
     getColumn,
     unsafeGetColumn,
     null,
@@ -338,8 +338,8 @@ insertColumn name column d =
                     exprs
 
 -- | Build a DataFrame from a list of @(name, column)@ pairs using 'insertColumn'.
-fromNamedColumns :: [(T.Text, Column)] -> DataFrame
-fromNamedColumns = foldl' (\df (name, column) -> insertColumn name column df) empty
+fromColumns :: [(T.Text, Column)] -> DataFrame
+fromColumns = foldl' (\df (name, column) -> insertColumn name column df) empty
 
 mkColumn :: (Columnable a) => T.Text -> [a] -> (T.Text, Column)
 mkColumn name column = (name, fromList column)

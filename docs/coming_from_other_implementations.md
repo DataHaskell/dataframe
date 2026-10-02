@@ -145,7 +145,7 @@ dataframe> import System.Random (mkStdGen)
 dataframe> import Data.List (foldl')
 dataframe> :set -XOverloadedStrings
 
-dataframe> initDf = D.fromNamedColumns [("date", dates)]
+dataframe> initDf = D.fromColumns [("date", dates)]
 
 -- Create 4 random columns from seeds 42 to 45.
 dataframe> df = foldl' (\d (name, seed) -> D.insertColumn name (D.mkRandom (mkStdGen seed) 6 (0 :: Double) 4) d) 
@@ -198,7 +198,7 @@ In Haskell, we achieve the same result with explicit types:
 data Transport = Test | Train deriving (Show, Ord, Eq)
 
 dataframe> :{
-ghci| df = D.fromNamedColumns [
+ghci| df = D.fromColumns [
 ghci|        ("A", D.fromList (replicate 4 1.0)),
 ghci|        ("B", D.fromList (replicate 4 (fromGregorian 2013 01 02))),
 ghci|        ("C", D.fromList (replicate 4 (1.0 :: Float))),
@@ -223,7 +223,7 @@ dataframe> df
 1. **Broadcasting**: pandas automatically broadcasts scalar values. In Haskell, you must explicitly replicate values
 2. **Categorical Data**: Instead of marking strings as categorical, we define custom algebraic data types. This provides compile-time guarantees about valid values
 3. **Type Annotations**: We sometimes need type annotations (like `:: Float`) to disambiguate numeric types
-4. **Named Columns**: `fromNamedColumns` takes a list of `(name, column)` tuples
+4. **Named Columns**: `fromColumns` takes a list of `(name, column)` tuples
 
 ### Viewing Data
 
@@ -563,7 +563,7 @@ import Data.Time.Calendar
 
 main :: IO ()
 main = do
-    let df = D.fromNamedColumns [
+    let df = D.fromColumns [
             ("name", D.fromList [ "Alice Archer"
                                 , "Ben Brown"
                                 , "Chloe Cooper"

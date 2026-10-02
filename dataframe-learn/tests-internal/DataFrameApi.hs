@@ -4,7 +4,7 @@ names the tests reach for are re-exported under one alias here.
 -}
 module DataFrameApi (
     DataFrame,
-    fromNamedColumns,
+    fromColumns,
     fromUnnamedColumns,
     dimensions,
     nRows,
@@ -15,7 +15,7 @@ module DataFrameApi (
     readCsv,
 ) where
 
-import DataFrame.Core (DataFrame, fromNamedColumns)
+import DataFrame.Core (DataFrame, fromColumns)
 import DataFrame.IO.CSV (readCsv)
 import DataFrame.Operations.Core (dimensions, fromUnnamedColumns, nRows, rename)
 import DataFrame.Operations.Subset (exclude, randomSplit)

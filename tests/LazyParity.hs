@@ -53,7 +53,7 @@ the LEFT join produces a Nothing group (exercises unmatched-row semantics).
 -}
 ordersFrame :: Int -> D.DataFrame
 ordersFrame n =
-    D.fromNamedColumns
+    D.fromColumns
         [ ("order_id", DI.fromList [0 .. n - 1])
         ,
             ( "customer_id"
@@ -69,7 +69,7 @@ ordersFrame n =
 
 customersFrame :: Int -> D.DataFrame
 customersFrame m =
-    D.fromNamedColumns
+    D.fromColumns
         [ ("customer_id", DI.fromList [0 .. m - 1])
         , ("region", DI.fromList [T.pack ("r" ++ show (i `mod` 4)) | i <- [0 .. m - 1]])
         , ("plan", DI.fromList [T.pack ("p" ++ show (i `mod` 3)) | i <- [0 .. m - 1]])
@@ -172,7 +172,7 @@ streamingMeanParity =
                 (show actual)
   where
     input =
-        D.fromNamedColumns
+        D.fromColumns
             [ ("order_id", DI.fromList [1 .. 12 :: Int])
             , ("customer_id", DI.fromList [0, 1, 2, 0, 1, 2, 0, 1, 2, 0, 1, 2 :: Int])
             ,

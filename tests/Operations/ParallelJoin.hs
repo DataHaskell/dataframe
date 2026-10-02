@@ -86,14 +86,14 @@ leftKernelParity (label, (probe, build)) =
 -- | Build a frame large enough to cross the parallel threshold.
 ordersFrame :: Int -> D.DataFrame
 ordersFrame n =
-    D.fromNamedColumns
+    D.fromColumns
         [ ("cid", D.fromList [i `mod` 7000 | i <- [0 .. n - 1]])
         , ("amount", D.fromList [fromIntegral i * 1.5 :: Double | i <- [0 .. n - 1]])
         ]
 
 custFrame :: Int -> D.DataFrame
 custFrame n =
-    D.fromNamedColumns
+    D.fromColumns
         [ ("cid", D.fromList [0 .. n - 1])
         , ("region", D.fromList [T.pack ('r' : show (i `mod` 5)) | i <- [0 .. n - 1]])
         ]
@@ -130,14 +130,14 @@ to end: a factor key with @k@ distinct values mapped over @n@ rows.
 -}
 factorOrdersFrame :: Int -> Int -> D.DataFrame
 factorOrdersFrame n k =
-    D.fromNamedColumns
+    D.fromColumns
         [ ("fk", D.fromList [T.pack ('f' : show (i `mod` k)) | i <- [0 .. n - 1]])
         , ("amount", D.fromList [fromIntegral i * 2.0 :: Double | i <- [0 .. n - 1]])
         ]
 
 factorDimFrame :: Int -> D.DataFrame
 factorDimFrame k =
-    D.fromNamedColumns
+    D.fromColumns
         [ ("fk", D.fromList [T.pack ('f' : show i) | i <- [0 .. k - 1]])
         , ("label", D.fromList [T.pack ('L' : show i) | i <- [0 .. k - 1]])
         ]

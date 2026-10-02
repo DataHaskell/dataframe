@@ -15,7 +15,7 @@ import Test.HUnit (Test (..), assertBool, assertEqual)
 
 testDataFrame :: D.DataFrame
 testDataFrame =
-    D.fromNamedColumns
+    D.fromColumns
         [ ("numbers", D.fromList @Int [1 .. 26])
         ]
 

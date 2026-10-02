@@ -64,7 +64,7 @@ sanitizeIdentifiers =
         ]
 df :: D.DataFrame
 df =
-    D.fromNamedColumns
+    D.fromColumns
         [("A", DI.fromList [(1 :: Int) .. 10])]
 
 testSum :: Test
@@ -72,7 +72,7 @@ testSum =
     TestCase
         ( assertEqual
             "Sum first 10 numbers"
-            ( D.fromNamedColumns
+            ( D.fromColumns
                 [ ("A", DI.fromList [(1 :: Int) .. 10])
                 , ("sum", DI.fromList (replicate 10 (55 :: Int)))
                 ]
@@ -104,7 +104,7 @@ testDaysBetween =
         )
   where
     dates =
-        D.fromNamedColumns
+        D.fromColumns
             [ ("start", DI.fromList [fromGregorian 2024 3 1])
             , ("end", DI.fromList [fromGregorian 2024 3 10])
             ]

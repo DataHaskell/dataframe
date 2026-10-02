@@ -43,7 +43,7 @@ close tol a b = abs (a - b) <= tol
 
 regDF :: D.DataFrame
 regDF =
-    D.fromNamedColumns
+    D.fromColumns
         [ ("x1", DI.fromList xs1)
         , ("x2", DI.fromList xs2)
         , ("y", DI.fromList [2 * a - 3 * b + 1 | (a, b) <- zip xs1 xs2])
@@ -57,7 +57,7 @@ data Flower = Rose | Tulip | Daisy deriving (Show, Eq, Ord)
 
 flowerDF :: D.DataFrame
 flowerDF =
-    D.fromNamedColumns
+    D.fromColumns
         [ ("x", DI.fromList ([-5, -4, -3, 0, 0.3, 0.6, 5, 6, 7] :: [Double]))
         ,
             ( "flower"
@@ -67,7 +67,7 @@ flowerDF =
 
 clsDF :: D.DataFrame
 clsDF =
-    D.fromNamedColumns
+    D.fromColumns
         [ ("x", DI.fromList ([-3, -2, -1, -0.5, 0.5, 1, 2, 3] :: [Double]))
         , ("label", DI.fromList ([0, 0, 0, 0, 1, 1, 1, 1] :: [Int]))
         ]
@@ -88,7 +88,7 @@ testOLS = TestCase $ do
 -}
 intFeatureDF :: D.DataFrame
 intFeatureDF =
-    D.fromNamedColumns
+    D.fromColumns
         [ ("x", DI.fromList @Int [1 .. 8])
         , ("y", DI.fromList @Double [2, 4, 6, 8, 10, 12, 14, 16])
         ]
@@ -113,7 +113,7 @@ must reject it rather than letting nulls poison the solve into NaN.
 -}
 nullableFeatureDF :: D.DataFrame
 nullableFeatureDF =
-    D.fromNamedColumns
+    D.fromColumns
         [ ("x", DI.fromList @(Maybe Double) (Nothing : map Just [2, 3, 4, 5, 6, 7, 8]))
         , ("y", DI.fromList @Double [2, 4, 6, 8, 10, 12, 14, 16])
         ]
@@ -206,7 +206,7 @@ testPCA = TestCase $ do
 testKMeans :: Test
 testKMeans = TestCase $ do
     let df =
-            D.fromNamedColumns
+            D.fromColumns
                 [ ("a", DI.fromList ([0, 0.1, 0.2, 10, 10.1, 10.2] :: [Double]))
                 , ("b", DI.fromList ([0, 0.1, 0, 10, 10, 10.1] :: [Double]))
                 ]

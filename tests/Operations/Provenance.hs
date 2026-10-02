@@ -15,7 +15,7 @@ import Test.HUnit
 -- Base frame with no derived columns.
 base :: D.DataFrame
 base =
-    D.fromNamedColumns
+    D.fromColumns
         [ ("x", DI.fromList [1 .. 5 :: Int])
         , ("y", DI.fromList [2 .. 6 :: Int])
         ]
@@ -177,7 +177,7 @@ emptyWithSemiGroup =
 horizontalMergePreservesLeft :: Test
 horizontalMergePreservesLeft =
     let dfW = D.derive "w" (F.col @Int "y") base
-        extra = D.fromNamedColumns [("q", DI.fromList [0 :: Int, 0, 0, 0, 0])]
+        extra = D.fromColumns [("q", DI.fromList [0 :: Int, 0, 0, 0, 0])]
         merged = dfW ||| extra
      in TestCase
             ( assertBool
@@ -187,12 +187,12 @@ horizontalMergePreservesLeft =
 
 horizontalMergePreservesRight :: Test
 horizontalMergePreservesRight =
-    let extra = D.fromNamedColumns [("q", DI.fromList [0 :: Int, 0, 0, 0, 0])]
+    let extra = D.fromColumns [("q", DI.fromList [0 :: Int, 0, 0, 0, 0])]
         dfW =
             D.derive
                 "w"
                 (F.col @Int "y")
-                (D.fromNamedColumns [("y", DI.fromList [2 .. 6 :: Int])])
+                (D.fromColumns [("y", DI.fromList [2 .. 6 :: Int])])
         merged = extra ||| dfW
      in TestCase
             ( assertBool
@@ -203,7 +203,7 @@ horizontalMergePreservesRight =
 horizontalMergePreservesBoth :: Test
 horizontalMergePreservesBoth =
     let dfZ = withZ
-        dfW = D.fromNamedColumns [("q", DI.fromList [0 :: Int, 0, 0, 0, 0])]
+        dfW = D.fromColumns [("q", DI.fromList [0 :: Int, 0, 0, 0, 0])]
         -- give dfW a derived column on a separate base
         dfWD = D.derive "w" (F.col @Int "q") dfW
         merged = dfZ ||| dfWD

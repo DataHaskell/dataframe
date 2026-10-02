@@ -363,7 +363,7 @@ testB1ExprWellTyped = TestCase $ do
                 }
         expr = modelToExpr model
         df =
-            D.fromNamedColumns
+            D.fromColumns
                 [ ("x", DI.fromList ([0.0, 1.0, 2.0] :: [Double]))
                 , ("y", DI.fromList ([0.0, 0.0, 5.0] :: [Double]))
                 ]
