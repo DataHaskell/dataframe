@@ -256,16 +256,16 @@ writeByteString ::
     ByteString ->
     IO ()
 writeByteString buffer bs = do
-    BU.unsafeUseAsCStringLen bs $ \(source, _) -> do
-        position <- readIORef buffer.positionRef
-        let len = BS.length bs
-        array <- ensureCapacity buffer (position + len)
-        withMutableByteArrayContents array $ \dst ->
+    position <- readIORef buffer.positionRef
+    let len = BS.length bs
+    array <- ensureCapacity buffer (position + len)
+    withMutableByteArrayContents array $ \dst ->
+        BU.unsafeUseAsCStringLen bs $ \(source, _) -> do
             copyBytes
                 (dst `plusPtr` position)
                 (castPtr source)
                 len
-        writeIORef buffer.positionRef (position + len)
+    writeIORef buffer.positionRef (position + len)
 {-# INLINE writeByteString #-}
 
 writeWord32LE :: MemoryBuffer -> Word32 -> IO ()
