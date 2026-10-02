@@ -255,7 +255,7 @@ writeByteString ::
     MemoryBuffer ->
     ByteString ->
     IO ()
-writeByteString buffer bs =
+writeByteString buffer bs = do
     BU.unsafeUseAsCStringLen bs $ \(source, _) -> do
         position <- readIORef buffer.positionRef
         let len = BS.length bs
