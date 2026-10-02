@@ -361,8 +361,8 @@ bufferToByteString ::
 bufferToByteString buffer = do
     array <- readIORef buffer.arrayRef
     position <- readIORef buffer.positionRef
-    create position $ \dst ->
-        withMutableByteArrayContents array $ \src ->
+    withMutableByteArrayContents array $ \src ->
+        create position $ \dst ->
             copyBytes dst (castPtr src) position
 
 bufferResidency :: MemoryBuffer -> IO Int
