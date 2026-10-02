@@ -14,6 +14,7 @@ import qualified Learn.NumericalRigor
 import qualified Learn.Numerics
 import qualified Learn.Symbolic
 import qualified LinearSolver
+import qualified NullSplits
 import qualified Properties.Simplify
 import qualified TreePruning
 import qualified Worklist
@@ -24,6 +25,7 @@ tests =
         Cart.tests
             ++ DecisionTree.tests
             ++ LinearSolver.tests
+            ++ NullSplits.tests
             ++ TreePruning.tests
             ++ Worklist.tests
             ++ Learn.Numerics.tests

@@ -125,6 +125,7 @@ test-suite learn-internal
     main-is:            Main.hs
     other-modules:      DataFrameApi
                         Cart
+                        NullSplits
                         DecisionTree
                         TreePruning
                         Worklist

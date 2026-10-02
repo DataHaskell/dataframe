@@ -4,12 +4,11 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 
-{- | sklearn-faithful CART initializer used to seed TAO. One-hot encodes
-categoricals and splits on exact (unsmoothed) Gini over midpoint thresholds
-(@<=@ routes left), matching @DecisionTreeClassifier(criterion='gini')@.
--}
 module DataFrame.DecisionTree.Cart (
     CartFeature (..),
+    NullSide (..),
+    cfPred,
+    splitMidpoint,
     CartNode (..),
     sortIndicesByValue,
     buildCartTree,
@@ -50,8 +49,29 @@ predicate (@x <= threshold@) over the ORIGINAL DataFrame.
 -}
 data CartFeature = CartFeature
     { cfValues :: !(VU.Vector Double)
-    , cfPred :: !(Double -> Expr Bool)
+    -- ^ One value per row. Null rows hold @+Infinity@, so they sort last.
+    , cfNulls :: !(Maybe (VU.Vector Bool))
+    -- ^ Which rows are null; 'Nothing' if the training data has no nulls here.
+    , cfSplit :: !(Double -> NullSide -> Expr Bool)
+    -- ^ The expression @value <= threshold@, sending null rows to the given side.
     }
+
+data NullSide = NullsLeft | NullsRight
+    deriving (Eq, Show)
+
+{- | The split expression with null rows sent right. For learners that ignore
+'cfNulls': their @+Infinity@ values also fall right of any 'splitMidpoint'.
+-}
+cfPred :: CartFeature -> Double -> Expr Bool
+cfPred f t = cfSplit f t NullsRight
+
+{- | The threshold between two adjacent sorted values. If the upper one is
+@+Infinity@ (a null row) it returns the lower one, keeping nulls on the right.
+-}
+splitMidpoint :: Double -> Double -> Double
+splitMidpoint lo hi
+    | isInfinite hi = lo
+    | otherwise = (lo + hi) / 2
 
 -- | Pre-'Tree' CART node: a leaf class id, or a split on feature @j@.
 data CartNode = CLeaf !Int | CSplit !Int !Double !CartNode !CartNode
@@ -234,7 +254,7 @@ considerThreshold ctx total n v s
         keepBetter
             (swBest s)
             (weightedGini total (swLeft s) (swMoved s) n)
-            ((swPrev s + v) / 2)
+            (splitMidpoint (swPrev s) v)
     | otherwise = swBest s
 
 keepBetter ::
@@ -267,36 +287,95 @@ cartFeatures target df = concatMap (featuresOfColumn df) (filter (/= target) (co
 
 featuresOfColumn :: DataFrame -> T.Text -> [CartFeature]
 featuresOfColumn df c = case unsafeGetColumn c df of
-    UnboxedColumn _ (v :: VU.Vector b) -> numericFeature @b c v
-    BoxedColumn _ (v :: V.Vector b) -> oneHotFeatures @b (nRows df) c v
+    UnboxedColumn bm (v :: VU.Vector b) -> numericFeature @b c bm v
+    BoxedColumn bm (v :: V.Vector b) -> oneHotFeatures @b c bm v
     pt@(PackedText _ _) -> case materializePacked pt of
-        BoxedColumn _ (v :: V.Vector b) -> oneHotFeatures @b (nRows df) c v
+        BoxedColumn bm (v :: V.Vector b) -> oneHotFeatures @b c bm v
         _ -> []
     mc@(MergedColumn _ _) -> case materializeMerged mc of
-        BoxedColumn _ (v :: V.Vector b) -> oneHotFeatures @b (nRows df) c v
+        BoxedColumn bm (v :: V.Vector b) -> oneHotFeatures @b c bm v
         _ -> []
 
+nullFlags :: Int -> Bitmap -> VU.Vector Bool
+nullFlags n bm = VU.generate n (not . bitmapTestBit bm)
+
+{- | 'Nothing' if no row is null, so learners split a null-free column the plain
+way. Its split expression still handles nulls that appear at prediction time.
+-}
+trainingNulls :: VU.Vector Bool -> Maybe (VU.Vector Bool)
+trainingNulls nulls
+    | VU.or nulls = Just nulls
+    | otherwise = Nothing
+
 numericFeature ::
-    forall b. (Columnable b, VU.Unbox b) => T.Text -> VU.Vector b -> [CartFeature]
-numericFeature c v = case testEquality (typeRep @b) (typeRep @Double) of
-    Just Refl -> [CartFeature v (\t -> F.col @Double c .<=. F.lit t)]
+    forall b.
+    (Columnable b, VU.Unbox b) =>
+    T.Text -> Maybe Bitmap -> VU.Vector b -> [CartFeature]
+numericFeature c Nothing v = case testEquality (typeRep @b) (typeRep @Double) of
+    Just Refl -> [CartFeature v Nothing (\t _ -> F.col @Double c .<=. F.lit t)]
     Nothing -> case sIntegral @b of
         STrue ->
-            [ CartFeature (VU.map fromIntegral v) (\t -> F.toDouble (F.col @b c) .<=. F.lit t)
+            [ CartFeature
+                (VU.map fromIntegral v)
+                Nothing
+                (\t _ -> F.toDouble (F.col @b c) .<=. F.lit t)
             ]
         SFalse -> []
+numericFeature c (Just bm) v = case nullableLeq @b c of
+    Just (toD, leq) ->
+        [ CartFeature
+            (VU.imap (\i x -> if nulls VU.! i then 1 / 0 else toD x) v)
+            (trainingNulls nulls)
+            (\t side -> F.fromMaybe (side == NullsLeft) (leq t))
+        ]
+    Nothing -> []
+  where
+    nulls = nullFlags (VU.length v) bm
+
+nullableLeq ::
+    forall b.
+    (Columnable b) =>
+    T.Text -> Maybe (b -> Double, Double -> Expr (Maybe Bool))
+nullableLeq c
+    | Just Refl <- testEquality (typeRep @b) (typeRep @Double) =
+        Just (id, \t -> F.col @(Maybe Double) c .<= F.lit t)
+    | Just Refl <- testEquality (typeRep @b) (typeRep @Int) =
+        Just (fromIntegral, \t -> F.col @(Maybe Int) c .<= F.lit t)
+    | otherwise = Nothing
 
 oneHotFeatures ::
-    forall b. (Columnable b) => Int -> T.Text -> V.Vector b -> [CartFeature]
-oneHotFeatures nAll c v = case testEquality (typeRep @b) (typeRep @T.Text) of
-    Just Refl -> [oneHot nAll c v cat | cat <- Set.toList (Set.fromList (V.toList v))]
+    forall b. (Columnable b) => T.Text -> Maybe Bitmap -> V.Vector b -> [CartFeature]
+oneHotFeatures c bm v = case testEquality (typeRep @b) (typeRep @T.Text) of
+    Just Refl -> [oneHot c nulls v cat | cat <- Set.toList (Set.fromList present)]
     Nothing -> []
+  where
+    nulls = fmap (nullFlags (V.length v)) bm
+    present = [x | (i, x) <- zip [0 ..] (V.toList v), maybe True (not . (VU.! i)) nulls]
 
-oneHot :: Int -> T.Text -> V.Vector T.Text -> T.Text -> CartFeature
-oneHot nAll c v cat =
+oneHot :: T.Text -> Maybe (VU.Vector Bool) -> V.Vector T.Text -> T.Text -> CartFeature
+oneHot c Nothing v cat =
     CartFeature
-        (VU.generate nAll (\i -> if v V.! i == cat then 1 else 0))
-        (const (F.col @T.Text c ./=. F.lit cat))
+        (VU.generate (V.length v) (\i -> if v V.! i == cat then 1 else 0))
+        Nothing
+        (\_ _ -> F.col @T.Text c ./=. F.lit cat)
+oneHot c (Just nulls) v cat =
+    CartFeature
+        (VU.generate (V.length v) value)
+        (trainingNulls nulls)
+        cond
+  where
+    value i
+        | nulls VU.! i = 1 / 0
+        | v V.! i == cat = 1
+        | otherwise = 0
+    col' = F.col @(Maybe T.Text) c
+    -- The feature is 1 for this category, 0 for others. A threshold below 1
+    -- means "not this category"; a threshold of 1 lets every non-null row
+    -- pass, so the split is null vs non-null.
+    cond t side
+        | t < 1 = F.fromMaybe (side == NullsLeft) (col' ./= F.lit cat)
+        | side == NullsLeft = F.lit True
+        | otherwise = F.isJust col'
 
 -- | Target column as string labels (matches pandas @y.astype(str)@).
 cartTargetLabels :: T.Text -> DataFrame -> V.Vector T.Text

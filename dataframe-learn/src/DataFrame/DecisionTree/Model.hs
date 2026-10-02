@@ -27,7 +27,7 @@ import qualified Data.Vector as V
 
 import DataFrame.DecisionTree.Cart (cartFeatures)
 import DataFrame.DecisionTree.Fit (fitDecisionTree, treeToExpr)
-import DataFrame.DecisionTree.Regression (RegTreeConfig, fitRegTreeOn)
+import DataFrame.DecisionTree.Regression (RegFit (..), RegTreeConfig, fitRegTree)
 import DataFrame.DecisionTree.Types (Tree (..), TreeConfig)
 import DataFrame.Featurize.Internal (targetDoubles)
 import DataFrame.Internal.Column (Columnable)
@@ -80,11 +80,13 @@ instance Fit RegTreeConfig (Expr Double) where
       where
         t = case target of
             Col name ->
-                fitRegTreeOn
-                    cfg
-                    (V.fromList (cartFeatures name df))
-                    (targetDoubles target df)
-                    Nothing
+                rfTree
+                    ( fitRegTree
+                        cfg
+                        (V.fromList (cartFeatures name df))
+                        (targetDoubles target df)
+                        Nothing
+                    )
             _ ->
                 throw
                     ( NonColumnReferenceException

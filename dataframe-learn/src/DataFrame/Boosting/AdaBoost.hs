@@ -30,6 +30,8 @@ import DataFrame.Errors (DataFrameException (..))
 
 import DataFrame.DecisionTree.Cart (
     CartFeature (..),
+    cfPred,
+    splitMidpoint,
     cartFeatures,
     sortIndicesByValue,
  )
@@ -188,7 +190,7 @@ fitWeightedTree maxDepth feats classesV codes kClasses weights =
                     valid = vCur /= vNext && wl > 0 && wr > 0
                     best' =
                         if valid && maybe True (\(_, s) -> score < s) best
-                            then Just ((vCur + vNext) / 2, score)
+                            then Just (splitMidpoint vCur vNext, score)
                             else best
                  in go0 (k + 1) leftW' best'
 

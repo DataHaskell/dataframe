@@ -24,7 +24,6 @@ module DataFrame.Boosting.GBM (
 ) where
 
 import Control.Exception (throw)
-import Data.Either (fromRight)
 import qualified Data.Map.Strict as M
 import qualified Data.Text as T
 import qualified Data.Vector as V
@@ -33,15 +32,13 @@ import DataFrame.Errors (DataFrameException (..))
 
 import DataFrame.DecisionTree.Cart (cartFeatures)
 import DataFrame.DecisionTree.Fit (treeToExpr)
-import DataFrame.DecisionTree.Regression (RegTreeConfig (..), fitRegTreeOn)
+import DataFrame.DecisionTree.Regression (RegFit (..), RegTreeConfig (..), fitRegTree)
 import DataFrame.DecisionTree.Types (Tree)
 import DataFrame.Expression.Operators ((.*.), (.+.), (.>.))
 import DataFrame.Featurize.Internal (targetDoubles)
 import qualified DataFrame.Functions as F
-import DataFrame.Internal.Column (TypedColumn (..), toVector)
 import DataFrame.Internal.DataFrame (DataFrame)
 import DataFrame.Internal.Expression (Expr (..), getColumns)
-import DataFrame.Internal.Interpreter (interpret)
 import DataFrame.Model
 
 -- | The boosting loss.
@@ -121,8 +118,7 @@ fitGBM cfg target@(Col name) df =
         | m >= gbNEstimators cfg = (ts, ss, usageAcc)
         | otherwise =
             let (target', weights) = newtonStep (gbLoss cfg) y fScores
-                tree = fitRegTreeOn rtCfg feats target' weights
-                pred = predictTree df tree
+                RegFit tree pred = fitRegTree rtCfg feats target' weights
                 fScores' = VU.zipWith (\f p -> f + lr * p) fScores pred
                 score = lossValue (gbLoss cfg) y fScores'
                 usage' = foldr (\c -> M.insertWith (+) c 1) usageAcc (treeColumns tree)
@@ -173,11 +169,6 @@ sigmoid z
 
 clamp01 :: Double -> Double
 clamp01 p = max 1e-12 (min (1 - 1e-12) p)
-
-predictTree :: DataFrame -> Tree Double -> VU.Vector Double
-predictTree df t = case interpret @Double df (treeToExpr t) of
-    Right (TColumn c) -> fromRight VU.empty (toVector @Double @VU.Vector c)
-    Left e -> throw e
 
 treeColumns :: Tree Double -> [T.Text]
 treeColumns = getColumns . treeToExpr
