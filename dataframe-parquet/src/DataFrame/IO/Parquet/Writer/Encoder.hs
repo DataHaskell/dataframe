@@ -4,6 +4,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
+{-# OPTIONS_GHC -funfolding-use-threshold=1000 #-}
 
 module DataFrame.IO.Parquet.Writer.Encoder (
     Encoder (..),
@@ -11,7 +12,7 @@ module DataFrame.IO.Parquet.Writer.Encoder (
 ) where
 
 import Control.Monad.IO.Class (MonadIO, liftIO)
-import Control.Monad.Primitive (PrimBase, PrimMonad, PrimState, RealWorld)
+import Control.Monad.Primitive (PrimBase, PrimMonad, PrimState)
 import Control.Monad.ST (stToIO)
 import Data.Bits (shiftL, (.|.))
 import Data.Int (Int32, Int64)
@@ -129,6 +130,8 @@ buildEncoder col
         writeWord64At buffer pos value
         pure (pos + 8)
 
+{-# SPECIALIZE buildEncoder :: Column -> IO (Encoder IO) #-}
+
 scalarEncoder ::
     forall a m.
     (Columnable a, Monad m) =>
@@ -140,56 +143,6 @@ scalarEncoder ::
     Encoder m
 scalarEncoder tt conv logical writePrim col =
     Encoder tt conv logical (columnWriter @a col writePrim) (\_ pos -> pure pos)
-{-# INLINEABLE scalarEncoder #-}
-{-# SPECIALIZE scalarEncoder ::
-    ThriftType ->
-    Maybe ConvertedType ->
-    Maybe LogicalType ->
-    (MemoryBuffer RealWorld -> Int -> Int32 -> IO Int) ->
-    Column ->
-    Encoder IO
-    #-}
-{-# SPECIALIZE scalarEncoder ::
-    ThriftType ->
-    Maybe ConvertedType ->
-    Maybe LogicalType ->
-    (MemoryBuffer RealWorld -> Int -> Int64 -> IO Int) ->
-    Column ->
-    Encoder IO
-    #-}
-{-# SPECIALIZE scalarEncoder ::
-    ThriftType ->
-    Maybe ConvertedType ->
-    Maybe LogicalType ->
-    (MemoryBuffer RealWorld -> Int -> Float -> IO Int) ->
-    Column ->
-    Encoder IO
-    #-}
-{-# SPECIALIZE scalarEncoder ::
-    ThriftType ->
-    Maybe ConvertedType ->
-    Maybe LogicalType ->
-    (MemoryBuffer RealWorld -> Int -> Double -> IO Int) ->
-    Column ->
-    Encoder IO
-    #-}
-{-# SPECIALIZE scalarEncoder ::
-    ThriftType ->
-    Maybe ConvertedType ->
-    Maybe LogicalType ->
-    (MemoryBuffer RealWorld -> Int -> Int -> IO Int) ->
-    Column ->
-    Encoder IO
-    #-}
-{-# SPECIALIZE scalarEncoder ::
-    ThriftType ->
-    Maybe ConvertedType ->
-    Maybe LogicalType ->
-    (MemoryBuffer RealWorld -> Int -> Integer -> IO Int) ->
-    Column ->
-    Encoder IO
-    #-}
-
 columnWriter ::
     forall a m.
     (Columnable a, Monad m) =>
@@ -218,71 +171,7 @@ columnWriter col writePrim = case col of
     mismatch =
         error
             ("writeParquet: incompatible column representation for " <> columnTypeString col)
-{-# INLINEABLE columnWriter #-}
-{-# SPECIALIZE columnWriter ::
-    Column ->
-    (MemoryBuffer RealWorld -> Int -> Int32 -> IO Int) ->
-    MemoryBuffer RealWorld ->
-    Int ->
-    Int ->
-    IO (Int, Bool)
-    #-}
-{-# SPECIALIZE columnWriter ::
-    Column ->
-    (MemoryBuffer RealWorld -> Int -> Int64 -> IO Int) ->
-    MemoryBuffer RealWorld ->
-    Int ->
-    Int ->
-    IO (Int, Bool)
-    #-}
-{-# SPECIALIZE columnWriter ::
-    Column ->
-    (MemoryBuffer RealWorld -> Int -> Float -> IO Int) ->
-    MemoryBuffer RealWorld ->
-    Int ->
-    Int ->
-    IO (Int, Bool)
-    #-}
-{-# SPECIALIZE columnWriter ::
-    Column ->
-    (MemoryBuffer RealWorld -> Int -> Double -> IO Int) ->
-    MemoryBuffer RealWorld ->
-    Int ->
-    Int ->
-    IO (Int, Bool)
-    #-}
-{-# SPECIALIZE columnWriter ::
-    Column ->
-    (MemoryBuffer RealWorld -> Int -> Bool -> IO Int) ->
-    MemoryBuffer RealWorld ->
-    Int ->
-    Int ->
-    IO (Int, Bool)
-    #-}
-{-# SPECIALIZE columnWriter ::
-    Column ->
-    (MemoryBuffer RealWorld -> Int -> UTCTime -> IO Int) ->
-    MemoryBuffer RealWorld ->
-    Int ->
-    Int ->
-    IO (Int, Bool)
-    #-}
-{-# SPECIALIZE columnWriter ::
-    Column ->
-    (MemoryBuffer RealWorld -> Int -> Int -> IO Int) ->
-    MemoryBuffer RealWorld ->
-    Int ->
-    Int ->
-    IO (Int, Bool)
-    #-}
-{-# SPECIALIZE columnWriter ::
-    Column ->
-    (MemoryBuffer RealWorld -> Int -> Integer -> IO Int) ->
-    MemoryBuffer RealWorld ->
-    Int ->
-    Int ->
-    IO (Int, Bool)
-    #-}
+{-# INLINE columnWriter #-}
 
 isPresent :: Maybe Bitmap -> Int -> Bool
 isPresent Nothing _ = True
