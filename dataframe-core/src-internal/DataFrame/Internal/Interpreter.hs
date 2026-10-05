@@ -39,6 +39,7 @@ import DataFrame.Internal.Column.Bitmap
 import DataFrame.Internal.DataFrame
 import DataFrame.Internal.Expression
 import qualified DataFrame.Internal.Grouping as G
+import qualified DataFrame.Internal.Interpreter.Kernels as K
 import Type.Reflection (
     Typeable,
     typeRep,
@@ -438,6 +439,110 @@ branchColumn cc lc rc = do
     pure $
         fromVector @a $
             V.zipWith3 (\c l r -> if c then l else r) cs ls rs
+
+-- | An operand a kernel can take: a literal or a null-free unboxed column.
+data KArg a = KLit !a | KVec !(VU.Vector a)
+
+kernelArg :: forall a. (Columnable a) => Value a -> Maybe (KArg a)
+kernelArg (Scalar s) = Just (KLit s)
+kernelArg (Flat (UnboxedColumn Nothing (v :: VU.Vector x)))
+    | Just Refl <- testEquality (typeRep @x) (typeRep @a) = Just (KVec v)
+kernelArg _ = Nothing
+
+flatUnboxed :: (Columnable a, VU.Unbox a) => VU.Vector a -> Value a
+flatUnboxed v = Flat (UnboxedColumn Nothing v)
+
+-- | Comparisons and @add@/@sub@/@mult@ on two operands of the same type.
+binaryKernel ::
+    forall c b a.
+    (Columnable c, Columnable b, Columnable a) =>
+    T.Text -> Value c -> Value b -> Maybe (Value a)
+binaryKernel name l r = do
+    Refl <- testEquality (typeRep @c) (typeRep @b)
+    case () of
+        _
+            | Just Refl <- testEquality (typeRep @c) (typeRep @Double) ->
+                numericBinary K.doubleKernels name l r
+            | Just Refl <- testEquality (typeRep @c) (typeRep @Int) ->
+                numericBinary K.intKernels name l r
+            | Just Refl <- testEquality (typeRep @c) (typeRep @T.Text) ->
+                textBinary name l r
+            | otherwise -> Nothing
+
+numericBinary ::
+    forall e a.
+    (Columnable e, VU.Unbox e, Columnable a) =>
+    K.NumKernels e -> T.Text -> Value e -> Value e -> Maybe (Value a)
+numericBinary ks name l r
+    | Just op <- K.cmpOpByName name
+    , Just Refl <- testEquality (typeRep @a) (typeRep @Bool) = do
+        args <- (,) <$> kernelArg l <*> kernelArg r
+        flatUnboxed <$> case args of
+            (KVec x, KLit y) -> Just (K.kCmpCL ks op x y)
+            (KLit x, KVec y) -> Just (K.kCmpLC ks op x y)
+            (KVec x, KVec y) -> Just (K.kCmpCC ks op x y)
+            (KLit _, KLit _) -> Nothing
+    | Just op <- K.arithOpByName name
+    , Just Refl <- testEquality (typeRep @a) (typeRep @e) = do
+        args <- (,) <$> kernelArg l <*> kernelArg r
+        flatUnboxed <$> case args of
+            (KVec x, KLit y) -> Just (K.kArithCL ks op x y)
+            (KLit x, KVec y) -> Just (K.kArithLC ks op x y)
+            (KVec x, KVec y) -> Just (K.kArithCC ks op x y)
+            (KLit _, KLit _) -> Nothing
+    | otherwise = Nothing
+
+{- | @eq@/@neq@ between a null-free packed Text column and a literal, on raw
+bytes. A literal containing U+FFFD takes the generic path (see
+'K.packedEqLit').
+-}
+textBinary ::
+    forall a. (Columnable a) => T.Text -> Value T.Text -> Value T.Text -> Maybe (Value a)
+textBinary name l r = do
+    Refl <- testEquality (typeRep @a) (typeRep @Bool)
+    wantEq <- case name of
+        "eq" -> Just True
+        "neq" -> Just False
+        _ -> Nothing
+    (p, t) <- case (l, r) of
+        (Flat (PackedText Nothing p), Scalar t) -> Just (p, t)
+        (Scalar t, Flat (PackedText Nothing p)) -> Just (p, t)
+        _ -> Nothing
+    if T.any (== '\xFFFD') t then Nothing else Just (flatUnboxed (K.packedEqLit wantEq p t))
+
+-- | @toDouble@ of a null-free 'Int' column.
+unaryKernel ::
+    forall b a. (Columnable b, Columnable a) => T.Text -> Value b -> Maybe (Value a)
+unaryKernel "toDouble" v
+    | Just Refl <- testEquality (typeRep @b) (typeRep @Int)
+    , Just Refl <- testEquality (typeRep @a) (typeRep @Double)
+    , Just (KVec x) <- kernelArg v =
+        Just (flatUnboxed (K.intToDouble x))
+unaryKernel _ _ = Nothing
+
+-- | If-then-else over a null-free Bool column, selecting 'Double' or 'Int'.
+selectKernel ::
+    forall a. (Columnable a) => Value Bool -> Value a -> Value a -> Maybe (Value a)
+selectKernel c l r = do
+    KVec cs <- kernelArg c
+    case () of
+        _
+            | Just Refl <- testEquality (typeRep @a) (typeRep @Double) ->
+                numericSelect K.doubleKernels cs l r
+            | Just Refl <- testEquality (typeRep @a) (typeRep @Int) ->
+                numericSelect K.intKernels cs l r
+            | otherwise -> Nothing
+
+numericSelect ::
+    (Columnable e, VU.Unbox e) =>
+    K.NumKernels e -> VU.Vector Bool -> Value e -> Value e -> Maybe (Value e)
+numericSelect ks cs l r = do
+    args <- (,) <$> kernelArg l <*> kernelArg r
+    pure . flatUnboxed $ case args of
+        (KVec x, KVec y) -> K.kSelCC ks cs x y
+        (KLit x, KLit y) -> K.kSelLL ks cs x y
+        (KLit x, KVec y) -> K.kSelLC ks cs x y
+        (KVec x, KLit y) -> K.kSelCL ks cs x y
 
 -------------------------------------------------------------------------------
 -- Error enrichment
@@ -842,17 +947,23 @@ eval ctx (CastExprWith _tag onResult (inner :: Expr src)) = do
             Group <$> V.mapM (promoteColumnWith onResult) gs
 eval ctx expr@(Unary op (inner :: Expr b)) = addContext expr $ do
     v <- eval @b ctx inner
-    liftValue (fastUnaryFn @b @a (unaryName op) (unaryFn op)) v
+    case unaryKernel @b @a (unaryName op) v of
+        Just out -> Right out
+        Nothing -> liftValue (fastUnaryFn @b @a (unaryName op) (unaryFn op)) v
 eval ctx expr@(Binary op (left :: Expr c) (right :: Expr b)) =
     addContext expr $ do
         l <- eval @c ctx left
         r <- eval @b ctx right
-        liftValue2 (binaryFn op) l r
+        case binaryKernel @c @b @a (binaryName op) l r of
+            Just out -> Right out
+            Nothing -> liftValue2 (binaryFn op) l r
 eval ctx expr@(If cond l r) = addContext expr $ do
     c <- eval @Bool ctx cond
     lv <- eval @a ctx l
     rv <- eval @a ctx r
-    branchValue c lv rv
+    case selectKernel c lv rv of
+        Just out -> Right out
+        Nothing -> branchValue c lv rv
 eval (FlatCtx df) expr@(Over keys inner) = addContext expr $ do
     let gdf = G.groupBy keys df
     v <- eval (GroupCtx gdf) inner

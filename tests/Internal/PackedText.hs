@@ -21,6 +21,7 @@ import Data.Text.Encoding (encodeUtf8)
 import Data.Word (Word8)
 import qualified DataFrame as D
 import qualified DataFrame.Functions as F
+import DataFrame.Expression.Operators ((./=.), (.==.))
 import qualified DataFrame.Internal.Column as DI
 import DataFrame.Internal.Data.PackedText (mkPackedContiguous)
 import DataFrame.Internal.DataFrame (unsafeGetColumn)
@@ -204,6 +205,48 @@ sliceRejectsInvalidBounds = TestCase $ do
         Right len ->
             assertFailure ("expected an invalid slice, got length " ++ show len)
 
+-- Rows for the eq/neq kernel: valid text, empty, and invalid UTF-8 (a lone
+-- 0xFF, a truncated "é", a bare continuation byte) that decodes to U+FFFD.
+kernelRowBytes :: [[Word8]]
+kernelRowBytes =
+    map (B.unpack . encodeUtf8) ["apple", "", "café", "日本語", "apple", "\xFFFD"]
+        ++ [[0xFF], [0x63, 0x61, 0x66, 0xC3], [0x80], [0xEF, 0xBF]]
+
+packedFromBytes :: [[Word8]] -> DI.Column
+packedFromBytes rows =
+    DI.PackedText
+        Nothing
+        (mkPackedContiguous (arrayFromBytes (concat rows)) (VU.fromList (scanl (+) 0 (map length rows))))
+
+{- The eq/neq-literal kernel compares raw bytes. Each case checks it against
+the same expression over the materialized (boxed) column, which takes the
+generic path, on the base and on a sorted (selected) payload. A literal with
+U+FFFD must fall back, so it is included too.
+-}
+eqLiteralKernelParity :: Test
+eqLiteralKernelParity = TestCase $ do
+    let base = D.fromColumns [("k", packedFromBytes kernelRowBytes)]
+        sorted = D.sortBy [D.Asc (F.col @T.Text "k")] base
+        boxed df = D.fromColumns [("k", DI.materializePacked (unsafeGetColumn "k" df))]
+        lits = ["apple", "", "café", "日本語", "\xFFFD", "caf", "missing"] :: [T.Text]
+        result :: D.DataFrame -> D.Expr Bool -> [Bool]
+        result df e = DI.toList @Bool (unsafeGetColumn "r" (D.derive "r" e df))
+    assertBool "sorted payload stays PackedText" (DI.isPackedText (unsafeGetColumn "k" sorted))
+    sequence_
+        [ assertEqual
+            (label ++ " " ++ show lit)
+            (result (boxed df) e)
+            (result df e)
+        | (label, df) <- [("base", base), ("sorted", sorted)]
+        , lit <- lits
+        , e <-
+            [ F.col @T.Text "k" .==. F.lit lit
+            , F.col @T.Text "k" ./=. F.lit lit
+            , F.lit lit .==. F.col @T.Text "k"
+            , F.lit lit ./=. F.col @T.Text "k"
+            ]
+        ]
+
 tests :: [Test]
 tests =
     [ TestLabel "PackedText display parity" displayParity
@@ -221,4 +264,5 @@ tests =
     , TestLabel "PackedText slice preserves packed" slicePreservesPacked
     , TestLabel "PackedText takeLast preserves packed" takeLastPreservesPacked
     , TestLabel "PackedText slice rejects bad bounds" sliceRejectsInvalidBounds
+    , TestLabel "PackedText eq/neq literal kernel parity" eqLiteralKernelParity
     ]

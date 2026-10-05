@@ -175,9 +175,7 @@ mapColumn f = \case
             Just Refl ->
                 Right $ case sUnbox @c of
                     STrue ->
-                        UnboxedColumn
-                            bm
-                            (parGenerateUnboxed (VB.length col) (f . VB.unsafeIndex col))
+                        UnboxedColumn bm (mapBoxedToUnboxed f col)
                     SFalse -> case bm of
                         Nothing -> fromVector @c (VB.map f col)
                         Just _ -> BoxedColumn bm (VB.map f col)
@@ -208,9 +206,7 @@ mapColumn f = \case
         Nothing -> case testEquality (typeRep @a) (typeRep @b) of
             Just Refl -> Right $ case sUnbox @c of
                 STrue ->
-                    UnboxedColumn
-                        bm
-                        (parGenerateUnboxed (VU.length col) (f . VU.unsafeIndex col))
+                    UnboxedColumn bm (mapUnboxed f col)
                 SFalse -> case bm of
                     Nothing -> fromVector @c (VB.generate (VU.length col) (f . VU.unsafeIndex col))
                     Just _ -> BoxedColumn bm (VB.generate (VU.length col) (f . VU.unsafeIndex col))
@@ -235,9 +231,7 @@ imapColumn f = \case
     runBoxed bm col = case testEquality (typeRep @a) (typeRep @b) of
         Just Refl -> Right $ case sUnbox @c of
             STrue ->
-                UnboxedColumn
-                    bm
-                    (VU.generate (VB.length col) (\i -> f i (VB.unsafeIndex col i)))
+                UnboxedColumn bm (imapBoxedToUnboxed f col)
             SFalse -> BoxedColumn bm (VB.imap f col)
         Nothing -> throwTypeMismatch @a @b
 
@@ -247,7 +241,7 @@ imapColumn f = \case
         Maybe Bitmap -> VU.Vector a -> Either DataFrameException Column
     runUnboxed bm col = case testEquality (typeRep @a) (typeRep @b) of
         Just Refl -> Right $ case sUnbox @c of
-            STrue -> UnboxedColumn bm (VU.imap f col)
+            STrue -> UnboxedColumn bm (imapUnboxed f col)
             SFalse -> BoxedColumn bm (VB.imap f (VG.convert col))
         Nothing -> throwTypeMismatch @a @b
 
@@ -353,6 +347,251 @@ parGenerateUnboxedInline n f
         parallelChunks_ parThreshold n (fillGenerate mv f)
         VU.unsafeFreeze mv
 {-# INLINE parGenerateUnboxedInline #-}
+
+-- | The element types with their own compiled loops.
+data ElemTy a where
+    TDouble :: ElemTy Double
+    TInt :: ElemTy Int
+    TBool :: ElemTy Bool
+
+elemTy :: forall a. (Typeable a) => Maybe (ElemTy a)
+elemTy
+    | Just Refl <- testEquality (typeRep @a) (typeRep @Double) = Just TDouble
+    | Just Refl <- testEquality (typeRep @a) (typeRep @Int) = Just TInt
+    | Just Refl <- testEquality (typeRep @a) (typeRep @Bool) = Just TBool
+    | otherwise = Nothing
+{-# INLINE elemTy #-}
+
+-- | @'parGenerateUnboxed' n (f . (v !))@.
+mapUnboxed ::
+    forall a c.
+    (Typeable a, Typeable c, VU.Unbox a, VU.Unbox c) =>
+    (a -> c) -> VU.Vector a -> VU.Vector c
+mapUnboxed f v = case (elemTy @a, elemTy @c) of
+    (Just TDouble, Just TDouble) -> mapDD f v
+    (Just TDouble, Just TInt) -> mapDI f v
+    (Just TDouble, Just TBool) -> mapDB f v
+    (Just TInt, Just TDouble) -> mapID f v
+    (Just TInt, Just TInt) -> mapII f v
+    (Just TInt, Just TBool) -> mapIB f v
+    (Just TBool, Just TDouble) -> mapBD f v
+    (Just TBool, Just TInt) -> mapBI f v
+    (Just TBool, Just TBool) -> mapBB f v
+    _ -> mapLoop f v
+
+mapLoop :: (VU.Unbox a, VU.Unbox c) => (a -> c) -> VU.Vector a -> VU.Vector c
+mapLoop f v = parGenerateUnboxedInline (VU.length v) (f . VU.unsafeIndex v)
+{-# INLINE mapLoop #-}
+
+mapDD :: (Double -> Double) -> VU.Vector Double -> VU.Vector Double
+mapDD = mapLoop
+{-# NOINLINE mapDD #-}
+mapDI :: (Double -> Int) -> VU.Vector Double -> VU.Vector Int
+mapDI = mapLoop
+{-# NOINLINE mapDI #-}
+mapDB :: (Double -> Bool) -> VU.Vector Double -> VU.Vector Bool
+mapDB = mapLoop
+{-# NOINLINE mapDB #-}
+mapID :: (Int -> Double) -> VU.Vector Int -> VU.Vector Double
+mapID = mapLoop
+{-# NOINLINE mapID #-}
+mapII :: (Int -> Int) -> VU.Vector Int -> VU.Vector Int
+mapII = mapLoop
+{-# NOINLINE mapII #-}
+mapIB :: (Int -> Bool) -> VU.Vector Int -> VU.Vector Bool
+mapIB = mapLoop
+{-# NOINLINE mapIB #-}
+mapBD :: (Bool -> Double) -> VU.Vector Bool -> VU.Vector Double
+mapBD = mapLoop
+{-# NOINLINE mapBD #-}
+mapBI :: (Bool -> Int) -> VU.Vector Bool -> VU.Vector Int
+mapBI = mapLoop
+{-# NOINLINE mapBI #-}
+mapBB :: (Bool -> Bool) -> VU.Vector Bool -> VU.Vector Bool
+mapBB = mapLoop
+{-# NOINLINE mapBB #-}
+
+-- | @'parGenerateUnboxed' n (f . (v !))@ from a boxed vector: only the write
+-- needs specialising.
+mapBoxedToUnboxed ::
+    forall a c. (Typeable c, VU.Unbox c) => (a -> c) -> VB.Vector a -> VU.Vector c
+mapBoxedToUnboxed f v = case elemTy @c of
+    Just TDouble -> mapBoxedD f v
+    Just TInt -> mapBoxedI f v
+    Just TBool -> mapBoxedB f v
+    Nothing -> mapBoxedLoop f v
+
+mapBoxedLoop :: (VU.Unbox c) => (a -> c) -> VB.Vector a -> VU.Vector c
+mapBoxedLoop f v = parGenerateUnboxedInline (VB.length v) (f . VB.unsafeIndex v)
+{-# INLINE mapBoxedLoop #-}
+
+mapBoxedD :: (a -> Double) -> VB.Vector a -> VU.Vector Double
+mapBoxedD = mapBoxedLoop
+{-# NOINLINE mapBoxedD #-}
+mapBoxedI :: (a -> Int) -> VB.Vector a -> VU.Vector Int
+mapBoxedI = mapBoxedLoop
+{-# NOINLINE mapBoxedI #-}
+mapBoxedB :: (a -> Bool) -> VB.Vector a -> VU.Vector Bool
+mapBoxedB = mapBoxedLoop
+{-# NOINLINE mapBoxedB #-}
+
+-- | 'VU.imap', sequential as before.
+imapUnboxed ::
+    forall a c.
+    (Typeable a, Typeable c, VU.Unbox a, VU.Unbox c) =>
+    (Int -> a -> c) -> VU.Vector a -> VU.Vector c
+imapUnboxed f v = case (elemTy @a, elemTy @c) of
+    (Just TDouble, Just TDouble) -> imapDD f v
+    (Just TDouble, Just TInt) -> imapDI f v
+    (Just TDouble, Just TBool) -> imapDB f v
+    (Just TInt, Just TDouble) -> imapID f v
+    (Just TInt, Just TInt) -> imapII f v
+    (Just TInt, Just TBool) -> imapIB f v
+    (Just TBool, Just TDouble) -> imapBD f v
+    (Just TBool, Just TInt) -> imapBI f v
+    (Just TBool, Just TBool) -> imapBB f v
+    _ -> VU.imap f v
+
+imapDD :: (Int -> Double -> Double) -> VU.Vector Double -> VU.Vector Double
+imapDD = VU.imap
+{-# NOINLINE imapDD #-}
+imapDI :: (Int -> Double -> Int) -> VU.Vector Double -> VU.Vector Int
+imapDI = VU.imap
+{-# NOINLINE imapDI #-}
+imapDB :: (Int -> Double -> Bool) -> VU.Vector Double -> VU.Vector Bool
+imapDB = VU.imap
+{-# NOINLINE imapDB #-}
+imapID :: (Int -> Int -> Double) -> VU.Vector Int -> VU.Vector Double
+imapID = VU.imap
+{-# NOINLINE imapID #-}
+imapII :: (Int -> Int -> Int) -> VU.Vector Int -> VU.Vector Int
+imapII = VU.imap
+{-# NOINLINE imapII #-}
+imapIB :: (Int -> Int -> Bool) -> VU.Vector Int -> VU.Vector Bool
+imapIB = VU.imap
+{-# NOINLINE imapIB #-}
+imapBD :: (Int -> Bool -> Double) -> VU.Vector Bool -> VU.Vector Double
+imapBD = VU.imap
+{-# NOINLINE imapBD #-}
+imapBI :: (Int -> Bool -> Int) -> VU.Vector Bool -> VU.Vector Int
+imapBI = VU.imap
+{-# NOINLINE imapBI #-}
+imapBB :: (Int -> Bool -> Bool) -> VU.Vector Bool -> VU.Vector Bool
+imapBB = VU.imap
+{-# NOINLINE imapBB #-}
+
+-- | 'VU.generate' over @f i (v ! i)@ from a boxed vector, sequential as before.
+imapBoxedToUnboxed ::
+    forall a c. (Typeable c, VU.Unbox c) => (Int -> a -> c) -> VB.Vector a -> VU.Vector c
+imapBoxedToUnboxed f v = case elemTy @c of
+    Just TDouble -> imapBoxedD f v
+    Just TInt -> imapBoxedI f v
+    Just TBool -> imapBoxedB f v
+    Nothing -> imapBoxedLoop f v
+
+imapBoxedLoop :: (VU.Unbox c) => (Int -> a -> c) -> VB.Vector a -> VU.Vector c
+imapBoxedLoop f v = VU.generate (VB.length v) (\i -> f i (VB.unsafeIndex v i))
+{-# INLINE imapBoxedLoop #-}
+
+imapBoxedD :: (Int -> a -> Double) -> VB.Vector a -> VU.Vector Double
+imapBoxedD = imapBoxedLoop
+{-# NOINLINE imapBoxedD #-}
+imapBoxedI :: (Int -> a -> Int) -> VB.Vector a -> VU.Vector Int
+imapBoxedI = imapBoxedLoop
+{-# NOINLINE imapBoxedI #-}
+imapBoxedB :: (Int -> a -> Bool) -> VB.Vector a -> VU.Vector Bool
+imapBoxedB = imapBoxedLoop
+{-# NOINLINE imapBoxedB #-}
+
+-- | Element-wise @f@ over two same-typed vectors, to the shorter length.
+zipUnboxed ::
+    forall a c.
+    (Typeable a, Typeable c, VU.Unbox a, VU.Unbox c) =>
+    (a -> a -> c) -> VU.Vector a -> VU.Vector a -> VU.Vector c
+zipUnboxed f l r = case (elemTy @a, elemTy @c) of
+    (Just TDouble, Just TDouble) -> zipDD f l r
+    (Just TDouble, Just TInt) -> zipDI f l r
+    (Just TDouble, Just TBool) -> zipDB f l r
+    (Just TInt, Just TDouble) -> zipID f l r
+    (Just TInt, Just TInt) -> zipII f l r
+    (Just TInt, Just TBool) -> zipIB f l r
+    (Just TBool, Just TDouble) -> zipBD f l r
+    (Just TBool, Just TInt) -> zipBI f l r
+    (Just TBool, Just TBool) -> zipBB f l r
+    _ -> zipLoop f l r
+
+zipLoop :: (VU.Unbox a, VU.Unbox b, VU.Unbox c) => (a -> b -> c) -> VU.Vector a -> VU.Vector b -> VU.Vector c
+zipLoop f l r =
+    parGenerateUnboxedInline
+        (min (VU.length l) (VU.length r))
+        (\i -> f (VU.unsafeIndex l i) (VU.unsafeIndex r i))
+{-# INLINE zipLoop #-}
+
+zipDD :: (Double -> Double -> Double) -> VU.Vector Double -> VU.Vector Double -> VU.Vector Double
+zipDD = zipLoop
+{-# NOINLINE zipDD #-}
+zipDI :: (Double -> Double -> Int) -> VU.Vector Double -> VU.Vector Double -> VU.Vector Int
+zipDI = zipLoop
+{-# NOINLINE zipDI #-}
+zipDB :: (Double -> Double -> Bool) -> VU.Vector Double -> VU.Vector Double -> VU.Vector Bool
+zipDB = zipLoop
+{-# NOINLINE zipDB #-}
+zipID :: (Int -> Int -> Double) -> VU.Vector Int -> VU.Vector Int -> VU.Vector Double
+zipID = zipLoop
+{-# NOINLINE zipID #-}
+zipII :: (Int -> Int -> Int) -> VU.Vector Int -> VU.Vector Int -> VU.Vector Int
+zipII = zipLoop
+{-# NOINLINE zipII #-}
+zipIB :: (Int -> Int -> Bool) -> VU.Vector Int -> VU.Vector Int -> VU.Vector Bool
+zipIB = zipLoop
+{-# NOINLINE zipIB #-}
+zipBD :: (Bool -> Bool -> Double) -> VU.Vector Bool -> VU.Vector Bool -> VU.Vector Double
+zipBD = zipLoop
+{-# NOINLINE zipBD #-}
+zipBI :: (Bool -> Bool -> Int) -> VU.Vector Bool -> VU.Vector Bool -> VU.Vector Int
+zipBI = zipLoop
+{-# NOINLINE zipBI #-}
+zipBB :: (Bool -> Bool -> Bool) -> VU.Vector Bool -> VU.Vector Bool -> VU.Vector Bool
+zipBB = zipLoop
+{-# NOINLINE zipBB #-}
+
+-- | 'VU.foldl'' over a 'Double' or 'Int' vector with a 'Double' or 'Int'
+-- accumulator.
+foldlUnboxed ::
+    forall a b. (Typeable a, Typeable b, VU.Unbox a) => (b -> a -> b) -> b -> VU.Vector a -> b
+foldlUnboxed f z v = case (elemTy @a, elemTy @b) of
+    (Just TDouble, Just TDouble) -> foldlDD f z v
+    (Just TDouble, Just TInt) -> foldlDI f z v
+    (Just TInt, Just TDouble) -> foldlID f z v
+    (Just TInt, Just TInt) -> foldlII f z v
+    _ -> VU.foldl' f z v
+
+foldlDD :: (Double -> Double -> Double) -> Double -> VU.Vector Double -> Double
+foldlDD = VU.foldl'
+{-# NOINLINE foldlDD #-}
+foldlDI :: (Int -> Double -> Int) -> Int -> VU.Vector Double -> Int
+foldlDI = VU.foldl'
+{-# NOINLINE foldlDI #-}
+foldlID :: (Double -> Int -> Double) -> Double -> VU.Vector Int -> Double
+foldlID = VU.foldl'
+{-# NOINLINE foldlID #-}
+foldlII :: (Int -> Int -> Int) -> Int -> VU.Vector Int -> Int
+foldlII = VU.foldl'
+{-# NOINLINE foldlII #-}
+
+-- | 'VU.foldl1'' over a 'Double' or 'Int' vector.
+foldl1Unboxed :: forall a. (Typeable a, VU.Unbox a) => (a -> a -> a) -> VU.Vector a -> a
+foldl1Unboxed f v = case elemTy @a of
+    Just TDouble -> foldl1D f v
+    Just TInt -> foldl1I f v
+    _ -> VU.foldl1' f v
+
+foldl1D :: (Double -> Double -> Double) -> VU.Vector Double -> Double
+foldl1D = VU.foldl1'
+{-# NOINLINE foldl1D #-}
+foldl1I :: (Int -> Int -> Int) -> VU.Vector Int -> Int
+foldl1I = VU.foldl1'
+{-# NOINLINE foldl1I #-}
 
 -- | Closure-free parallel 'Int' gather: @out!i = v ! (ix!i)@.
 parBackpermuteInt :: VU.Vector Int -> VU.Vector Int -> VU.Vector Int
@@ -605,7 +844,9 @@ foldlColumn ::
     (b -> a -> b) -> b -> Column -> Either DataFrameException b
 foldlColumn f acc = \case
     BoxedColumn _ column -> foldlWorker column
-    UnboxedColumn _ column -> foldlWorker column
+    UnboxedColumn _ (column :: VU.Vector c)
+        | Just Refl <- testEquality (typeRep @a) (typeRep @c) -> pure (foldlUnboxed f acc column)
+        | otherwise -> foldlWorker column
     c@(PackedText _ _) -> foldlColumn f acc (materializePacked c)
     c@(MergedColumn _ _) -> foldlColumn f acc (materializeMerged c)
   where
@@ -633,7 +874,9 @@ foldl1Column ::
     (a -> a -> a) -> Column -> Either DataFrameException a
 foldl1Column f = \case
     BoxedColumn _ column -> foldl1Worker column
-    UnboxedColumn _ column -> foldl1Worker column
+    UnboxedColumn _ (column :: VU.Vector c)
+        | Just Refl <- testEquality (typeRep @a) (typeRep @c) -> pure (foldl1Unboxed f column)
+        | otherwise -> foldl1Worker column
     c@(PackedText _ _) -> foldl1Column f (materializePacked c)
     c@(MergedColumn _ _) -> foldl1Column f (materializeMerged c)
   where
@@ -833,10 +1076,11 @@ zipWithColumns f (UnboxedColumn bmL (column :: VU.Vector d)) (UnboxedColumn bmR 
             | isNothing bmL
             , isNothing bmR ->
                 pure $ case sUnbox @c of
-                    STrue ->
-                        let !n = min (VU.length column) (VU.length other)
-                         in UnboxedColumn Nothing $
-                                parGenerateUnboxed n $ \i ->
+                    STrue -> UnboxedColumn Nothing $ case testEquality (typeRep @a) (typeRep @b) of
+                        Just Refl -> zipUnboxed f column other
+                        Nothing ->
+                            let !n = min (VU.length column) (VU.length other)
+                             in parGenerateUnboxed n $ \i ->
                                     f (VU.unsafeIndex column i) (VU.unsafeIndex other i)
                     SFalse -> fromVector $ VB.zipWith f (VG.convert column) (VG.convert other)
         _ -> zipWithColumnsGeneral f (UnboxedColumn bmL column) (UnboxedColumn bmR other)

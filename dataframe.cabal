@@ -329,6 +329,8 @@ test-suite tests
                    Operations.Take,
                    Operations.Typing,
                    Operations.VectorKernel,
+                   Operations.InterpreterKernels,
+                   Operations.MonomorphicLoops,
                    Operations.Record,
                    LazyParquet,
                    LazyParity,

@@ -81,6 +81,7 @@ library
                         DataFrame.Internal.Grouping.Direct
                         DataFrame.Internal.Grouping.Partitioned
                         DataFrame.Internal.Interpreter
+                        DataFrame.Internal.Interpreter.Kernels
                         DataFrame.Internal.Row
                         DataFrame.Internal.Row.RowHash
     build-depends:      base >= 4 && < 5,

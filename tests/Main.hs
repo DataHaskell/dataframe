@@ -39,6 +39,8 @@ import qualified Operations.Filter
 import qualified Operations.GroupBy
 import qualified Operations.Inference
 import qualified Operations.InsertColumn
+import qualified Operations.InterpreterKernels
+import qualified Operations.MonomorphicLoops
 import qualified Operations.Join
 import qualified Operations.Merge
 import qualified Operations.Nullable
@@ -112,6 +114,8 @@ tests =
             ++ Operations.Take.tests
             ++ Operations.Typing.tests
             ++ Operations.VectorKernel.tests
+            ++ Operations.InterpreterKernels.tests
+            ++ Operations.MonomorphicLoops.tests
             ++ Operations.Window.tests
             ++ Functions.tests
             ++ IO.CSV.tests

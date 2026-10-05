@@ -45,7 +45,7 @@ import qualified Data.Vector.Unboxed as VU
 
 import Control.Exception (throw)
 import Data.Function (on)
-import Data.List (sortBy, (\\))
+import Data.List (sortBy, (\\), foldl')
 import Data.Maybe (fromMaybe)
 import Data.Type.Equality (
     TestEquality (testEquality),
