@@ -1,5 +1,4 @@
 {-# LANGUAGE BangPatterns #-}
-{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 
@@ -13,20 +12,15 @@ module DataFrame.IO.Parquet.Writer (
     nativeTypeKeyValues,
 ) where
 
+import Control.Exception (evaluate)
 import Control.Monad (forM_, unless, when)
-import Control.Monad.IO.Class (MonadIO)
-import Control.Monad.Primitive (PrimBase, PrimMonad, PrimState)
+import Control.Monad.ST (RealWorld, ST, stToIO)
 import qualified Data.ByteString as BS
+import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import Data.Int (Int64)
 import Data.Maybe (fromJust)
 import Data.Primitive.ByteArray (getSizeofMutableByteArray)
-import Data.Primitive.MutVar (
-    MutVar,
-    modifyMutVar',
-    newMutVar,
-    readMutVar,
-    writeMutVar,
- )
+import Data.STRef (STRef, modifySTRef', newSTRef, readSTRef, writeSTRef)
 import qualified Data.Text as T
 import qualified Data.Vector as VB
 import DataFrame.IO.Parquet.Thrift hiding (schema)
@@ -56,12 +50,12 @@ import DataFrame.IO.Utils.RandomAccess (
     WritableBinaryHandle,
     atomicallyWriteFile,
     bufferResidency,
-    bufferToByteString,
     ensureCapacity,
     flushBufferToBuffer,
     flushBufferToFile,
     mallocBuffer,
     resetPosition,
+    unsafeBufferView,
     withWritableBinaryFile,
     writeByteString,
     writeByteStringToFile,
@@ -80,29 +74,29 @@ import System.Directory (createDirectoryIfMissing)
 import System.FilePath (takeDirectory)
 import Text.Printf (printf)
 
-data ParquetWriterState m = ParquetWriterState
+data ParquetWriterState = ParquetWriterState
     { outputFileHandle :: !WritableBinaryHandle
-    , columnChunks :: !(VB.Vector (ColumnChunkState m))
-    , currentFileOffsetRef :: !(MutVar (PrimState m) Int64)
-    , scratchBuffer :: !(MemoryBuffer (PrimState m))
-    , rowGroupMetadataRef :: !(MutVar (PrimState m) [RowGroup])
-    , rowNumberRef :: !(MutVar (PrimState m) Int)
+    , columnChunks :: !(VB.Vector (ColumnChunkState RealWorld))
+    , currentFileOffsetRef :: !(IORef Int64)
+    , scratchBuffer :: !(MemoryBuffer RealWorld)
+    , rowGroupMetadataRef :: !(IORef [RowGroup])
+    , rowNumberRef :: !(IORef Int)
     }
 
-data ColumnChunkState m = ColumnChunkState
+data ColumnChunkState s = ColumnChunkState
     { columnName :: !T.Text
     , nullable :: !Bool
     , schema :: !SchemaElement
-    , encoder :: !(Encoder m)
-    , buffer :: !(MemoryBuffer (PrimState m))
-    , uncompressedBufferSize :: !(MutVar (PrimState m) Int64)
-    , pageState :: !(PageState m)
+    , encoder :: !(Encoder s)
+    , buffer :: !(MemoryBuffer s)
+    , uncompressedBufferSize :: !(STRef s Int64)
+    , pageState :: !(PageState s)
     }
 
-data PageState m = PageState
-    { pageBuffer :: !(MemoryBuffer (PrimState m))
-    , definitionLevels :: !(DefLevels (PrimState m))
-    , currentRowCount :: !(MutVar (PrimState m) Int)
+data PageState s = PageState
+    { pageBuffer :: !(MemoryBuffer s)
+    , definitionLevels :: !(DefLevels s)
+    , currentRowCount :: !(STRef s Int)
     }
 
 writeParquet :: FilePath -> DataFrame -> IO ()
@@ -163,21 +157,22 @@ writeShard options path_ df startRow endRow = do
     let names = columnNames df
         shardRows = max 0 (endRow - startRow)
     columnChunks_ <-
-        VB.fromList
-            <$> mapM
-                ( \columnName_ ->
-                    initColumnChunkState
-                        options
-                        columnName_
-                        (fromJust (getColumn columnName_ df))
-                )
-                names
-    scratchBuffer_ <- mallocBuffer (max 1 options.pageSize)
+        stToIO $
+            VB.fromList
+                <$> mapM
+                    ( \columnName_ ->
+                        initColumnChunkState
+                            options
+                            columnName_
+                            (fromJust (getColumn columnName_ df))
+                    )
+                    names
+    scratchBuffer_ <- stToIO (mallocBuffer (max 1 options.pageSize))
     atomicallyWriteFile path_ $ \path -> withWritableBinaryFile path $ \output -> do
         writeByteStringToFile output magic
-        currentFileOffsetRef_ <- newMutVar 4
-        rowGroupMetadataRef_ <- newMutVar []
-        rowNumberRef_ <- newMutVar 0
+        currentFileOffsetRef_ <- newIORef 4
+        rowGroupMetadataRef_ <- newIORef []
+        rowNumberRef_ <- newIORef 0
         let writerState =
                 ParquetWriterState
                     output
@@ -188,26 +183,29 @@ writeShard options path_ df startRow endRow = do
                     rowNumberRef_
             interval = max 1 options.batchRows
             subBatch = max 1 options.subBatchRows
+            writeBatch :: Int -> Int -> IO ()
             writeBatch rowNum batchEnd
                 | rowNum >= batchEnd = pure ()
                 | otherwise = do
                     let count = min subBatch (batchEnd - rowNum)
-                    VB.forM_ columnChunks_ (writeRows options scratchBuffer_ rowNum count)
-                    modifyMutVar' rowNumberRef_ (+ count)
+                    VB.forM_ columnChunks_ $ \ccs -> do
+                        pageFull <- stToIO (writeRows options rowNum count ccs)
+                        when pageFull (flushPage options scratchBuffer_ ccs)
+                    modifyIORef' rowNumberRef_ (+ count)
                     writeBatch (rowNum + count) batchEnd
+            loop :: Int -> IO ()
             loop rowNum
                 | rowNum >= endRow = pure ()
                 | otherwise = do
                     let batchEnd = rowNum + min interval (endRow - rowNum)
                     writeBatch rowNum batchEnd
-                    size <- bufferedSize columnChunks_
+                    size <- stToIO (bufferedSize columnChunks_)
                     when (size >= options.rowGroupSize) $
                         flushRowGroup options writerState
                     loop batchEnd
         loop startRow
         flushRowGroup options writerState
-        rowGroupMetadata <-
-            reverse <$> readMutVar rowGroupMetadataRef_
+        rowGroupMetadata <- reverse <$> readIORef rowGroupMetadataRef_
         let schemaElements =
                 rootSchemaElement (VB.length columnChunks_)
                     : VB.toList (VB.map schema columnChunks_)
@@ -229,31 +227,28 @@ nativeTypeKeyValues names df =
     , Just col <- [getColumn name df]
     ]
 
+{- | Encode @count@ rows starting at @firstRow@ into the column's page.
+Returns 'True' when the page has reached the page size and should be flushed.
+-}
 writeRows ::
-    (PrimBase m, MonadIO m) =>
-    ParquetWriteOptions ->
-    MemoryBuffer (PrimState m) ->
-    Int ->
-    Int ->
-    ColumnChunkState m ->
-    m ()
-writeRows options scratch firstRow count ccs = do
+    ParquetWriteOptions -> Int -> Int -> ColumnChunkState s -> ST s Bool
+writeRows options firstRow count ccs = do
     let page = ccs.pageState
         buf = page.pageBuffer
         encode = ccs.encoder.encodeValue
         dl = page.definitionLevels
         end = firstRow + count
 
-    pos0 <- readMutVar buf.positionRef
+    pos0 <- readSTRef buf.positionRef
     let margin = options.pageSize
     arr0 <- ensureCapacity buf (pos0 + max margin (count * 64))
     size0 <- getSizeofMutableByteArray arr0
 
     let go !size !pos !row
-            | row >= end = writeMutVar buf.positionRef pos
+            | row >= end = writeSTRef buf.positionRef pos
             | pos + margin > size = do
                 -- Rare: buffer nearly full, grow it
-                writeMutVar buf.positionRef pos
+                writeSTRef buf.positionRef pos
                 arr' <-
                     ensureCapacity
                         buf
@@ -269,43 +264,35 @@ writeRows options scratch firstRow count ccs = do
     go size0 pos0 firstRow
 
     -- Batch bookkeeping: once per sub-batch instead of per value
-    modifyMutVar' page.currentRowCount (+ count)
+    modifySTRef' page.currentRowCount (+ count)
     flushDef dl
     pageRes <- bufferResidency buf
     defRes <- bufferResidency dl.dlBuf
-    when
-        (pageRes + defRes >= options.pageSize)
-        (flushPage options scratch ccs)
+    pure (pageRes + defRes >= options.pageSize)
 
 flushPage ::
-    (PrimBase m, MonadIO m) =>
     ParquetWriteOptions ->
-    MemoryBuffer (PrimState m) ->
-    ColumnChunkState m ->
-    m ()
+    MemoryBuffer RealWorld ->
+    ColumnChunkState RealWorld ->
+    IO ()
 flushPage options scratch columnChunkState = do
     let page = columnChunkState.pageState
-    numPageRows <- readMutVar page.currentRowCount
+    numPageRows <- stToIO (readSTRef page.currentRowCount)
     when (numPageRows > 0) $ do
-        pos <- readMutVar page.pageBuffer.positionRef
-        pos' <- columnChunkState.encoder.finishValues page.pageBuffer pos
-        writeMutVar page.pageBuffer.positionRef pos'
-        body <- assemblePageBody scratch columnChunkState
-        writeDataPage
-            options.compressionCodec
-            numPageRows
-            body
-            columnChunkState
-        resetPosition page.pageBuffer
-        resetPosition page.definitionLevels.dlBuf
-        resetPosition scratch
-        writeMutVar page.currentRowCount 0
+        body <- stToIO $ do
+            pos <- readSTRef page.pageBuffer.positionRef
+            pos' <- columnChunkState.encoder.finishValues page.pageBuffer pos
+            writeSTRef page.pageBuffer.positionRef pos'
+            assemblePageBody scratch columnChunkState
+        writeDataPage options.compressionCodec numPageRows body columnChunkState
+        stToIO $ do
+            resetPosition page.pageBuffer
+            resetPosition page.definitionLevels.dlBuf
+            resetPosition scratch
+            writeSTRef page.currentRowCount 0
 
 assemblePageBody ::
-    (PrimMonad m) =>
-    MemoryBuffer (PrimState m) ->
-    ColumnChunkState m ->
-    m (MemoryBuffer (PrimState m))
+    MemoryBuffer s -> ColumnChunkState s -> ST s (MemoryBuffer s)
 assemblePageBody scratch columnChunkState
     | not columnChunkState.nullable = pure columnChunkState.pageState.pageBuffer
     | otherwise = do
@@ -319,18 +306,20 @@ assemblePageBody scratch columnChunkState
         pure scratch
 
 writeDataPage ::
-    (PrimBase m, MonadIO m) =>
     CompressionCodec ->
     Int ->
-    MemoryBuffer (PrimState m) ->
-    ColumnChunkState m ->
-    m ()
+    MemoryBuffer RealWorld ->
+    ColumnChunkState RealWorld ->
+    IO ()
 writeDataPage codec numPageRows body columnChunkState = do
-    uncompressedPageSize <- bufferResidency body
+    uncompressedPageSize <- stToIO (bufferResidency body)
     compressedBody <- case codec of
         UNCOMPRESSED _ -> pure Nothing
-        SNAPPY _ ->
-            Just . Snappy.compress <$> bufferToByteString body
+        SNAPPY _ -> do
+            -- Compress straight from the page buffer, forcing the result now
+            -- so it can't be read after the buffer is reused for the next page.
+            page <- unsafeBufferView body
+            Just <$> evaluate (Snappy.compress page)
         other -> error ("writeParquet: unsupported codec " <> show other)
     let compressedPageSize = maybe uncompressedPageSize BS.length compressedBody
         headerBytes =
@@ -339,19 +328,16 @@ writeDataPage codec numPageRows body columnChunkState = do
                 (mkDataPageHeader numPageRows uncompressedPageSize compressedPageSize)
     writeByteString columnChunkState.buffer headerBytes
     case compressedBody of
-        Nothing -> flushBufferToBuffer body columnChunkState.buffer
+        Nothing -> stToIO (flushBufferToBuffer body columnChunkState.buffer)
         Just bytes -> writeByteString columnChunkState.buffer bytes
-    modifyMutVar'
-        columnChunkState.uncompressedBufferSize
-        (+ fromIntegral (BS.length headerBytes + uncompressedPageSize))
+    stToIO $
+        modifySTRef'
+            columnChunkState.uncompressedBufferSize
+            (+ fromIntegral (BS.length headerBytes + uncompressedPageSize))
 
-flushRowGroup ::
-    (PrimBase m, MonadIO m) =>
-    ParquetWriteOptions ->
-    ParquetWriterState m ->
-    m ()
+flushRowGroup :: ParquetWriteOptions -> ParquetWriterState -> IO ()
 flushRowGroup options writerState = do
-    rowNumber <- readMutVar writerState.rowNumberRef
+    rowNumber <- readIORef writerState.rowNumberRef
     when (rowNumber > 0) $ do
         VB.forM_
             writerState.columnChunks
@@ -359,22 +345,19 @@ flushRowGroup options writerState = do
         (reversedColumnChunks, totalCompressed, totalUncompressed) <-
             VB.foldM'
                 ( \(acc, totalCompressedSize, totalUncompressedSize) columnChunkState -> do
-                    offset <-
-                        readMutVar writerState.currentFileOffsetRef
-                    compressedSize <-
-                        bufferResidency columnChunkState.buffer
-                    uncompressedSize <-
-                        readMutVar
-                            columnChunkState.uncompressedBufferSize
+                    offset <- readIORef writerState.currentFileOffsetRef
+                    (compressedSize, uncompressedSize) <-
+                        stToIO $
+                            (,)
+                                <$> bufferResidency columnChunkState.buffer
+                                <*> readSTRef columnChunkState.uncompressedBufferSize
                     flushBufferToFile
                         writerState.outputFileHandle
                         columnChunkState.buffer
-                    writeMutVar
+                    writeIORef
                         writerState.currentFileOffsetRef
                         (offset + fromIntegral compressedSize)
-                    writeMutVar
-                        columnChunkState.uncompressedBufferSize
-                        0
+                    stToIO (writeSTRef columnChunkState.uncompressedBufferSize 0)
                     let columnChunk =
                             mkColumnChunk
                                 options.compressionCodec
@@ -392,7 +375,7 @@ flushRowGroup options writerState = do
                 )
                 ([], 0 :: Int64, 0 :: Int64)
                 writerState.columnChunks
-        modifyMutVar'
+        modifyIORef'
             writerState.rowGroupMetadataRef
             ( mkRowGroup
                 (reverse reversedColumnChunks)
@@ -401,12 +384,9 @@ flushRowGroup options writerState = do
                 rowNumber
                 :
             )
-        writeMutVar writerState.rowNumberRef 0
+        writeIORef writerState.rowNumberRef 0
 
-bufferedSize ::
-    (PrimMonad m) =>
-    VB.Vector (ColumnChunkState m) ->
-    m Int
+bufferedSize :: VB.Vector (ColumnChunkState s) -> ST s Int
 bufferedSize =
     VB.foldM'
         ( \total columnChunkState -> do
@@ -421,11 +401,7 @@ bufferedSize =
         0
 
 initColumnChunkState ::
-    (PrimBase m, MonadIO m) =>
-    ParquetWriteOptions ->
-    T.Text ->
-    Column ->
-    m (ColumnChunkState m)
+    ParquetWriteOptions -> T.Text -> Column -> ST s (ColumnChunkState s)
 initColumnChunkState options columnName_ column = do
     encoder_ <- buildEncoder column
     let nullable_ = hasMissing column
@@ -450,7 +426,7 @@ initColumnChunkState options columnName_ column = do
     -- is likely to hit the page limit, the others are liable to be
     -- much smaller than the limit.
     buffer_ <- mallocBuffer bufferSize
-    uncompressedBufferSize_ <- newMutVar 0
+    uncompressedBufferSize_ <- newSTRef 0
     pageState_ <- initPageState bufferSize
     pure
         ColumnChunkState
@@ -463,11 +439,11 @@ initColumnChunkState options columnName_ column = do
             , pageState = pageState_
             }
 
-initPageState :: (PrimMonad m, MonadIO m) => Int -> m (PageState m)
+initPageState :: Int -> ST s (PageState s)
 initPageState bufferSize = do
     pageBuffer_ <- mallocBuffer bufferSize
     definitionLevels_ <- newDefLevels
-    currentRowCount_ <- newMutVar 0
+    currentRowCount_ <- newSTRef 0
     pure
         PageState
             { pageBuffer = pageBuffer_

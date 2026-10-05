@@ -1,4 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 module DataFrame.IO.Parquet.Writer.Metadata (
@@ -11,8 +10,7 @@ module DataFrame.IO.Parquet.Writer.Metadata (
     magic,
 ) where
 
-import Control.Monad.IO.Class (MonadIO)
-import Control.Monad.Primitive (PrimBase)
+import Control.Monad.ST (stToIO)
 import qualified Data.ByteString as BS
 import Data.Int (Int64)
 import qualified Data.Text as T
@@ -140,13 +138,12 @@ mkRowGroup chunks totalCompressed totalUncompressed rgRows =
         }
 
 writeFooter ::
-    (PrimBase m, MonadIO m) =>
     WritableBinaryHandle ->
     [SchemaElement] ->
     Int ->
     [RowGroup] ->
     [(T.Text, T.Text)] ->
-    m ()
+    IO ()
 writeFooter output schemaElements numRows rowGroupMetadata keyValues = do
     let metadata =
             FileMetadata
@@ -169,9 +166,9 @@ writeFooter output schemaElements numRows rowGroupMetadata keyValues = do
                 , footer_signing_key_metadata = putField Nothing
                 }
         footer = Pinch.encode Pinch.compactProtocol metadata
-    buffer <- mallocBuffer (BS.length footer + 8)
+    buffer <- stToIO (mallocBuffer (BS.length footer + 8))
     writeByteString buffer footer
-    writeWord32LE buffer (fromIntegral (BS.length footer))
+    stToIO (writeWord32LE buffer (fromIntegral (BS.length footer)))
     writeByteString buffer magic
     flushBufferToFile output buffer
 

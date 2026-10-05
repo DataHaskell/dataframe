@@ -12,6 +12,7 @@ import System.IO.Temp (withSystemTempDirectory)
 import Test.HUnit
 
 import Control.Monad (unless)
+import Control.Monad.ST (stToIO)
 import Data.Int (Int32, Int64)
 import Data.Maybe (fromJust)
 import qualified Data.Text as T
@@ -34,14 +35,14 @@ import System.Directory (listDirectory)
 
 directWrites :: Test
 directWrites = TestCase $ do
-    buffer <- mallocBuffer 1
-    writeWord8 buffer 0xaa
-    writeWord32LE buffer 0x78563412
-    writeWord64LE buffer 0x0807060504030201
-    writeFloatLE buffer 1
-    writeDoubleLE buffer 1
+    buffer <- stToIO (mallocBuffer 1)
+    stToIO (writeWord8 buffer 0xaa)
+    stToIO (writeWord32LE buffer 0x78563412)
+    stToIO (writeWord64LE buffer 0x0807060504030201)
+    stToIO (writeFloatLE buffer 1)
+    stToIO (writeDoubleLE buffer 1)
     writeByteString buffer (BS.pack [0xfe, 0xff])
-    residency <- bufferResidency buffer
+    residency <- stToIO (bufferResidency buffer)
     bytes <- bufferToByteString buffer
     assertEqual "direct write residency" 27 residency
     assertEqual
@@ -80,20 +81,20 @@ directWrites = TestCase $ do
 
 directBufferFlush :: Test
 directBufferFlush = TestCase $ do
-    source <- mallocBuffer 0
-    destination <- mallocBuffer 0
+    source <- stToIO (mallocBuffer 0)
+    destination <- stToIO (mallocBuffer 0)
     writeByteString destination (BS.pack [1, 2])
     writeByteString source (BS.pack [3, 4, 5])
-    flushBufferToBuffer source destination
-    sourceResidency <- bufferResidency source
+    stToIO (flushBufferToBuffer source destination)
+    sourceResidency <- stToIO (bufferResidency source)
     destinationBytes <- bufferToByteString destination
     assertEqual "source cleared" 0 sourceResidency
     assertEqual "destination appended" (BS.pack [1, 2, 3, 4, 5]) destinationBytes
-    flushBufferToBuffer destination destination
+    stToIO (flushBufferToBuffer destination destination)
     selfFlushedBytes <- bufferToByteString destination
     assertEqual "self flush is a no-op" destinationBytes selfFlushedBytes
-    resetPosition destination
-    destinationResidency <- bufferResidency destination
+    stToIO (resetPosition destination)
+    destinationResidency <- stToIO (bufferResidency destination)
     assertEqual "reset position" 0 destinationResidency
 
 directFileFlush :: Test
@@ -101,11 +102,11 @@ directFileFlush = TestCase $
     withSystemTempDirectory "dfpq-buffer" $ \dir -> do
         let outPath = dir </> "out.bin"
             payload = BS.pack (take 300000 (cycle [0 .. 255]))
-        buffer <- mallocBuffer 1
+        buffer <- stToIO (mallocBuffer 1)
         writeByteString buffer payload
         withWritableBinaryFile outPath $ \output ->
             flushBufferToFile output buffer
-        residency <- bufferResidency buffer
+        residency <- stToIO (bufferResidency buffer)
         contents <- BS.readFile outPath
         assertEqual "source cleared after file flush" 0 residency
         assertEqual "large payload round-trips" payload contents
