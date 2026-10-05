@@ -23,15 +23,17 @@ import DataFrame.DecisionTree.Regression (
     fitRegTree,
  )
 import DataFrame.DecisionTree.Types (Tree, TreeConfig (..), defaultTreeConfig)
-import DataFrame.Internal.Expression (Expr (..))
 import qualified DataFrame.Internal.Column as DI
+import DataFrame.Internal.Expression (Expr (..))
 import DataFrame.Internal.Interpreter (interpret)
 import DataFrame.Model (Fit (..), Predict (..))
 import qualified DataFrameApi as D
 
 tests :: [Test]
 tests =
-    [ TestLabel "null splits: in-sample == interpreted (mixed nullable frame)" inSampleMatchesInterpret
+    [ TestLabel
+        "null splits: in-sample == interpreted (mixed nullable frame)"
+        inSampleMatchesInterpret
     , TestLabel "null splits: nulls join the side they fit" learnedDirection
     , TestLabel "null splits: null-indicator split" nullIndicator
     , TestLabel "null splits: unseen nulls still route" unseenNullsRoute
@@ -39,7 +41,8 @@ tests =
     , TestLabel "null splits: AdaBoost null indicator" adaBoostNullIndicator
     ]
 
-fitAll :: Int -> D.DataFrame -> VU.Vector Double -> (Tree Double, VU.Vector Double)
+fitAll ::
+    Int -> D.DataFrame -> VU.Vector Double -> (Tree Double, VU.Vector Double)
 fitAll depth df y = (rfTree fitted, rfFitted fitted)
   where
     fitted =
@@ -67,17 +70,35 @@ inSampleMatchesInterpret :: Test
 inSampleMatchesInterpret = TestCase $ do
     let n = 60 :: Int
         rows = [0 .. n - 1]
-        md = [if i `mod` 7 == 0 then Nothing else Just (fromIntegral ((i * 37) `mod` 23) :: Double) | i <- rows]
-        mi = [if i `mod` 5 == 2 then Nothing else Just ((i * 11) `mod` 9 :: Int) | i <- rows]
-        mt = [if i `mod` 6 == 4 then Nothing else Just (["a", "b", "c"] !! (i `mod` 3) :: T.Text) | i <- rows]
+        md =
+            [ if i `mod` 7 == 0
+                then Nothing
+                else Just (fromIntegral ((i * 37) `mod` 23) :: Double)
+            | i <- rows
+            ]
+        mi =
+            [if i `mod` 5 == 2 then Nothing else Just ((i * 11) `mod` 9 :: Int) | i <- rows]
+        mt =
+            [ if i `mod` 6 == 4
+                then Nothing
+                else Just (["a", "b", "c"] !! (i `mod` 3) :: T.Text)
+            | i <- rows
+            ]
         z = [fromIntegral ((i * 13) `mod` 17) :: Double | i <- rows]
         y = [fromIntegral ((i * 29) `mod` 31) / 7 :: Double | i <- rows]
         df =
             withTarget
                 y
-                [("md", maybeCol md), ("mi", maybeCol mi), ("mt", maybeCol mt), ("z", DI.fromList z)]
+                [ ("md", maybeCol md)
+                , ("mi", maybeCol mi)
+                , ("mt", maybeCol mt)
+                , ("z", DI.fromList z)
+                ]
         (t, inSample) = fitAll 6 df (VU.fromList y)
-    assertEqual "in-sample predictions equal the interpreted tree" (interpreted df t) inSample
+    assertEqual
+        "in-sample predictions equal the interpreted tree"
+        (interpreted df t)
+        inSample
 
 -- The null rows have the same target as the low values of x, so one split
 -- fits exactly only if it sends the nulls left.
@@ -108,7 +129,9 @@ unseenNullsRoute = TestCase $ do
         scored = interpreted testDf t
     assertEqual "fits exactly" (VU.fromList y) inSample
     assertEqual "present rows unchanged" (VU.take 4 inSample) (VU.take 4 scored)
-    assertBool "null rows land in a leaf" (VU.all (`elem` [0, 1]) (VU.drop 4 scored))
+    assertBool
+        "null rows land in a leaf"
+        (VU.all (`elem` [0, 1]) (VU.drop 4 scored))
 
 -- The target depends only on whether x is null. If the split's threshold were
 -- +Infinity instead of 3, CART and AdaBoost would send the null rows left
@@ -122,7 +145,11 @@ indicatorFrame = (y, withTarget y [("x", maybeCol x)])
 cartNullIndicator :: Test
 cartNullIndicator = TestCase $ do
     let (y, df) = indicatorFrame
-        t = buildCartTree @Double defaultTreeConfig{maxTreeDepth = 1, minLeafSize = 1} "y" df
+        t =
+            buildCartTree @Double
+                defaultTreeConfig{maxTreeDepth = 1, minLeafSize = 1}
+                "y"
+                df
     assertEqual "fits exactly" (VU.fromList y) (interpreted df t)
 
 adaBoostNullIndicator :: Test

@@ -3,7 +3,7 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE TypeApplications #-}
+
 {-# LANGUAGE TypeFamilies #-}
 
 {- | Gradient boosting of regression trees (Friedman). Trees are fitted to the
@@ -34,7 +34,11 @@ import DataFrame.Errors (DataFrameException (..))
 
 import DataFrame.DecisionTree.Cart (cartFeatures)
 import DataFrame.DecisionTree.Fit (treeToExpr)
-import DataFrame.DecisionTree.Histogram (TreeLimits (..), binFeatures, fitBinnedTree)
+import DataFrame.DecisionTree.Histogram (
+    TreeLimits (..),
+    binFeatures,
+    fitBinnedTree,
+ )
 import DataFrame.DecisionTree.Types (Tree)
 import DataFrame.Expression.Operators ((.*.), (.+.), (.>.))
 import DataFrame.Featurize.Internal (targetDoubles)
@@ -53,8 +57,9 @@ data GBConfig = GBConfig
     , gbLearningRate :: !Double
     , gbMaxDepth :: !Int
     , gbMaxBins :: !Int
-    -- ^ Bins per feature for split finding. Features with at most this many
-    -- distinct values split exactly as on the raw values.
+    {- ^ Bins per feature for split finding. Features with at most this many
+    distinct values split exactly as on the raw values.
+    -}
     , gbSeed :: !Int
     }
     deriving (Eq, Show)

@@ -30,10 +30,10 @@ import DataFrame.Errors (DataFrameException (..))
 
 import DataFrame.DecisionTree.Cart (
     CartFeature (..),
-    cfPred,
-    splitMidpoint,
     cartFeatures,
+    cfPred,
     sortIndicesByValue,
+    splitMidpoint,
  )
 import DataFrame.DecisionTree.Fit (treeToExpr)
 import DataFrame.DecisionTree.Types (Tree (..))
