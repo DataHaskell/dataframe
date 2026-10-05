@@ -54,7 +54,8 @@ binFeature maxBins f = Binned f bins nb upper
     runs = runLengths sorted
     distinct = map fst runs
     edges
-        | length runs <= maxBins = VU.fromList (zipWith splitMidpoint distinct (drop 1 distinct))
+        | length runs <= maxBins =
+            VU.fromList (zipWith splitMidpoint distinct (drop 1 distinct))
         | otherwise = VU.fromList (cutEdges maxBins (VU.length sorted) runs)
     nb = VU.length edges + 1
     -- The last bin's threshold is the largest value, so "every non-null row
@@ -112,7 +113,8 @@ Built strictly: left lazy, the histograms of a deep tree pile up as thunks.
 -}
 type Hist = VU.Vector Double
 
-buildHist :: VU.Vector Double -> VU.Vector Double -> VU.Vector Int -> Binned -> Hist
+buildHist ::
+    VU.Vector Double -> VU.Vector Double -> VU.Vector Int -> Binned -> Hist
 buildHist w y idxs bn = runST $ do
     m <- VUM.replicate (4 * (bnNBins bn + 1)) 0
     VU.forM_ idxs $ \i -> do
@@ -141,7 +143,7 @@ fitBinnedTree ::
 fitBinnedTree lim binned y mw = (toTree root, inSample)
   where
     n = VU.length y
-    w = maybe (VU.replicate n 1) id mw
+    w = Data.Maybe.fromMaybe (VU.replicate n 1) mw
     allIdx = VU.enumFromN 0 n
     root = node 0 allIdx (hists allIdx)
     inSample = VU.update (VU.replicate n 0) (VU.concat (leafRows root))
@@ -155,7 +157,8 @@ fitBinnedTree lim binned y mw = (toTree root, inSample)
         strategy = if VU.length idxs >= 20000 then parList rseq else evalList rseq
 
     node depth idxs hs
-        | depth >= tlMaxDepth lim || VU.length idxs < tlMinSamplesSplit lim || V.null hs = leaf
+        | depth >= tlMaxDepth lim || VU.length idxs < tlMinSamplesSplit lim || V.null hs =
+            leaf
         | otherwise = maybe leaf split (bestSplit lim binned hs)
       where
         Totals tw tsy _ _ = histTotals (V.head hs)
@@ -199,7 +202,8 @@ histTotals h = go 0 0 0 0 0
 scored with the node's null rows on the right and then on the left; ties keep
 the earliest candidate, as in the exact sweep.
 -}
-bestSplit :: TreeLimits -> V.Vector Binned -> V.Vector Hist -> Maybe (Int, Int, Bool)
+bestSplit ::
+    TreeLimits -> V.Vector Binned -> V.Vector Hist -> Maybe (Int, Int, Bool)
 bestSplit lim binned hs
     | null candidates = Nothing
     | red > 0 && red >= tlMinImpurityDecrease lim = Just sp
@@ -225,7 +229,14 @@ bestSplit lim binned hs
             | otherwise = Nothing
           where
             wr = totW - wl
-        scan :: Int -> Double -> Double -> Double -> Int -> Maybe (Int, Bool, Double) -> Maybe (Int, Bool, Double)
+        scan ::
+            Int ->
+            Double ->
+            Double ->
+            Double ->
+            Int ->
+            Maybe (Int, Bool, Double) ->
+            Maybe (Int, Bool, Double)
         scan !b !wl !syl !syl2 !cl best
             | b > lastB = best
             | otherwise = scan (b + 1) wl' syl' syl2' cl' best'
@@ -236,7 +247,8 @@ bestSplit lim binned hs
             cl' = cl + round (h VU.! (4 * b + 3))
             right = (,) False <$> score cl' wl' syl' syl2'
             left
-                | hasNulls = (,) True <$> score (cl' + nC) (wl' + nW) (syl' + nSY) (syl2' + nSY2)
+                | hasNulls =
+                    (,) True <$> score (cl' + nC) (wl' + nW) (syl' + nSY) (syl2' + nSY2)
                 | otherwise = Nothing
             consider bst (dir, r)
                 | maybe True (\(_, _, rb) -> r > rb) bst = Just (b, dir, r)

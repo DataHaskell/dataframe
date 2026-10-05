@@ -344,7 +344,8 @@ nullableLeq c
     | otherwise = Nothing
 
 oneHotFeatures ::
-    forall b. (Columnable b) => T.Text -> Maybe Bitmap -> V.Vector b -> [CartFeature]
+    forall b.
+    (Columnable b) => T.Text -> Maybe Bitmap -> V.Vector b -> [CartFeature]
 oneHotFeatures c bm v = case testEquality (typeRep @b) (typeRep @T.Text) of
     Just Refl -> [oneHot c nulls v cat | cat <- Set.toList (Set.fromList present)]
     Nothing -> []
@@ -352,7 +353,8 @@ oneHotFeatures c bm v = case testEquality (typeRep @b) (typeRep @T.Text) of
     nulls = fmap (nullFlags (V.length v)) bm
     present = [x | (i, x) <- zip [0 ..] (V.toList v), maybe True (not . (VU.! i)) nulls]
 
-oneHot :: T.Text -> Maybe (VU.Vector Bool) -> V.Vector T.Text -> T.Text -> CartFeature
+oneHot ::
+    T.Text -> Maybe (VU.Vector Bool) -> V.Vector T.Text -> T.Text -> CartFeature
 oneHot c Nothing v cat =
     CartFeature
         (VU.generate (V.length v) (\i -> if v V.! i == cat then 1 else 0))

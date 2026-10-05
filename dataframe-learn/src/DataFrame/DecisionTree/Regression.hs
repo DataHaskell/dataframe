@@ -83,8 +83,8 @@ fitRegTree cfg feats y mw = RegFit (toTree root) inSample
     splitNode depth idxs sortedByFeat (fj, thr, side)
         | VU.null lefts || VU.null rights = FLeaf (weightedMean idxs) idxs
         | otherwise =
-            forceTree l
-                `par` (forceTree r `pseq` FBranch (cfSplit feat thr side) l r)
+            forceTree l `par`
+                (forceTree r `pseq` FBranch (cfSplit feat thr side) l r)
       where
         feat = feats V.! fj
         vals = cfValues feat
@@ -134,7 +134,8 @@ fitRegTree cfg feats y mw = RegFit (toTree root) inSample
         lastK = if hasNulls then m - 1 else m - 2
         score nl wl syl syl2 =
             let wr = totW - wl
-                ok = nl >= rtMinLeafSize cfg && nNode - nl >= rtMinLeafSize cfg && wl > 0 && wr > 0
+                ok =
+                    nl >= rtMinLeafSize cfg && nNode - nl >= rtMinLeafSize cfg && wl > 0 && wr > 0
              in if ok
                     then Just (nodeSSE - (sse syl syl2 wl + sse (totSY - syl) (totSY2 - syl2) wr))
                     else Nothing

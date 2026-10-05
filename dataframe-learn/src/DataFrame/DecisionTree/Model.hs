@@ -27,7 +27,11 @@ import qualified Data.Vector as V
 
 import DataFrame.DecisionTree.Cart (cartFeatures)
 import DataFrame.DecisionTree.Fit (fitDecisionTree, treeToExpr)
-import DataFrame.DecisionTree.Regression (RegFit (..), RegTreeConfig, fitRegTree)
+import DataFrame.DecisionTree.Regression (
+    RegFit (..),
+    RegTreeConfig,
+    fitRegTree,
+ )
 import DataFrame.DecisionTree.Types (Tree (..), TreeConfig)
 import DataFrame.Featurize.Internal (targetDoubles)
 import DataFrame.Internal.Column (Columnable)
