@@ -9,6 +9,7 @@ import Test.QuickCheck
 
 import qualified Cart
 import qualified DecisionTree
+import qualified HistogramTrees
 import qualified Learn.EdgeCases
 import qualified Learn.NumericalRigor
 import qualified Learn.Numerics
@@ -24,6 +25,7 @@ tests =
     TestList $
         Cart.tests
             ++ DecisionTree.tests
+            ++ HistogramTrees.tests
             ++ LinearSolver.tests
             ++ NullSplits.tests
             ++ TreePruning.tests

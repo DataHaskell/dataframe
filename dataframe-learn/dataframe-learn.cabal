@@ -45,6 +45,7 @@ library internal
                         DataFrame.DecisionTree.Pool
                         DataFrame.DecisionTree.Linear
                         DataFrame.DecisionTree.Tao
+                        DataFrame.DecisionTree.Histogram
                         DataFrame.DecisionTree.Fit
                         DataFrame.LinearSolver
                         DataFrame.LinearSolver.Loss
@@ -126,6 +127,7 @@ test-suite learn-internal
     other-modules:      DataFrameApi
                         Cart
                         NullSplits
+                        HistogramTrees
                         DecisionTree
                         TreePruning
                         Worklist

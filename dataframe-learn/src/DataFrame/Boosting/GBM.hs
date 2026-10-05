@@ -9,7 +9,9 @@
 {- | Gradient boosting of regression trees (Friedman). Trees are fitted to the
 negative gradient of the loss each round and accumulated with a shrinkage
 factor; squared error gives regression, logistic deviance gives binary
-classification. 'predict' is the additive score; 'gbProbaExpr' /
+classification. Split search runs on per-feature histograms (see
+'gbMaxBins'), so a tree costs O(rows) rather than a sweep per node.
+'predict' is the additive score; 'gbProbaExpr' /
 'gbDecisionExpr' give the classification probability / decision.
 -}
 module DataFrame.Boosting.GBM (
@@ -32,7 +34,7 @@ import DataFrame.Errors (DataFrameException (..))
 
 import DataFrame.DecisionTree.Cart (cartFeatures)
 import DataFrame.DecisionTree.Fit (treeToExpr)
-import DataFrame.DecisionTree.Regression (RegFit (..), RegTreeConfig (..), fitRegTree)
+import DataFrame.DecisionTree.Histogram (TreeLimits (..), binFeatures, fitBinnedTree)
 import DataFrame.DecisionTree.Types (Tree)
 import DataFrame.Expression.Operators ((.*.), (.+.), (.>.))
 import DataFrame.Featurize.Internal (targetDoubles)
@@ -50,6 +52,9 @@ data GBConfig = GBConfig
     , gbNEstimators :: !Int
     , gbLearningRate :: !Double
     , gbMaxDepth :: !Int
+    , gbMaxBins :: !Int
+    -- ^ Bins per feature for split finding. Features with at most this many
+    -- distinct values split exactly as on the raw values.
     , gbSeed :: !Int
     }
     deriving (Eq, Show)
@@ -61,6 +66,7 @@ defaultGBConfig =
         , gbNEstimators = 100
         , gbLearningRate = 0.1
         , gbMaxDepth = 3
+        , gbMaxBins = 1024
         , gbSeed = 0
         }
 
@@ -97,16 +103,16 @@ fitGBM cfg target@(Col name) df =
         (VU.fromList (reverse scores))
         usage
   where
-    feats = V.fromList (cartFeatures name df)
+    binned = binFeatures (gbMaxBins cfg) (V.fromList (cartFeatures name df))
     y = targetDoubles target df
     n = VU.length y
     lr = gbLearningRate cfg
-    rtCfg =
-        RegTreeConfig
-            { rtMaxDepth = gbMaxDepth cfg
-            , rtMinSamplesSplit = 2
-            , rtMinLeafSize = 1
-            , rtMinImpurityDecrease = 0.0
+    limits =
+        TreeLimits
+            { tlMaxDepth = gbMaxDepth cfg
+            , tlMinSamplesSplit = 2
+            , tlMinLeafSize = 1
+            , tlMinImpurityDecrease = 0.0
             }
     f0 = case gbLoss cfg of
         SquaredError -> VU.sum y / fromIntegral (max 1 n)
@@ -118,7 +124,7 @@ fitGBM cfg target@(Col name) df =
         | m >= gbNEstimators cfg = (ts, ss, usageAcc)
         | otherwise =
             let (target', weights) = newtonStep (gbLoss cfg) y fScores
-                RegFit tree pred = fitRegTree rtCfg feats target' weights
+                (tree, pred) = fitBinnedTree limits binned target' weights
                 fScores' = VU.zipWith (\f p -> f + lr * p) fScores pred
                 score = lossValue (gbLoss cfg) y fScores'
                 usage' = foldr (\c -> M.insertWith (+) c 1) usageAcc (treeColumns tree)
