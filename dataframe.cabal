@@ -331,6 +331,7 @@ test-suite tests
                    Operations.VectorKernel,
                    Operations.InterpreterKernels,
                    Operations.MonomorphicLoops,
+                   Operations.RowWise,
                    Operations.Record,
                    LazyParquet,
                    LazyParity,

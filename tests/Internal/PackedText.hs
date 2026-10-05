@@ -20,8 +20,8 @@ import qualified Data.ByteString as B
 import Data.Text.Encoding (encodeUtf8)
 import Data.Word (Word8)
 import qualified DataFrame as D
-import qualified DataFrame.Functions as F
 import DataFrame.Expression.Operators ((./=.), (.==.))
+import qualified DataFrame.Functions as F
 import qualified DataFrame.Internal.Column as DI
 import DataFrame.Internal.Data.PackedText (mkPackedContiguous)
 import DataFrame.Internal.DataFrame (unsafeGetColumn)
@@ -216,12 +216,13 @@ packedFromBytes :: [[Word8]] -> DI.Column
 packedFromBytes rows =
     DI.PackedText
         Nothing
-        (mkPackedContiguous (arrayFromBytes (concat rows)) (VU.fromList (scanl (+) 0 (map length rows))))
+        ( mkPackedContiguous
+            (arrayFromBytes (concat rows))
+            (VU.fromList (scanl (+) 0 (map length rows)))
+        )
 
-{- The eq/neq-literal kernel compares raw bytes. Each case checks it against
-the same expression over the materialized (boxed) column, which takes the
-generic path, on the base and on a sorted (selected) payload. A literal with
-U+FFFD must fall back, so it is included too.
+{- The eq/neq-literal kernel compares raw bytes. It must agree with the same
+expression over the decoded column, including invalid UTF-8 rows.
 -}
 eqLiteralKernelParity :: Test
 eqLiteralKernelParity = TestCase $ do
@@ -231,7 +232,9 @@ eqLiteralKernelParity = TestCase $ do
         lits = ["apple", "", "café", "日本語", "\xFFFD", "caf", "missing"] :: [T.Text]
         result :: D.DataFrame -> D.Expr Bool -> [Bool]
         result df e = DI.toList @Bool (unsafeGetColumn "r" (D.derive "r" e df))
-    assertBool "sorted payload stays PackedText" (DI.isPackedText (unsafeGetColumn "k" sorted))
+    assertBool
+        "sorted payload stays PackedText"
+        (DI.isPackedText (unsafeGetColumn "k" sorted))
     sequence_
         [ assertEqual
             (label ++ " " ++ show lit)

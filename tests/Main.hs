@@ -50,6 +50,7 @@ import qualified Operations.ParallelJoin
 import qualified Operations.Provenance
 import qualified Operations.ReadCsv
 import qualified Operations.Record
+import qualified Operations.RowWise
 import qualified Operations.SetOps
 import qualified Operations.Shuffle
 import qualified Operations.Sort
@@ -116,6 +117,7 @@ tests =
             ++ Operations.VectorKernel.tests
             ++ Operations.InterpreterKernels.tests
             ++ Operations.MonomorphicLoops.tests
+            ++ Operations.RowWise.tests
             ++ Operations.Window.tests
             ++ Functions.tests
             ++ IO.CSV.tests

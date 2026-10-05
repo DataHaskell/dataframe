@@ -1,6 +1,5 @@
 {-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE BangPatterns #-}
-{-# LANGUAGE ExplicitNamespaces #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GADTs #-}
@@ -8,7 +7,9 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# OPTIONS_GHC -Wno-orphans #-}
 
@@ -27,6 +28,7 @@ module DataFrame.Internal.Interpreter (
 
 import Data.Bifunctor (first)
 import qualified Data.Map as M
+import qualified Data.Set as S
 import qualified Data.Text as T
 import Data.Type.Equality (TestEquality (testEquality), type (:~:) (Refl))
 import qualified Data.Vector as V
@@ -41,11 +43,14 @@ import DataFrame.Internal.Expression
 import qualified DataFrame.Internal.Grouping as G
 import qualified DataFrame.Internal.Interpreter.Kernels as K
 import Type.Reflection (
+    SomeTypeRep (..),
     Typeable,
     typeRep,
  )
 
 import Data.Int (Int16, Int32, Int64, Int8)
+import Data.Word (Word64)
+import GHC.Float (castDoubleToWord64)
 
 -- Specializations for common aggregation types to avoid dictionary overhead.
 -- foldLinearGroups: mean accumulator
@@ -388,7 +393,10 @@ liftValue2 _ (Group _) (Group _) =
     Left $ InternalException "Group count mismatch in binary operation"
 {-# INLINEABLE liftValue2 #-}
 
--- | Branch on a boolean 'Value', selecting from two same-typed 'Value's.
+{- | If-then-else over values already computed for every row. Each row takes
+its value from the chosen branch only, so a null in the other branch does not
+make the row null.
+-}
 branchValue ::
     forall a.
     (Columnable a) =>
@@ -398,151 +406,394 @@ branchValue ::
     Either DataFrameException (Value a)
 branchValue (Scalar True) l _ = Right l
 branchValue (Scalar False) _ r = Right r
-branchValue cond (Scalar l) (Scalar r) =
-    liftValue (\c -> if c then l else r) cond
-branchValue cond (Scalar l) r =
-    liftValue2 (\c rv -> if c then l else rv) cond r
-branchValue cond l (Scalar r) =
-    liftValue2 (\c lv -> if c then lv else r) cond l
-branchValue (Flat cc) (Flat lc) (Flat rc) =
-    Flat <$> branchColumn @a cc lc rc
-branchValue (Group cgs) (Group lgs) (Group rgs)
-    | V.length cgs == V.length lgs
-        && V.length lgs == V.length rgs =
-        Group
-            <$> V.generateM
-                (V.length cgs)
-                ( \i ->
-                    branchColumn @a (cgs V.! i) (lgs V.! i) (rgs V.! i)
-                )
-branchValue _ _ _ =
-    Left $
-        AggregatedAndNonAggregatedException
-            "if-then-else branches"
-            "mismatched shapes"
-{-# INLINEABLE branchValue #-}
+branchValue (Flat cc) l r = do
+    lc <- alongside cc l
+    rc <- alongside cc r
+    Flat <$> chooseRows cc lc rc
+branchValue (Group cgs) l r =
+    Group
+        <$> V.imapM
+            ( \i cc -> do
+                lc <- alongside cc =<< groupAt i l
+                rc <- alongside cc =<< groupAt i r
+                chooseRows cc lc rc
+            )
+            cgs
 
-{- | Low-level column branch: given a boolean column and two same-typed
-columns, produce the element-wise selection.
--}
-branchColumn ::
+shapeMismatch :: DataFrameException
+shapeMismatch =
+    AggregatedAndNonAggregatedException "if-then-else branches" "mismatched shapes"
+
+-- | A branch as a column with one value per row of the condition column.
+alongside ::
     forall a.
-    (Columnable a) =>
-    Column ->
-    Column ->
-    Column ->
-    Either DataFrameException Column
-branchColumn cc lc rc = do
-    cs <- toVector @Bool @V.Vector cc
-    ls <- toVector @a @V.Vector lc
-    rs <- toVector @a @V.Vector rc
-    pure $
-        fromVector @a $
-            V.zipWith3 (\c l r -> if c then l else r) cs ls rs
+    (Columnable a) => Column -> Value a -> Either DataFrameException Column
+alongside cc (Scalar x) = Right (broadcastScalar (columnLength cc) x)
+alongside _ (Flat c) = Right c
+alongside _ (Group _) = Left shapeMismatch
 
--- | An operand a kernel can take: a literal or a null-free unboxed column.
-data KArg a = KLit !a | KVec !(VU.Vector a)
+-- | The part of a branch that belongs to group @i@.
+groupAt :: Int -> Value a -> Either DataFrameException (Value a)
+groupAt _ v@(Scalar _) = Right v
+groupAt i (Group gs) | i < V.length gs = Right (Flat (gs V.! i))
+groupAt _ _ = Left shapeMismatch
 
-kernelArg :: forall a. (Columnable a) => Value a -> Maybe (KArg a)
-kernelArg (Scalar s) = Just (KLit s)
-kernelArg (Flat (UnboxedColumn Nothing (v :: VU.Vector x)))
-    | Just Refl <- testEquality (typeRep @x) (typeRep @a) = Just (KVec v)
-kernelArg _ = Nothing
+chooseRows :: Column -> Column -> Column -> Either DataFrameException Column
+chooseRows cc lc rc = do
+    cs <- conditionVector cc
+    let n = VU.length cs
+    both <- mappendColumns lc rc
+    pure (atIndicesStable (VU.imap (\i c -> if c then i else n + i) cs) both)
 
-flatUnboxed :: (Columnable a, VU.Unbox a) => VU.Vector a -> Value a
-flatUnboxed v = Flat (UnboxedColumn Nothing v)
+-- | A condition with nulls is an error.
+conditionVector :: Column -> Either DataFrameException (VU.Vector Bool)
+conditionVector (UnboxedColumn bm (v :: VU.Vector x))
+    | Just Refl <- testEquality (typeRep @x) (typeRep @Bool)
+    , maybe True (not . bitmapHasNulls (VU.length v)) bm =
+        Right v
+conditionVector c = toVector @Bool @VU.Vector c
 
--- | Comparisons and @add@/@sub@/@mult@ on two operands of the same type.
-binaryKernel ::
+-- | A value as a kernel operand: a literal or a null-free unboxed column.
+operand :: forall a. (Columnable a) => Value a -> Maybe (K.Operand a)
+operand (Scalar s) = Just (K.Literal s)
+operand (Flat (UnboxedColumn Nothing (v :: VU.Vector x)))
+    | Just Refl <- testEquality (typeRep @x) (typeRep @a) = Just (K.Column v)
+operand _ = Nothing
+
+fromOperand :: (Columnable a, VU.Unbox a) => K.Operand a -> Value a
+fromOperand (K.Literal x) = Scalar x
+fromOperand (K.Column v) = Flat (UnboxedColumn Nothing v)
+
+{- | A column loop for a built-in binary operator. The loop returns 'Nothing'
+for operands it cannot take (nulls, boxed columns), and the operator's own
+function runs instead.
+-}
+builtinBinary ::
     forall c b a.
     (Columnable c, Columnable b, Columnable a) =>
-    T.Text -> Value c -> Value b -> Maybe (Value a)
-binaryKernel name l r = do
+    T.Text -> Maybe (Value c -> Value b -> Maybe (Value a))
+builtinBinary name = do
     Refl <- testEquality (typeRep @c) (typeRep @b)
-    case () of
-        _
-            | Just Refl <- testEquality (typeRep @c) (typeRep @Double) ->
-                numericBinary K.doubleKernels name l r
-            | Just Refl <- testEquality (typeRep @c) (typeRep @Int) ->
-                numericBinary K.intKernels name l r
-            | Just Refl <- testEquality (typeRep @c) (typeRep @T.Text) ->
-                textBinary name l r
-            | otherwise -> Nothing
+    case (comparison, arithmetic, textEquality) of
+        (Just run, _, _) -> Just run
+        (_, Just run, _) -> Just run
+        (_, _, found) -> found
+  where
+    comparison :: (c ~ b) => Maybe (Value c -> Value c -> Maybe (Value a))
+    comparison = do
+        Refl <- testEquality (typeRep @a) (typeRep @Bool)
+        op <- K.cmpOpByName name
+        run <- K.compareOperands @c
+        Just (\l r -> fromOperand <$> (run op <$> operand l <*> operand r))
+    arithmetic :: (c ~ b) => Maybe (Value c -> Value c -> Maybe (Value a))
+    arithmetic = do
+        Refl <- testEquality (typeRep @a) (typeRep @c)
+        op <- K.arithOpByName name
+        run <- K.arithOperands @c
+        case sUnbox @c of
+            STrue -> Just (\l r -> fromOperand <$> (run op <$> operand l <*> operand r))
+            SFalse -> Nothing
+    textEquality :: (c ~ b) => Maybe (Value c -> Value c -> Maybe (Value a))
+    textEquality = do
+        Refl <- testEquality (typeRep @c) (typeRep @T.Text)
+        Refl <- testEquality (typeRep @a) (typeRep @Bool)
+        wantEq <- case name of
+            "eq" -> Just True
+            "neq" -> Just False
+            _ -> Nothing
+        Just (packedEquals wantEq)
 
-numericBinary ::
-    forall e a.
-    (Columnable e, VU.Unbox e, Columnable a) =>
-    K.NumKernels e -> T.Text -> Value e -> Value e -> Maybe (Value a)
-numericBinary ks name l r
-    | Just op <- K.cmpOpByName name
-    , Just Refl <- testEquality (typeRep @a) (typeRep @Bool) = do
-        args <- (,) <$> kernelArg l <*> kernelArg r
-        flatUnboxed <$> case args of
-            (KVec x, KLit y) -> Just (K.kCmpCL ks op x y)
-            (KLit x, KVec y) -> Just (K.kCmpLC ks op x y)
-            (KVec x, KVec y) -> Just (K.kCmpCC ks op x y)
-            (KLit _, KLit _) -> Nothing
-    | Just op <- K.arithOpByName name
-    , Just Refl <- testEquality (typeRep @a) (typeRep @e) = do
-        args <- (,) <$> kernelArg l <*> kernelArg r
-        flatUnboxed <$> case args of
-            (KVec x, KLit y) -> Just (K.kArithCL ks op x y)
-            (KLit x, KVec y) -> Just (K.kArithLC ks op x y)
-            (KVec x, KVec y) -> Just (K.kArithCC ks op x y)
-            (KLit _, KLit _) -> Nothing
-    | otherwise = Nothing
-
-{- | @eq@/@neq@ between a null-free packed Text column and a literal, on raw
-bytes. A literal containing U+FFFD takes the generic path (see
-'K.packedEqLit').
--}
-textBinary ::
-    forall a. (Columnable a) => T.Text -> Value T.Text -> Value T.Text -> Maybe (Value a)
-textBinary name l r = do
-    Refl <- testEquality (typeRep @a) (typeRep @Bool)
-    wantEq <- case name of
-        "eq" -> Just True
-        "neq" -> Just False
-        _ -> Nothing
+-- | Not used when the literal contains U+FFFD (see 'K.packedEqLit').
+packedEquals :: Bool -> Value T.Text -> Value T.Text -> Maybe (Value Bool)
+packedEquals wantEq l r = do
     (p, t) <- case (l, r) of
         (Flat (PackedText Nothing p), Scalar t) -> Just (p, t)
         (Scalar t, Flat (PackedText Nothing p)) -> Just (p, t)
         _ -> Nothing
-    if T.any (== '\xFFFD') t then Nothing else Just (flatUnboxed (K.packedEqLit wantEq p t))
+    if T.any (== '\xFFFD') t
+        then Nothing
+        else Just (Flat (UnboxedColumn Nothing (K.packedEqLit wantEq p t)))
 
--- | @toDouble@ of a null-free 'Int' column.
-unaryKernel ::
-    forall b a. (Columnable b, Columnable a) => T.Text -> Value b -> Maybe (Value a)
-unaryKernel "toDouble" v
+-- | As 'builtinBinary', for unary operators.
+builtinUnary ::
+    forall b a.
+    (Columnable b, Columnable a) => T.Text -> Maybe (Value b -> Maybe (Value a))
+builtinUnary "toDouble"
     | Just Refl <- testEquality (typeRep @b) (typeRep @Int)
-    , Just Refl <- testEquality (typeRep @a) (typeRep @Double)
-    , Just (KVec x) <- kernelArg v =
-        Just (flatUnboxed (K.intToDouble x))
-unaryKernel _ _ = Nothing
+    , Just Refl <- testEquality (typeRep @a) (typeRep @Double) =
+        Just $ \v -> case operand v of
+            Just (K.Column x) -> Just (Flat (UnboxedColumn Nothing (K.intToDouble x)))
+            _ -> Nothing
+builtinUnary _ = Nothing
 
--- | If-then-else over a null-free Bool column, selecting 'Double' or 'Int'.
-selectKernel ::
-    forall a. (Columnable a) => Value Bool -> Value a -> Value a -> Maybe (Value a)
-selectKernel c l r = do
-    KVec cs <- kernelArg c
-    case () of
-        _
-            | Just Refl <- testEquality (typeRep @a) (typeRep @Double) ->
-                numericSelect K.doubleKernels cs l r
-            | Just Refl <- testEquality (typeRep @a) (typeRep @Int) ->
-                numericSelect K.intKernels cs l r
-            | otherwise -> Nothing
+applyUnary ::
+    forall op b a.
+    (UnaryOp op, Columnable b, Columnable a) =>
+    op b a -> Value b -> Either DataFrameException (Value a)
+applyUnary op v = case builtinUnary @b @a (unaryName op) >>= ($ v) of
+    Just out -> Right out
+    Nothing -> liftValue (fastUnaryFn @b @a (unaryName op) (unaryFn op)) v
 
-numericSelect ::
-    (Columnable e, VU.Unbox e) =>
-    K.NumKernels e -> VU.Vector Bool -> Value e -> Value e -> Maybe (Value e)
-numericSelect ks cs l r = do
-    args <- (,) <$> kernelArg l <*> kernelArg r
-    pure . flatUnboxed $ case args of
-        (KVec x, KVec y) -> K.kSelCC ks cs x y
-        (KLit x, KLit y) -> K.kSelLL ks cs x y
-        (KLit x, KVec y) -> K.kSelLC ks cs x y
-        (KVec x, KLit y) -> K.kSelCL ks cs x y
+applyBinary ::
+    forall op c b a.
+    (BinaryOp op, Columnable c, Columnable b, Columnable a) =>
+    op c b a -> Value c -> Value b -> Either DataFrameException (Value a)
+applyBinary op l r = case builtinBinary @c @b @a (binaryName op) >>= (\run -> run l r) of
+    Just out -> Right out
+    Nothing -> liftValue2 (binaryFn op) l r
+
+-- | The rows of the frame an evaluation covers.
+data Rows = AllRows | Rows !(VU.Vector Int)
+
+data Env = Env {envFrame :: DataFrame, envRows :: Rows}
+
+frameRows :: Env -> Int
+frameRows env = fst (dataframeDimensions (envFrame env))
+
+rowCount :: Env -> Int
+rowCount env = case envRows env of
+    AllRows -> frameRows env
+    Rows sel -> VU.length sel
+
+-- | Keep only the covered rows of a value computed for the whole frame.
+restrict :: Rows -> Value a -> Value a
+restrict (Rows sel) (Flat col) = Flat (atIndicesStable sel col)
+restrict _ v = v
+
+-- | The rows at these positions of the rows already covered.
+narrow :: Env -> VU.Vector Int -> Env
+narrow env positions = env{envRows = Rows rows}
+  where
+    rows = case envRows env of
+        AllRows -> positions
+        Rows sel -> VU.unsafeBackpermute sel positions
+
+{- | Identifies an expression built only from columns, literals and built-in
+operators. Two expressions with equal keys compute the same column, and
+evaluating one on extra rows cannot fail, so a result can be reused.
+-}
+data Key
+    = KeyColumn T.Text SomeTypeRep
+    | KeyLiteral Literal
+    | KeyUnary T.Text SomeTypeRep Key
+    | KeyBinary T.Text SomeTypeRep Key Key
+    deriving (Eq, Ord)
+
+data Literal
+    = LitDouble Word64
+    | LitInt Int
+    | LitBool Bool
+    | LitText T.Text
+    deriving (Eq, Ord)
+
+-- | Keys are only built for expressions up to this many nodes.
+maxKeyNodes :: Int
+maxKeyNodes = 32
+
+keyOf :: (Columnable a) => Expr a -> Maybe Key
+keyOf expr = fst <$> go maxKeyNodes expr
+  where
+    -- Returns the key and the node budget left.
+    go :: forall x. (Columnable x) => Int -> Expr x -> Maybe (Key, Int)
+    go budget _ | budget <= 0 = Nothing
+    go budget e = case e of
+        Col name -> Just (KeyColumn name (SomeTypeRep (typeRep @x)), budget - 1)
+        Lit v -> (\l -> (KeyLiteral l, budget - 1)) <$> literalKey v
+        Unary op (inner :: Expr b) -> do
+            _ <- builtinUnary @b @x (unaryName op)
+            (k, left) <- go (budget - 1) inner
+            Just (KeyUnary (unaryName op) (SomeTypeRep (typeRep @b)) k, left)
+        Binary op (l :: Expr c) (r :: Expr b) -> do
+            _ <- builtinBinary @c @b @x (binaryName op)
+            (kl, afterLeft) <- go (budget - 1) l
+            (kr, left) <- go afterLeft r
+            Just (KeyBinary (binaryName op) (SomeTypeRep (typeRep @c)) kl kr, left)
+        _ -> Nothing
+
+literalKey :: forall a. (Columnable a) => a -> Maybe Literal
+literalKey v
+    | Just Refl <- testEquality (typeRep @a) (typeRep @Double) =
+        Just (LitDouble (castDoubleToWord64 v))
+    | Just Refl <- testEquality (typeRep @a) (typeRep @Int) = Just (LitInt v)
+    | Just Refl <- testEquality (typeRep @a) (typeRep @Bool) = Just (LitBool v)
+    | Just Refl <- testEquality (typeRep @a) (typeRep @T.Text) = Just (LitText v)
+    | otherwise = Nothing
+
+-- | The keys of operator nodes that occur more than once in an expression.
+repeatedKeys :: (Columnable a) => Expr a -> S.Set Key
+repeatedKeys expr = M.keysSet (M.filter (> 1) (count expr M.empty))
+  where
+    count :: forall x. (Columnable x) => Expr x -> M.Map Key Int -> M.Map Key Int
+    count e seen = case e of
+        Unary _ inner -> count inner (note e seen)
+        Binary _ l r -> count r (count l (note e seen))
+        If c l r -> count r (count l (count c seen))
+        _ -> seen
+    note :: forall x. (Columnable x) => Expr x -> M.Map Key Int -> M.Map Key Int
+    note e seen = maybe seen (\k -> M.insertWith (+) k (1 :: Int) seen) (keyOf e)
+
+data Sharing = Sharing
+    { repeated :: !(S.Set Key)
+    , rowsAsked :: !(M.Map Key Int)
+    -- ^ How many rows each repeated key has been computed for so far.
+    , computed :: !(M.Map Key Column)
+    -- ^ Results kept for the whole frame.
+    , bytesKept :: !Int
+    }
+
+-- | Results kept for reuse during one evaluation may total this many bytes.
+maxBytesKept :: Int
+maxBytesKept = 256 * 1024 * 1024
+
+newtype Eval a = Eval
+    {runEval :: Sharing -> Either DataFrameException (a, Sharing)}
+
+instance Functor Eval where
+    fmap f (Eval m) = Eval (fmap (first f) . m)
+
+instance Applicative Eval where
+    pure x = Eval (\s -> Right (x, s))
+    Eval mf <*> Eval mx = Eval $ \s -> do
+        (f, s') <- mf s
+        (x, s'') <- mx s'
+        Right (f x, s'')
+
+instance Monad Eval where
+    Eval m >>= k = Eval $ \s -> do
+        (x, s') <- m s
+        runEval (k x) s'
+
+failing :: Either DataFrameException a -> Eval a
+failing r = Eval (\s -> fmap (,s) r)
+
+inContext :: (Show e) => Expr e -> Eval a -> Eval a
+inContext expr (Eval m) = Eval (addContext expr . m)
+
+evalFlat ::
+    (Columnable a) => DataFrame -> Expr a -> Either DataFrameException (Value a)
+evalFlat df expr =
+    fst
+        <$> runEval
+            (evalRows (Env df AllRows) expr)
+            (Sharing (repeatedKeys expr) M.empty M.empty 0)
+
+evalRows :: forall a. (Columnable a) => Env -> Expr a -> Eval (Value a)
+evalRows env expr = case expr of
+    Lit v -> pure (Scalar v)
+    Unary{} -> evalShared env expr
+    Binary{} -> evalShared env expr
+    If cond l r -> inContext expr $ do
+        c <- evalRows env cond
+        case c of
+            Scalar holds -> do
+                -- The other branch runs on no rows: it can still report a
+                -- missing column, but none of its values are computed.
+                let (chosen, other) = if holds then (l, r) else (r, l)
+                _ <- evalRows (narrow env VU.empty) other
+                evalRows env chosen
+            Flat cc -> do
+                cs <- failing (conditionVector cc)
+                let (yes, no) = K.partitionRows cs
+                lv <- evalArm env yes l
+                rv <- evalArm env no r
+                failing (mergeArms cs yes no lv rv)
+            Group _ -> failing (Left (InternalException "grouped condition in a flat frame"))
+    -- Aggregations and windows need every row; then keep the covered ones.
+    _ -> failing (restrict (envRows env) <$> eval (FlatCtx (envFrame env)) expr)
+
+{- | Evaluate an operator node, reusing a result kept for the whole frame. A
+repeated node is computed for the whole frame once the rows asked of it add
+up to a full column; before that it is computed only for the rows covered.
+-}
+evalShared :: forall a. (Columnable a) => Env -> Expr a -> Eval (Value a)
+evalShared env expr = Eval $ \s -> case keyOf expr of
+    Just key
+        | S.member key (repeated s) -> case M.lookup key (computed s) of
+            Just col -> Right (restrict (envRows env) (Flat col), s)
+            Nothing -> runEval (askFor key) s
+    _ -> runEval (evalNode env expr) s
+  where
+    total = frameRows env
+    askFor key = Eval $ \s ->
+        let asked = M.findWithDefault 0 key (rowsAsked s) + rowCount env
+         in if asked >= total && bytesKept s + 8 * total <= maxBytesKept
+                then do
+                    (full, s') <- runEval (evalNode env{envRows = AllRows} expr) s
+                    Right (restrict (envRows env) full, keep key full s')
+                else runEval (evalNode env expr) s{rowsAsked = M.insert key asked (rowsAsked s)}
+    keep :: Key -> Value a -> Sharing -> Sharing
+    keep key (Flat col) s =
+        s
+            { computed = M.insert key col (computed s)
+            , bytesKept = bytesKept s + columnBytes col
+            }
+    keep _ _ s = s
+
+evalNode :: forall a. (Columnable a) => Env -> Expr a -> Eval (Value a)
+evalNode env expr = inContext expr $ case expr of
+    Unary op inner -> evalRows env inner >>= failing . applyUnary op
+    Binary op l r -> do
+        lv <- evalRows env l
+        rv <- evalRows env r
+        failing (applyBinary op lv rv)
+    _ -> evalRows env expr
+
+columnBytes :: Column -> Int
+columnBytes (UnboxedColumn _ (v :: VU.Vector x))
+    | Just Refl <- testEquality (typeRep @x) (typeRep @Bool) = VU.length v
+    | otherwise = 8 * VU.length v
+columnBytes c = 16 * columnLength c
+
+-- | A branch computed for every covered row, or only for the rows choosing it.
+data Arm a = ForEveryRow (Value a) | ForChosenRows (Value a)
+
+{- | A column or literal is already there for every row. Anything else is
+computed only for the rows that choose it.
+-}
+evalArm :: (Columnable a) => Env -> VU.Vector Int -> Expr a -> Eval (Arm a)
+evalArm env chosen expr = case expr of
+    Col _ -> ForEveryRow <$> evalRows env expr
+    Lit _ -> ForEveryRow <$> evalRows env expr
+    _ -> ForChosenRows <$> evalRows (narrow env chosen) expr
+
+-- | Each row's value from the branch its condition chooses.
+mergeArms ::
+    forall a.
+    (Columnable a) =>
+    VU.Vector Bool ->
+    VU.Vector Int ->
+    VU.Vector Int ->
+    Arm a ->
+    Arm a ->
+    Either DataFrameException (Value a)
+mergeArms cs yes no l r = case (K.mergeBranches @a, branch l, branch r, sUnbox @a) of
+    (Just run, Just lb, Just rb, STrue) -> Right (Flat (UnboxedColumn Nothing (run cs lb rb)))
+    _
+        | VU.null no -> Right (Flat lc)
+        | VU.null yes -> Right (Flat rc)
+        | otherwise -> do
+            both <- mappendColumns lc rc
+            -- Row i reads the next unused value of its branch.
+            let place (y, f) c = if c then (y + 1, f) else (y, f + 1)
+                taken = VU.prescanl' place (0, VU.length yes) cs
+                source = VU.zipWith (\c (y, f) -> if c then y else f) cs taken
+            Right (Flat (atIndicesStable source both))
+  where
+    branch :: Arm a -> Maybe (K.Branch a)
+    branch arm = case arm of
+        ForEveryRow v ->
+            (\o -> case o of K.Literal x -> K.Constant x; K.Column xs -> K.EveryRow xs)
+                <$> operand v
+        ForChosenRows v ->
+            (\o -> case o of K.Literal x -> K.Constant x; K.Column xs -> K.ChosenRows xs)
+                <$> operand v
+    -- The generic path wants each branch as one value per row choosing it.
+    chosenColumn :: VU.Vector Int -> Arm a -> Column
+    chosenColumn rows arm = case arm of
+        ForEveryRow v -> materialize @a (VU.length rows) (restrict (Rows rows) v)
+        ForChosenRows v -> materialize @a (VU.length rows) v
+    lc = chosenColumn yes l
+    rc = chosenColumn no r
 
 -------------------------------------------------------------------------------
 -- Error enrichment
@@ -620,10 +871,6 @@ invertPermutation perm = VU.create $ do
     VU.imapM_ (flip (VUM.unsafeWrite inv)) perm
     return inv
 {-# INLINE invertPermutation #-}
-
--------------------------------------------------------------------------------
--- promoteColumnWith: unified numeric / text coercion for CastWith
--------------------------------------------------------------------------------
 
 {- | Coerce a column to type @a@, then apply @onResult@ to each element; the handler
 selects the mode (like @cast@, @castWithDefault@, or @castEither@). Handles Double/
@@ -867,10 +1114,6 @@ castMismatch =
                 , errorColumnName = Nothing
                 }
 
--------------------------------------------------------------------------------
--- eval: the unified interpreter
--------------------------------------------------------------------------------
-
 {- | Evaluate an expression in a given context, producing a 'Value'.
 This single function replaces both the old @interpret@ (flat) and
 @interpretAggregation@ (grouped) code paths.
@@ -945,25 +1188,22 @@ eval ctx (CastExprWith _tag onResult (inner :: Expr src)) = do
             Flat <$> promoteColumnWith onResult col
         Group gs ->
             Group <$> V.mapM (promoteColumnWith onResult) gs
+eval (FlatCtx df) expr@(Unary{}) = evalFlat df expr
+eval (FlatCtx df) expr@(Binary{}) = evalFlat df expr
+eval (FlatCtx df) expr@(If{}) = evalFlat df expr
 eval ctx expr@(Unary op (inner :: Expr b)) = addContext expr $ do
     v <- eval @b ctx inner
-    case unaryKernel @b @a (unaryName op) v of
-        Just out -> Right out
-        Nothing -> liftValue (fastUnaryFn @b @a (unaryName op) (unaryFn op)) v
+    applyUnary op v
 eval ctx expr@(Binary op (left :: Expr c) (right :: Expr b)) =
     addContext expr $ do
         l <- eval @c ctx left
         r <- eval @b ctx right
-        case binaryKernel @c @b @a (binaryName op) l r of
-            Just out -> Right out
-            Nothing -> liftValue2 (binaryFn op) l r
+        applyBinary op l r
 eval ctx expr@(If cond l r) = addContext expr $ do
     c <- eval @Bool ctx cond
     lv <- eval @a ctx l
     rv <- eval @a ctx r
-    case selectKernel c lv rv of
-        Just out -> Right out
-        Nothing -> branchValue c lv rv
+    branchValue c lv rv
 eval (FlatCtx df) expr@(Over keys inner) = addContext expr $ do
     let gdf = G.groupBy keys df
     v <- eval (GroupCtx gdf) inner

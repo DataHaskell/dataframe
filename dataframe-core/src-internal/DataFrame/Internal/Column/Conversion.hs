@@ -137,7 +137,8 @@ toList xs = case toVector @a xs of
     Right val -> VB.toList val
 
 {- | Type-safe conversion of a column to a vector of element type @a@ (specify via
-type application); 'Left' 'TypeMismatchException' when the column's type differs.
+type application); 'Left' 'TypeMismatchException' when the column's type differs,
+or when asking for @a@ from a column that has nulls (ask for @Maybe a@).
 
 >>> toVector @Int @VU.Vector column
 Right (unboxed vector of Ints)
@@ -154,7 +155,9 @@ toVector col = case col of
     BoxedColumn bm (inner :: VB.Vector c) ->
         -- Check if user wants Maybe c (nullable) or c directly
         case testEquality (typeRep @a) (typeRep @c) of
-            Just Refl -> Right $ VG.convert inner
+            Just Refl
+                | hasNulls (VB.length inner) bm -> Left (nullsMismatch @c)
+                | otherwise -> Right $ VG.convert inner
             Nothing ->
                 -- Try: a = Maybe c
                 case testEquality (typeRep @a) (typeRep @(Maybe c)) of
@@ -178,7 +181,9 @@ toVector col = case col of
                                 )
     UnboxedColumn bm (inner :: VU.Vector c) ->
         case testEquality (typeRep @a) (typeRep @c) of
-            Just Refl -> Right $ VG.convert inner
+            Just Refl
+                | hasNulls (VU.length inner) bm -> Left (nullsMismatch @c)
+                | otherwise -> Right $ VG.convert inner
             Nothing ->
                 case testEquality (typeRep @a) (typeRep @(Maybe c)) of
                     Just Refl ->
@@ -198,6 +203,21 @@ toVector col = case col of
                                     }
                                 )
 {-# INLINEABLE toVector #-}
+
+hasNulls :: Int -> Maybe Bitmap -> Bool
+hasNulls n = maybe False (bitmapHasNulls n)
+
+-- | The column has nulls, so it must be read as @Maybe c@.
+nullsMismatch :: forall c. (Columnable c) => DataFrameException
+nullsMismatch =
+    TypeMismatchException
+        ( MkTypeErrorContext
+            { userType = Right (typeRep @c)
+            , expectedType = Right (typeRep @(Maybe c))
+            , callingFunctionName = Just "toVector"
+            , errorColumnName = Nothing
+            }
+        )
 
 -- Some common types we will use for numerical computing.
 

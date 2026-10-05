@@ -8,11 +8,13 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE UndecidableInstances #-}
 
 {- |
@@ -28,7 +30,7 @@ import qualified Data.Vector.Mutable as VBM
 import qualified Data.Vector.Unboxed as VU
 import qualified Data.Vector.Unboxed.Mutable as VUM
 
-import Control.Monad (when)
+import Control.Monad (join, when)
 import Control.Monad.ST (runST)
 import Data.Bits (setBit, shiftL, shiftR)
 import Data.Int (Int32)
@@ -68,10 +70,13 @@ import System.IO.Unsafe (unsafePerformIO)
 import Type.Reflection (
     TypeRep,
     Typeable,
+    eqTypeRep,
     typeOf,
     typeRep,
     withTypeable,
+    pattern App,
     type (:~:) (Refl),
+    type (:~~:) (HRefl),
  )
 
 {- | Force evaluation of all elements in a column. Replacement for the removed
@@ -173,12 +178,14 @@ mapColumn f = \case
                                 )
         Nothing -> case testEquality (typeRep @a) (typeRep @b) of
             Just Refl ->
-                Right $ case sUnbox @c of
-                    STrue ->
-                        UnboxedColumn bm (mapBoxedToUnboxed f col)
-                    SFalse -> case bm of
-                        Nothing -> fromVector @c (VB.map f col)
-                        Just _ -> BoxedColumn bm (VB.map f col)
+                let !n = VB.length col
+                 in Right $ case sUnbox @c of
+                        STrue -> UnboxedColumn bm $ case nullsIn n bm of
+                            Nothing -> parGenerateUnboxed n (f . VB.unsafeIndex col)
+                            Just nulls -> generateValidUnboxed nulls n (f . VB.unsafeIndex col)
+                        SFalse -> case bm of
+                            Nothing -> fromVector @c (VB.map f col)
+                            Just b' -> generateValidBoxed b' n (f . VB.unsafeIndex col)
             Nothing -> throwTypeMismatch @a @b
 
     runUnboxed ::
@@ -204,12 +211,15 @@ mapColumn f = \case
                                     else Nothing
                                 )
         Nothing -> case testEquality (typeRep @a) (typeRep @b) of
-            Just Refl -> Right $ case sUnbox @c of
-                STrue ->
-                    UnboxedColumn bm (mapUnboxed f col)
-                SFalse -> case bm of
-                    Nothing -> fromVector @c (VB.generate (VU.length col) (f . VU.unsafeIndex col))
-                    Just _ -> BoxedColumn bm (VB.generate (VU.length col) (f . VU.unsafeIndex col))
+            Just Refl ->
+                let !n = VU.length col
+                 in Right $ case sUnbox @c of
+                        STrue -> UnboxedColumn bm $ case nullsIn n bm of
+                            Nothing -> fromMaybe mapLoop compiledMap f col
+                            Just nulls -> generateValidUnboxed nulls n (f . VU.unsafeIndex col)
+                        SFalse -> case bm of
+                            Nothing -> fromVector @c (VB.generate n (f . VU.unsafeIndex col))
+                            Just b' -> generateValidBoxed b' n (f . VU.unsafeIndex col)
             Nothing -> throwTypeMismatch @a @b
 {-# INLINEABLE mapColumn #-}
 
@@ -229,10 +239,15 @@ imapColumn f = \case
         (Columnable a) =>
         Maybe Bitmap -> VB.Vector a -> Either DataFrameException Column
     runBoxed bm col = case testEquality (typeRep @a) (typeRep @b) of
-        Just Refl -> Right $ case sUnbox @c of
-            STrue ->
-                UnboxedColumn bm (imapBoxedToUnboxed f col)
-            SFalse -> BoxedColumn bm (VB.imap f col)
+        Just Refl ->
+            let !n = VB.length col
+             in Right $ case sUnbox @c of
+                    STrue -> UnboxedColumn bm $ case nullsIn n bm of
+                        Nothing -> VU.generate n (\i -> f i (VB.unsafeIndex col i))
+                        Just nulls -> generateValidUnboxed nulls n (\i -> f i (VB.unsafeIndex col i))
+                    SFalse -> case bm of
+                        Nothing -> fromVector @c (VB.imap f col)
+                        Just b' -> generateValidBoxed b' n (\i -> f i (VB.unsafeIndex col i))
         Nothing -> throwTypeMismatch @a @b
 
     runUnboxed ::
@@ -240,9 +255,15 @@ imapColumn f = \case
         (Columnable a, VU.Unbox a) =>
         Maybe Bitmap -> VU.Vector a -> Either DataFrameException Column
     runUnboxed bm col = case testEquality (typeRep @a) (typeRep @b) of
-        Just Refl -> Right $ case sUnbox @c of
-            STrue -> UnboxedColumn bm (imapUnboxed f col)
-            SFalse -> BoxedColumn bm (VB.imap f (VG.convert col))
+        Just Refl ->
+            let !n = VU.length col
+             in Right $ case sUnbox @c of
+                    STrue -> UnboxedColumn bm $ case nullsIn n bm of
+                        Nothing -> VU.imap f col
+                        Just nulls -> generateValidUnboxed nulls n (\i -> f i (VU.unsafeIndex col i))
+                    SFalse -> case bm of
+                        Nothing -> fromVector @c (VB.imap f (VG.convert col))
+                        Just b' -> generateValidBoxed b' n (\i -> f i (VU.unsafeIndex col i))
         Nothing -> throwTypeMismatch @a @b
 
 -- | O(n) Takes the last n values of a column.
@@ -289,14 +310,6 @@ pre-allocated mutable vector, then freezes. Element @i@ depends only on @f i@,
 so the result is bit-identical to the sequential 'VU.generate' regardless of
 capability count. Falls back to 'VU.generate' below 'parThreshold'.
 -}
-{-# SPECIALIZE parGenerateUnboxed ::
-    Int -> (Int -> Double) -> VU.Vector Double
-    #-}
-{-# SPECIALIZE parGenerateUnboxed ::
-    Int -> (Int -> Float) -> VU.Vector Float
-    #-}
-{-# SPECIALIZE parGenerateUnboxed :: Int -> (Int -> Int) -> VU.Vector Int #-}
-{-# SPECIALIZE parGenerateUnboxed :: Int -> (Int -> Bool) -> VU.Vector Bool #-}
 parGenerateUnboxed :: (VU.Unbox c) => Int -> (Int -> c) -> VU.Vector c
 parGenerateUnboxed n f
     | not (shouldParallelize parThreshold n) = VU.generate n f
@@ -348,250 +361,101 @@ parGenerateUnboxedInline n f
         VU.unsafeFreeze mv
 {-# INLINE parGenerateUnboxedInline #-}
 
--- | The element types with their own compiled loops.
-data ElemTy a where
-    TDouble :: ElemTy Double
-    TInt :: ElemTy Int
-    TBool :: ElemTy Bool
-
-elemTy :: forall a. (Typeable a) => Maybe (ElemTy a)
-elemTy
-    | Just Refl <- testEquality (typeRep @a) (typeRep @Double) = Just TDouble
-    | Just Refl <- testEquality (typeRep @a) (typeRep @Int) = Just TInt
-    | Just Refl <- testEquality (typeRep @a) (typeRep @Bool) = Just TBool
+{- | Runs @k@ with the element type known to the compiler, for the types that
+get a compiled loop of their own; 'Nothing' for any other type. @k@ must take
+its 'VU.Unbox' evidence from here, so its callers carry no such constraint.
+-}
+withKnownElem ::
+    forall a r. (Typeable a) => (forall x. (VU.Unbox x) => a :~: x -> r) -> Maybe r
+withKnownElem k
+    | Just Refl <- testEquality (typeRep @a) (typeRep @Double) =
+        Just (k @Double Refl)
+    | Just Refl <- testEquality (typeRep @a) (typeRep @Int) = Just (k @Int Refl)
+    | Just Refl <- testEquality (typeRep @a) (typeRep @Bool) = Just (k @Bool Refl)
     | otherwise = Nothing
-{-# INLINE elemTy #-}
+{-# INLINE withKnownElem #-}
 
--- | @'parGenerateUnboxed' n (f . (v !))@.
-mapUnboxed ::
+-- | 'Nothing' for element types without a compiled loop.
+compiledMap ::
     forall a c.
-    (Typeable a, Typeable c, VU.Unbox a, VU.Unbox c) =>
-    (a -> c) -> VU.Vector a -> VU.Vector c
-mapUnboxed f v = case (elemTy @a, elemTy @c) of
-    (Just TDouble, Just TDouble) -> mapDD f v
-    (Just TDouble, Just TInt) -> mapDI f v
-    (Just TDouble, Just TBool) -> mapDB f v
-    (Just TInt, Just TDouble) -> mapID f v
-    (Just TInt, Just TInt) -> mapII f v
-    (Just TInt, Just TBool) -> mapIB f v
-    (Just TBool, Just TDouble) -> mapBD f v
-    (Just TBool, Just TInt) -> mapBI f v
-    (Just TBool, Just TBool) -> mapBB f v
-    _ -> mapLoop f v
+    (Typeable a, Typeable c) => Maybe ((a -> c) -> VU.Vector a -> VU.Vector c)
+compiledMap = join (withKnownElem @a (\Refl -> withKnownElem @c (\Refl -> mapLoop)))
+
+compiledZip ::
+    forall a c.
+    (Typeable a, Typeable c) =>
+    Maybe ((a -> a -> c) -> VU.Vector a -> VU.Vector a -> VU.Vector c)
+compiledZip = join (withKnownElem @a (\Refl -> withKnownElem @c (\Refl -> zipLoop)))
+
+compiledFoldl ::
+    forall a b.
+    (Typeable a, Typeable b) => Maybe ((b -> a -> b) -> b -> VU.Vector a -> b)
+compiledFoldl = join (withKnownElem @a (\Refl -> withKnownElem @b (\Refl -> VU.foldl')))
+
+compiledFoldl1 ::
+    forall a. (Typeable a) => Maybe ((a -> a -> a) -> VU.Vector a -> a)
+compiledFoldl1 = withKnownElem @a (\Refl -> VU.foldl1')
 
 mapLoop :: (VU.Unbox a, VU.Unbox c) => (a -> c) -> VU.Vector a -> VU.Vector c
 mapLoop f v = parGenerateUnboxedInline (VU.length v) (f . VU.unsafeIndex v)
 {-# INLINE mapLoop #-}
 
-mapDD :: (Double -> Double) -> VU.Vector Double -> VU.Vector Double
-mapDD = mapLoop
-{-# NOINLINE mapDD #-}
-mapDI :: (Double -> Int) -> VU.Vector Double -> VU.Vector Int
-mapDI = mapLoop
-{-# NOINLINE mapDI #-}
-mapDB :: (Double -> Bool) -> VU.Vector Double -> VU.Vector Bool
-mapDB = mapLoop
-{-# NOINLINE mapDB #-}
-mapID :: (Int -> Double) -> VU.Vector Int -> VU.Vector Double
-mapID = mapLoop
-{-# NOINLINE mapID #-}
-mapII :: (Int -> Int) -> VU.Vector Int -> VU.Vector Int
-mapII = mapLoop
-{-# NOINLINE mapII #-}
-mapIB :: (Int -> Bool) -> VU.Vector Int -> VU.Vector Bool
-mapIB = mapLoop
-{-# NOINLINE mapIB #-}
-mapBD :: (Bool -> Double) -> VU.Vector Bool -> VU.Vector Double
-mapBD = mapLoop
-{-# NOINLINE mapBD #-}
-mapBI :: (Bool -> Int) -> VU.Vector Bool -> VU.Vector Int
-mapBI = mapLoop
-{-# NOINLINE mapBI #-}
-mapBB :: (Bool -> Bool) -> VU.Vector Bool -> VU.Vector Bool
-mapBB = mapLoop
-{-# NOINLINE mapBB #-}
-
--- | @'parGenerateUnboxed' n (f . (v !))@ from a boxed vector: only the write
--- needs specialising.
-mapBoxedToUnboxed ::
-    forall a c. (Typeable c, VU.Unbox c) => (a -> c) -> VB.Vector a -> VU.Vector c
-mapBoxedToUnboxed f v = case elemTy @c of
-    Just TDouble -> mapBoxedD f v
-    Just TInt -> mapBoxedI f v
-    Just TBool -> mapBoxedB f v
-    Nothing -> mapBoxedLoop f v
-
-mapBoxedLoop :: (VU.Unbox c) => (a -> c) -> VB.Vector a -> VU.Vector c
-mapBoxedLoop f v = parGenerateUnboxedInline (VB.length v) (f . VB.unsafeIndex v)
-{-# INLINE mapBoxedLoop #-}
-
-mapBoxedD :: (a -> Double) -> VB.Vector a -> VU.Vector Double
-mapBoxedD = mapBoxedLoop
-{-# NOINLINE mapBoxedD #-}
-mapBoxedI :: (a -> Int) -> VB.Vector a -> VU.Vector Int
-mapBoxedI = mapBoxedLoop
-{-# NOINLINE mapBoxedI #-}
-mapBoxedB :: (a -> Bool) -> VB.Vector a -> VU.Vector Bool
-mapBoxedB = mapBoxedLoop
-{-# NOINLINE mapBoxedB #-}
-
--- | 'VU.imap', sequential as before.
-imapUnboxed ::
-    forall a c.
-    (Typeable a, Typeable c, VU.Unbox a, VU.Unbox c) =>
-    (Int -> a -> c) -> VU.Vector a -> VU.Vector c
-imapUnboxed f v = case (elemTy @a, elemTy @c) of
-    (Just TDouble, Just TDouble) -> imapDD f v
-    (Just TDouble, Just TInt) -> imapDI f v
-    (Just TDouble, Just TBool) -> imapDB f v
-    (Just TInt, Just TDouble) -> imapID f v
-    (Just TInt, Just TInt) -> imapII f v
-    (Just TInt, Just TBool) -> imapIB f v
-    (Just TBool, Just TDouble) -> imapBD f v
-    (Just TBool, Just TInt) -> imapBI f v
-    (Just TBool, Just TBool) -> imapBB f v
-    _ -> VU.imap f v
-
-imapDD :: (Int -> Double -> Double) -> VU.Vector Double -> VU.Vector Double
-imapDD = VU.imap
-{-# NOINLINE imapDD #-}
-imapDI :: (Int -> Double -> Int) -> VU.Vector Double -> VU.Vector Int
-imapDI = VU.imap
-{-# NOINLINE imapDI #-}
-imapDB :: (Int -> Double -> Bool) -> VU.Vector Double -> VU.Vector Bool
-imapDB = VU.imap
-{-# NOINLINE imapDB #-}
-imapID :: (Int -> Int -> Double) -> VU.Vector Int -> VU.Vector Double
-imapID = VU.imap
-{-# NOINLINE imapID #-}
-imapII :: (Int -> Int -> Int) -> VU.Vector Int -> VU.Vector Int
-imapII = VU.imap
-{-# NOINLINE imapII #-}
-imapIB :: (Int -> Int -> Bool) -> VU.Vector Int -> VU.Vector Bool
-imapIB = VU.imap
-{-# NOINLINE imapIB #-}
-imapBD :: (Int -> Bool -> Double) -> VU.Vector Bool -> VU.Vector Double
-imapBD = VU.imap
-{-# NOINLINE imapBD #-}
-imapBI :: (Int -> Bool -> Int) -> VU.Vector Bool -> VU.Vector Int
-imapBI = VU.imap
-{-# NOINLINE imapBI #-}
-imapBB :: (Int -> Bool -> Bool) -> VU.Vector Bool -> VU.Vector Bool
-imapBB = VU.imap
-{-# NOINLINE imapBB #-}
-
--- | 'VU.generate' over @f i (v ! i)@ from a boxed vector, sequential as before.
-imapBoxedToUnboxed ::
-    forall a c. (Typeable c, VU.Unbox c) => (Int -> a -> c) -> VB.Vector a -> VU.Vector c
-imapBoxedToUnboxed f v = case elemTy @c of
-    Just TDouble -> imapBoxedD f v
-    Just TInt -> imapBoxedI f v
-    Just TBool -> imapBoxedB f v
-    Nothing -> imapBoxedLoop f v
-
-imapBoxedLoop :: (VU.Unbox c) => (Int -> a -> c) -> VB.Vector a -> VU.Vector c
-imapBoxedLoop f v = VU.generate (VB.length v) (\i -> f i (VB.unsafeIndex v i))
-{-# INLINE imapBoxedLoop #-}
-
-imapBoxedD :: (Int -> a -> Double) -> VB.Vector a -> VU.Vector Double
-imapBoxedD = imapBoxedLoop
-{-# NOINLINE imapBoxedD #-}
-imapBoxedI :: (Int -> a -> Int) -> VB.Vector a -> VU.Vector Int
-imapBoxedI = imapBoxedLoop
-{-# NOINLINE imapBoxedI #-}
-imapBoxedB :: (Int -> a -> Bool) -> VB.Vector a -> VU.Vector Bool
-imapBoxedB = imapBoxedLoop
-{-# NOINLINE imapBoxedB #-}
-
--- | Element-wise @f@ over two same-typed vectors, to the shorter length.
-zipUnboxed ::
-    forall a c.
-    (Typeable a, Typeable c, VU.Unbox a, VU.Unbox c) =>
-    (a -> a -> c) -> VU.Vector a -> VU.Vector a -> VU.Vector c
-zipUnboxed f l r = case (elemTy @a, elemTy @c) of
-    (Just TDouble, Just TDouble) -> zipDD f l r
-    (Just TDouble, Just TInt) -> zipDI f l r
-    (Just TDouble, Just TBool) -> zipDB f l r
-    (Just TInt, Just TDouble) -> zipID f l r
-    (Just TInt, Just TInt) -> zipII f l r
-    (Just TInt, Just TBool) -> zipIB f l r
-    (Just TBool, Just TDouble) -> zipBD f l r
-    (Just TBool, Just TInt) -> zipBI f l r
-    (Just TBool, Just TBool) -> zipBB f l r
-    _ -> zipLoop f l r
-
-zipLoop :: (VU.Unbox a, VU.Unbox b, VU.Unbox c) => (a -> b -> c) -> VU.Vector a -> VU.Vector b -> VU.Vector c
+-- | Element-wise over two vectors, to the shorter length.
+zipLoop ::
+    (VU.Unbox a, VU.Unbox b, VU.Unbox c) =>
+    (a -> b -> c) -> VU.Vector a -> VU.Vector b -> VU.Vector c
 zipLoop f l r =
     parGenerateUnboxedInline
         (min (VU.length l) (VU.length r))
         (\i -> f (VU.unsafeIndex l i) (VU.unsafeIndex r i))
 {-# INLINE zipLoop #-}
 
-zipDD :: (Double -> Double -> Double) -> VU.Vector Double -> VU.Vector Double -> VU.Vector Double
-zipDD = zipLoop
-{-# NOINLINE zipDD #-}
-zipDI :: (Double -> Double -> Int) -> VU.Vector Double -> VU.Vector Double -> VU.Vector Int
-zipDI = zipLoop
-{-# NOINLINE zipDI #-}
-zipDB :: (Double -> Double -> Bool) -> VU.Vector Double -> VU.Vector Double -> VU.Vector Bool
-zipDB = zipLoop
-{-# NOINLINE zipDB #-}
-zipID :: (Int -> Int -> Double) -> VU.Vector Int -> VU.Vector Int -> VU.Vector Double
-zipID = zipLoop
-{-# NOINLINE zipID #-}
-zipII :: (Int -> Int -> Int) -> VU.Vector Int -> VU.Vector Int -> VU.Vector Int
-zipII = zipLoop
-{-# NOINLINE zipII #-}
-zipIB :: (Int -> Int -> Bool) -> VU.Vector Int -> VU.Vector Int -> VU.Vector Bool
-zipIB = zipLoop
-{-# NOINLINE zipIB #-}
-zipBD :: (Bool -> Bool -> Double) -> VU.Vector Bool -> VU.Vector Bool -> VU.Vector Double
-zipBD = zipLoop
-{-# NOINLINE zipBD #-}
-zipBI :: (Bool -> Bool -> Int) -> VU.Vector Bool -> VU.Vector Bool -> VU.Vector Int
-zipBI = zipLoop
-{-# NOINLINE zipBI #-}
-zipBB :: (Bool -> Bool -> Bool) -> VU.Vector Bool -> VU.Vector Bool -> VU.Vector Bool
-zipBB = zipLoop
-{-# NOINLINE zipBB #-}
+-- | The bitmap, if it marks any of the first @n@ rows null.
+nullsIn :: Int -> Maybe Bitmap -> Maybe Bitmap
+nullsIn n (Just bm) | bitmapHasNulls n bm = Just bm
+nullsIn _ _ = Nothing
+{-# INLINE nullsIn #-}
 
--- | 'VU.foldl'' over a 'Double' or 'Int' vector with a 'Double' or 'Int'
--- accumulator.
-foldlUnboxed ::
-    forall a b. (Typeable a, Typeable b, VU.Unbox a) => (b -> a -> b) -> b -> VU.Vector a -> b
-foldlUnboxed f z v = case (elemTy @a, elemTy @b) of
-    (Just TDouble, Just TDouble) -> foldlDD f z v
-    (Just TDouble, Just TInt) -> foldlDI f z v
-    (Just TInt, Just TDouble) -> foldlID f z v
-    (Just TInt, Just TInt) -> foldlII f z v
-    _ -> VU.foldl' f z v
+validAt :: Maybe Bitmap -> Int -> Bool
+validAt bm i = maybe True (`bitmapTestBit` i) bm
+{-# INLINE validAt #-}
 
-foldlDD :: (Double -> Double -> Double) -> Double -> VU.Vector Double -> Double
-foldlDD = VU.foldl'
-{-# NOINLINE foldlDD #-}
-foldlDI :: (Int -> Double -> Int) -> Int -> VU.Vector Double -> Int
-foldlDI = VU.foldl'
-{-# NOINLINE foldlDI #-}
-foldlID :: (Double -> Int -> Double) -> Double -> VU.Vector Int -> Double
-foldlID = VU.foldl'
-{-# NOINLINE foldlID #-}
-foldlII :: (Int -> Int -> Int) -> Int -> VU.Vector Int -> Int
-foldlII = VU.foldl'
-{-# NOINLINE foldlII #-}
+{- | @g i@ for the valid rows only. Null rows hold zero, since 'VUM.new'
+zero-fills unboxed storage.
+-}
+generateValidUnboxed ::
+    (VU.Unbox c) => Bitmap -> Int -> (Int -> c) -> VU.Vector c
+generateValidUnboxed bm n g = unsafePerformIO $ do
+    mv <- VUM.new n
+    let fill !lo !hi =
+            let go !i
+                    | i >= hi = pure ()
+                    | bitmapTestBit bm i = VUM.unsafeWrite mv i (g i) >> go (i + 1)
+                    | otherwise = go (i + 1)
+             in go lo
+    if shouldParallelize parThreshold n
+        then parallelChunks_ parThreshold n fill
+        else fill 0 n
+    VU.unsafeFreeze mv
+{-# NOINLINE generateValidUnboxed #-}
 
--- | 'VU.foldl1'' over a 'Double' or 'Int' vector.
-foldl1Unboxed :: forall a. (Typeable a, VU.Unbox a) => (a -> a -> a) -> VU.Vector a -> a
-foldl1Unboxed f v = case elemTy @a of
-    Just TDouble -> foldl1D f v
-    Just TInt -> foldl1I f v
-    _ -> VU.foldl1' f v
-
-foldl1D :: (Double -> Double -> Double) -> VU.Vector Double -> Double
-foldl1D = VU.foldl1'
-{-# NOINLINE foldl1D #-}
-foldl1I :: (Int -> Int -> Int) -> VU.Vector Int -> Int
-foldl1I = VU.foldl1'
-{-# NOINLINE foldl1I #-}
+{- | A boxed column of @g i@ for the valid rows only; null rows stay null.
+If @g@ returns a 'Maybe', its 'Nothing's become null too.
+-}
+generateValidBoxed ::
+    forall c. (Columnable c) => Bitmap -> Int -> (Int -> c) -> Column
+generateValidBoxed bm n g = case typeRep @c of
+    App tMaybe _
+        | Just HRefl <- eqTypeRep tMaybe (typeRep @Maybe) ->
+            fromVector @c
+                (VB.generate n (\i -> if bitmapTestBit bm i then g i else Nothing))
+    _ ->
+        BoxedColumn
+            (Just bm)
+            ( VB.generate
+                n
+                (\i -> if bitmapTestBit bm i then g i else errorWithoutStackTrace "null slot")
+            )
 
 -- | Closure-free parallel 'Int' gather: @out!i = v ! (ix!i)@.
 parBackpermuteInt :: VU.Vector Int -> VU.Vector Int -> VU.Vector Int
@@ -786,19 +650,25 @@ findIndices ::
     Column ->
     Either DataFrameException (VU.Vector Int)
 findIndices predicate = \case
-    BoxedColumn _ (v :: VB.Vector b) -> run v VG.convert
-    UnboxedColumn _ (v :: VU.Vector b) -> run v id
+    BoxedColumn bm (v :: VB.Vector b) -> run bm v
+    UnboxedColumn bm (v :: VU.Vector b) -> run bm v
     c@(PackedText _ _) -> findIndices predicate (materializePacked c)
     c@(MergedColumn _ _) -> findIndices predicate (materializeMerged c)
   where
+    -- Null rows never match.
     run ::
         forall b v.
         (Typeable b, VG.Vector v b, VG.Vector v Int) =>
+        Maybe Bitmap ->
         v b ->
-        (v Int -> VU.Vector Int) ->
         Either DataFrameException (VU.Vector Int)
-    run column finalize = case testEquality (typeRep @a) (typeRep @b) of
-        Just Refl -> Right . finalize $ VG.findIndices predicate column
+    run bm column = case testEquality (typeRep @a) (typeRep @b) of
+        Just Refl -> Right $ case nullsIn (VG.length column) bm of
+            Nothing -> VG.convert (VG.findIndices predicate column)
+            Just nulls ->
+                VU.filter
+                    (\i -> bitmapTestBit nulls i && predicate (VG.unsafeIndex column i))
+                    (VU.enumFromN 0 (VG.length column))
         Nothing ->
             Left $
                 TypeMismatchException
@@ -809,94 +679,113 @@ findIndices predicate = \case
                         , errorColumnName = Nothing
                         }
 
--- | Fold (right) column with index.
+-- | Fold (right) column with index, skipping null rows.
 ifoldrColumn ::
     forall a b.
     (Columnable a, Columnable b) =>
     (Int -> a -> b -> b) -> b -> Column -> Either DataFrameException b
 ifoldrColumn f acc = \case
-    BoxedColumn _ column -> foldrWorker column
-    UnboxedColumn _ column -> foldrWorker column
+    BoxedColumn bm column -> foldrWorker bm column
+    UnboxedColumn bm column -> foldrWorker bm column
     c@(PackedText _ _) -> ifoldrColumn f acc (materializePacked c)
     c@(MergedColumn _ _) -> ifoldrColumn f acc (materializeMerged c)
   where
     foldrWorker ::
         forall c v.
         (Typeable c, VG.Vector v c) =>
+        Maybe Bitmap ->
         v c ->
         Either DataFrameException b
-    foldrWorker vec = case testEquality (typeRep @a) (typeRep @c) of
-        Just Refl -> pure $ VG.ifoldr f acc vec
+    foldrWorker bm vec = case testEquality (typeRep @a) (typeRep @c) of
+        Just Refl -> pure $ case nullsIn (VG.length vec) bm of
+            Nothing -> VG.ifoldr f acc vec
+            Just nulls -> VG.ifoldr (\i x r -> if bitmapTestBit nulls i then f i x r else r) acc vec
         Nothing ->
             Left $
                 TypeMismatchException
-                    ( MkTypeErrorContext
+                    MkTypeErrorContext
                         { userType = Right (typeRep @a)
                         , expectedType = Right (typeRep @c)
                         , callingFunctionName = Just "ifoldrColumn"
                         , errorColumnName = Nothing
                         }
-                    )
 
+-- | Left fold over a column, skipping null rows.
 foldlColumn ::
     forall a b.
     (Columnable a, Columnable b) =>
     (b -> a -> b) -> b -> Column -> Either DataFrameException b
 foldlColumn f acc = \case
-    BoxedColumn _ column -> foldlWorker column
-    UnboxedColumn _ (column :: VU.Vector c)
-        | Just Refl <- testEquality (typeRep @a) (typeRep @c) -> pure (foldlUnboxed f acc column)
-        | otherwise -> foldlWorker column
+    BoxedColumn bm column -> foldlWorker bm column
+    UnboxedColumn bm (column :: VU.Vector c)
+        | Just Refl <- testEquality (typeRep @a) (typeRep @c)
+        , Nothing <- nullsIn (VU.length column) bm ->
+            pure (fromMaybe VU.foldl' compiledFoldl f acc column)
+        | otherwise -> foldlWorker bm column
     c@(PackedText _ _) -> foldlColumn f acc (materializePacked c)
     c@(MergedColumn _ _) -> foldlColumn f acc (materializeMerged c)
   where
     foldlWorker ::
         forall c v.
         (Typeable c, VG.Vector v c) =>
+        Maybe Bitmap ->
         v c ->
         Either DataFrameException b
-    foldlWorker vec = case testEquality (typeRep @a) (typeRep @c) of
-        Just Refl -> pure $ VG.foldl' f acc vec
+    foldlWorker bm vec = case testEquality (typeRep @a) (typeRep @c) of
+        Just Refl -> pure $ case nullsIn (VG.length vec) bm of
+            Nothing -> VG.foldl' f acc vec
+            Just nulls -> VG.ifoldl' (\r i x -> if bitmapTestBit nulls i then f r x else r) acc vec
         Nothing ->
             Left $
                 TypeMismatchException
-                    ( MkTypeErrorContext
+                    MkTypeErrorContext
                         { userType = Right (typeRep @a)
                         , expectedType = Right (typeRep @c)
-                        , callingFunctionName = Just "ifoldrColumn"
+                        , callingFunctionName = Just "foldlColumn"
                         , errorColumnName = Nothing
                         }
-                    )
 
+-- | Left fold seeded with the first valid row, skipping null rows.
 foldl1Column ::
     forall a.
     (Columnable a) =>
     (a -> a -> a) -> Column -> Either DataFrameException a
 foldl1Column f = \case
-    BoxedColumn _ column -> foldl1Worker column
-    UnboxedColumn _ (column :: VU.Vector c)
-        | Just Refl <- testEquality (typeRep @a) (typeRep @c) -> pure (foldl1Unboxed f column)
-        | otherwise -> foldl1Worker column
+    BoxedColumn bm column -> foldl1Worker bm column
+    UnboxedColumn bm (column :: VU.Vector c)
+        | Just Refl <- testEquality (typeRep @a) (typeRep @c)
+        , Nothing <- nullsIn (VU.length column) bm ->
+            pure (fromMaybe VU.foldl1' compiledFoldl1 f column)
+        | otherwise -> foldl1Worker bm column
     c@(PackedText _ _) -> foldl1Column f (materializePacked c)
     c@(MergedColumn _ _) -> foldl1Column f (materializeMerged c)
   where
     foldl1Worker ::
         forall c v.
         (Typeable c, VG.Vector v c) =>
+        Maybe Bitmap ->
         v c ->
         Either DataFrameException a
-    foldl1Worker vec = case testEquality (typeRep @a) (typeRep @c) of
-        Just Refl -> pure $ VG.foldl1' f vec
+    foldl1Worker bm vec = case testEquality (typeRep @a) (typeRep @c) of
+        Just Refl -> case nullsIn (VG.length vec) bm of
+            Nothing -> pure (VG.foldl1' f vec)
+            Just nulls ->
+                let step r i x
+                        | not (bitmapTestBit nulls i) = r
+                        | otherwise = Just $! maybe x (`f` x) r
+                 in maybe
+                        (Left (EmptyDataSetException "foldl1Column"))
+                        Right
+                        (VG.ifoldl' step Nothing vec)
         Nothing ->
             Left $
                 TypeMismatchException
-                    ( MkTypeErrorContext
+                    MkTypeErrorContext
                         { userType = Right (typeRep @a)
                         , expectedType = Right (typeRep @c)
                         , callingFunctionName = Just "foldl1Column"
                         , errorColumnName = Nothing
                         }
-                    )
 
 {- | O(n) Seedless fold over groups using the first element of each group as seed.
 Like 'foldDirectGroups' but for the case where no initial accumulator is available.
@@ -912,31 +801,46 @@ foldl1DirectGroups ::
 foldl1DirectGroups f col valueIndices offsets
     | VU.length offsets <= 1 = pure $ fromVector @a VB.empty
     | otherwise = case col of
-        UnboxedColumn _ (vec :: VU.Vector d) -> UnboxedColumn Nothing <$> foldl1Worker vec
-        BoxedColumn _ (vec :: VB.Vector d) -> BoxedColumn Nothing <$> foldl1Worker vec
+        UnboxedColumn bm (vec :: VU.Vector d) -> uncurry UnboxedColumn <$> foldl1Worker bm vec
+        BoxedColumn bm (vec :: VB.Vector d) -> uncurry BoxedColumn <$> foldl1Worker bm vec
         PackedText _ _ -> foldl1DirectGroups f (materializePacked col) valueIndices offsets
         MergedColumn _ _ -> foldl1DirectGroups f (materializeMerged col) valueIndices offsets
   where
+    nGroups = VU.length offsets - 1
     foldl1Worker ::
         forall c v.
         (Typeable c, VG.Vector v c) =>
+        Maybe Bitmap ->
         v c ->
-        Either DataFrameException (v c)
-    foldl1Worker vec = case testEquality (typeRep @a) (typeRep @c) of
-        Just Refl ->
-            Right $
-                VG.generate (VU.length offsets - 1) foldGroup
+        Either DataFrameException (Maybe Bitmap, v c)
+    foldl1Worker bm vec = case testEquality (typeRep @a) (typeRep @c) of
+        Just Refl -> Right $ case nullsIn (VG.length vec) bm of
+            Nothing -> (Nothing, VG.generate nGroups foldGroup)
+            Just nulls ->
+                -- A group whose rows are all null has no seed, so its result is null.
+                let groups = VG.generate nGroups (foldValidGroup nulls) :: VB.Vector (Maybe c)
+                    empty = VU.filter (isNothing . VB.unsafeIndex groups) (VU.enumFromN 0 nGroups)
+                    placeholder k = VG.unsafeIndex vec (VU.unsafeIndex valueIndices (VU.unsafeIndex offsets k))
+                 in ( Just (buildBitmapFromNulls' nGroups empty)
+                    , VG.generate nGroups (\k -> fromMaybe (placeholder k) (VB.unsafeIndex groups k))
+                    )
           where
+            row i = VG.unsafeIndex vec (VU.unsafeIndex valueIndices i)
             foldGroup k =
                 let !s = VU.unsafeIndex offsets k
                     !e = VU.unsafeIndex offsets (k + 1)
-                    !seed = VG.unsafeIndex vec (VU.unsafeIndex valueIndices s)
-                 in go (s + 1) e seed
+                 in go (s + 1) e (row s)
             go !i !e !acc
                 | i >= e = acc
-                | otherwise =
-                    go (i + 1) e $!
-                        f acc (VG.unsafeIndex vec (VU.unsafeIndex valueIndices i))
+                | otherwise = go (i + 1) e $! f acc (row i)
+            foldValidGroup nulls k = goValid (VU.unsafeIndex offsets k) Nothing
+              where
+                !e = VU.unsafeIndex offsets (k + 1)
+                goValid !i acc
+                    | i >= e = acc
+                    | not (bitmapTestBit nulls (VU.unsafeIndex valueIndices i)) =
+                        goValid (i + 1) acc
+                    | otherwise = goValid (i + 1) (Just $! maybe (row i) (`f` row i) acc)
         Nothing ->
             Left $
                 TypeMismatchException
@@ -964,29 +868,32 @@ foldLinearGroups ::
 foldLinearGroups f seed col rowToGroup nGroups
     | nGroups == 0 = Right (fromVector @acc VB.empty)
     | otherwise = case col of
-        UnboxedColumn _ (vec :: VU.Vector d) -> foldLinearWorker vec
-        BoxedColumn _ (vec :: VB.Vector d) -> foldLinearWorker vec
+        UnboxedColumn bm (vec :: VU.Vector d) -> foldLinearWorker bm vec
+        BoxedColumn bm (vec :: VB.Vector d) -> foldLinearWorker bm vec
         PackedText _ _ ->
             foldLinearGroups f seed (materializePacked col) rowToGroup nGroups
         MergedColumn _ _ ->
             foldLinearGroups f seed (materializeMerged col) rowToGroup nGroups
   where
+    -- Null rows are skipped; a group with no valid rows keeps the seed.
     foldLinearWorker ::
         forall c v.
         (Typeable c, VG.Vector v c) =>
+        Maybe Bitmap ->
         v c ->
         Either DataFrameException Column
-    foldLinearWorker vec = case testEquality (typeRep @b) (typeRep @c) of
+    foldLinearWorker bm vec = case testEquality (typeRep @b) (typeRep @c) of
         Just Refl ->
-            Right $
-                unsafePerformIO $
-                    runWith
-                        ( \readAt writeAt ->
-                            VG.iforM_ vec $ \row x -> do
-                                let !k = VG.unsafeIndex rowToGroup row
-                                cur <- readAt k
-                                writeAt k $! f cur x
-                        )
+            let nulls = nullsIn (VG.length vec) bm
+             in Right $
+                    unsafePerformIO $
+                        runWith
+                            ( \readAt writeAt ->
+                                VG.iforM_ vec $ \row x -> when (validAt nulls row) $ do
+                                    let !k = VG.unsafeIndex rowToGroup row
+                                    cur <- readAt k
+                                    writeAt k $! f cur x
+                            )
         Nothing ->
             Left $
                 TypeMismatchException
@@ -1010,33 +917,34 @@ foldLinearGroups f seed col rowToGroup nGroups
     {-# INLINE runWith #-}
 {-# INLINEABLE foldLinearGroups #-}
 
+-- | The first valid row.
 headColumn :: forall a. (Columnable a) => Column -> Either DataFrameException a
 headColumn = \case
-    BoxedColumn _ col -> headWorker col
-    UnboxedColumn _ col -> headWorker col
+    BoxedColumn bm col -> headWorker bm col
+    UnboxedColumn bm col -> headWorker bm col
     c@(PackedText _ _) -> headColumn (materializePacked c)
     c@(MergedColumn _ _) -> headColumn (mergedHead c)
   where
     headWorker ::
         forall c v.
         (Typeable c, VG.Vector v c) =>
+        Maybe Bitmap ->
         v c ->
         Either DataFrameException a
-    headWorker vec = case testEquality (typeRep @a) (typeRep @c) of
+    headWorker bm vec = case testEquality (typeRep @a) (typeRep @c) of
         Just Refl ->
-            if VG.null vec
-                then Left (EmptyDataSetException "headColumn")
-                else pure (VG.head vec)
+            case VU.find (validAt bm) (VU.enumFromN 0 (VG.length vec)) of
+                Nothing -> Left (EmptyDataSetException "headColumn")
+                Just i -> pure (VG.unsafeIndex vec i)
         Nothing ->
             Left $
                 TypeMismatchException
-                    ( MkTypeErrorContext
+                    MkTypeErrorContext
                         { userType = Right (typeRep @a)
                         , expectedType = Right (typeRep @c)
                         , callingFunctionName = Just "headColumn"
                         , errorColumnName = Nothing
                         }
-                    )
 
 -- | An internal, column version of zip.
 zipColumns :: Column -> Column -> Column
@@ -1044,10 +952,10 @@ zipColumns l@(MergedColumn _ _) r = zipColumns (materializeMerged l) r
 zipColumns l r@(MergedColumn _ _) = zipColumns l (materializeMerged r)
 zipColumns l@(PackedText _ _) r = zipColumns (materializePacked l) r
 zipColumns l r@(PackedText _ _) = zipColumns l (materializePacked r)
-zipColumns (BoxedColumn _ column) (BoxedColumn _ other) = zipVectors column other
-zipColumns (BoxedColumn _ column) (UnboxedColumn _ other) = zipVectors column other
-zipColumns (UnboxedColumn _ column) (BoxedColumn _ other) = zipVectors column other
-zipColumns (UnboxedColumn _ column) (UnboxedColumn _ other) = zipVectors column other
+zipColumns (BoxedColumn bmL column) (BoxedColumn bmR other) = withBitmap (bothValid bmL bmR) (zipVectors column other)
+zipColumns (BoxedColumn bmL column) (UnboxedColumn bmR other) = withBitmap (bothValid bmL bmR) (zipVectors column other)
+zipColumns (UnboxedColumn bmL column) (BoxedColumn bmR other) = withBitmap (bothValid bmL bmR) (zipVectors column other)
+zipColumns (UnboxedColumn bmL column) (UnboxedColumn bmR other) = withBitmap (bothValid bmL bmR) (zipVectors column other)
 {-# INLINE zipColumns #-}
 
 zipVectors ::
@@ -1070,24 +978,54 @@ zipWithColumns ::
     forall a b c.
     (Columnable a, Columnable b, Columnable c) =>
     (a -> b -> c) -> Column -> Column -> Either DataFrameException Column
-zipWithColumns f (UnboxedColumn bmL (column :: VU.Vector d)) (UnboxedColumn bmR (other :: VU.Vector e)) = case testEquality (typeRep @a) (typeRep @d) of
-    Just Refl -> case testEquality (typeRep @b) (typeRep @e) of
-        Just Refl
-            | isNothing bmL
-            , isNothing bmR ->
-                pure $ case sUnbox @c of
-                    STrue -> UnboxedColumn Nothing $ case testEquality (typeRep @a) (typeRep @b) of
-                        Just Refl -> zipUnboxed f column other
-                        Nothing ->
-                            let !n = min (VU.length column) (VU.length other)
-                             in parGenerateUnboxed n $ \i ->
-                                    f (VU.unsafeIndex column i) (VU.unsafeIndex other i)
-                    SFalse -> fromVector $ VB.zipWith f (VG.convert column) (VG.convert other)
-        _ -> zipWithColumnsGeneral f (UnboxedColumn bmL column) (UnboxedColumn bmR other)
-    Nothing -> zipWithColumnsGeneral f (UnboxedColumn bmL column) (UnboxedColumn bmR other)
--- TODO: mchavinda - reuse pattern from interpret where we augment the
--- error at the end.
-zipWithColumns f left right = zipWithColumnsGeneral f left right
+zipWithColumns f left right = case (left, right) of
+    (PackedText _ _, _) -> zipWithColumns f (materializePacked left) right
+    (_, PackedText _ _) -> zipWithColumns f left (materializePacked right)
+    (MergedColumn _ _, _) -> zipWithColumns f (materializeMerged left) right
+    (_, MergedColumn _ _) -> zipWithColumns f left (materializeMerged right)
+    ( UnboxedColumn Nothing (l :: VU.Vector d)
+        , UnboxedColumn Nothing (r :: VU.Vector e)
+        )
+            | Just Refl <- testEquality (typeRep @a) (typeRep @d)
+            , Just Refl <- testEquality (typeRep @b) (typeRep @e)
+            , STrue <- sUnbox @c ->
+                pure . UnboxedColumn Nothing $ case testEquality (typeRep @a) (typeRep @b) of
+                    Just Refl -> fromMaybe zipLoop compiledZip f l r
+                    Nothing -> zipLoop f l r
+    (BoxedColumn bmL l, BoxedColumn bmR r) -> elements bmL l bmR r
+    (BoxedColumn bmL l, UnboxedColumn bmR r) -> elements bmL l bmR r
+    (UnboxedColumn bmL l, BoxedColumn bmR r) -> elements bmL l bmR r
+    (UnboxedColumn bmL l, UnboxedColumn bmR r) -> elements bmL l bmR r
+  where
+    -- A row is null if either side is; f never sees a null row.
+    elements ::
+        forall d e vl vr.
+        (Typeable d, Typeable e, VG.Vector vl d, VG.Vector vr e) =>
+        Maybe Bitmap -> vl d -> Maybe Bitmap -> vr e -> Either DataFrameException Column
+    elements bmL l bmR r
+        | Just Refl <- testEquality (typeRep @a) (typeRep @d)
+        , Just Refl <- testEquality (typeRep @b) (typeRep @e) =
+            let !n = min (VG.length l) (VG.length r)
+                g i = f (VG.unsafeIndex l i) (VG.unsafeIndex r i)
+             in pure $ case (bothValid bmL bmR, sUnbox @c) of
+                    (Nothing, STrue) -> UnboxedColumn Nothing (parGenerateUnboxed n g)
+                    (Nothing, SFalse) -> fromVector @c (VB.generate n g)
+                    (Just bm, STrue) -> UnboxedColumn (Just bm) $ case nullsIn n (Just bm) of
+                        Nothing -> parGenerateUnboxed n g
+                        Just nulls -> generateValidUnboxed nulls n g
+                    (Just bm, SFalse) -> generateValidBoxed bm n g
+        | otherwise = zipWithColumnsGeneral f left right
+
+-- | Valid where both are valid; a missing bitmap means every row is valid.
+bothValid :: Maybe Bitmap -> Maybe Bitmap -> Maybe Bitmap
+bothValid (Just l) (Just r) = Just (andBitmaps l r)
+bothValid l Nothing = l
+bothValid Nothing r = r
+
+withBitmap :: Maybe Bitmap -> Column -> Column
+withBitmap bm (BoxedColumn _ v) = BoxedColumn bm v
+withBitmap bm (UnboxedColumn _ v) = UnboxedColumn bm v
+withBitmap _ c = c
 
 zipWithColumnsGeneral ::
     forall a b c.
@@ -1105,7 +1043,6 @@ zipWithColumnsGeneral f left right = case toVector @a left of
         Left e -> Left e
         Right right' -> pure $ fromVector $ VB.zipWith f left' right'
 {-# INLINE zipWithColumnsGeneral #-}
-{-# INLINE zipWithColumns #-}
 
 -- writeColumn and freezeColumn' (CSV-ingest helpers) moved to
 -- DataFrame.IO.Internal.MutableColumn so the core column module does not

@@ -126,6 +126,11 @@ popCountUpTo n bm = whole + partial
             popCount (VU.unsafeIndex bm fullBytes .&. ((1 `shiftL` rest) - 1))
 {-# INLINE popCountUpTo #-}
 
+-- | Whether any of the first @n@ rows is null.
+bitmapHasNulls :: Int -> Bitmap -> Bool
+bitmapHasNulls n bm = popCountUpTo n bm < n
+{-# INLINE bitmapHasNulls #-}
+
 -- | Concatenate two bitmaps covering @n1@ and @n2@ rows respectively.
 bitmapConcat :: Int -> Bitmap -> Int -> Bitmap -> Bitmap
 bitmapConcat n1 bm1 n2 bm2 =
