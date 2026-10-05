@@ -88,6 +88,8 @@ import qualified DataFrame as D
 import qualified DataFrame.Functions as F
 import DataFrame.Expression.Operators
 
+import DataFrame ((=:))
+
 sales = D.fromColumns
     [ "product" =: [1, 1, 2, 2, 3, 3 :: Int]
     , "amount"  =: [100, 120, 50, 20, 40, 30 :: Int]
