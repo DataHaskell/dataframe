@@ -3,7 +3,6 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-
 {-# LANGUAGE TypeFamilies #-}
 
 {- | Gradient boosting of regression trees (Friedman). Trees are fitted to the

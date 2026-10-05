@@ -1,4 +1,5 @@
 {-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE TupleSections #-}
 
 {- | Regression trees grown from per-bin histograms, for gradient boosting.
 Each feature is bucketed once per fit; a node's split search then costs
@@ -16,7 +17,7 @@ module DataFrame.DecisionTree.Histogram (
 import Control.Monad.ST (runST)
 import Control.Parallel (par, pseq)
 import Control.Parallel.Strategies (evalList, parList, rseq, using)
-import Data.Maybe (maybeToList)
+import Data.Maybe (fromMaybe, maybeToList)
 import qualified Data.Vector as V
 import qualified Data.Vector.Unboxed as VU
 import qualified Data.Vector.Unboxed.Mutable as VUM
@@ -147,7 +148,7 @@ fitBinnedTree lim binned y mw = (toTree root, inSample)
     allIdx = VU.enumFromN 0 n
     root = node 0 allIdx (hists allIdx)
     inSample = VU.update (VU.replicate n 0) (VU.concat (leafRows root))
-    leafRows (NLeaf v idxs) = [VU.map (\i -> (i, v)) idxs]
+    leafRows (NLeaf v idxs) = [VU.map (,v) idxs]
     leafRows (NBranch _ l r) = leafRows l ++ leafRows r
 
     -- Feature-parallel only where a node is big enough to pay for the sparks.
