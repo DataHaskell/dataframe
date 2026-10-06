@@ -14,6 +14,7 @@ import qualified IO.CsvGolden
 import qualified IO.JSON
 import qualified IR.ExprJsonRoundtrip
 import qualified Internal.ColumnBuilder
+import qualified Internal.ColumnConcat
 import qualified Internal.DictEncode
 import qualified Internal.Markdown
 import qualified Internal.PackedText
@@ -75,6 +76,7 @@ tests :: Test
 tests =
     TestList $
         Internal.ColumnBuilder.tests
+            ++ Internal.ColumnConcat.tests
             ++ Internal.DictEncode.tests
             ++ Internal.Markdown.tests
             ++ Internal.PackedText.tests

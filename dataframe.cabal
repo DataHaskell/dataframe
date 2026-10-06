@@ -284,6 +284,7 @@ test-suite tests
                    Functions,
                    GenDataFrame,
                    Internal.ColumnBuilder,
+                   Internal.ColumnConcat,
                    Internal.DictEncode,
                    Internal.Markdown,
                    Internal.PackedText,
