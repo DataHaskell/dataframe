@@ -21,6 +21,8 @@ import DataFrame.DecisionTree.Types (
     Direction (..),
     TreeConfig (..),
  )
+import DataFrame.Expression.Operators ((.*.), (.+.), (.>.))
+import qualified DataFrame.Functions as F
 import DataFrame.Internal.Column (TypedColumn (..), toVector)
 import DataFrame.Internal.DataFrame (DataFrame)
 import DataFrame.Internal.Expression (Expr, getColumns)
@@ -52,23 +54,49 @@ fitLinearCandidate ::
 fitLinearCandidate cfg target df carePoints =
     case materializedFeatures target df carePoints of
         [] -> Nothing
-        mats -> linearFromFeatures cfg carePoints mats
+        feats -> linearFromFeatures cfg carePoints feats
 
+{- | Each feature's materialised care values together with the Double expression
+that produced them, so the hyperplane can be rebuilt over Int or nullable columns.
+-}
 materializedFeatures ::
-    T.Text -> DataFrame -> [CarePoint] -> [(T.Text, VU.Vector Double)]
+    T.Text ->
+    DataFrame ->
+    [CarePoint] ->
+    [(Expr Double, (T.Text, VU.Vector Double))]
 materializedFeatures target df carePoints =
-    mapMaybe (materializeFeatureForCare df carePoints) (featureCols target df)
+    mapMaybe
+        ( \ne ->
+            (\m -> (doubleExprOf ne (snd m), m))
+                <$> materializeFeatureForCare df carePoints ne
+        )
+        (featureCols target df)
+
+-- | The expression behind a feature; a nullable one takes the care-point mean, as its values did.
+doubleExprOf :: NumExpr -> VU.Vector Double -> Expr Double
+doubleExprOf (NDouble e) _ = e
+doubleExprOf (NMaybeDouble e) vals = F.fromMaybe (VU.sum vals / fromIntegral (max 1 (VU.length vals))) e
 
 featureCols :: T.Text -> DataFrame -> [NumExpr]
 featureCols target df = filter (notElem target . numExprCols) (numericCols df)
 
 linearFromFeatures ::
-    TreeConfig -> [CarePoint] -> [(T.Text, VU.Vector Double)] -> Maybe (Expr Bool)
-linearFromFeatures cfg carePoints mats
+    TreeConfig ->
+    [CarePoint] ->
+    [(Expr Double, (T.Text, VU.Vector Double))] ->
+    Maybe (Expr Bool)
+linearFromFeatures cfg carePoints feats
     | VU.all (== 0) weights = Nothing
     | degenerateHyperplane rows weights (LS.lmIntercept model) = Nothing
-    | otherwise = Just (LS.modelToExpr model)
+    | otherwise = Just hyperplane
   where
+    mats = map snd feats
+    hyperplane =
+        foldl
+            (\acc (w, e) -> acc .+. (F.lit w .*. e))
+            (F.lit (LS.lmIntercept model))
+            [(w, e) | (w, (e, _)) <- zip (VU.toList weights) feats, w /= 0]
+            .>. F.lit (0 :: Double)
     rows = careRowsFromFeatures (length carePoints) mats
     labels = careLabels carePoints
     model =
