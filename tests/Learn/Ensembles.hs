@@ -199,9 +199,81 @@ testGBMCalibration = TestCase $ do
         ("logistic boosting recovers the conditional probability " ++ show err)
         (err < 0.03)
 
+gbmData :: D.DataFrame
+gbmData =
+    D.fromColumns
+        [ ("x", DI.fromList ([fromIntegral i / 4 | i <- [1 .. 40 :: Int]] :: [Double]))
+        ,
+            ( "z"
+            , DI.fromList
+                ([fromIntegral ((i * 7) `mod` 11) | i <- [1 .. 40 :: Int]] :: [Double])
+            )
+        ,
+            ( "y"
+            , DI.fromList
+                ( [ sin (fromIntegral i / 4) + fromIntegral ((i * 7) `mod` 11) * 0.1
+                  | i <- [1 .. 40 :: Int]
+                  ] ::
+                    [Double]
+                )
+            )
+        ]
+
+-- A constant base equal to the default initial score boosts the same trees.
+testGBMBaseScore :: Test
+testGBMBaseScore = TestCase $ do
+    let cfg = defaultGBConfig{gbNEstimators = 20, gbMaxDepth = 2}
+        ys = interpD gbmData (F.col @Double "y")
+        mean = sum ys / fromIntegral (length ys)
+        plain = fit cfg (F.col @Double "y") gbmData
+        based = fit cfg{gbBaseScore = Just (F.lit mean)} (F.col @Double "y") gbmData
+        gap =
+            maximum
+                ( zipWith
+                    (\a b -> abs (a - b))
+                    (interpD gbmData (predict plain))
+                    (interpD gbmData (predict based))
+                )
+    assertBool
+        ("base-score model matches the default, gap " ++ show gap)
+        (gap < 1e-9)
+    -- A per-row base is part of the prediction: shifting it shifts every score.
+    let shifted = fit cfg{gbBaseScore = Just (F.col @Double "z")} (F.col @Double "y") gbmData
+        noTrees =
+            fit
+                cfg{gbNEstimators = 0, gbBaseScore = Just (F.col @Double "z")}
+                (F.col @Double "y")
+                gbmData
+    assertEqual
+        "zero trees predict the base"
+        (interpD gbmData (F.col @Double "z"))
+        (interpD gbmData (predict noTrees))
+    assertBool
+        "base model still fits"
+        (length (interpD gbmData (predict shifted)) == 40)
+
+-- Sampling at 1 is inert; sampling below 1 changes the fit and is fixed by the seed.
+testGBMSubsample :: Test
+testGBMSubsample = TestCase $ do
+    let cfg = defaultGBConfig{gbNEstimators = 20, gbMaxDepth = 2}
+        scores :: GBConfig -> [Double]
+        scores c = interpD gbmData (predict (fit c (F.col @Double "y") gbmData))
+    assertEqual
+        "subsample 1 / colsample 1 reproduce the default"
+        (scores cfg)
+        (scores cfg{gbSubsample = 1, gbColsample = 1})
+    let half = cfg{gbSubsample = 0.5, gbColsample = 0.5, gbSeed = 3}
+    assertEqual "deterministic in the seed" (scores half) (scores half)
+    assertBool "sampling changes the fit" (scores half /= scores cfg)
+    assertBool
+        "a different seed changes the fit"
+        (scores half /= scores half{gbSeed = 4})
+
 tests :: [Test]
 tests =
     [ testGBMRegression
+    , testGBMBaseScore
+    , testGBMSubsample
     , testGBMStaged
     , testGBMCalibration
     , testAdaBoost

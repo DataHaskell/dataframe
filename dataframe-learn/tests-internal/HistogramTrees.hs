@@ -44,7 +44,7 @@ tests =
     ]
 
 limits :: Int -> TreeLimits
-limits depth = TreeLimits depth 2 1 0
+limits depth = TreeLimits depth 2 1 0 0 0
 
 fitBinned ::
     Int -> Int -> D.DataFrame -> VU.Vector Double -> (Tree Double, VU.Vector Double)

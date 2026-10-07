@@ -7,19 +7,23 @@ the deterministic 'kFolds' from @dataframe-operations@.
 module DataFrame.ModelSelection (
     crossValScore,
     crossValidate,
+    stratifiedFoldIds,
+    outOfFold,
     GridSearchResult (..),
     gridSearch,
 ) where
 
-import Data.List (maximumBy)
+import Data.List (maximumBy, sortOn)
 import Data.Ord (comparing)
-import System.Random (mkStdGen)
+import qualified Data.Set as S
+import qualified Data.Vector.Unboxed as VU
+import System.Random (mkStdGen, randoms)
 
 import DataFrame.Internal.DataFrame (DataFrame)
 import DataFrame.Internal.Expression (Expr)
 import DataFrame.Metrics (Metric, evaluate)
 import DataFrame.Operations.Merge ()
-import DataFrame.Operations.Subset (kFolds)
+import DataFrame.Operations.Subset (kFolds, rowsAtIndices)
 
 {- | Per-fold scores from k-fold cross-validation. @scoreFn train test@ fits on
 the training rows and returns a score on the held-out fold.
@@ -57,6 +61,39 @@ crossValidate folds seed metric truth fitPredict =
     crossValScore folds seed score
   where
     score train = evaluate metric (fitPredict train) truth
+
+{- | A fold number in @[0, k)@ for every row. Each label's rows are shuffled by
+the seed and dealt round-robin, so every fold has the same class balance.
+-}
+stratifiedFoldIds :: Int -> Int -> VU.Vector Double -> VU.Vector Int
+stratifiedFoldIds k seed labels = VU.update (VU.replicate n 0) (VU.fromList assigned)
+  where
+    n = VU.length labels
+    shuffled = map snd (sortOn fst (zip (randoms (mkStdGen seed) :: [Double]) [0 .. n - 1]))
+    assigned =
+        concat
+            [ zip [i | i <- shuffled, labels VU.! i == c] (cycle [0 .. k - 1])
+            | c <- S.toList (S.fromList (VU.toList labels))
+            ]
+
+{- | Out-of-fold scores: row @i@ is scored by @fitScore train test@ fitted on
+every fold except row @i@'s.
+-}
+outOfFold ::
+    VU.Vector Int ->
+    (DataFrame -> DataFrame -> VU.Vector Double) ->
+    DataFrame ->
+    VU.Vector Double
+outOfFold folds fitScore df =
+    VU.update
+        (VU.replicate (VU.length folds) 0)
+        (VU.concat (map score [0 .. k - 1]))
+  where
+    k = if VU.null folds then 0 else VU.maximum folds + 1
+    score f =
+        let test = VU.findIndices (== f) folds
+            train = VU.findIndices (/= f) folds
+         in VU.zip test (fitScore (rowsAtIndices train df) (rowsAtIndices test df))
 
 -- | The outcome of a grid search: the best config, its score, and all results.
 data GridSearchResult c = GridSearchResult

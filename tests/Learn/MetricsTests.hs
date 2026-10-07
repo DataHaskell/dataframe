@@ -17,8 +17,11 @@ import DataFrame.ModelSelection
 import DataFrame.PCA
 import DataFrame.Transform
 
+import Data.List (sortBy)
+import Data.Ord (comparing)
 import qualified Data.Vector.Unboxed as VU
 import DataFrame.Model (fit, predict)
+import System.Random (mkStdGen, randomRs)
 import Test.HUnit
 
 close :: Double -> Double -> Double -> Bool
@@ -117,9 +120,65 @@ testTransformCompose = TestCase $ do
     assertBool "pipeline produced a frame" (D.columnNames out /= [])
     assertBool "pipeline has pc1 column" ("pc1" `elem` D.columnNames out)
 
+{- | Mann-Whitney AUC from ranks computed over lists, the definition 'rocAuc'
+must reproduce bit for bit.
+-}
+referenceAuc :: [Double] -> [Double] -> Double
+referenceAuc scores truth
+    | nPos == 0 || nNeg == 0 = 0.5
+    | otherwise = (rankSum - nPos * (nPos + 1) / 2) / (nPos * nNeg)
+  where
+    sorted = sortBy (comparing snd) (zip [0 :: Int ..] scores)
+    ranks = map snd (sortBy (comparing fst) (assign 1 sorted))
+    assign _ [] = []
+    assign start grp@((_, v) : _) =
+        let (tied, rest) = span ((== v) . snd) grp
+            k = length tied
+            avg = fromIntegral (sum [start .. start + k - 1]) / fromIntegral k
+         in [(i, avg) | (i, _) <- tied] ++ assign (start + k) rest
+    rankSum = sum [r | (y, r) <- zip truth ranks, y == 1]
+    nPos = fromIntegral (length (filter (== 1) truth))
+    nNeg = fromIntegral (length truth) - nPos
+
+testRocAucMatchesReference :: Test
+testRocAucMatchesReference = TestCase $ do
+    let cases =
+            [ (n, levels, seed)
+            | n <- [1, 2, 17, 1000]
+            , levels <- [2, 7, 100000]
+            , seed <- [1, 2, 3]
+            ]
+    sequence_
+        [ assertEqual
+            ("n=" ++ show n ++ " levels=" ++ show levels ++ " seed=" ++ show seed)
+            (referenceAuc scores truth)
+            (rocAuc (VU.fromList scores) (VU.fromList truth))
+        | (n, levels, seed) <- cases
+        , let scores = map fromIntegral (take n (randomRs (0, levels - 1 :: Int) (mkStdGen seed)))
+              truth = map fromIntegral (take n (randomRs (0, 1 :: Int) (mkStdGen (seed + 100))))
+        ]
+
+testStratifiedFolds :: Test
+testStratifiedFolds = TestCase $ do
+    let labels =
+            VU.fromList (map fromIntegral (take 1003 (randomRs (0, 1 :: Int) (mkStdGen 7))))
+        folds = stratifiedFoldIds 5 42 labels
+        perFold c =
+            [ VU.length (VU.filter id (VU.zipWith (\f l -> f == k && l == c) folds labels))
+            | k <- [0 .. 4]
+            ]
+        spread xs = maximum xs - minimum xs
+    assertEqual "one fold per row" (VU.length labels) (VU.length folds)
+    assertBool "folds in range" (VU.all (\f -> f >= 0 && f < 5) folds)
+    assertBool "positives balanced" (spread (perFold 1) <= 1)
+    assertBool "negatives balanced" (spread (perFold 0) <= 1)
+    assertEqual "deterministic" folds (stratifiedFoldIds 5 42 labels)
+
 tests :: [Test]
 tests =
-    [ testRegressionMetrics
+    [ testRocAucMatchesReference
+    , testStratifiedFolds
+    , testRegressionMetrics
     , testMulticlassMetrics
     , testRocAuc
     , testReports

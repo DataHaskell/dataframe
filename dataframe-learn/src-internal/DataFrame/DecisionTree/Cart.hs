@@ -13,6 +13,7 @@ module DataFrame.DecisionTree.Cart (
     sortIndicesByValue,
     buildCartTree,
     cartFeatures,
+    cartFeaturesByColumn,
     cartTargetLabels,
 ) where
 
@@ -283,7 +284,12 @@ bumpClass c = zipWith (\j x -> if j == c then x + 1 else x) [0 ..]
 
 -- | One-hot features in @pd.get_dummies(drop_first=False)@ column order.
 cartFeatures :: T.Text -> DataFrame -> [CartFeature]
-cartFeatures target df = concatMap (featuresOfColumn df) (filter (/= target) (columnNames df))
+cartFeatures target df = map snd (cartFeaturesByColumn target df)
+
+-- | 'cartFeatures', each paired with the column it was built from.
+cartFeaturesByColumn :: T.Text -> DataFrame -> [(T.Text, CartFeature)]
+cartFeaturesByColumn target df =
+    [(c, f) | c <- filter (/= target) (columnNames df), f <- featuresOfColumn df c]
 
 featuresOfColumn :: DataFrame -> T.Text -> [CartFeature]
 featuresOfColumn df c = case unsafeGetColumn c df of

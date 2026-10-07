@@ -9,14 +9,15 @@ more distinct values than bins, the trees partition the rows identically.
 -}
 module DataFrame.DecisionTree.Histogram (
     Binned,
+    BinnedFeatures,
     binFeatures,
     TreeLimits (..),
     fitBinnedTree,
+    fitBinnedTreeOn,
 ) where
 
 import Control.Monad.ST (runST)
 import Control.Parallel (par, pseq)
-import Control.Parallel.Strategies (evalList, parList, rseq, using)
 import Data.Maybe (fromMaybe, maybeToList)
 import qualified Data.Vector as V
 import qualified Data.Vector.Unboxed as VU
@@ -41,9 +42,35 @@ data Binned = Binned
     , bnUpper :: !(VU.Vector Double)
     }
 
+{- | Every feature's bins, plus the same bins stored row by row: row @i@'s bin
+for feature @j@ is at @i * features + j@, so one row's bins share a cache line.
+-}
+data BinnedFeatures = BinnedFeatures
+    { bfFeatures :: !(V.Vector Binned)
+    , bfRows :: !(VU.Vector Word16)
+    , bfOffsets :: !(VU.Vector Int)
+    -- ^ Where each feature's histogram starts in a node's histogram buffer.
+    , bfSlots :: !Int
+    }
+
 -- | Bin every feature into at most @maxBins@ bins (capped at 65535).
-binFeatures :: Int -> V.Vector CartFeature -> V.Vector Binned
-binFeatures maxBins = V.map (binFeature (max 2 (min 65535 maxBins)))
+binFeatures :: Int -> V.Vector CartFeature -> BinnedFeatures
+binFeatures maxBins features = BinnedFeatures binned rows offsets (VU.last sizes)
+  where
+    binned = V.map (binFeature (max 2 (min 65535 maxBins))) features
+    nf = V.length binned
+    n = if nf == 0 then 0 else VU.length (bnBins (V.head binned))
+    sizes =
+        VU.prescanl'
+            (+)
+            0
+            (VU.fromList [4 * (bnNBins b + 1) | b <- V.toList binned] `VU.snoc` 0)
+    offsets = VU.take nf sizes
+    rows = VU.create $ do
+        m <- VUM.unsafeNew (n * nf)
+        V.iforM_ binned $ \j b ->
+            VU.iforM_ (bnBins b) $ \i bin -> VUM.unsafeWrite m (i * nf + j) bin
+        pure m
 
 binFeature :: Int -> CartFeature -> Binned
 binFeature maxBins f = Binned f bins nb upper
@@ -107,6 +134,10 @@ data TreeLimits = TreeLimits
     , tlMinSamplesSplit :: !Int
     , tlMinLeafSize :: !Int
     , tlMinImpurityDecrease :: !Double
+    , tlL2 :: !Double
+    -- ^ Added to every node's total weight: shrinks leaf values and split gains.
+    , tlMinChildWeight :: !Double
+    -- ^ Smallest total weight a child may have.
     }
 
 {- | Per-bin Σw, Σwy, Σwy² and row count, four slots per bin, null bin last.
@@ -114,19 +145,42 @@ Built strictly: left lazy, the histograms of a deep tree pile up as thunks.
 -}
 type Hist = VU.Vector Double
 
-buildHist ::
-    VU.Vector Double -> VU.Vector Double -> VU.Vector Int -> Binned -> Hist
-buildHist w y idxs bn = runST $ do
-    m <- VUM.replicate (4 * (bnNBins bn + 1)) 0
-    VU.forM_ idxs $ \i -> do
-        let s = 4 * fromIntegral (VU.unsafeIndex (bnBins bn) i)
-            wi = VU.unsafeIndex w i
-            yi = VU.unsafeIndex y i
-        VUM.unsafeModify m (+ wi) s
-        VUM.unsafeModify m (+ wi * yi) (s + 1)
-        VUM.unsafeModify m (+ wi * yi * yi) (s + 2)
-        VUM.unsafeModify m (+ 1) (s + 3)
-    VU.unsafeFreeze m
+{- | Every feature's histogram for a node, in one pass over its rows. Each
+feature's slice of the result is its 'Hist'.
+-}
+buildHists ::
+    BinnedFeatures ->
+    VU.Vector Int ->
+    VU.Vector Double ->
+    VU.Vector Double ->
+    VU.Vector Int ->
+    V.Vector Hist
+buildHists bf allowed w y idxs = V.imap slice (bfFeatures bf)
+  where
+    nf = V.length (bfFeatures bf)
+    na = VU.length allowed
+    slice j b = VU.slice (VU.unsafeIndex (bfOffsets bf) j) (4 * (bnNBins b + 1)) flat
+    flat = runST $ do
+        m <- VUM.replicate (bfSlots bf) 0
+        VU.forM_ idxs $ \i -> do
+            let wi = VU.unsafeIndex w i
+                yi = VU.unsafeIndex y i
+                wy = wi * yi
+                wyy = wy * yi
+                row = i * nf
+                go !k
+                    | k >= na = pure ()
+                    | otherwise = do
+                        let j = VU.unsafeIndex allowed k
+                            bin = fromIntegral (VU.unsafeIndex (bfRows bf) (row + j))
+                            s = VU.unsafeIndex (bfOffsets bf) j + 4 * bin
+                        VUM.unsafeModify m (+ wi) s
+                        VUM.unsafeModify m (+ wy) (s + 1)
+                        VUM.unsafeModify m (+ wyy) (s + 2)
+                        VUM.unsafeModify m (+ 1) (s + 3)
+                        go (k + 1)
+            go 0
+        VU.unsafeFreeze m
 
 data Node
     = NLeaf !Double !(VU.Vector Int)
@@ -137,12 +191,23 @@ and its in-sample predictions.
 -}
 fitBinnedTree ::
     TreeLimits ->
-    V.Vector Binned ->
+    BinnedFeatures ->
     VU.Vector Double ->
     Maybe (VU.Vector Double) ->
     (Tree Double, VU.Vector Double)
-fitBinnedTree lim binned y mw = (toTree root, inSample)
+fitBinnedTree lim bf = fitBinnedTreeOn (VU.enumFromN 0 (V.length (bfFeatures bf))) lim bf
+
+-- | 'fitBinnedTree' splitting only on the features at the given indices.
+fitBinnedTreeOn ::
+    VU.Vector Int ->
+    TreeLimits ->
+    BinnedFeatures ->
+    VU.Vector Double ->
+    Maybe (VU.Vector Double) ->
+    (Tree Double, VU.Vector Double)
+fitBinnedTreeOn allowed lim bf y mw = (toTree root, inSample)
   where
+    binned = bfFeatures bf
     n = VU.length y
     w = Data.Maybe.fromMaybe (VU.replicate n 1) mw
     allIdx = VU.enumFromN 0 n
@@ -151,19 +216,17 @@ fitBinnedTree lim binned y mw = (toTree root, inSample)
     leafRows (NLeaf v idxs) = [VU.map (,v) idxs]
     leafRows (NBranch _ l r) = leafRows l ++ leafRows r
 
-    -- Feature-parallel only where a node is big enough to pay for the sparks.
-    hists idxs =
-        V.fromList (map (buildHist w y idxs) (V.toList binned) `using` strategy)
-      where
-        strategy = if VU.length idxs >= 20000 then parList rseq else evalList rseq
+    hists = buildHists bf allowed w y
+    -- Every allowed feature's histogram covers all of a node's rows.
+    totalsOf hs = histTotals (hs V.! VU.head allowed)
 
     node depth idxs hs
         | depth >= tlMaxDepth lim || VU.length idxs < tlMinSamplesSplit lim || V.null hs =
             leaf
-        | otherwise = maybe leaf split (bestSplit lim binned hs)
+        | otherwise = maybe leaf split (bestSplit lim binned allowed hs)
       where
-        Totals tw tsy _ _ = histTotals (V.head hs)
-        leaf = NLeaf (if tw == 0 then 0 else tsy / tw) idxs
+        Totals tw tsy _ _ = totalsOf hs
+        leaf = NLeaf (if tw + tlL2 lim == 0 then 0 else tsy / (tw + tlL2 lim)) idxs
         split (fj, b, nullLeft) =
             forceNode l `par` (forceNode r `pseq` NBranch cond l r)
           where
@@ -204,16 +267,21 @@ scored with the node's null rows on the right and then on the left; ties keep
 the earliest candidate, as in the exact sweep.
 -}
 bestSplit ::
-    TreeLimits -> V.Vector Binned -> V.Vector Hist -> Maybe (Int, Int, Bool)
-bestSplit lim binned hs
+    TreeLimits ->
+    V.Vector Binned ->
+    VU.Vector Int ->
+    V.Vector Hist ->
+    Maybe (Int, Int, Bool)
+bestSplit lim binned allowed hs
     | null candidates = Nothing
     | red > 0 && red >= tlMinImpurityDecrease lim = Just sp
     | otherwise = Nothing
   where
-    Totals totW totSY totSY2 totC = histTotals (V.head hs)
+    Totals totW totSY totSY2 totC = histTotals (hs V.! VU.head allowed)
     nNode = round totC :: Int
+    sse = penalisedSse (tlL2 lim)
     nodeSSE = sse totSY totSY2 totW
-    candidates = concat (zipWith featBest [0 ..] (V.toList hs))
+    candidates = concat [featBest fj (hs V.! fj) | fj <- VU.toList allowed]
     (red, sp) = maximumByFst candidates
     featBest fj h = [(r, (fj, b, nl)) | (b, nl, r) <- maybeToList (scan 0 0 0 0 0 Nothing)]
       where
@@ -225,7 +293,12 @@ bestSplit lim binned hs
         hasNulls = nC > 0
         lastB = if hasNulls then nb - 1 else nb - 2
         score nl wl syl syl2
-            | nl >= tlMinLeafSize lim && nNode - nl >= tlMinLeafSize lim && wl > 0 && wr > 0 =
+            | nl >= tlMinLeafSize lim
+            , nNode - nl >= tlMinLeafSize lim
+            , wl > 0
+            , wr > 0
+            , wl >= tlMinChildWeight lim
+            , wr >= tlMinChildWeight lim =
                 Just (nodeSSE - (sse syl syl2 wl + sse (totSY - syl) (totSY2 - syl2) wr))
             | otherwise = Nothing
           where
@@ -256,9 +329,12 @@ bestSplit lim binned hs
                 | otherwise = bst
             best' = foldl consider best (maybeToList right ++ maybeToList left)
 
--- | Weighted SSE of a node from its Σy, Σy², and total weight.
-sse :: Double -> Double -> Double -> Double
-sse sumY sumSq wt = sumSq - (if wt == 0 then 0 else sumY * sumY / wt)
+{- | Weighted SSE of a node from its Σy, Σy², and total weight, with @l2@ added
+to the weight. Differences of these give the Newton split gain with an L2 leaf
+penalty; at @l2 = 0@ it is the plain SSE.
+-}
+penalisedSse :: Double -> Double -> Double -> Double -> Double
+penalisedSse l2 sumY sumSq wt = sumSq - (if wt + l2 == 0 then 0 else sumY * sumY / (wt + l2))
 
 maximumByFst :: (Ord a) => [(a, b)] -> (a, b)
 maximumByFst = foldr1 (\x@(a, _) y@(b, _) -> if a >= b then x else y)

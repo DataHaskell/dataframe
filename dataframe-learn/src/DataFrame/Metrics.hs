@@ -1,3 +1,4 @@
+{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
@@ -41,9 +42,10 @@ module DataFrame.Metrics (
 
 import Control.Exception (throw)
 import Data.Either (fromRight)
-import Data.List (nub, sort, sortBy)
+import Data.List (nub, sort)
 import Data.Ord (comparing)
 import qualified Data.Text as T
+import qualified Data.Vector.Algorithms.Intro as VA
 import qualified Data.Vector.Unboxed as VU
 
 import DataFrame.Errors (DataFrameException (..))
@@ -223,31 +225,23 @@ f1 :: Average -> VU.Vector Double -> VU.Vector Double -> Double
 f1 = averaged f1Of
 
 {- | Binary ROC-AUC (Mann–Whitney). @scores@ are predicted probabilities, @truth@
-is @0@/@1@.
+is @0@/@1@. Tied scores share their average rank.
 -}
 rocAuc :: VU.Vector Double -> VU.Vector Double -> Double
 rocAuc scores truth
     | nPos == 0 || nNeg == 0 = 0.5
     | otherwise = (rankSum - nPos * (nPos + 1) / 2) / (nPos * nNeg)
   where
-    ranked = rankAverages (VU.toList scores)
-    pairs = zip (VU.toList truth) ranked
-    rankSum = sum [r | (y, r) <- pairs, y == 1]
-    nPos = fromIntegral (length (filter (== 1) (VU.toList truth)))
-    nNeg = fromIntegral (VU.length truth) - nPos
-
--- | Average ranks (ties share the mean rank), returned in input order.
-rankAverages :: [Double] -> [Double]
-rankAverages xs =
-    let indexed = zip [0 :: Int ..] xs
-        sorted = sortBy (comparing snd) indexed
-        ranked = assignRanks 1 sorted
-     in map snd (sortBy (comparing fst) ranked)
-  where
-    assignRanks _ [] = []
-    assignRanks start grp =
-        let v = snd (head grp)
-            (tied, rest) = span ((== v) . snd) grp
-            k = length tied
-            avgRank = fromIntegral (sum [start .. start + k - 1]) / fromIntegral k
-         in [(i, avgRank) | (i, _) <- tied] ++ assignRanks (start + k) rest
+    n = VU.length scores
+    sorted = VU.modify (VA.sortBy (comparing fst)) (VU.zip scores truth)
+    nPos = fromIntegral (VU.length (VU.filter (== 1) truth))
+    nNeg = fromIntegral n - nPos
+    rankSum = go 0 0
+    go !start !acc
+        | start >= n = acc
+        | otherwise =
+            let v = fst (VU.unsafeIndex sorted start)
+                end = maybe n (+ start) (VU.findIndex ((/= v) . fst) (VU.drop start sorted))
+                rank = fromIntegral (start + 1 + end) / 2
+                positives = VU.length (VU.filter ((== 1) . snd) (VU.slice start (end - start) sorted))
+             in go end (acc + rank * fromIntegral positives)
