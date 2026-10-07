@@ -31,6 +31,7 @@ import qualified Data.Vector as V
 import qualified Data.Vector.Unboxed as VU
 import DataFrame.Errors (DataFrameException (..))
 
+import Data.Maybe (fromMaybe)
 import DataFrame.DecisionTree.Cart (cartFeaturesByColumn)
 import DataFrame.DecisionTree.Fit (treeToExpr)
 import DataFrame.DecisionTree.Histogram (
@@ -40,13 +41,12 @@ import DataFrame.DecisionTree.Histogram (
  )
 import DataFrame.DecisionTree.Types (Tree)
 import DataFrame.Expression.Operators ((.*.), (.+.), (.>.))
-import Data.Maybe (fromMaybe)
-import System.Random (StdGen, mkStdGen, randoms)
 import DataFrame.Featurize.Internal (targetDoubles)
 import qualified DataFrame.Functions as F
 import DataFrame.Internal.DataFrame (DataFrame)
 import DataFrame.Internal.Expression (Expr (..), getColumns)
 import DataFrame.Model
+import System.Random (StdGen, mkStdGen, randoms)
 
 -- | The boosting loss.
 data GBLoss = SquaredError | LogisticDeviance
@@ -67,8 +67,9 @@ data GBConfig = GBConfig
     , gbMinChildWeight :: !Double
     -- ^ Smallest Hessian sum a leaf may have (XGBoost's @min_child_weight@).
     , gbFeatureGroups :: ![[T.Text]]
-    -- ^ Tree @m@ splits only on columns of group @m mod (number of groups)@.
-    -- Empty: every tree may use every column.
+    {- ^ Tree @m@ splits only on columns of group @m mod (number of groups)@.
+    Empty: every tree may use every column.
+    -}
     , gbBaseScore :: !(Maybe (Expr Double))
     -- ^ Boost from these per-row scores instead of a constant; the prediction adds them back.
     , gbSubsample :: !Double
@@ -141,10 +142,26 @@ fitGBM cfg target@(Col name) df =
         let allowed = case groupFeatures of
                 [] -> allFeatures
                 gs -> gs !! (m `mod` length gs)
-         in if gbColsample cfg >= 1 then allowed else keepFraction (gbColsample cfg) (mkStdGen (7919 * gbSeed cfg + 2 * m + 1)) allowed
+         in if gbColsample cfg >= 1
+                then allowed
+                else
+                    keepFraction
+                        (gbColsample cfg)
+                        (mkStdGen (7919 * gbSeed cfg + 2 * m + 1))
+                        allowed
     rowMask m
         | gbSubsample cfg >= 1 = Nothing
-        | otherwise = Just (VU.fromList (take n (map (\u -> if u < gbSubsample cfg then 1 else 0) (randoms (mkStdGen (7919 * gbSeed cfg + 2 * m)) :: [Double]))))
+        | otherwise =
+            Just
+                ( VU.fromList
+                    ( take
+                        n
+                        ( map
+                            (\u -> if u < gbSubsample cfg then 1 else 0)
+                            (randoms (mkStdGen (7919 * gbSeed cfg + 2 * m)) :: [Double])
+                        )
+                    )
+                )
     y = targetDoubles target df
     n = VU.length y
     lr = gbLearningRate cfg

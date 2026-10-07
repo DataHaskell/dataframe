@@ -21,10 +21,10 @@ import DataFrame.DecisionTree.Types (
     Direction (..),
     TreeConfig (..),
  )
-import DataFrame.Internal.Column (TypedColumn (..), toVector)
-import DataFrame.Internal.DataFrame (DataFrame)
 import DataFrame.Expression.Operators ((.*.), (.+.), (.>.))
 import qualified DataFrame.Functions as F
+import DataFrame.Internal.Column (TypedColumn (..), toVector)
+import DataFrame.Internal.DataFrame (DataFrame)
 import DataFrame.Internal.Expression (Expr, getColumns)
 import DataFrame.Internal.Interpreter (interpret)
 import qualified DataFrame.LinearSolver as LS
@@ -60,10 +60,16 @@ fitLinearCandidate cfg target df carePoints =
 that produced them, so the hyperplane can be rebuilt over Int or nullable columns.
 -}
 materializedFeatures ::
-    T.Text -> DataFrame -> [CarePoint] -> [(Expr Double, (T.Text, VU.Vector Double))]
+    T.Text ->
+    DataFrame ->
+    [CarePoint] ->
+    [(Expr Double, (T.Text, VU.Vector Double))]
 materializedFeatures target df carePoints =
     mapMaybe
-        (\ne -> (\m -> (doubleExprOf ne (snd m), m)) <$> materializeFeatureForCare df carePoints ne)
+        ( \ne ->
+            (\m -> (doubleExprOf ne (snd m), m))
+                <$> materializeFeatureForCare df carePoints ne
+        )
         (featureCols target df)
 
 -- | The expression behind a feature; a nullable one takes the care-point mean, as its values did.
@@ -75,7 +81,10 @@ featureCols :: T.Text -> DataFrame -> [NumExpr]
 featureCols target df = filter (notElem target . numExprCols) (numericCols df)
 
 linearFromFeatures ::
-    TreeConfig -> [CarePoint] -> [(Expr Double, (T.Text, VU.Vector Double))] -> Maybe (Expr Bool)
+    TreeConfig ->
+    [CarePoint] ->
+    [(Expr Double, (T.Text, VU.Vector Double))] ->
+    Maybe (Expr Bool)
 linearFromFeatures cfg carePoints feats
     | VU.all (== 0) weights = Nothing
     | degenerateHyperplane rows weights (LS.lmIntercept model) = Nothing
@@ -83,7 +92,10 @@ linearFromFeatures cfg carePoints feats
   where
     mats = map snd feats
     hyperplane =
-        foldl (\acc (w, e) -> acc .+. (F.lit w .*. e)) (F.lit (LS.lmIntercept model)) [(w, e) | (w, (e, _)) <- zip (VU.toList weights) feats, w /= 0]
+        foldl
+            (\acc (w, e) -> acc .+. (F.lit w .*. e))
+            (F.lit (LS.lmIntercept model))
+            [(w, e) | (w, (e, _)) <- zip (VU.toList weights) feats, w /= 0]
             .>. F.lit (0 :: Double)
     rows = careRowsFromFeatures (length carePoints) mats
     labels = careLabels carePoints
