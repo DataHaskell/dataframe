@@ -42,7 +42,7 @@ import qualified Data.Text as T
 import DataFrame.Internal.Column (Columnable)
 import DataFrame.Internal.Column.Types (These (..))
 import qualified DataFrame.Internal.DataFrame as D
-import DataFrame.Internal.Expression (Expr, NamedExpr, UExpr (..))
+import DataFrame.Internal.Expression (Expr, NamedExpr, SomeExpr (..))
 
 {- | A phantom-typed wrapper over the untyped 'DataFrame'.
 
@@ -126,4 +126,4 @@ taggToNamedExprs = reverse . go
   where
     go :: TAgg keys cols aggs -> [NamedExpr]
     go TAggNil = []
-    go (TAggCons name (TExpr expr) rest) = (name, UExpr expr) : go rest
+    go (TAggCons name (TExpr expr) rest) = (name, SomeExpr expr) : go rest

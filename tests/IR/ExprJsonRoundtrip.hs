@@ -19,7 +19,7 @@ import DataFrame.Expression.Operators (ifThenElse, (.>.))
 import qualified DataFrame.Functions as F
 import DataFrame.Internal.Column (Columnable, TypedColumn (..), toVector)
 import qualified DataFrame.Internal.Column as DI
-import DataFrame.Internal.Expression (Expr, UExpr (..))
+import DataFrame.Internal.Expression (Expr, SomeExpr (..))
 import DataFrame.Internal.Interpreter (interpret)
 
 import DataFrame.LinearModel (defaultLinearConfig)
@@ -71,7 +71,7 @@ JSON. Avoids needing an 'Eq' instance on the GADT.
 roundtrips :: (Columnable a) => Expr a -> Bool
 roundtrips e = fromRight False $ do
     v1 <- encodeExpr e
-    SomeExpr _ e' <- decodeExprAny v1
+    SomeExpr e' <- decodeExprAny v1
     v2 <- encodeExpr e'
     Right (v1 == v2)
 
@@ -161,8 +161,8 @@ ioTests =
     , TestCase $ withSystemTempDirectory "expr-ser" $ \dir -> do
         let fp = dir ++ "/pipeline.json"
             nes =
-                [ ("z", UExpr (F.col @Double "x" * F.lit 2))
-                , ("w", UExpr (F.col @Double "x" + F.lit 10))
+                [ ("z", SomeExpr (F.col @Double "x" * F.lit 2))
+                , ("w", SomeExpr (F.col @Double "x" + F.lit 10))
                 ]
         sr <- savePipelineToFile fp nes
         assertEqual "save pipeline ok" (Right ()) sr
@@ -175,7 +175,7 @@ ioTests =
                 assertBool "w = x+10" (close (interpD df' (F.col @Double "w")) [11, 12, 13])
     , TestCase $ withSystemTempDirectory "expr-ser" $ \dir -> do
         let fp = dir ++ "/transform.json"
-            t = Transform [("z", UExpr (F.col @Double "x" * F.lit 2))]
+            t = Transform [("z", SomeExpr (F.col @Double "x" * F.lit 2))]
         sr <- saveTransformToFile fp t
         assertEqual "save transform ok" (Right ()) sr
         loaded <- loadTransformFromFile fp

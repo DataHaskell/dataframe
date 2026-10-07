@@ -27,7 +27,7 @@ import DataFrame.Expression.Operators ((.*.), (.+.), (.-.))
 import DataFrame.Featurize.Internal (Features (..), extractFeatures)
 import qualified DataFrame.Functions as F
 import DataFrame.Internal.DataFrame (DataFrame)
-import DataFrame.Internal.Expression (Expr (..), UExpr (..))
+import DataFrame.Internal.Expression (Expr (..), SomeExpr (..))
 import DataFrame.LinearAlgebra (gram)
 import DataFrame.LinearAlgebra.Eigen (jacobiEigenSym)
 import DataFrame.Model
@@ -118,7 +118,7 @@ pcaExprs m =
 
 -- | The PCA projection as a composable fitted 'Transform'.
 pcaTransform :: PCAModel -> Transform
-pcaTransform m = Transform [(n, UExpr e) | (n, e) <- pcaExprs m]
+pcaTransform m = Transform [(n, SomeExpr e) | (n, e) <- pcaExprs m]
 
 resolveK :: NComponents -> Int -> VU.Vector Double -> Int
 resolveK (NComp k) d _ = max 1 (min k d)

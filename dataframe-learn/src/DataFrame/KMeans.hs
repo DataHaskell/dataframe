@@ -29,7 +29,7 @@ import DataFrame.Expression.Operators ((.*.), (.+.), (.-.))
 import DataFrame.Featurize.Internal (Features (..), argMinExpr, extractFeatures)
 import qualified DataFrame.Functions as F
 import DataFrame.Internal.DataFrame (DataFrame)
-import DataFrame.Internal.Expression (Expr (..), UExpr (..))
+import DataFrame.Internal.Expression (Expr (..), SomeExpr (..))
 import DataFrame.LinearAlgebra (Matrix, nearestCenter, sqDist)
 import DataFrame.Model
 import DataFrame.Random (Gen, mkGen, nextDouble, nextIntR, splitGen)
@@ -158,4 +158,4 @@ kmeansDistanceExprs m =
 
 -- | The per-cluster distance features as a composable fitted 'Transform'.
 kmeansTransform :: KMeansModel -> Transform
-kmeansTransform m = Transform [(n, UExpr e) | (n, e) <- kmeansDistanceExprs m]
+kmeansTransform m = Transform [(n, SomeExpr e) | (n, e) <- kmeansDistanceExprs m]

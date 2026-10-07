@@ -33,7 +33,7 @@ import DataFrame.Internal.DataFrame (DataFrame)
 import DataFrame.Internal.Expression (
     Expr (..),
     NamedExpr,
-    UExpr (..),
+    SomeExpr (..),
     substituteColumns,
  )
 import DataFrame.Operations.Core (columnAsDoubleVector)
@@ -46,8 +46,8 @@ instance Semigroup Transform where
     Transform s <> Transform t =
         Transform (s ++ map (subst (M.fromList s)) t)
       where
-        subst :: M.Map T.Text UExpr -> NamedExpr -> NamedExpr
-        subst m (nm, UExpr e) = (nm, UExpr (substituteColumns m e))
+        subst :: M.Map T.Text SomeExpr -> NamedExpr -> NamedExpr
+        subst m (nm, SomeExpr e) = (nm, SomeExpr (substituteColumns m e))
 
 instance Monoid Transform where
     mempty = Transform []
@@ -94,7 +94,7 @@ standardScaler names df =
 scalerTransform :: ScalerModel -> Transform
 scalerTransform m =
     Transform
-        [ (n, UExpr ((F.col @Double n .-. F.lit mu) ./. F.lit sigma))
+        [ (n, SomeExpr ((F.col @Double n .-. F.lit mu) ./. F.lit sigma))
         | (n, mu, sigma) <-
             zip3
                 (V.toList (smColumns m))

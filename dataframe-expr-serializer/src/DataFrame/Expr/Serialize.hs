@@ -64,7 +64,7 @@ import DataFrame.IR.ExprJson (
     parseSomeExpr,
  )
 import DataFrame.Internal.Column (Columnable)
-import DataFrame.Internal.Expression (Expr, NamedExpr, UExpr (..))
+import DataFrame.Internal.Expression (Expr, NamedExpr, SomeExpr (..))
 
 -- | Decode a single expression from a strict JSON 'BS.ByteString'.
 decodeExprFromBytes :: BS.ByteString -> Either String SomeExpr
@@ -79,7 +79,7 @@ encodeNamedExprs nes = do
     Right $ object ["version" .= (1 :: Int), "outputs" .= outs]
   where
     encodeOne :: NamedExpr -> Either String Aeson.Value
-    encodeOne (name, UExpr e) = do
+    encodeOne (name, SomeExpr e) = do
         ev <- encodeExpr e
         Right $ object ["name" .= name, "expr" .= ev]
 
@@ -98,8 +98,8 @@ decodeNamedExprs = Aeson.parseEither parsePipeline
     parseOne = Aeson.withObject "PipelineOutput" $ \o -> do
         name <- o .: "name" :: Aeson.Parser T.Text
         rawExpr <- o .: "expr"
-        SomeExpr _ e <- parseSomeExpr rawExpr
-        return (name, UExpr e)
+        SomeExpr e <- parseSomeExpr rawExpr
+        return (name, SomeExpr e)
 
 -- | Encode an expression and write it to a file. No file is written on failure.
 saveExprToFile :: (Columnable a) => FilePath -> Expr a -> IO (Either String ())

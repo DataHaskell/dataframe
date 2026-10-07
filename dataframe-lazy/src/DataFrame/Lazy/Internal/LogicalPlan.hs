@@ -41,11 +41,11 @@ data LogicalPlan
     | -- | Keep rows matching the predicate.
       Filter (E.Expr Bool) LogicalPlan
     | -- | Add or overwrite a column via an expression.
-      Derive T.Text E.UExpr LogicalPlan
+      Derive T.Text E.SomeExpr LogicalPlan
     | -- | Join two sub-plans on the given key columns.
       Join JoinType T.Text T.Text LogicalPlan LogicalPlan
     | -- | Group then aggregate.
-      Aggregate [T.Text] [(T.Text, E.UExpr)] LogicalPlan
+      Aggregate [T.Text] [(T.Text, E.SomeExpr)] LogicalPlan
     | -- | Sort by a list of (column, direction) pairs.
       Sort [(T.Text, SortOrder)] LogicalPlan
     | -- | Retain at most N rows.

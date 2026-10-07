@@ -34,7 +34,7 @@ import DataFrame.Internal.Expression (
     AggStrategy (..),
     BinaryOp (binaryCommutative, binaryName),
     Expr (..),
-    UExpr (..),
+    SomeExpr (..),
  )
 import Type.Reflection (Typeable, typeRep)
 
@@ -54,8 +54,8 @@ data AggPlan
 over a present clean column, else 'Nothing'. Nullable or non-Int/Double columns
 are rejected here so the scatter only sees a clean unboxed vector.
 -}
-planAgg :: GroupedDataFrame -> UExpr -> Maybe AggPlan
-planAgg gdf (UExpr (expr :: Expr a)) = case expr of
+planAgg :: GroupedDataFrame -> SomeExpr -> Maybe AggPlan
+planAgg gdf (SomeExpr (expr :: Expr a)) = case expr of
     Agg (FoldAgg tag _ _) (Col name) -> foldPlan tag name
     Agg (MergeAgg tag _ _ _ _) (Col name) -> mergePlan tag name
     Agg (CollectAgg tag _) (Col name) -> collectPlan tag name
@@ -133,7 +133,7 @@ data Term
 @count@, @sum(x)@, @sum(y)@, @sum(x*x)@, @sum(y*y)@, @sum(x*y)@ over two distinct
 clean unboxed base columns. 'Nothing' on any other set.
 -}
-planMoments :: GroupedDataFrame -> [(T.Text, UExpr)] -> Maybe MomentPlan
+planMoments :: GroupedDataFrame -> [(T.Text, SomeExpr)] -> Maybe MomentPlan
 planMoments gdf aggs
     | length aggs /= 6 = Nothing
     | otherwise = do
@@ -174,10 +174,10 @@ data Role
     deriving (Eq, Ord, Show)
 
 -- | Tag a single named aggregation with its moment role, or reject the group.
-classify :: M.Map T.Text UExpr -> (T.Text, UExpr) -> Maybe (T.Text, Role)
-classify exprs (name, UExpr expr) = case expr of
+classify :: M.Map T.Text SomeExpr -> (T.Text, SomeExpr) -> Maybe (T.Text, Role)
+classify exprs (name, SomeExpr expr) = case expr of
     Agg (MergeAgg "count" _ _ _ _) _ -> Just (name, RoleN)
-    Agg (FoldAgg "sum" _ _) arg -> (\t -> (name, termRole t)) <$> resolveTerm exprs (UExpr arg)
+    Agg (FoldAgg "sum" _ _) arg -> (\t -> (name, termRole t)) <$> resolveTerm exprs (SomeExpr arg)
     _ -> Nothing
 
 termRole :: Term -> Role
@@ -188,19 +188,19 @@ termRole (Prod a b) = RoleProd a b
 unary coercions, follows a derived column to its stored expression, and
 recognises a commutative product of two linear terms.
 -}
-resolveTerm :: M.Map T.Text UExpr -> UExpr -> Maybe Term
+resolveTerm :: M.Map T.Text SomeExpr -> SomeExpr -> Maybe Term
 resolveTerm exprs = go (8 :: Int)
   where
     go 0 _ = Nothing
-    go fuel (UExpr e) = case e of
+    go fuel (SomeExpr e) = case e of
         Col nm -> case M.lookup nm exprs of
             Just ue -> go (fuel - 1) ue
             Nothing -> Just (Lin nm)
-        Unary _ inner -> go (fuel - 1) (UExpr inner)
+        Unary _ inner -> go (fuel - 1) (SomeExpr inner)
         Binary op l r
             | binaryName op == "mult" && binaryCommutative op -> do
-                Lin a <- go (fuel - 1) (UExpr l)
-                Lin b <- go (fuel - 1) (UExpr r)
+                Lin a <- go (fuel - 1) (SomeExpr l)
+                Lin b <- go (fuel - 1) (SomeExpr r)
                 Just (sortProd a b)
         _ -> Nothing
 

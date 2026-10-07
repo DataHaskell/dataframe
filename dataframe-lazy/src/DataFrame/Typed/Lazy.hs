@@ -258,7 +258,7 @@ run ::
 run (TLD ldf) = unsafeFreeze <$> L.runDataFrame ldf
 
 -- | Convert TAgg to untyped named expressions for the lazy groupBy.
-aggToNamedExprs :: TAgg keys cols aggs -> [(T.Text, E.UExpr)]
+aggToNamedExprs :: TAgg keys cols aggs -> [(T.Text, E.SomeExpr)]
 aggToNamedExprs TAggNil = []
 aggToNamedExprs (TAggCons name (TExpr expr) rest) =
-    (name, E.UExpr expr) : aggToNamedExprs rest
+    (name, E.SomeExpr expr) : aggToNamedExprs rest

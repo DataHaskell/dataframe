@@ -194,7 +194,7 @@ executePlan reader (Filter predJson node) = do
 executePlan reader (Derive name exprJson node) = do
     df <- executePlan reader node
     case decodeExprAny exprJson of
-        Right (SomeExpr _trep expr) -> return $ derive name expr df
+        Right (SomeExpr expr) -> return $ derive name expr df
         Left err -> ioError $ userError $ "DataFrame.IR.Derive: " <> err
 executePlan reader (Exclude cols node) =
     exclude cols <$> executePlan reader node

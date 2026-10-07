@@ -363,7 +363,7 @@ The API favors **consistency, small primitives, and composition**. Names mirror 
 * Rows (DSL-based)  
   * `filter :: Expr Bool -> DataFrame -> DataFrame`  
   * `sortBy :: [SortOrder] -> DataFrame -> DataFrame`  
-  * `groupBy :: [UExpr] -> DataFrame -> DataFrame`  
+  * `groupBy :: [SomeExpr] -> DataFrame -> DataFrame`  
 * Whole-frame  
   * `transpose :: DataFrame -> DataFrame`  
   * `join :: JoinType -> [Text] -> DataFrame -> DataFrame -> DataFrame`  
@@ -372,7 +372,7 @@ The API favors **consistency, small primitives, and composition**. Names mirror 
 *Notes:*
 
 * `Order = Asc | Desc`  
-* `UExpr` is an untyped expression and is defined as `data UExpr = Expr a`.  
+* `SomeExpr` is an untyped expression and is defined as `data UExpr = Expr a`.  
 * Joins assume explicit key columns; types must be compatible (coercions explicit).
 
 #### **Integration with Tools and Workflows**

@@ -298,6 +298,7 @@ test-suite tests
                    Learn.SklearnParity,
                    Learn.Synthesis,
                    Learn.MetricsTests,
+                   Operations.ExprParse,
                    Learn.Metamorphic,
                    IO.CSV,
                    IO.CsvGolden,

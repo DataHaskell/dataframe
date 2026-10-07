@@ -185,7 +185,7 @@ scanParquet schema path =
 derive ::
     (C.Columnable a) => T.Text -> E.Expr a -> LazyDataFrame -> LazyDataFrame
 derive name expr ldf =
-    ldf{plan = Derive name (E.UExpr expr) (plan ldf)}
+    ldf{plan = Derive name (E.SomeExpr expr) (plan ldf)}
 
 -- | Retain only the listed columns.
 select :: [T.Text] -> LazyDataFrame -> LazyDataFrame
@@ -221,7 +221,7 @@ groupBy ::
     -- | Group-by key columns
     [T.Text] ->
     -- | @[(outputName, aggregateExpr)]@
-    [(T.Text, E.UExpr)] ->
+    [(T.Text, E.SomeExpr)] ->
     LazyDataFrame ->
     LazyDataFrame
 groupBy keys aggs ldf = ldf{plan = Aggregate keys aggs (plan ldf)}

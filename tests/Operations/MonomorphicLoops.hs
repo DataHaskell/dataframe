@@ -40,7 +40,7 @@ sizes :: [Int]
 sizes = [37, 200003]
 
 doublesOf :: Int -> [Double]
-doublesOf n = take n (cycle [0 / 0, -1 / 0, -1.5, -0.0, 0.0, 5.0e-324, 0.5, 2.5, 1 / 0])
+doublesOf n = take n (cycle [0 / 0, -(1 / 0), -1.5, -0.0, 0.0, 5.0e-324, 0.5, 2.5, 1 / 0])
 
 intsOf :: Int -> [Int]
 intsOf n = take n (cycle [minBound, -3, 0, 1, 7, maxBound])
@@ -186,7 +186,7 @@ nullSemantics =
     , eq
         "imap skips null rows"
         [Just 4, Nothing, Just 4]
-        (outM @Int (imapColumn @Int (\i x -> x + i) ints3))
+        (outM @Int (imapColumn @Int (flip (+)) ints3))
     , eq
         "zip: null if either side is"
         [Just 5, Nothing, Nothing]
@@ -305,7 +305,7 @@ tests =
             (\i x -> fromIntegral (x + i))
             (\a b -> fromIntegral a - fromIntegral b)
         , pairCases @Int @Int "II" intsOf (* 3) (+) (-)
-        , pairCases @Int @Bool "IB" intsOf odd (\i x -> x > i) (==)
+        , pairCases @Int @Bool "IB" intsOf odd (flip (>)) (==)
         , pairCases @Bool @Double
             "BD"
             boolsOf

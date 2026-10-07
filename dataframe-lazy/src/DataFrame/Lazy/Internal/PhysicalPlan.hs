@@ -23,10 +23,10 @@ data PhysicalPlan
     = PhysicalScan DataSource ScanConfig
     | PhysicalProject [T.Text] PhysicalPlan
     | PhysicalFilter (E.Expr Bool) PhysicalPlan
-    | PhysicalDerive T.Text E.UExpr PhysicalPlan
+    | PhysicalDerive T.Text E.SomeExpr PhysicalPlan
     | PhysicalHashJoin JoinType T.Text T.Text PhysicalPlan PhysicalPlan
     | PhysicalSortMergeJoin JoinType T.Text T.Text PhysicalPlan PhysicalPlan
-    | PhysicalHashAggregate [T.Text] [(T.Text, E.UExpr)] PhysicalPlan
+    | PhysicalHashAggregate [T.Text] [(T.Text, E.SomeExpr)] PhysicalPlan
     | PhysicalSort [(T.Text, SortOrder)] PhysicalPlan
     | PhysicalLimit Int PhysicalPlan
     | -- | Materialize child to a binary file on disk (used for build sides).

@@ -75,6 +75,7 @@ library
                         -- Expressions: syntax, operators, simplification.
                         DataFrame.Internal.Expression
                         DataFrame.Internal.Expression.Operators
+                        DataFrame.Internal.Expression.Reflect
                         DataFrame.Internal.Expression.Operators.Nullable
                         DataFrame.Internal.Expression.Simplify
                         DataFrame.Internal.Grouping

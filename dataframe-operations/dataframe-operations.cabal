@@ -31,6 +31,7 @@ library
     import:             warnings
     exposed-modules:
                         DataFrame.Internal.Statistics
+                        DataFrame.Expression.Parse
                         DataFrame.Functions
                         DataFrame.Monad
                         DataFrame.Operations.Aggregation.Run

@@ -1,4 +1,5 @@
 {-# LANGUAGE AllowAmbiguousTypes #-}
+{-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE ExplicitNamespaces #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
@@ -57,7 +58,7 @@ import qualified Data.Text as T
 import Data.Type.Equality (TestEquality (testEquality), type (:~:) (Refl))
 import qualified Data.Vector.Unboxed as VU
 import Data.Word (Word16, Word32, Word64, Word8)
-import Type.Reflection (TypeRep, Typeable, typeRep)
+import Type.Reflection (Typeable, typeRep)
 
 import DataFrame.Expression.Operators (
     ifThenElse,
@@ -76,15 +77,20 @@ import DataFrame.Internal.Expression (
     AggStrategy (..),
     BinaryOp (binaryName),
     Expr (..),
+    SomeExpr (..),
     UnaryOp (unaryName),
  )
 import qualified DataFrame.Internal.Expression as F
-
-{- | Existential wrapper around a typed expression decoded from JSON.
-TODO: mchavinda - Maybe consolidate with UExpr from the main package.
--}
-data SomeExpr where
-    SomeExpr :: (Columnable a) => TypeRep a -> Expr a -> SomeExpr
+import DataFrame.Internal.Expression.Reflect (
+    Dict (..),
+    RealUnbox,
+    floatingDict,
+    fracDict,
+    numDict,
+    ordDict,
+    realDict,
+    realUnboxDict,
+ )
 
 -- | Map a Haskell type to its wire-format tag string.
 typeTagOf :: forall a. (Typeable a) => Maybe T.Text
@@ -133,126 +139,61 @@ withTypeTag t k = case t of
     "string" -> k (Proxy @String)
     _ -> fail $ "DataFrame.IR.ExprJson: unknown type tag: " <> T.unpack t
 
--- | Subset that supports 'Ord' (for comparison ops).
+-- | A tag whose type has the class evidence @dict@ provides; @what@ names it in errors.
+withClassTag ::
+    forall c r.
+    (forall a. (Columnable a) => Maybe (Dict (c a))) ->
+    String ->
+    T.Text ->
+    (forall a. (Columnable a, c a) => Proxy a -> Aeson.Parser r) ->
+    Aeson.Parser r
+withClassTag dict what t k = withTypeTag t $ \(p :: Proxy a) -> case dict @a of
+    Just Dict -> k p
+    Nothing ->
+        fail $
+            "DataFrame.IR.ExprJson: type does not support " <> what <> ": " <> T.unpack t
+
+-- | Types that support 'Ord' (comparison ops).
 withOrdTypeTag ::
     T.Text ->
     (forall a. (Columnable a, Ord a) => Proxy a -> Aeson.Parser r) ->
     Aeson.Parser r
-withOrdTypeTag t k = case t of
-    "int" -> k (Proxy @Int)
-    "int8" -> k (Proxy @Int8)
-    "int16" -> k (Proxy @Int16)
-    "int32" -> k (Proxy @Int32)
-    "int64" -> k (Proxy @Int64)
-    "word" -> k (Proxy @Word)
-    "word8" -> k (Proxy @Word8)
-    "word16" -> k (Proxy @Word16)
-    "word32" -> k (Proxy @Word32)
-    "word64" -> k (Proxy @Word64)
-    "integer" -> k (Proxy @Integer)
-    "double" -> k (Proxy @Double)
-    "float" -> k (Proxy @Float)
-    "bool" -> k (Proxy @Bool)
-    "char" -> k (Proxy @Char)
-    "text" -> k (Proxy @T.Text)
-    "string" -> k (Proxy @String)
-    _ ->
-        fail $ "DataFrame.IR.ExprJson: type does not support ordering: " <> T.unpack t
+withOrdTypeTag = withClassTag @Ord ordDict "ordering"
 
--- | Subset that supports 'Num' (arithmetic).
+-- | Types that support 'Num' (arithmetic).
 withNumTypeTag ::
     T.Text ->
     (forall a. (Columnable a, Num a) => Proxy a -> Aeson.Parser r) ->
     Aeson.Parser r
-withNumTypeTag t k = case t of
-    "int" -> k (Proxy @Int)
-    "int8" -> k (Proxy @Int8)
-    "int16" -> k (Proxy @Int16)
-    "int32" -> k (Proxy @Int32)
-    "int64" -> k (Proxy @Int64)
-    "word" -> k (Proxy @Word)
-    "word8" -> k (Proxy @Word8)
-    "word16" -> k (Proxy @Word16)
-    "word32" -> k (Proxy @Word32)
-    "word64" -> k (Proxy @Word64)
-    "integer" -> k (Proxy @Integer)
-    "double" -> k (Proxy @Double)
-    "float" -> k (Proxy @Float)
-    _ ->
-        fail $ "DataFrame.IR.ExprJson: type does not support arithmetic: " <> T.unpack t
+withNumTypeTag = withClassTag @Num numDict "arithmetic"
 
--- | Subset that supports 'Fractional' (division).
+-- | Types that support 'Fractional' (division).
 withFracTypeTag ::
     T.Text ->
     (forall a. (Columnable a, Fractional a) => Proxy a -> Aeson.Parser r) ->
     Aeson.Parser r
-withFracTypeTag t k = case t of
-    "double" -> k (Proxy @Double)
-    "float" -> k (Proxy @Float)
-    _ ->
-        fail $
-            "DataFrame.IR.ExprJson: type does not support fractional division: "
-                <> T.unpack t
+withFracTypeTag = withClassTag @Fractional fracDict "fractional division"
 
--- | Subset that supports 'Real' (used by toDouble source types).
+-- | Types that support 'Real' (toDouble sources).
 withRealTypeTag ::
     T.Text ->
     (forall a. (Columnable a, Real a) => Proxy a -> Aeson.Parser r) ->
     Aeson.Parser r
-withRealTypeTag t k = case t of
-    "int" -> k (Proxy @Int)
-    "int8" -> k (Proxy @Int8)
-    "int16" -> k (Proxy @Int16)
-    "int32" -> k (Proxy @Int32)
-    "int64" -> k (Proxy @Int64)
-    "word" -> k (Proxy @Word)
-    "word8" -> k (Proxy @Word8)
-    "word16" -> k (Proxy @Word16)
-    "word32" -> k (Proxy @Word32)
-    "word64" -> k (Proxy @Word64)
-    "integer" -> k (Proxy @Integer)
-    "double" -> k (Proxy @Double)
-    "float" -> k (Proxy @Float)
-    _ ->
-        fail $
-            "DataFrame.IR.ExprJson: type does not support Real (toDouble source): "
-                <> T.unpack t
+withRealTypeTag = withClassTag @Real realDict "Real (toDouble source)"
 
--- | Subset that supports 'Floating'.
+-- | Types that support 'Floating'.
 withFloatingTypeTag ::
     T.Text ->
     (forall a. (Columnable a, Floating a) => Proxy a -> Aeson.Parser r) ->
     Aeson.Parser r
-withFloatingTypeTag t k = case t of
-    "double" -> k (Proxy @Double)
-    "float" -> k (Proxy @Float)
-    _ ->
-        fail $ "DataFrame.IR.ExprJson: type does not support Floating: " <> T.unpack t
+withFloatingTypeTag = withClassTag @Floating floatingDict "Floating"
 
-{- | Subset that supports both 'Real' and 'VU.Unbox' (used by variance/median).
-'Integer' is deliberately omitted — it is 'Real' but not 'Unbox'.
--}
+-- | Types that support 'Real' and 'VU.Unbox' (variance, median).
 withRealUnboxTypeTag ::
     T.Text ->
     (forall a. (Columnable a, Real a, VU.Unbox a) => Proxy a -> Aeson.Parser r) ->
     Aeson.Parser r
-withRealUnboxTypeTag t k = case t of
-    "int" -> k (Proxy @Int)
-    "int8" -> k (Proxy @Int8)
-    "int16" -> k (Proxy @Int16)
-    "int32" -> k (Proxy @Int32)
-    "int64" -> k (Proxy @Int64)
-    "word" -> k (Proxy @Word)
-    "word8" -> k (Proxy @Word8)
-    "word16" -> k (Proxy @Word16)
-    "word32" -> k (Proxy @Word32)
-    "word64" -> k (Proxy @Word64)
-    "double" -> k (Proxy @Double)
-    "float" -> k (Proxy @Float)
-    _ ->
-        fail $
-            "DataFrame.IR.ExprJson: type does not support Real+Unbox (variance/median): "
-                <> T.unpack t
+withRealUnboxTypeTag = withClassTag @RealUnbox realUnboxDict "Real+Unbox (variance/median)"
 
 {- | Encode an 'Expr' to a JSON value. Returns 'Left' on unsupported
 constructors (Agg, Over, CastWith, CastExprWith) or unsupported operator
@@ -474,15 +415,15 @@ decodeExprAny = Aeson.parseEither parseSomeExpr
 decodeExprAt ::
     forall a. (Columnable a) => Aeson.Value -> Either String (Expr a)
 decodeExprAt v = do
-    SomeExpr trep expr <- decodeExprAny v
-    case testEquality trep (typeRep @a) of
+    SomeExpr (expr :: Expr b) <- decodeExprAny v
+    case testEquality (typeRep @b) (typeRep @a) of
         Just Refl -> Right expr
         Nothing ->
             Left $
                 "DataFrame.IR.ExprJson.decodeExprAt: expected "
                     <> show (typeRep @a)
                     <> " but got "
-                    <> show trep
+                    <> show (typeRep @b)
 
 -- | The Aeson.Parser entry point — useful when composing with bigger parsers.
 parseSomeExpr :: Aeson.Value -> Aeson.Parser SomeExpr
@@ -493,12 +434,12 @@ parseSomeExpr = Aeson.withObject "Expr" $ \o -> do
         "col" -> do
             name <- o .: "name" :: Aeson.Parser T.Text
             withTypeTag outType $ \(_ :: Proxy a) ->
-                return $ SomeExpr (typeRep @a) (Col @a name)
+                return $ SomeExpr (Col @a name)
         "lit" -> do
             rawVal <- o .: "value"
             withTypeTag outType $ \(_ :: Proxy a) -> do
                 litVal <- decodeLit @a rawVal
-                return $ SomeExpr (typeRep @a) (Lit @a litVal)
+                return $ SomeExpr (Lit @a litVal)
         "if" -> do
             rawCond <- o .: "cond"
             rawThen <- o .: "then"
@@ -507,7 +448,7 @@ parseSomeExpr = Aeson.withObject "Expr" $ \o -> do
             withTypeTag outType $ \(_ :: Proxy a) -> do
                 thenE <- parseExprAt @a rawThen
                 elseE <- parseExprAt @a rawElse
-                return $ SomeExpr (typeRep @a) (ifThenElse cond thenE elseE)
+                return $ SomeExpr (ifThenElse cond thenE elseE)
         "unary" -> do
             op <- o .: "op" :: Aeson.Parser T.Text
             argType <- o .: "arg_type" :: Aeson.Parser T.Text
@@ -529,20 +470,20 @@ parseSomeExpr = Aeson.withObject "Expr" $ \o -> do
             rawArg <- o .: "arg"
             withTypeTag outType $ \(_ :: Proxy a) -> do
                 inner <- parseExprAt @a rawArg
-                return $ SomeExpr (typeRep @a) (F.over names inner)
+                return $ SomeExpr (F.over names inner)
         other -> fail $ "DataFrame.IR.ExprJson: unknown node kind: " <> T.unpack other
 
 parseExprAt :: forall a. (Columnable a) => Aeson.Value -> Aeson.Parser (Expr a)
 parseExprAt v = do
-    SomeExpr trep expr <- parseSomeExpr v
-    case testEquality trep (typeRep @a) of
+    SomeExpr (expr :: Expr b) <- parseSomeExpr v
+    case testEquality (typeRep @b) (typeRep @a) of
         Just Refl -> return expr
         Nothing ->
             fail $
                 "DataFrame.IR.ExprJson: expected "
                     <> show (typeRep @a)
                     <> " but got "
-                    <> show trep
+                    <> show (typeRep @b)
 
 decodeLit :: forall a. (Columnable a) => Aeson.Value -> Aeson.Parser a
 decodeLit v
@@ -606,24 +547,24 @@ parseUnary op outType argType rawArg = case op of
         requireTag outType "bool"
         requireTag argType "bool"
         arg <- parseExprAt @Bool rawArg
-        return $ SomeExpr (typeRep @Bool) (F.not arg)
+        return $ SomeExpr (F.not arg)
     "negate" -> withNumTypeTag outType $ \(_ :: Proxy a) -> do
         requireSame outType argType
         arg <- parseExprAt @a rawArg
-        return $ SomeExpr (typeRep @a) (negate arg)
+        return $ SomeExpr (negate arg)
     "abs" -> withNumTypeTag outType $ \(_ :: Proxy a) -> do
         requireSame outType argType
         arg <- parseExprAt @a rawArg
-        return $ SomeExpr (typeRep @a) (abs arg)
+        return $ SomeExpr (abs arg)
     "signum" -> withNumTypeTag outType $ \(_ :: Proxy a) -> do
         requireSame outType argType
         arg <- parseExprAt @a rawArg
-        return $ SomeExpr (typeRep @a) (signum arg)
+        return $ SomeExpr (signum arg)
     "toDouble" -> do
         requireTag outType "double"
         withRealTypeTag argType $ \(_ :: Proxy a) -> do
             arg <- parseExprAt @a rawArg
-            return $ SomeExpr (typeRep @Double) (F.toDouble arg)
+            return $ SomeExpr (F.toDouble arg)
     "exp" -> floatingUnary outType argType rawArg exp
     "sqrt" -> floatingUnary outType argType rawArg sqrt
     "log" -> floatingUnary outType argType rawArg log
@@ -649,7 +590,7 @@ floatingUnary ::
 floatingUnary outType argType rawArg f = withFloatingTypeTag outType $ \(_ :: Proxy a) -> do
     requireSame outType argType
     arg <- parseExprAt @a rawArg
-    return $ SomeExpr (typeRep @a) (f arg)
+    return $ SomeExpr (f arg)
 
 parseBinary ::
     T.Text ->
@@ -664,72 +605,72 @@ parseBinary op outType argType rawLhs rawRhs = case op of
         withTypeTag argType $ \(_ :: Proxy a) -> do
             l <- parseExprAt @a rawLhs
             r <- parseExprAt @a rawRhs
-            return $ SomeExpr (typeRep @Bool) (l .==. r)
+            return $ SomeExpr (l .==. r)
     "neq" -> do
         requireTag outType "bool"
         withTypeTag argType $ \(_ :: Proxy a) -> do
             l <- parseExprAt @a rawLhs
             r <- parseExprAt @a rawRhs
-            return $ SomeExpr (typeRep @Bool) (l ./=. r)
+            return $ SomeExpr (l ./=. r)
     "lt" -> do
         requireTag outType "bool"
         withOrdTypeTag argType $ \(_ :: Proxy a) -> do
             l <- parseExprAt @a rawLhs
             r <- parseExprAt @a rawRhs
-            return $ SomeExpr (typeRep @Bool) (l .<. r)
+            return $ SomeExpr (l .<. r)
     "leq" -> do
         requireTag outType "bool"
         withOrdTypeTag argType $ \(_ :: Proxy a) -> do
             l <- parseExprAt @a rawLhs
             r <- parseExprAt @a rawRhs
-            return $ SomeExpr (typeRep @Bool) (l .<=. r)
+            return $ SomeExpr (l .<=. r)
     "gt" -> do
         requireTag outType "bool"
         withOrdTypeTag argType $ \(_ :: Proxy a) -> do
             l <- parseExprAt @a rawLhs
             r <- parseExprAt @a rawRhs
-            return $ SomeExpr (typeRep @Bool) (l .>. r)
+            return $ SomeExpr (l .>. r)
     "geq" -> do
         requireTag outType "bool"
         withOrdTypeTag argType $ \(_ :: Proxy a) -> do
             l <- parseExprAt @a rawLhs
             r <- parseExprAt @a rawRhs
-            return $ SomeExpr (typeRep @Bool) (l .>=. r)
+            return $ SomeExpr (l .>=. r)
     "and" -> do
         requireTag outType "bool"
         l <- parseExprAt @Bool rawLhs
         r <- parseExprAt @Bool rawRhs
-        return $ SomeExpr (typeRep @Bool) (l .&&. r)
+        return $ SomeExpr (l .&&. r)
     "or" -> do
         requireTag outType "bool"
         l <- parseExprAt @Bool rawLhs
         r <- parseExprAt @Bool rawRhs
-        return $ SomeExpr (typeRep @Bool) (l .||. r)
+        return $ SomeExpr (l .||. r)
     "add" -> withNumTypeTag outType $ \(_ :: Proxy a) -> do
         requireSame outType argType
         l <- parseExprAt @a rawLhs
         r <- parseExprAt @a rawRhs
-        return $ SomeExpr (typeRep @a) (l + r)
+        return $ SomeExpr (l + r)
     "sub" -> withNumTypeTag outType $ \(_ :: Proxy a) -> do
         requireSame outType argType
         l <- parseExprAt @a rawLhs
         r <- parseExprAt @a rawRhs
-        return $ SomeExpr (typeRep @a) (l - r)
+        return $ SomeExpr (l - r)
     "mult" -> withNumTypeTag outType $ \(_ :: Proxy a) -> do
         requireSame outType argType
         l <- parseExprAt @a rawLhs
         r <- parseExprAt @a rawRhs
-        return $ SomeExpr (typeRep @a) (l * r)
+        return $ SomeExpr (l * r)
     "divide" -> withFracTypeTag outType $ \(_ :: Proxy a) -> do
         requireSame outType argType
         l <- parseExprAt @a rawLhs
         r <- parseExprAt @a rawRhs
-        return $ SomeExpr (typeRep @a) (l / r)
+        return $ SomeExpr (l / r)
     "exponentiate" -> withFloatingTypeTag outType $ \(_ :: Proxy a) -> do
         requireSame outType argType
         l <- parseExprAt @a rawLhs
         r <- parseExprAt @a rawRhs
-        return $ SomeExpr (typeRep @a) (l ** r)
+        return $ SomeExpr (l ** r)
     "nulladd" -> parseBinary "add" outType argType rawLhs rawRhs
     "nullsub" -> parseBinary "sub" outType argType rawLhs rawRhs
     "nullmul" -> parseBinary "mult" outType argType rawLhs rawRhs
@@ -748,11 +689,11 @@ parseAgg aggName outType argType rawArg = case aggName of
         requireTag outType "int"
         withTypeTag argType $ \(_ :: Proxy a) -> do
             arg <- parseExprAt @a rawArg
-            return $ SomeExpr (typeRep @Int) (F.count arg)
+            return $ SomeExpr (F.count arg)
     "sum" -> withNumTypeTag outType $ \(_ :: Proxy a) -> do
         requireSame outType argType
         arg <- parseExprAt @a rawArg
-        return $ SomeExpr (typeRep @a) (F.sum arg)
+        return $ SomeExpr (F.sum arg)
     "minimum" -> ordAgg F.minimum
     "maximum" -> ordAgg F.maximum
     "mode" -> ordAgg F.mode
@@ -760,7 +701,7 @@ parseAgg aggName outType argType rawArg = case aggName of
         requireTag outType "double"
         withRealTypeTag argType $ \(_ :: Proxy a) -> do
             arg <- parseExprAt @a rawArg
-            return $ SomeExpr (typeRep @Double) (F.mean arg)
+            return $ SomeExpr (F.mean arg)
     "variance" -> realUnboxAgg F.variance
     "median" -> realUnboxAgg F.median
     "collect" ->
@@ -775,7 +716,7 @@ parseAgg aggName outType argType rawArg = case aggName of
     ordAgg op = withOrdTypeTag outType $ \(_ :: Proxy a) -> do
         requireSame outType argType
         arg <- parseExprAt @a rawArg
-        return $ SomeExpr (typeRep @a) (op arg)
+        return $ SomeExpr (op arg)
     realUnboxAgg ::
         (forall a. (Columnable a, Real a, VU.Unbox a) => Expr a -> Expr Double) ->
         Aeson.Parser SomeExpr
@@ -783,4 +724,4 @@ parseAgg aggName outType argType rawArg = case aggName of
         requireTag outType "double"
         withRealUnboxTypeTag argType $ \(_ :: Proxy a) -> do
             arg <- parseExprAt @a rawArg
-            return $ SomeExpr (typeRep @Double) (op arg)
+            return $ SomeExpr (op arg)

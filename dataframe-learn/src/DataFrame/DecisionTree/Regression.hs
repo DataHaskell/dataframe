@@ -1,5 +1,6 @@
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TupleSections #-}
 
 {- | Variance-reduction (weighted-SSE) regression trees over the CART feature
 machinery; leaves predict the weighted mean of their rows. 'fitRegTree' lets
@@ -63,7 +64,7 @@ fitRegTree cfg feats y mw = RegFit (toTree root) inSample
   where
     root = buildNode 0 (VU.enumFromN 0 n) featSorted
     inSample = VU.update (VU.replicate n 0) (VU.concat (leafRows root))
-    leafRows (FLeaf v idxs) = [VU.map (\i -> (i, v)) idxs]
+    leafRows (FLeaf v idxs) = [VU.map (,v) idxs]
     leafRows (FBranch _ l r) = leafRows l ++ leafRows r
     n = VU.length y
     weightAt i = maybe 1 (VU.! i) mw

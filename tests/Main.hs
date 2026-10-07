@@ -35,14 +35,15 @@ import qualified Operations.Aggregations
 import qualified Operations.Apply
 import qualified Operations.Core
 import qualified Operations.Derive
+import qualified Operations.ExprParse
 import qualified Operations.Filter
 import qualified Operations.GroupBy
 import qualified Operations.Inference
 import qualified Operations.InsertColumn
 import qualified Operations.InterpreterKernels
-import qualified Operations.MonomorphicLoops
 import qualified Operations.Join
 import qualified Operations.Merge
+import qualified Operations.MonomorphicLoops
 import qualified Operations.Nullable
 import qualified Operations.NullableHashing
 import qualified Operations.ParallelGroupBy
@@ -86,6 +87,7 @@ tests =
             ++ Learn.SklearnParity.tests
             ++ Learn.Synthesis.tests
             ++ Learn.MetricsTests.tests
+            ++ Operations.ExprParse.tests
             ++ Learn.Metamorphic.tests
             ++ Learn.Segmented.tests
             ++ Operations.Aggregations.tests

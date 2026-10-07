@@ -950,19 +950,19 @@ showDerivedExpressions df =
         names = columnNames df
         toNamedExpr name = case M.lookup name exprs of
             Just uexpr -> (name, uexpr)
-            Nothing -> (name, identityUExpr name)
+            Nothing -> (name, identityExpr name)
      in map toNamedExpr names
   where
-    identityUExpr name = case getColumn name df of
-        Just (BoxedColumn (Just _) (_ :: V.Vector a)) -> UExpr (Col @(Maybe a) name)
-        Just (BoxedColumn Nothing (_ :: V.Vector a)) -> UExpr (Col @a name)
-        Just (UnboxedColumn (Just _) (_ :: VU.Vector a)) -> UExpr (Col @(Maybe a) name)
-        Just (UnboxedColumn Nothing (_ :: VU.Vector a)) -> UExpr (Col @a name)
-        Just (PackedText (Just _) _) -> UExpr (Col @(Maybe T.Text) name)
-        Just (PackedText Nothing _) -> UExpr (Col @T.Text name)
+    identityExpr name = case getColumn name df of
+        Just (BoxedColumn (Just _) (_ :: V.Vector a)) -> SomeExpr (Col @(Maybe a) name)
+        Just (BoxedColumn Nothing (_ :: V.Vector a)) -> SomeExpr (Col @a name)
+        Just (UnboxedColumn (Just _) (_ :: VU.Vector a)) -> SomeExpr (Col @(Maybe a) name)
+        Just (UnboxedColumn Nothing (_ :: VU.Vector a)) -> SomeExpr (Col @a name)
+        Just (PackedText (Just _) _) -> SomeExpr (Col @(Maybe T.Text) name)
+        Just (PackedText Nothing _) -> SomeExpr (Col @T.Text name)
         Just c@(MergedColumn _ _) -> case mergedHead c of
-            BoxedColumn (Just _) (_ :: V.Vector a) -> UExpr (Col @(Maybe a) name)
-            BoxedColumn Nothing (_ :: V.Vector a) -> UExpr (Col @a name)
+            BoxedColumn (Just _) (_ :: V.Vector a) -> SomeExpr (Col @(Maybe a) name)
+            BoxedColumn Nothing (_ :: V.Vector a) -> SomeExpr (Col @a name)
             _ ->
                 error $
                     "showDerivedExpressions: merged column did not materialize boxed: "

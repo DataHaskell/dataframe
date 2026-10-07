@@ -108,25 +108,25 @@ data Expr a where
     Agg :: (Columnable a, Columnable b) => AggStrategy a b -> Expr b -> Expr a
     Over :: (Columnable a) => [T.Text] -> Expr a -> Expr a
 
-data UExpr where
-    UExpr :: (Columnable a) => Expr a -> UExpr
+data SomeExpr where
+    SomeExpr :: (Columnable a) => Expr a -> SomeExpr
 
-instance Show UExpr where
-    show :: UExpr -> String
-    show (UExpr expr) = show expr
+instance Show SomeExpr where
+    show :: SomeExpr -> String
+    show (SomeExpr expr) = show expr
 
-toUExpr :: (Columnable a) => Expr a -> UExpr
-toUExpr = UExpr
+toSomeExpr :: (Columnable a) => Expr a -> SomeExpr
+toSomeExpr = SomeExpr
 
-fromUExpr :: forall a. (Columnable a) => UExpr -> Maybe (Expr a)
-fromUExpr (UExpr (expr :: Expr b)) = do
+fromSomeExpr :: forall a. (Columnable a) => SomeExpr -> Maybe (Expr a)
+fromSomeExpr (SomeExpr (expr :: Expr b)) = do
     Refl <- testEquality (typeRep @a) (typeRep @b)
     pure expr
 
-type NamedExpr = (T.Text, UExpr)
+type NamedExpr = (T.Text, SomeExpr)
 
 toNamedExpr :: (Columnable a) => T.Text -> Expr a -> NamedExpr
-toNamedExpr exprName expr = (exprName, UExpr expr)
+toNamedExpr exprName expr = (exprName, SomeExpr expr)
 
 instance (Num a, Columnable a) => Num (Expr a) where
     (+) :: Expr a -> Expr a -> Expr a
@@ -382,13 +382,13 @@ single parallel pass, so a swap like @{a ↦ col b, b ↦ col a}@ works. Raw-tex
 references (in 'CastWith', 'Over' keys) are left untouched; type mismatch raises.
 -}
 substituteColumns ::
-    forall a. (Columnable a) => M.Map T.Text UExpr -> Expr a -> Expr a
+    forall a. (Columnable a) => M.Map T.Text SomeExpr -> Expr a -> Expr a
 substituteColumns subs = go
   where
     go :: forall b. (Columnable b) => Expr b -> Expr b
     go e@(Col name) = case M.lookup name subs of
         Nothing -> e
-        Just (UExpr (repl :: Expr c)) -> case testEquality (typeRep @b) (typeRep @c) of
+        Just (SomeExpr (repl :: Expr c)) -> case testEquality (typeRep @b) (typeRep @c) of
             Just Refl -> repl
             Nothing ->
                 error $

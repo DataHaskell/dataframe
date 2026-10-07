@@ -68,7 +68,7 @@ arithmetic :: (Columnable e, Num e) => [BinOp e e]
 arithmetic = [BinOp (+) (+), BinOp (-) (-), BinOp (*) (*)]
 
 doubles :: [Double]
-doubles = [0 / 0, -1 / 0, -1.5, -0.0, 0.0, 5.0e-324, 0.5, 1, 2.5, 1.0e308, 1 / 0]
+doubles = [0 / 0, -(1 / 0), -1.5, -0.0, 0.0, 5.0e-324, 0.5, 1, 2.5, 1.0e308, 1 / 0]
 
 ints :: [Int]
 ints = [minBound, -3, -1, 0, 1, 7, maxBound]

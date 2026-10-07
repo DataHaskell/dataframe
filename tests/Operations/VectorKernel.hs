@@ -36,7 +36,7 @@ import DataFrame.Internal.DataFrame (GroupedDataFrame, insertColumn)
 import DataFrame.Internal.Expression (
     AggStrategy (..),
     Expr (..),
-    UExpr (..),
+    SomeExpr (..),
  )
 import DataFrame.Internal.Interpreter (
     AggregationResult (..),
@@ -48,11 +48,11 @@ import Assertions ()
 import Test.HUnit
 
 -- | Aggregate forcing every expression through the interpreter (no kernel).
-interpretOnly :: [(T.Text, UExpr)] -> GroupedDataFrame -> D.DataFrame
+interpretOnly :: [(T.Text, SomeExpr)] -> GroupedDataFrame -> D.DataFrame
 interpretOnly aggs gdf =
     let base = DA.aggregate [] gdf
-        f :: (T.Text, UExpr) -> D.DataFrame -> D.DataFrame
-        f (name, UExpr (expr :: Expr a)) d =
+        f :: (T.Text, SomeExpr) -> D.DataFrame -> D.DataFrame
+        f (name, SomeExpr (expr :: Expr a)) d =
             let value :: DI.Column
                 value = case interpretAggregation @a gdf expr of
                     Left e -> throw e
@@ -91,7 +91,7 @@ vj = F.col @Int "vj"
 vd :: Expr Double
 vd = F.col @Double "vd"
 
-aggSets :: [[(T.Text, UExpr)]]
+aggSets :: [[(T.Text, SomeExpr)]]
 aggSets =
     [ ["s" F..= F.sum vi]
     , ["s" F..= F.sum vd, "c" F..= F.count vi]
@@ -115,7 +115,7 @@ aggSets =
 keySets :: [[T.Text]]
 keySets = [["ki"], ["kt"], ["ki", "kt"], ["kh"]]
 
-parityCase :: Int -> [T.Text] -> [(T.Text, UExpr)] -> Test
+parityCase :: Int -> [T.Text] -> [(T.Text, SomeExpr)] -> Test
 parityCase n keys aggs =
     TestCase $
         let df = grid n

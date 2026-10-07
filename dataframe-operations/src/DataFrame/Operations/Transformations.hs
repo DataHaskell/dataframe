@@ -101,7 +101,7 @@ derive name expr df = case interpret @a df (normalize expr) of
     Left e -> throw e
     Right (TColumn value) ->
         (insertColumn name value df)
-            { derivingExpressions = M.insert name (UExpr expr) (derivingExpressions df)
+            { derivingExpressions = M.insert name (SomeExpr expr) (derivingExpressions df)
             }
 
 {- | O(k) Apply a function to an expression in a dataframe and
@@ -119,14 +119,14 @@ deriveWithExpr name expr df = case interpret @a df (normalize expr) of
     Right (TColumn value) ->
         ( Col name
         , (insertColumn name value df)
-            { derivingExpressions = M.insert name (UExpr expr) (derivingExpressions df)
+            { derivingExpressions = M.insert name (SomeExpr expr) (derivingExpressions df)
             }
         )
 
 deriveMany :: [NamedExpr] -> DataFrame -> DataFrame
 deriveMany exprs df =
     let
-        f (name, UExpr (expr :: Expr a)) d =
+        f (name, SomeExpr (expr :: Expr a)) d =
             case interpret @a df expr of
                 Left e -> throw e
                 Right (TColumn value) -> insertColumn name value d

@@ -21,7 +21,7 @@ import DataFrame.Internal.Expression (
     ),
     Expr (Binary, Col, If, Lit, Unary),
     NamedExpr,
-    UExpr (UExpr),
+    SomeExpr (SomeExpr),
     UnUDF (MkUnaryOp),
  )
 import DataFrame.Internal.Expression.Operators.Nullable (
@@ -50,7 +50,7 @@ infixr 0 .=
 (|>) = (&)
 
 as :: (Columnable a) => Expr a -> T.Text -> NamedExpr
-as expr colName = (colName, UExpr expr)
+as expr colName = (colName, SomeExpr expr)
 
 name :: (Show a) => Expr a -> T.Text
 name (Col n) = n

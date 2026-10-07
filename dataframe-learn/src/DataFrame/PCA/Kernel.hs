@@ -25,7 +25,7 @@ import DataFrame.Expression.Operators ((.*.), (.+.), (.-.))
 import DataFrame.Featurize.Internal (Features (..), extractFeatures)
 import qualified DataFrame.Functions as F
 import DataFrame.Internal.DataFrame (DataFrame)
-import DataFrame.Internal.Expression (Expr (..), UExpr (..))
+import DataFrame.Internal.Expression (Expr (..), SomeExpr (..))
 import DataFrame.LinearAlgebra (sqDist)
 import DataFrame.LinearAlgebra.Eigen (jacobiEigenSym)
 import DataFrame.Model
@@ -136,4 +136,4 @@ kernelPCAExprs m =
 
 -- | The kernel-PCA projection as a composable fitted 'Transform'.
 kernelPcaTransform :: KernelPCAModel -> Transform
-kernelPcaTransform m = Transform [(n, UExpr e) | (n, e) <- kernelPCAExprs m]
+kernelPcaTransform m = Transform [(n, SomeExpr e) | (n, e) <- kernelPCAExprs m]

@@ -44,7 +44,7 @@ module DataFrame.Monad (
 import Control.Monad (void)
 import DataFrame.Internal.Column (Columnable)
 import DataFrame.Internal.DataFrame (DataFrame)
-import DataFrame.Internal.Expression (Expr (..), UExpr (..), prettyPrint)
+import DataFrame.Internal.Expression (Expr (..), SomeExpr (..), prettyPrint)
 import DataFrame.Internal.Expression.Operators.Nullable (BaseType)
 import qualified DataFrame.Operations.Core as D
 import DataFrame.Operations.Permutation (SortOrder)
@@ -153,7 +153,7 @@ evalFrameM df m = fst (runFrameM df m)
 execFrameM :: DataFrame -> FrameM a -> DataFrame
 execFrameM df m = snd (runFrameM df m)
 
-newtype Pipeline a = Pipeline {unPipeline :: Int -> (Int, [(T.Text, UExpr)], a)}
+newtype Pipeline a = Pipeline {unPipeline :: Int -> (Int, [(T.Text, SomeExpr)], a)}
 
 instance Functor Pipeline where
     fmap f (Pipeline g) = Pipeline $ \n -> let (n', w, a) = g n in (n', w, f a)
@@ -173,18 +173,18 @@ instance Monad Pipeline where
 
 -- | Derive a column under an explicit name, returning a reference to it.
 letAs :: (Columnable a) => T.Text -> Expr a -> Pipeline (Expr a)
-letAs nm e = Pipeline (,[(nm, UExpr e)],Col nm)
+letAs nm e = Pipeline (,[(nm, SomeExpr e)],Col nm)
 
 -- | Derive a column under a fresh generated name.
 letExpr :: (Columnable a) => Expr a -> Pipeline (Expr a)
 letExpr e = Pipeline $ \n ->
-    let nm = T.pack ('_' : 'v' : show n) in (n + 1, [(nm, UExpr e)], Col nm)
+    let nm = T.pack ('_' : 'v' : show n) in (n + 1, [(nm, SomeExpr e)], Col nm)
 
 instance Show (Pipeline (Expr a)) where
     show p =
         let (_, steps, res) = unPipeline p 0
          in concatMap
-                (\(nm, UExpr e) -> T.unpack nm ++ " = " ++ prettyPrint e ++ "\n")
+                (\(nm, SomeExpr e) -> T.unpack nm ++ " = " ++ prettyPrint e ++ "\n")
                 steps
                 ++ "return "
                 ++ prettyPrint res
@@ -197,7 +197,7 @@ pipelineSteps p = let (_, w, _) = unPipeline p 0 in length w
 toFrameM :: Pipeline (Expr a) -> FrameM (Expr a)
 toFrameM p =
     let (_, steps, res) = unPipeline p 0
-     in mapM_ (\(nm, UExpr e) -> void (deriveM nm e)) steps >> pure res
+     in mapM_ (\(nm, SomeExpr e) -> void (deriveM nm e)) steps >> pure res
 
 {- | Run a pipeline over a frame: derive its columns and return the result
 expression (a reference to the final column) and the resulting frame.

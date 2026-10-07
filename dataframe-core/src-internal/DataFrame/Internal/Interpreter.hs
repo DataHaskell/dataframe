@@ -3,6 +3,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RankNTypes #-}
@@ -782,10 +783,10 @@ mergeArms cs yes no l r = case (K.mergeBranches @a, branch l, branch r, sUnbox @
     branch :: Arm a -> Maybe (K.Branch a)
     branch arm = case arm of
         ForEveryRow v ->
-            (\o -> case o of K.Literal x -> K.Constant x; K.Column xs -> K.EveryRow xs)
+            (\case K.Literal x -> K.Constant x; K.Column xs -> K.EveryRow xs)
                 <$> operand v
         ForChosenRows v ->
-            (\o -> case o of K.Literal x -> K.Constant x; K.Column xs -> K.ChosenRows xs)
+            (\case K.Literal x -> K.Constant x; K.Column xs -> K.ChosenRows xs)
                 <$> operand v
     -- The generic path wants each branch as one value per row choosing it.
     chosenColumn :: VU.Vector Int -> Arm a -> Column

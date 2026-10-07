@@ -87,7 +87,7 @@ data DataFrame = DataFrame
     -- ^ Keeps the column names in the order they were inserted in.
     , dataframeDimensions :: (Int, Int)
     -- ^ (rows, columns)
-    , derivingExpressions :: M.Map T.Text UExpr
+    , derivingExpressions :: M.Map T.Text SomeExpr
     }
 
 {- | Force evaluation of all columns in a DataFrame. Replacement for the removed

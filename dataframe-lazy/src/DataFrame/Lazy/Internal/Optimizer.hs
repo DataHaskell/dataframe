@@ -98,22 +98,22 @@ referencedCols (Project cols _) = Just (S.fromList cols)
 referencedCols (Filter p child) =
     fmap (S.union (S.fromList (E.getColumns p))) (referencedCols child)
 referencedCols (Derive _ expr child) =
-    fmap (S.union (S.fromList (uExprCols expr))) (referencedCols child)
+    fmap (S.union (S.fromList (someExprCols expr))) (referencedCols child)
 referencedCols (Join _ l r left right) =
     let keySet = S.fromList [l, r]
         lRef = fmap (S.union keySet) (referencedCols left)
         rRef = fmap (S.union keySet) (referencedCols right)
      in S.union <$> lRef <*> rRef
 referencedCols (Aggregate keys aggs child) =
-    let aggCols = S.fromList (keys <> concatMap (uExprCols . snd) aggs)
+    let aggCols = S.fromList (keys <> concatMap (someExprCols . snd) aggs)
      in fmap (S.union aggCols) (referencedCols child)
 referencedCols (Sort cols child) =
     fmap (S.union (S.fromList (fmap fst cols))) (referencedCols child)
 referencedCols (Limit _ child) = referencedCols child
 referencedCols (SourceDF _) = Nothing
 
-uExprCols :: E.UExpr -> [T.Text]
-uExprCols (E.UExpr expr) = E.getColumns expr
+someExprCols :: E.SomeExpr -> [T.Text]
+someExprCols (E.SomeExpr expr) = E.getColumns expr
 
 -- | Drop @Derive@ nodes whose output column is never consumed downstream.
 eliminateDeadColumns :: LogicalPlan -> LogicalPlan
@@ -128,7 +128,7 @@ eliminateDeadColumns plan = go (referencedCols plan) plan
                     Derive
                         name
                         expr
-                        (go (Just (S.union cols (S.fromList (uExprCols expr)))) child)
+                        (go (Just (S.union cols (S.fromList (someExprCols expr)))) child)
     go needed (Filter p child) =
         Filter p (go (fmap (S.union (S.fromList (E.getColumns p))) needed) child)
     go _needed (Project cols child) =
@@ -137,7 +137,7 @@ eliminateDeadColumns plan = go (referencedCols plan) plan
         let keySet = fmap (S.union (S.fromList [l, r])) needed
          in Join jt l r (go keySet left) (go keySet right)
     go needed (Aggregate keys aggs child) =
-        let aggCols = fmap (S.union (S.fromList (keys <> concatMap (uExprCols . snd) aggs))) needed
+        let aggCols = fmap (S.union (S.fromList (keys <> concatMap (someExprCols . snd) aggs))) needed
          in Aggregate keys aggs (go aggCols child)
     go needed (Sort cols child) =
         Sort cols (go (fmap (S.union (S.fromList (fmap fst cols))) needed) child)

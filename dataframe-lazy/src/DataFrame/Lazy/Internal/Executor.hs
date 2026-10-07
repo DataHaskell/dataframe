@@ -348,20 +348,20 @@ mergePartials keys mergeAggs = go
                 Agg.aggregate mergeAggs (Agg.groupBy keys (acc <> p))
         go merged ps
 
-isStreamableAgg :: E.UExpr -> Bool
-isStreamableAgg (E.UExpr (E.Agg (E.CollectAgg _ _) _)) = False
-isStreamableAgg (E.UExpr (E.Agg (E.FoldAgg _ Nothing (_ :: a -> b -> a)) _)) =
+isStreamableAgg :: E.SomeExpr -> Bool
+isStreamableAgg (E.SomeExpr (E.Agg (E.CollectAgg _ _) _)) = False
+isStreamableAgg (E.SomeExpr (E.Agg (E.FoldAgg _ Nothing (_ :: a -> b -> a)) _)) =
     case testEquality (typeRep @a) (typeRep @b) of
         Just Refl -> True
         Nothing -> False
-isStreamableAgg (E.UExpr (E.Agg (E.FoldAgg _ (Just _) (_ :: a -> b -> a)) _)) =
+isStreamableAgg (E.SomeExpr (E.Agg (E.FoldAgg _ (Just _) (_ :: a -> b -> a)) _)) =
     case testEquality (typeRep @a) (typeRep @Int) of
         Just Refl -> True
         Nothing ->
             case testEquality (typeRep @a) (typeRep @b) of
                 Just Refl -> True
                 Nothing -> False
-isStreamableAgg (E.UExpr (E.Agg (E.MergeAgg{}) _)) = True
+isStreamableAgg (E.SomeExpr (E.Agg (E.MergeAgg{}) _)) = True
 isStreamableAgg _ = False
 
 {- | Build the (partial, merge, finalizer) plan for a list of streamable
@@ -369,9 +369,9 @@ aggregates: @partialAggs@ run per batch, @mergeAggs@ combine two partial
 results, and @finalizer@ post-processes (for 'MergeAgg' acc≠output types).
 -}
 buildAggPlan ::
-    [(T.Text, E.UExpr)] ->
-    ( [(T.Text, E.UExpr)]
-    , [(T.Text, E.UExpr)]
+    [(T.Text, E.SomeExpr)] ->
+    ( [(T.Text, E.SomeExpr)]
+    , [(T.Text, E.SomeExpr)]
     , D.DataFrame -> D.DataFrame
     )
 buildAggPlan aggs = foldl combine ([], [], id) (map processAgg aggs)
@@ -379,14 +379,14 @@ buildAggPlan aggs = foldl combine ([], [], id) (map processAgg aggs)
     combine (p1, m1, f1) (p2, m2, f2) = (p1 ++ p2, m1 ++ m2, f1 . f2)
 
     processAgg ::
-        (T.Text, E.UExpr) ->
-        ([(T.Text, E.UExpr)], [(T.Text, E.UExpr)], D.DataFrame -> D.DataFrame)
+        (T.Text, E.SomeExpr) ->
+        ([(T.Text, E.SomeExpr)], [(T.Text, E.SomeExpr)], D.DataFrame -> D.DataFrame)
     processAgg (name, ue) = case ue of
-        E.UExpr (E.Agg (E.FoldAgg n Nothing (f :: a -> b -> a)) (_ :: E.Expr b)) ->
+        E.SomeExpr (E.Agg (E.FoldAgg n Nothing (f :: a -> b -> a)) (_ :: E.Expr b)) ->
             case testEquality (typeRep @a) (typeRep @b) of
                 Just Refl ->
                     ( [(name, ue)]
-                    , [(name, E.UExpr (E.Agg (E.FoldAgg n Nothing f) (E.Col @a name)))]
+                    , [(name, E.SomeExpr (E.Agg (E.FoldAgg n Nothing f) (E.Col @a name)))]
                     , id
                     )
                 Nothing ->
@@ -396,21 +396,21 @@ buildAggPlan aggs = foldl combine ([], [], id) (map processAgg aggs)
                             ,
                                 [
                                     ( name
-                                    , E.UExpr
+                                    , E.SomeExpr
                                         (E.Agg (E.FoldAgg "sum" Nothing ((+) :: Int -> Int -> Int)) (E.Col @Int name))
                                     )
                                 ]
                             , id
                             )
                         Nothing -> ([(name, ue)], [(name, ue)], id)
-        E.UExpr (E.Agg (E.FoldAgg n (Just _) (f :: a -> b -> a)) (_ :: E.Expr b)) ->
+        E.SomeExpr (E.Agg (E.FoldAgg n (Just _) (f :: a -> b -> a)) (_ :: E.Expr b)) ->
             case testEquality (typeRep @a) (typeRep @Int) of
                 Just Refl ->
                     ( [(name, ue)]
                     ,
                         [
                             ( name
-                            , E.UExpr
+                            , E.SomeExpr
                                 (E.Agg (E.FoldAgg "sum" Nothing ((+) :: Int -> Int -> Int)) (E.Col @Int name))
                             )
                         ]
@@ -420,11 +420,11 @@ buildAggPlan aggs = foldl combine ([], [], id) (map processAgg aggs)
                     case testEquality (typeRep @a) (typeRep @b) of
                         Just Refl ->
                             ( [(name, ue)]
-                            , [(name, E.UExpr (E.Agg (E.FoldAgg n Nothing f) (E.Col @a name)))]
+                            , [(name, E.SomeExpr (E.Agg (E.FoldAgg n Nothing f) (E.Col @a name)))]
                             , id
                             )
                         Nothing -> ([(name, ue)], [(name, ue)], id)
-        E.UExpr
+        E.SomeExpr
             ( E.Agg
                     ( E.MergeAgg
                             n
@@ -436,13 +436,13 @@ buildAggPlan aggs = foldl combine ([], [], id) (map processAgg aggs)
                     (inner :: E.Expr b)
                 ) ->
                 let partialExpr =
-                        E.UExpr
+                        E.SomeExpr
                             ( E.Agg
                                 (E.FoldAgg ("partial_" <> n) (Just seed) step)
                                 inner
                             )
                     mergeExpr =
-                        E.UExpr
+                        E.SomeExpr
                             ( E.Agg
                                 (E.FoldAgg ("merge_" <> n) Nothing merge)
                                 (E.Col @acc name)

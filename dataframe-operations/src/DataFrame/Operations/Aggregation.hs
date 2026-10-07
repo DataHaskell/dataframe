@@ -229,7 +229,7 @@ aggregate aggs gdf =
 
 -- | The fall-back path: evaluate one named aggregation via the interpreter.
 interpretNamed :: GroupedDataFrame -> NamedExpr -> Column
-interpretNamed gdf (_, UExpr (expr :: Expr a)) =
+interpretNamed gdf (_, SomeExpr (expr :: Expr a)) =
     case interpretAggregation @a gdf expr of
         Left e -> throw e
         Right (UnAggregated _) -> throw $ UnaggregatedException (T.pack $ show expr)

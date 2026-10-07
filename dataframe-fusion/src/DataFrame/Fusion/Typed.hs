@@ -186,7 +186,7 @@ aggregate build (GD keys plan) = do
                 return (DF ph)
   where
     encodeAggEntry :: IE.NamedExpr -> IO Aeson.Value
-    encodeAggEntry (name, IE.UExpr e) = case encodeExprToBytes e of
+    encodeAggEntry (name, IE.SomeExpr e) = case encodeExprToBytes e of
         Right bs -> case Aeson.decode (BL.fromStrict bs) :: Maybe Aeson.Value of
             Just v ->
                 return $
