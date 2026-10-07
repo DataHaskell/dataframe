@@ -31,15 +31,17 @@ import qualified Data.Vector as V
 import qualified Data.Vector.Unboxed as VU
 import DataFrame.Errors (DataFrameException (..))
 
-import DataFrame.DecisionTree.Cart (cartFeatures)
+import DataFrame.DecisionTree.Cart (cartFeaturesByColumn)
 import DataFrame.DecisionTree.Fit (treeToExpr)
 import DataFrame.DecisionTree.Histogram (
     TreeLimits (..),
     binFeatures,
-    fitBinnedTree,
+    fitBinnedTreeOn,
  )
 import DataFrame.DecisionTree.Types (Tree)
 import DataFrame.Expression.Operators ((.*.), (.+.), (.>.))
+import Data.Maybe (fromMaybe)
+import System.Random (StdGen, mkStdGen, randoms)
 import DataFrame.Featurize.Internal (targetDoubles)
 import qualified DataFrame.Functions as F
 import DataFrame.Internal.DataFrame (DataFrame)
@@ -60,8 +62,21 @@ data GBConfig = GBConfig
     distinct values split exactly as on the raw values.
     -}
     , gbSeed :: !Int
+    , gbL2 :: !Double
+    -- ^ L2 penalty on leaf values (XGBoost's @lambda@).
+    , gbMinChildWeight :: !Double
+    -- ^ Smallest Hessian sum a leaf may have (XGBoost's @min_child_weight@).
+    , gbFeatureGroups :: ![[T.Text]]
+    -- ^ Tree @m@ splits only on columns of group @m mod (number of groups)@.
+    -- Empty: every tree may use every column.
+    , gbBaseScore :: !(Maybe (Expr Double))
+    -- ^ Boost from these per-row scores instead of a constant; the prediction adds them back.
+    , gbSubsample :: !Double
+    -- ^ Fraction of rows each tree is fitted on (1 = all); drawn per tree from 'gbSeed'.
+    , gbColsample :: !Double
+    -- ^ Fraction of the allowed features each tree may split on (1 = all); drawn per tree from 'gbSeed'.
     }
-    deriving (Eq, Show)
+    deriving (Show)
 
 defaultGBConfig :: GBConfig
 defaultGBConfig =
@@ -72,6 +87,12 @@ defaultGBConfig =
         , gbMaxDepth = 3
         , gbMaxBins = 1024
         , gbSeed = 0
+        , gbL2 = 0
+        , gbMinChildWeight = 0
+        , gbFeatureGroups = []
+        , gbBaseScore = Nothing
+        , gbSubsample = 1
+        , gbColsample = 1
         }
 
 {- | A fitted gradient-boosting model. 'gbInit' is the constant initial score
@@ -85,6 +106,7 @@ data GBModel = GBModel
     , gbModelLoss :: !GBLoss
     , gbTrainScore :: !(VU.Vector Double)
     , gbFeatureUsage :: !(M.Map T.Text Int)
+    , gbBase :: !(Maybe (Expr Double))
     }
     deriving (Show)
 
@@ -106,8 +128,23 @@ fitGBM cfg target@(Col name) df =
         (gbLoss cfg)
         (VU.fromList (reverse scores))
         usage
+        (gbBaseScore cfg)
   where
-    binned = binFeatures (gbMaxBins cfg) (V.fromList (cartFeatures name df))
+    byColumn = cartFeaturesByColumn name df
+    binned = binFeatures (gbMaxBins cfg) (V.fromList (map snd byColumn))
+    allFeatures = VU.enumFromN 0 (length byColumn)
+    groupFeatures =
+        [ VU.fromList [j | (j, (c, _)) <- zip [0 ..] byColumn, c `elem` g]
+        | g <- gbFeatureGroups cfg
+        ]
+    featuresFor m =
+        let allowed = case groupFeatures of
+                [] -> allFeatures
+                gs -> gs !! (m `mod` length gs)
+         in if gbColsample cfg >= 1 then allowed else keepFraction (gbColsample cfg) (mkStdGen (7919 * gbSeed cfg + 2 * m + 1)) allowed
+    rowMask m
+        | gbSubsample cfg >= 1 = Nothing
+        | otherwise = Just (VU.fromList (take n (map (\u -> if u < gbSubsample cfg then 1 else 0) (randoms (mkStdGen (7919 * gbSeed cfg + 2 * m)) :: [Double]))))
     y = targetDoubles target df
     n = VU.length y
     lr = gbLearningRate cfg
@@ -117,21 +154,28 @@ fitGBM cfg target@(Col name) df =
             , tlMinSamplesSplit = 2
             , tlMinLeafSize = 1
             , tlMinImpurityDecrease = 0.0
+            , tlL2 = gbL2 cfg
+            , tlMinChildWeight = gbMinChildWeight cfg
             }
-    f0 = case gbLoss cfg of
-        SquaredError -> VU.sum y / fromIntegral (max 1 n)
-        LogisticDeviance ->
+    baseScores = fmap (`targetDoubles` df) (gbBaseScore cfg)
+    f0 = case (baseScores, gbLoss cfg) of
+        (Just _, _) -> 0
+        (Nothing, SquaredError) -> VU.sum y / fromIntegral (max 1 n)
+        (Nothing, LogisticDeviance) ->
             let p = clamp01 (VU.sum y / fromIntegral (max 1 n))
              in log (p / (1 - p))
-    (trees, scores, usage) = boost 0 (VU.replicate n f0) [] [] M.empty
+    (trees, scores, usage) = boost 0 (fromMaybe (VU.replicate n f0) baseScores) [] [] M.empty
     boost !m fScores ts ss usageAcc
         | m >= gbNEstimators cfg = (ts, ss, usageAcc)
         | otherwise =
-            let (target', weights) = newtonStep (gbLoss cfg) y fScores
-                (tree, pred) = fitBinnedTree limits binned target' weights
+            let (target', weights0) = newtonStep (gbLoss cfg) y fScores
+                weights = case rowMask m of
+                    Nothing -> weights0
+                    Just mask -> Just (VU.zipWith (*) mask (fromMaybe (VU.replicate n 1) weights0))
+                (tree, pred) = fitBinnedTreeOn (featuresFor m) limits binned target' weights
                 fScores' = VU.zipWith (\f p -> f + lr * p) fScores pred
-                score = lossValue (gbLoss cfg) y fScores'
-                usage' = foldr (\c -> M.insertWith (+) c 1) usageAcc (treeColumns tree)
+                !score = lossValue (gbLoss cfg) y fScores'
+                !usage' = foldr (\c -> M.insertWith (+) c 1) usageAcc (treeColumns tree)
              in boost (m + 1) fScores' (tree : ts) (score : ss) usage'
 fitGBM _ expr _ =
     throw (NonColumnReferenceException ("fitGBM: " <> T.pack (show expr)))
@@ -195,8 +239,9 @@ gbExprAtStage k m
 
 stageExpr :: Int -> GBModel -> Expr Double
 stageExpr k m =
-    foldr ((.+.) . scaled) (F.lit (gbInit m)) (take k (V.toList (gbTrees m)))
+    foldr ((.+.) . scaled) start (take k (V.toList (gbTrees m)))
   where
+    start = maybe (F.lit (gbInit m)) (\b -> b .+. F.lit (gbInit m)) (gbBase m)
     scaled t = F.lit (gbRate m) .*. treeToExpr t
 
 -- | Probability expression for classification: @sigmoid(score)@.
@@ -206,3 +251,11 @@ gbProbaExpr m = F.lit 1 / (F.lit 1 + exp (negate (gbExpr m)))
 -- | Decision expression for classification: positive class when score > 0.
 gbDecisionExpr :: GBModel -> Expr Bool
 gbDecisionExpr m = gbExpr m .>. F.lit 0
+
+-- | A uniformly chosen subset of the given size fraction (at least one element), in order.
+keepFraction :: Double -> StdGen -> VU.Vector Int -> VU.Vector Int
+keepFraction frac g xs =
+    let k = max 1 (round (frac * fromIntegral (VU.length xs)))
+        keyed = zip (take (VU.length xs) (randoms g :: [Double])) (VU.toList xs)
+        chosen = map snd (take k (M.toAscList (M.fromList keyed)))
+     in VU.fromList (M.keys (M.fromList [(x, ()) | x <- chosen]))

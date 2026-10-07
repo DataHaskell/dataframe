@@ -41,6 +41,7 @@ import DataFrame.DecisionTree.Predict (
     partitionIndices,
     predictWithTree,
  )
+import DataFrame.DecisionTree.Linear (fitLinearCandidate)
 import DataFrame.DecisionTree.Tao (taoIteration, taoOptimize)
 import DataFrame.DecisionTree.Types (CarePoint (..), Direction (..))
 import DataFrame.Expression.Operators
@@ -1357,9 +1358,30 @@ threshSemanticPreservation = TestCase $ do
 -- Test list
 ------------------------------------------------------------------------
 
+-- Regression: on Int features the hyperplane used to be rebuilt over `Col c :: Expr Double`,
+-- which cannot evaluate, so every oblique candidate was silently dropped.
+obliqueOnIntColumns :: Test
+obliqueOnIntColumns = TestCase $ do
+    let as = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 2, 4, 6, 8, 1, 3, 5, 7, 9] :: [Int]
+        bs = [9, 7, 5, 3, 1, 8, 6, 4, 2, 0, 1, 3, 5, 7, 9, 0, 2, 4, 6, 8] :: [Int]
+        labels = [if a + b > 9 then "yes" else "no" | (a, b) <- zip as bs] :: [T.Text]
+        df = D.fromColumns [("a", DI.fromList as), ("b", DI.fromList bs), ("label", DI.fromList labels)]
+        cps = [CarePoint i (if l == "yes" then GoRight else GoLeft) | (i, l) <- zip [0 ..] labels]
+    case fitLinearCandidate defaultTreeConfig "label" df cps of
+        Nothing -> assertFailure "no oblique candidate on Int features"
+        Just cond -> case interpret @Bool df cond of
+            Left err -> assertFailure ("oblique condition does not evaluate: " ++ show err)
+            Right (DI.TColumn col) -> case DI.toVector @Bool @V.Vector col of
+                Left err -> assertFailure (show err)
+                Right v -> do
+                    let sides = V.toList (v :: V.Vector Bool)
+                    assertBool "both sides non-empty" (or sides && not (and sides))
+                    assertBool "uses both features" (length (getColumns cond) == 2)
+
 tests :: [Test]
 tests =
-    [ TestLabel "carePointsBothWrong" carePointsBothWrong
+    [ TestLabel "obliqueOnIntColumns" obliqueOnIntColumns
+    , TestLabel "carePointsBothWrong" carePointsBothWrong
     , TestLabel "carePointsLeftCorrect" carePointsLeftCorrect
     , TestLabel "carePointsRightCorrect" carePointsRightCorrect
     , TestLabel "carePointsMixed" carePointsMixed
