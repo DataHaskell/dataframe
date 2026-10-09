@@ -42,6 +42,16 @@ tests =
                 (ifThenElse (col @Double "b" .>. lit 2.0) (lit "y") (lit "z"))
             )
         )
+    ,
+      golden
+        "caseWhen chain is a flat ladder"
+        "if a .>. 1.0\n    \"x\"\nelse if b .>. 2.0\n    \"y\"\nelse\n    \"z\""
+        ( prettyPrint
+            ( caseWhen (col @Double "a" .>. lit 1.0) (lit @T.Text "x")
+                $ caseWhen (col @Double "b" .>. lit 2.0) (lit "y")
+                $ orElse (lit "z")
+            )
+        )
     , -- A lower-precedence operand is parenthesized under a higher one.
       golden "precedence: (a + b) * c" "(a + b) * c" (prettyPrint ((a + b) * c))
     , -- No spurious parens when precedence already disambiguates.

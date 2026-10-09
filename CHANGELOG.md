@@ -2,6 +2,7 @@
 
 ## 3.6.1.0
 
+* More ergonomic conditionals with `caseWhen` (basically `ifThen`)/`orElse`
 * splices for deriving schema
 * writeParquet and friends added.
 * skewness computed as g1

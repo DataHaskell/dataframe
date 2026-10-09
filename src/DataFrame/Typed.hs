@@ -68,6 +68,8 @@ module DataFrame.Typed (
     col,
     lit,
     ifThenElse,
+    caseWhen,
+    orElse,
     lift,
     lift2,
     nullLift,

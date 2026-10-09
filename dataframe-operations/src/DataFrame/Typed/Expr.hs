@@ -52,6 +52,8 @@ module DataFrame.Typed.Expr (
 
     -- * Conditional
     ifThenElse,
+    caseWhen,
+    orElse,
 
     -- * Unary / binary lifting
     lift,
@@ -220,6 +222,18 @@ ifThenElse ::
     (Columnable a) =>
     TExpr cols Bool -> TExpr cols a -> TExpr cols a -> TExpr cols a
 ifThenElse (TExpr c) (TExpr t) (TExpr e) = TExpr (If c t e)
+
+{- | One branch of a chained conditional. The fallback goes last so a chain
+reads top-down: @caseWhen c1 a $ caseWhen c2 b $ orElse c@.
+-}
+caseWhen ::
+    (Columnable a) =>
+    TExpr cols Bool -> TExpr cols a -> TExpr cols a -> TExpr cols a
+caseWhen (TExpr c) (TExpr t) (TExpr e) = TExpr (If c t e)
+
+-- | Closes a 'caseWhen' chain with its fallback value.
+orElse :: TExpr cols a -> TExpr cols a
+orElse = id
 
 instance (Num a, Columnable a) => Num (TExpr cols a) where
     (TExpr a) + (TExpr b) = TExpr (a + b)

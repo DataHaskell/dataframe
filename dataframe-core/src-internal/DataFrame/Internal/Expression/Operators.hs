@@ -64,6 +64,13 @@ col = Col
 ifThenElse :: (Columnable a) => Expr Bool -> Expr a -> Expr a -> Expr a
 ifThenElse = If
 
+caseWhen :: (Columnable a) => Expr Bool -> Expr a -> Expr a -> Expr a
+caseWhen = If
+
+-- | Closes a 'caseWhen' chain with its fallback value.
+orElse :: Expr a -> Expr a
+orElse = id
+
 lit :: (Columnable a) => a -> Expr a
 lit = Lit
 

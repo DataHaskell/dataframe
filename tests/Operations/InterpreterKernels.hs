@@ -130,6 +130,20 @@ selectCases vals =
                 (operandRows n r)
     ]
 
+caseWhenCases :: [Test]
+caseWhenCases =
+    [ TestCase (assertBitEq (prettyPrint e ++ " n=" ++ show n) expected (run columns e))
+    | n <- sizes
+    , let x = fst (columnPair n ints)
+          columns = operandColumns x
+          xe = operandExpr x
+          e =
+            F.caseWhen (xe .>. Lit 5) (Lit 1)
+                $ F.caseWhen (xe .>. Lit 0) (Lit 2)
+                $ F.orElse (Lit (3 :: Int))
+          expected = [if v > 5 then 1 else if v > 0 then 2 else 3 | v <- operandRows n x]
+    ]
+
 toDoubleCases :: [Test]
 toDoubleCases =
     [ TestCase
@@ -151,4 +165,5 @@ tests =
         ++ binaryCases ints arithmetic
         ++ selectCases doubles
         ++ selectCases ints
+        ++ caseWhenCases
         ++ toDoubleCases
