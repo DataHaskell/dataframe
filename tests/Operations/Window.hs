@@ -34,7 +34,7 @@ globalFilterTest =
             7
             ( purchases
                 & D.filter
-                    (F.col @Double "amount" .<=. F.median (F.col @Double "amount") * 10)
+                    (F.double "amount" .<=. F.median (F.double "amount") * 10)
                 & D.nRows
             )
         )
@@ -51,11 +51,11 @@ overMedianFilterTest =
     actual =
         purchases
             & D.filter
-                ( F.col @Double "amount"
-                    .<=. F.over ["country"] (F.median (F.col @Double "amount"))
+                ( F.double "amount"
+                    .<=. F.over ["country"] (F.median (F.double "amount"))
                     * 10
                 )
-            & D.sortBy [D.Asc (F.col @T.Text "country"), D.Asc (F.col @Double "amount")]
+            & D.sortBy [D.Asc (F.text "country"), D.Asc (F.double "amount")]
     expected =
         D.fromColumns
             [
@@ -77,17 +77,17 @@ globalVsOverDifferentResults =
     globalResult =
         purchases
             & D.filter
-                (F.col @Double "amount" .<=. F.median (F.col @Double "amount") * 3)
-            & D.sortBy [D.Asc (F.col @T.Text "country"), D.Asc (F.col @Double "amount")]
+                (F.double "amount" .<=. F.median (F.double "amount") * 3)
+            & D.sortBy [D.Asc (F.text "country"), D.Asc (F.double "amount")]
 
     overResult =
         purchases
             & D.filter
-                ( F.col @Double "amount"
-                    .<=. F.over ["country"] (F.median (F.col @Double "amount"))
+                ( F.double "amount"
+                    .<=. F.over ["country"] (F.median (F.double "amount"))
                     * 3
                 )
-            & D.sortBy [D.Asc (F.col @T.Text "country"), D.Asc (F.col @Double "amount")]
+            & D.sortBy [D.Asc (F.text "country"), D.Asc (F.double "amount")]
 
 overMeanDeriveTest :: Test
 overMeanDeriveTest =
@@ -105,8 +105,8 @@ overMeanDeriveTest =
             ]
     result =
         simpleData
-            & D.derive "group_mean" (F.over ["group"] (F.mean (F.col @Double "value")))
-            & D.sortBy [D.Asc (F.col @T.Text "group"), D.Asc (F.col @Double "value")]
+            & D.derive "group_mean" (F.over ["group"] (F.mean (F.double "value")))
+            & D.sortBy [D.Asc (F.text "group"), D.Asc (F.double "value")]
     -- A mean = 15.0, B mean = 60.0
     expectedMeans = [15.0, 15.0, 60.0, 60.0, 60.0] :: [Double]
     actualMeans = case DI.getColumn "group_mean" result of
@@ -129,8 +129,8 @@ overSumTest =
             ]
     result =
         simpleData
-            & D.derive "group_sum" (F.over ["group"] (F.sum (F.col @Int "value")))
-            & D.sortBy [D.Asc (F.col @T.Text "group"), D.Asc (F.col @Int "value")]
+            & D.derive "group_sum" (F.over ["group"] (F.sum (F.int "value")))
+            & D.sortBy [D.Asc (F.text "group"), D.Asc (F.int "value")]
     expectedSums = [30, 30, 300, 300] :: [Int]
     actualSums = case DI.getColumn "group_sum" result of
         Nothing -> error "group_sum column not found"
@@ -152,8 +152,8 @@ overCountTest =
             ]
     result =
         simpleData
-            & D.derive "group_count" (F.over ["group"] (F.count (F.col @Int "value")))
-            & D.sortBy [D.Asc (F.col @T.Text "group"), D.Asc (F.col @Int "value")]
+            & D.derive "group_count" (F.over ["group"] (F.count (F.int "value")))
+            & D.sortBy [D.Asc (F.text "group"), D.Asc (F.int "value")]
     expectedCounts = [3, 3, 3, 2, 2] :: [Int]
     actualCounts = case DI.getColumn "group_count" result of
         Nothing -> error "group_count column not found"
@@ -177,8 +177,8 @@ mixedGlobalAndOverTest =
         simpleData
             & D.derive
                 "deviation"
-                (F.col @Double "value" - F.over ["group"] (F.mean (F.col @Double "value")))
-            & D.sortBy [D.Asc (F.col @T.Text "group"), D.Asc (F.col @Double "value")]
+                (F.double "value" - F.over ["group"] (F.mean (F.double "value")))
+            & D.sortBy [D.Asc (F.text "group"), D.Asc (F.double "value")]
     expectedDeviations = [-5.0, 5.0, -50.0, 50.0] :: [Double]
     actualDeviations = case DI.getColumn "deviation" result of
         Nothing -> error "deviation column not found"
@@ -194,14 +194,14 @@ blogPostExampleGlobal =
             actual
         )
   where
-    amount = F.col @Double "amount"
-    discount = F.col @Double "discount"
+    amount = F.double "amount"
+    discount = F.double "discount"
     actual =
         purchases
             & D.filter (amount .<=. F.median amount * 10)
             & D.groupBy ["country"]
             & D.aggregate [F.sum (amount - discount) `as` "total"]
-            & D.sortBy [D.Asc (F.col @T.Text "country")]
+            & D.sortBy [D.Asc (F.text "country")]
     -- Global median 60 and threshold 600 remove 5000 and 800.
     expected =
         D.fromColumns
@@ -218,14 +218,14 @@ blogPostExampleOver =
             actual
         )
   where
-    amount = F.col @Double "amount"
-    discount = F.col @Double "discount"
+    amount = F.double "amount"
+    discount = F.double "discount"
     actual =
         purchases
             & D.filter (amount .<=. F.over ["country"] (F.median amount) * 10)
             & D.groupBy ["country"]
             & D.aggregate [F.sum (amount - discount) `as` "total"]
-            & D.sortBy [D.Asc (F.col @T.Text "country")]
+            & D.sortBy [D.Asc (F.text "country")]
     expected =
         D.fromColumns
             [ ("country", DI.fromList (["France", "UK", "US"] :: [T.Text]))

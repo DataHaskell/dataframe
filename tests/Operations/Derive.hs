@@ -41,7 +41,7 @@ deriveWAI =
                     "test4"
                     ( F.lift2
                         (++)
-                        (F.lift show (F.col @Int "test1"))
+                        (F.lift show (F.int "test1"))
                         (F.lift (: ([] :: [Char])) (F.col @Char "test3"))
                     )
                     testData

@@ -49,7 +49,7 @@ containsCase needle =
             ("contains " ++ show needle)
             (map (T.isInfixOf needle) rows)
             ( D.columnAsList
-                (F.col @Bool "m")
+                (F.bool "m")
                 (D.derive "m" (F.contains needle (F.col "t")) frame)
             )
 
@@ -59,7 +59,7 @@ lengthCase =
         assertEqual
             "length"
             (map T.length rows)
-            (D.columnAsList (F.col @Int "l") (D.derive "l" (F.length (F.col "t")) frame))
+            (D.columnAsList (F.int "l") (D.derive "l" (F.length (F.col "t")) frame))
 
 tests :: [Test]
 tests =

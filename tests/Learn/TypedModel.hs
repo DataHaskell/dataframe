@@ -65,7 +65,7 @@ sameModel a b =
 testTypedFitParity :: Test
 testTypedFitParity = TestCase $ do
     let onTyped = fit defaultLinearConfig (DT.col @"y") housesTDF
-        onUntyped = fit defaultLinearConfig (F.col @Double "y") regDF
+        onUntyped = fit defaultLinearConfig (F.double "y") regDF
     assertBool
         "fittedModel of typed fit == untyped fit"
         (sameModel (fittedModel onTyped) onUntyped)
@@ -74,10 +74,10 @@ testTypedFitParity = TestCase $ do
 testTypedPredict :: Test
 testTypedPredict = TestCase $ do
     let onTyped = fit defaultLinearConfig (DT.col @"y") housesTDF
-        onUntyped = fit defaultLinearConfig (F.col @Double "y") regDF
+        onUntyped = fit defaultLinearConfig (F.double "y") regDF
         typedExpr = DT.unTExpr (predict onTyped)
         untypedExpr = predict onUntyped -- :: Expr Double
-        truth = interpD regDF (F.col @Double "y")
+        truth = interpD regDF (F.double "y")
     assertBool
         "typed predict matches untyped predict"
         ( and
@@ -92,7 +92,7 @@ testTypedRidge :: Test
 testTypedRidge = TestCase $ do
     let cfg = defaultLinearConfig{lcPenalty = Ridge 0.01}
         onTyped = fit cfg (DT.col @"y") housesTDF
-        onUntyped = fit cfg (F.col @Double "y") regDF
+        onUntyped = fit cfg (F.double "y") regDF
     assertBool
         "ridge: fittedModel of typed fit == untyped fit"
         (sameModel (fittedModel onTyped) onUntyped)

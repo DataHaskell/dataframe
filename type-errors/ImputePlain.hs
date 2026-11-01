@@ -11,4 +11,4 @@ df :: D.DataFrame
 df = D.fromColumns [("plain", D.fromList [10 :: Int, 20, 30])]
 
 badImpute :: D.DataFrame
-badImpute = D.impute (F.col @Int "plain") 0 df
+badImpute = D.impute (F.int "plain") 0 df

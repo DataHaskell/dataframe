@@ -38,7 +38,7 @@ addIntMaybeInt =
             ( DI.getColumn "result" $
                 D.derive
                     "result"
-                    (F.col @Int "x" .+ F.col @(Maybe Int) "y")
+                    (F.int "x" .+ F.maybeInt "y")
                     testData
             )
         )
@@ -53,7 +53,7 @@ addMaybeIntInt =
             ( DI.getColumn "result" $
                 D.derive
                     "result"
-                    (F.col @(Maybe Int) "y" .+ F.col @Int "x")
+                    (F.maybeInt "y" .+ F.int "x")
                     testData
             )
         )
@@ -68,7 +68,7 @@ addIntInt =
             ( DI.getColumn "result" $
                 D.derive
                     "result"
-                    (F.col @Int "x" .+ F.col @Int "x")
+                    (F.int "x" .+ F.int "x")
                     testData
             )
         )
@@ -83,7 +83,7 @@ addMaybeMaybe =
             ( DI.getColumn "result" $
                 D.derive
                     "result"
-                    (F.col @(Maybe Int) "y" .+ F.col @(Maybe Int) "y")
+                    (F.maybeInt "y" .+ F.maybeInt "y")
                     testData
             )
         )
@@ -100,7 +100,7 @@ subIntMaybeInt =
             ( DI.getColumn "result" $
                 D.derive
                     "result"
-                    (F.col @Int "x" .- F.col @(Maybe Int) "y")
+                    (F.int "x" .- F.maybeInt "y")
                     testData
             )
         )
@@ -117,7 +117,7 @@ eqIntMaybeInt =
             ( DI.getColumn "result" $
                 D.derive
                     "result"
-                    (F.col @Int "x" .== F.col @(Maybe Int) "y" :: Expr (Maybe Bool))
+                    (F.int "x" .== F.maybeInt "y" :: Expr (Maybe Bool))
                     testData
             )
         )
@@ -132,7 +132,7 @@ eqIntInt =
             ( DI.getColumn "result" $
                 D.derive
                     "result"
-                    (F.col @Int "x" .== F.lit (1 :: Int) :: Expr Bool)
+                    (F.int "x" .== F.lit (1 :: Int) :: Expr Bool)
                     testData
             )
         )
@@ -149,7 +149,7 @@ nullLiftMaybeInt =
             ( DI.getColumn "result" $
                 D.derive
                     "result"
-                    (F.nullLift negate (F.col @(Maybe Int) "y") :: Expr (Maybe Int))
+                    (F.nullLift negate (F.maybeInt "y") :: Expr (Maybe Int))
                     testData
             )
         )
@@ -164,7 +164,7 @@ nullLiftInt =
             ( DI.getColumn "result" $
                 D.derive
                     "result"
-                    (F.nullLift negate (F.col @Int "x") :: Expr Int)
+                    (F.nullLift negate (F.int "x") :: Expr Int)
                     testData
             )
         )
@@ -179,7 +179,7 @@ nullLift2IntMaybeInt =
             ( DI.getColumn "result" $
                 D.derive
                     "result"
-                    (F.nullLift2 (+) (F.col @Int "x") (F.col @(Maybe Int) "y") :: Expr (Maybe Int))
+                    (F.nullLift2 (+) (F.int "x") (F.maybeInt "y") :: Expr (Maybe Int))
                     testData
             )
         )
@@ -194,7 +194,7 @@ nullLift2MaybeIntInt =
             ( DI.getColumn "result" $
                 D.derive
                     "result"
-                    (F.nullLift2 (+) (F.col @(Maybe Int) "y") (F.col @Int "x") :: Expr (Maybe Int))
+                    (F.nullLift2 (+) (F.maybeInt "y") (F.int "x") :: Expr (Maybe Int))
                     testData
             )
         )
@@ -209,7 +209,7 @@ nullLift2IntInt =
             ( DI.getColumn "result" $
                 D.derive
                     "result"
-                    (F.nullLift2 (+) (F.col @Int "x") (F.col @Int "x") :: Expr Int)
+                    (F.nullLift2 (+) (F.int "x") (F.int "x") :: Expr Int)
                     testData
             )
         )
@@ -235,7 +235,7 @@ addIntDouble =
             "Int .+ Double = Double"
             (Just $ DI.fromList [2.5, 4.5, 6.5 :: Double])
             ( DI.getColumn "result" $
-                D.derive "result" (F.col @Int "x" .+ F.col @Double "d") crossData
+                D.derive "result" (F.int "x" .+ F.double "d") crossData
             )
         )
 
@@ -247,7 +247,7 @@ addDoubleInt =
             "Double .+ Int = Double"
             (Just $ DI.fromList [2.5, 4.5, 6.5 :: Double])
             ( DI.getColumn "result" $
-                D.derive "result" (F.col @Double "d" .+ F.col @Int "x") crossData
+                D.derive "result" (F.double "d" .+ F.int "x") crossData
             )
         )
 
@@ -261,7 +261,7 @@ addMaybeIntDouble =
                 DI.fromVector (V.fromList [Just 11.5, Nothing, Just 33.5 :: Maybe Double])
             )
             ( DI.getColumn "result" $
-                D.derive "result" (F.col @(Maybe Int) "y" .+ F.col @Double "d") crossData
+                D.derive "result" (F.maybeInt "y" .+ F.double "d") crossData
             )
         )
 
@@ -275,7 +275,7 @@ addIntMaybeDouble =
                 DI.fromVector (V.fromList [Just 11.5, Nothing, Just 33.5 :: Maybe Double])
             )
             ( DI.getColumn "result" $
-                D.derive "result" (F.col @Int "x" .+ F.col @(Maybe Double) "md") crossData
+                D.derive "result" (F.int "x" .+ F.maybeDouble "md") crossData
             )
         )
 
@@ -291,7 +291,7 @@ addMaybeIntMaybeDouble =
             ( DI.getColumn "result" $
                 D.derive
                     "result"
-                    (F.col @(Maybe Int) "y" .+ F.col @(Maybe Double) "md")
+                    (F.maybeInt "y" .+ F.maybeDouble "md")
                     crossData
             )
         )
@@ -304,7 +304,7 @@ subIntDouble =
             "Int .- Double = Double"
             (Just $ DI.fromList [-0.5, -0.5, -0.5 :: Double])
             ( DI.getColumn "result" $
-                D.derive "result" (F.col @Int "x" .- F.col @Double "d") crossData
+                D.derive "result" (F.int "x" .- F.double "d") crossData
             )
         )
 
@@ -316,7 +316,7 @@ mulIntDouble =
             "Int .* Double = Double"
             (Just $ DI.fromList [1.5, 5.0, 10.5 :: Double])
             ( DI.getColumn "result" $
-                D.derive "result" (F.col @Int "x" .* F.col @Double "d") crossData
+                D.derive "result" (F.int "x" .* F.double "d") crossData
             )
         )
 
@@ -328,7 +328,7 @@ subDoubleInt =
             "Double .- Int = Double"
             (Just $ DI.fromList [0.5, 0.5, 0.5 :: Double])
             ( DI.getColumn "result" $
-                D.derive "result" (F.col @Double "d" .- F.col @Int "x") crossData
+                D.derive "result" (F.double "d" .- F.int "x") crossData
             )
         )
 
@@ -342,7 +342,7 @@ subMaybeIntDouble =
                 DI.fromVector (V.fromList [Just 8.5, Nothing, Just 26.5 :: Maybe Double])
             )
             ( DI.getColumn "result" $
-                D.derive "result" (F.col @(Maybe Int) "y" .- F.col @Double "d") crossData
+                D.derive "result" (F.maybeInt "y" .- F.double "d") crossData
             )
         )
 
@@ -357,7 +357,7 @@ subIntMaybeDouble =
                     (V.fromList [Just (-9.5), Nothing, Just (-27.5) :: Maybe Double])
             )
             ( DI.getColumn "result" $
-                D.derive "result" (F.col @Int "x" .- F.col @(Maybe Double) "md") crossData
+                D.derive "result" (F.int "x" .- F.maybeDouble "md") crossData
             )
         )
 
@@ -374,7 +374,7 @@ subMaybeIntMaybeDouble =
             ( DI.getColumn "result" $
                 D.derive
                     "result"
-                    (F.col @(Maybe Int) "y" .- F.col @(Maybe Double) "md")
+                    (F.maybeInt "y" .- F.maybeDouble "md")
                     crossData
             )
         )
@@ -387,7 +387,7 @@ mulDoubleInt =
             "Double .* Int = Double"
             (Just $ DI.fromList [1.5, 5.0, 10.5 :: Double])
             ( DI.getColumn "result" $
-                D.derive "result" (F.col @Double "d" .* F.col @Int "x") crossData
+                D.derive "result" (F.double "d" .* F.int "x") crossData
             )
         )
 
@@ -401,7 +401,7 @@ mulMaybeIntDouble =
                 DI.fromVector (V.fromList [Just 15.0, Nothing, Just 105.0 :: Maybe Double])
             )
             ( DI.getColumn "result" $
-                D.derive "result" (F.col @(Maybe Int) "y" .* F.col @Double "d") crossData
+                D.derive "result" (F.maybeInt "y" .* F.double "d") crossData
             )
         )
 
@@ -415,7 +415,7 @@ mulIntMaybeDouble =
                 DI.fromVector (V.fromList [Just 10.5, Nothing, Just 91.5 :: Maybe Double])
             )
             ( DI.getColumn "result" $
-                D.derive "result" (F.col @Int "x" .* F.col @(Maybe Double) "md") crossData
+                D.derive "result" (F.int "x" .* F.maybeDouble "md") crossData
             )
         )
 
@@ -431,7 +431,7 @@ mulMaybeIntMaybeDouble =
             ( DI.getColumn "result" $
                 D.derive
                     "result"
-                    (F.col @(Maybe Int) "y" .* F.col @(Maybe Double) "md")
+                    (F.maybeInt "y" .* F.maybeDouble "md")
                     crossData
             )
         )
@@ -457,7 +457,7 @@ divIntDouble =
             "Int ./ Double = Double"
             (Just $ DI.fromList [2.0, 2.0, 2.0 :: Double])
             ( DI.getColumn "result" $
-                D.derive "result" (F.col @Int "x" ./ F.col @Double "d") divData
+                D.derive "result" (F.int "x" ./ F.double "d") divData
             )
         )
 
@@ -469,7 +469,7 @@ divDoubleInt =
             "Double ./ Int = Double"
             (Just $ DI.fromList [0.5, 0.5, 0.5 :: Double])
             ( DI.getColumn "result" $
-                D.derive "result" (F.col @Double "d" ./ F.col @Int "x") divData
+                D.derive "result" (F.double "d" ./ F.int "x") divData
             )
         )
 
@@ -483,7 +483,7 @@ divMaybeIntDouble =
                 DI.fromVector (V.fromList [Just 4.0, Nothing, Just 2.0 :: Maybe Double])
             )
             ( DI.getColumn "result" $
-                D.derive "result" (F.col @(Maybe Int) "y" ./ F.col @Double "d") divData
+                D.derive "result" (F.maybeInt "y" ./ F.double "d") divData
             )
         )
 
@@ -497,7 +497,7 @@ divIntMaybeDouble =
                 DI.fromVector (V.fromList [Just 2.0, Nothing, Just 2.0 :: Maybe Double])
             )
             ( DI.getColumn "result" $
-                D.derive "result" (F.col @Int "x" ./ F.col @(Maybe Double) "md") divData
+                D.derive "result" (F.int "x" ./ F.maybeDouble "md") divData
             )
         )
 
@@ -511,7 +511,7 @@ divMaybeIntMaybeDouble =
                 DI.fromVector (V.fromList [Just 4.0, Nothing, Just 2.0 :: Maybe Double])
             )
             ( DI.getColumn "result" $
-                D.derive "result" (F.col @(Maybe Int) "y" ./ F.col @(Maybe Double) "md") divData
+                D.derive "result" (F.maybeInt "y" ./ F.maybeDouble "md") divData
             )
         )
 
@@ -737,8 +737,8 @@ sumGroupedNullable :: D.DataFrame -> D.DataFrame
 sumGroupedNullable df =
     df
         & D.groupBy ["k"]
-        & D.aggregate [F.sumMaybe (F.col @(Maybe Double) "v") `as` "s"]
-        & D.sortBy [D.Asc (F.col @T.Text "k")]
+        & D.aggregate [F.sumMaybe (F.maybeDouble "v") `as` "s"]
+        & D.sortBy [D.Asc (F.text "k")]
 
 expectedGroupSums :: [Double] -> D.DataFrame
 expectedGroupSums sums =

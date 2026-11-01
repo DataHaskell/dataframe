@@ -63,7 +63,7 @@ filterPushdown =
             actual <-
                 L.run
                     ( L.filter
-                        (F.geq (F.col @Int32 "id") (F.lit 6))
+                        (F.geq (F.int32 "id") (F.lit 6))
                         (L.scanParquet allTypesSchema (T.pack plainPath))
                     )
             assertEqual "filterPushdown" (2, 11) (D.dimensions actual)
@@ -79,7 +79,7 @@ filterAndProject =
                     ( L.select
                         ["id", "bool_col"]
                         ( L.filter
-                            (F.geq (F.col @Int32 "id") (F.lit 6))
+                            (F.geq (F.int32 "id") (F.lit 6))
                             (L.scanParquet allTypesSchema (T.pack plainPath))
                         )
                     )
@@ -112,7 +112,7 @@ sortAndLimit =
                     ( L.take
                         3
                         ( L.sortBy
-                            [L.Asc (L.col @Int32 "id")]
+                            [L.Asc (L.int32 "id")]
                             (L.scanParquet allTypesSchema (T.pack plainPath))
                         )
                     )

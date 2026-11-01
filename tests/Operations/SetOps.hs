@@ -11,7 +11,7 @@ import Test.HUnit
 
 -- | Sort by the integer key so hash-ordered set results compare stably.
 sortByA :: D.DataFrame -> D.DataFrame
-sortByA = D.sortBy [D.Asc (F.col @Int "A")]
+sortByA = D.sortBy [D.Asc (F.int "A")]
 
 dfA :: D.DataFrame
 dfA =

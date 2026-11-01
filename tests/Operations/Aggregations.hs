@@ -40,8 +40,8 @@ foldAggregation =
             )
             ( testData
                 & D.groupBy ["test1"]
-                & D.aggregate [F.count (F.col @Int "test2") `as` "test2"]
-                & D.sortBy [D.Asc (F.col @Int "test1")]
+                & D.aggregate [F.count (F.int "test2") `as` "test2"]
+                & D.sortBy [D.Asc (F.int "test1")]
             )
         )
 
@@ -58,7 +58,7 @@ countAllAggregation =
             ( testData
                 & D.groupBy ["test1"]
                 & D.aggregate [F.countAll `as` "n"]
-                & D.sortBy [D.Asc (F.col @Int "test1")]
+                & D.sortBy [D.Asc (F.int "test1")]
             )
         )
 
@@ -128,8 +128,8 @@ numericAggregation =
             )
             ( testData
                 & D.groupBy ["test1"]
-                & D.aggregate [F.mean (F.col @Int "test2") `as` "test2"]
-                & D.sortBy [D.Asc (F.col @Int "test1")]
+                & D.aggregate [F.mean (F.int "test2") `as` "test2"]
+                & D.sortBy [D.Asc (F.int "test1")]
             )
         )
 
@@ -173,9 +173,9 @@ numericAggregationOfUnaggregatedUnaryOp =
             ( testData
                 & D.groupBy ["test1"]
                 & D.aggregate
-                    [ F.mean (F.lift (fromIntegral @Int @Double) (F.col @Int "test2")) `as` "test2"
+                    [ F.mean (F.lift (fromIntegral @Int @Double) (F.int "test2")) `as` "test2"
                     ]
-                & D.sortBy [D.Asc (F.col @Int "test1")]
+                & D.sortBy [D.Asc (F.int "test1")]
             )
         )
 
@@ -191,8 +191,8 @@ numericAggregationOfUnaggregatedBinaryOp =
             )
             ( testData
                 & D.groupBy ["test1"]
-                & D.aggregate [F.mean (F.col @Int "test2" + F.col @Int "test2") `as` "test2"]
-                & D.sortBy [D.Asc (F.col @Int "test1")]
+                & D.aggregate [F.mean (F.int "test2" + F.int "test2") `as` "test2"]
+                & D.sortBy [D.Asc (F.int "test1")]
             )
         )
 
@@ -209,10 +209,10 @@ reduceAggregationOfUnaggregatedUnaryOp =
             ( testData
                 & D.groupBy ["test1"]
                 & D.aggregate
-                    [ F.maximum (F.lift (fromIntegral @Int @Double) (F.col @Int "test2"))
+                    [ F.maximum (F.lift (fromIntegral @Int @Double) (F.int "test2"))
                         `as` "test2"
                     ]
-                & D.sortBy [D.Asc (F.col @Int "test1")]
+                & D.sortBy [D.Asc (F.int "test1")]
             )
         )
 
@@ -229,8 +229,8 @@ reduceAggregationOfUnaggregatedBinaryOp =
             ( testData
                 & D.groupBy ["test1"]
                 & D.aggregate
-                    [F.maximum (F.col @Int "test2" + F.col @Int "test2") `as` "test2"]
-                & D.sortBy [D.Asc (F.col @Int "test1")]
+                    [F.maximum (F.int "test2" + F.int "test2") `as` "test2"]
+                & D.sortBy [D.Asc (F.int "test1")]
             )
         )
 
@@ -248,7 +248,7 @@ aggregationOnNoRows =
                 & D.drop 12
                 & D.groupBy ["test1"]
                 & D.aggregate
-                    [F.sum (F.col @Int "test2") `as` "sum(test2)"]
+                    [F.sum (F.int "test2") `as` "sum(test2)"]
             )
         )
 
@@ -320,7 +320,7 @@ groupByOptionalColumn =
             ( D.nRows
                 ( optGroupByDf
                     & D.groupBy ["key"]
-                    & D.aggregate [F.count (F.col @Int "val") `as` "val"]
+                    & D.aggregate [F.count (F.int "val") `as` "val"]
                 )
             )
         )

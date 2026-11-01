@@ -7,6 +7,7 @@
 module DataFrame.Internal.Expression.Operators where
 
 import Data.Function ((&))
+import Data.Int (Int32, Int64)
 import qualified Data.Text as T
 import DataFrame.Internal.Column (Columnable)
 import DataFrame.Internal.Column.Types (Promote, PromoteDiv)
@@ -63,6 +64,70 @@ name other =
 
 col :: (Columnable a) => T.Text -> Expr a
 col = Col
+
+-- | Column reference of type Int; same as `col @Int`.
+int :: T.Text -> Expr Int
+int = Col
+
+-- | Column reference of type Double; same as `col @Double`.
+double :: T.Text -> Expr Double
+double = Col
+
+-- | Column reference of type Text; same as `col @T.Text`.
+text :: T.Text -> Expr T.Text
+text = Col
+
+-- | Column reference of type Bool; same as `col @Bool`.
+bool :: T.Text -> Expr Bool
+bool = Col
+
+-- | Nullable column reference of type Maybe Int.
+maybeInt :: T.Text -> Expr (Maybe Int)
+maybeInt = Col
+
+-- | Nullable column reference of type Maybe Double.
+maybeDouble :: T.Text -> Expr (Maybe Double)
+maybeDouble = Col
+
+-- | Nullable column reference of type Maybe Text.
+maybeText :: T.Text -> Expr (Maybe T.Text)
+maybeText = Col
+
+-- | Nullable column reference of type Maybe Bool.
+maybeBool :: T.Text -> Expr (Maybe Bool)
+maybeBool = Col
+
+-- | Column reference of type Int32.
+int32 :: T.Text -> Expr Int32
+int32 = Col
+
+-- | Column reference of type Int64.
+int64 :: T.Text -> Expr Int64
+int64 = Col
+
+-- | Column reference of type Float (32-bit).
+float32 :: T.Text -> Expr Float
+float32 = Col
+
+-- | Column reference of type Double (64-bit).
+float64 :: T.Text -> Expr Double
+float64 = Col
+
+-- | Nullable column reference of type Maybe Int32.
+maybeInt32 :: T.Text -> Expr (Maybe Int32)
+maybeInt32 = Col
+
+-- | Nullable column reference of type Maybe Int64.
+maybeInt64 :: T.Text -> Expr (Maybe Int64)
+maybeInt64 = Col
+
+-- | Nullable column reference of type Maybe Float (32-bit).
+maybeFloat32 :: T.Text -> Expr (Maybe Float)
+maybeFloat32 = Col
+
+-- | Nullable column reference of type Maybe Double (64-bit).
+maybeFloat64 :: T.Text -> Expr (Maybe Double)
+maybeFloat64 = Col
 
 ifThenElse :: (Columnable a) => Expr Bool -> Expr a -> Expr a -> Expr a
 ifThenElse = If

@@ -52,7 +52,7 @@ baseDF :: D.DataFrame
 baseDF = mkRegDF [("x1", baseX1), ("x2", baseX2)] baseY
 
 fitBase :: D.DataFrame -> LinearRegressor
-fitBase = fit defaultLinearConfig (F.col @Double "y")
+fitBase = fit defaultLinearConfig (F.double "y")
 
 -- | Duplicating every row leaves the OLS coefficients unchanged.
 testDuplicateRows :: Test
@@ -205,7 +205,7 @@ testStandardScalerLaw = TestCase $ do
              in (mu, sqrt var)
     mapM_
         ( \c -> do
-            let (mu, sd) = moments (interpD scaledDF (F.col @Double c))
+            let (mu, sd) = moments (interpD scaledDF (F.double c))
             assertBool ("scaler: " ++ T.unpack c ++ " mean ~ 0") (close 1e-9 mu 0)
             assertBool ("scaler: " ++ T.unpack c ++ " std ~ 1") (close 1e-9 sd 1)
         )
@@ -265,8 +265,8 @@ testR2Anchors = TestCase $ do
 testR2OfFittedModel :: Test
 testR2OfFittedModel = TestCase $ do
     let m = fitBase baseDF
-        score = evaluate r2 (predict m) (F.col @Double "y") baseDF
-        err = evaluate rmse (predict m) (F.col @Double "y") baseDF
+        score = evaluate r2 (predict m) (F.double "y") baseDF
+        err = evaluate rmse (predict m) (F.double "y") baseDF
     assertBool "r2 of exact linear fit ~ 1" (close 1e-9 score 1.0)
     assertBool "rmse of exact linear fit ~ 0" (err < 1e-6)
 
@@ -289,13 +289,13 @@ testTargetNeverAFeature = TestCase $ do
                 ("y" `notElem` getColumns expr)
     assertNoTarget
         "linear"
-        (predict (fit defaultLinearConfig (F.col @Double "y") leakDF))
+        (predict (fit defaultLinearConfig (F.double "y") leakDF))
     assertNoTarget
         "regression tree"
-        (predict (fit defaultRegTreeConfig (F.col @Double "y") leakDF))
+        (predict (fit defaultRegTreeConfig (F.double "y") leakDF))
     assertNoTarget
         "classification tree"
-        (predict (fit D.defaultTreeConfig (F.col @Double "y") leakDF))
+        (predict (fit D.defaultTreeConfig (F.double "y") leakDF))
 
 tests :: [Test]
 tests =

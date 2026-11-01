@@ -52,8 +52,8 @@ treeOnTextFeature = TestCase $ do
                 [ ("color", mk ["red", "red", "blue", "blue", "green", "green"])
                 , ("y", DI.fromList ([0, 0, 1, 1, 2, 2] :: [Double]))
                 ]
-        packedTree = fit defaultTreeConfig (D.col @Double "y") (df packed)
-        boxedTree = fit defaultTreeConfig (D.col @Double "y") (df boxed)
+        packedTree = fit defaultTreeConfig (D.double "y") (df packed)
+        boxedTree = fit defaultTreeConfig (D.double "y") (df boxed)
     assertEqual
         "tree on packed-text feature == tree on boxed-text feature"
         (D.prettyPrint (predict boxedTree))
@@ -67,8 +67,8 @@ classifierOnTextTarget = TestCase $ do
                 [ ("x", DI.fromList ([1, 2, 3, 4, 5, 6] :: [Double]))
                 , ("label", mk ["a", "a", "a", "b", "b", "b"])
                 ]
-        packedClf = fit defaultTreeConfig (D.col @T.Text "label") (df packed)
-        boxedClf = fit defaultTreeConfig (D.col @T.Text "label") (df boxed)
+        packedClf = fit defaultTreeConfig (D.text "label") (df packed)
+        boxedClf = fit defaultTreeConfig (D.text "label") (df boxed)
     assertEqual
         "classifier with packed-text target == boxed-text target"
         (D.prettyPrint (predict boxedClf))

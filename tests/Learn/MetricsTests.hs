@@ -91,10 +91,10 @@ testReports = TestCase $ do
 
 testEvaluateOneLiner :: Test
 testEvaluateOneLiner = TestCase $ do
-    let m = fit defaultLinearConfig (F.col @Double "y") reg
-        score = evaluate rmse (predict m) (F.col @Double "y") reg
+    let m = fit defaultLinearConfig (F.double "y") reg
+        score = evaluate rmse (predict m) (F.double "y") reg
     assertBool "evaluate rmse ~ 0 on exact linear fit" (score < 1e-6)
-    let r = regressionReportExpr (predict m) (F.col @Double "y") reg
+    let r = regressionReportExpr (predict m) (F.double "y") reg
     assertBool "report r2 ~ 1" (close 1e-6 (rrR2 r) 1)
 
 testCrossValidate :: Test
@@ -104,8 +104,8 @@ testCrossValidate = TestCase $ do
                 4
                 0
                 r2
-                (F.col @Double "y")
-                (predict . fit defaultLinearConfig (F.col @Double "y"))
+                (F.double "y")
+                (predict . fit defaultLinearConfig (F.double "y"))
                 reg
     assertBool "all folds high R2" (all (> 0.99) cv)
     assertEqual "four folds" 4 (length cv)
@@ -113,7 +113,7 @@ testCrossValidate = TestCase $ do
 testTransformCompose :: Test
 testTransformCompose = TestCase $ do
     let scaler = standardScaler ["x"] reg
-        pca = fit (PCAConfig (NComp 1) False) [F.col @Double "x"] reg
+        pca = fit (PCAConfig (NComp 1) False) [F.double "x"] reg
         pipeline = scalerTransform scaler <> pcaTransform pca
         out = applyTransform pipeline reg
     assertBool "pipeline produced a frame" (D.columnNames out /= [])

@@ -161,24 +161,24 @@ mergeAggCases = concatMap sizeCases sizes
             assertEqual
                 ("count over " ++ show n ++ " rows")
                 [n]
-                (take 1 (run (operandColumns xsI) (F.count (F.col @Int "x"))))
+                (take 1 (run (operandColumns xsI) (F.count (F.int "x"))))
         , TestCase $
             assertEqual
                 ("countDistinct of an expression over " ++ show n ++ " rows")
                 [length (takeWhile (< n) [0 .. 6])]
-                (take 1 (run (operandColumns xsI) (F.countDistinct (F.col @Int "x" + 1))))
+                (take 1 (run (operandColumns xsI) (F.countDistinct (F.int "x" + 1))))
         , TestCase $
             assertBool
                 ("mean of ints over " ++ show n ++ " rows")
                 ( all
                     (approx (sumD / fromIntegral n))
-                    (run (operandColumns xsI) (F.mean (F.col @Int "x")))
+                    (run (operandColumns xsI) (F.mean (F.int "x")))
                 )
         , TestCase $
             assertEqual
                 ("mean of doubles over " ++ show n ++ " rows")
                 [sum (take n smallDoubles) / fromIntegral n]
-                (take 1 (run (operandColumns xsD) (F.mean (F.col @Double "x"))))
+                (take 1 (run (operandColumns xsD) (F.mean (F.double "x"))))
         ]
       where
         -- Seven distinct ints with a large spread; the sum fits in a Double.

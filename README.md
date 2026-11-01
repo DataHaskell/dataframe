@@ -35,25 +35,7 @@
 
 # DataFrame
 
-Tabular data analysis and symbolic AI in Haskell. Supports eager computation and lazy/deferred computation. API flexible enough to accomodate beginners to both data analysis or Haskell, and advanced type-safe pipeline.
-
-## Features
-
-**I/O**: CSV, TSV, Parquet (Snappy, ZSTD, Gzip), JSON. Read Parquet from Hugging Face datasets (`hf://` URIs) via the `dataframe-huggingface` package. Column projection and predicate pushdown for Parquet reads.
-
-**Operations**: filter, select, derive, groupBy, aggregate, joins (inner, left, right, full outer), sort, sample, stratified sample, distinct, k-fold splits.
-
-**Expressions**: typed column references (`F.col @Double "x"`), arithmetic, comparisons, logical operators, nullable-aware three-valued logic (`.==`, `.&&`), string matching (`like`, `regex`), casting, and user-defined functions via `lift`/`lift2`.
-
-**Statistics**: mean, median, mode, variance, standard deviation, percentiles, inter-quartile range, correlation, skewness, frequency tables, imputation.
-
-**Plotting**: terminal plots (histogram, scatter, line, bar, box, pie, heatmap, stacked bar, correlation matrix) and interactive HTML plots.
-
-**Lazy engine**: streaming query execution for files that don't fit in memory. Rule-based optimizer with filter fusion, predicate pushdown, and dead column elimination. Pull-based executor with configurable batch sizes.
-
-**Interop**: Arrow C Data Interface for zero-copy round-trips with Python and Polars.
-
-**ML**: decision trees (TAO algorithm), feature synthesis, k-fold cross-validation, stratified sampling.
+Tabular data analysis and symbolic AI in Haskell. Supports eager computation and lazy/deferred computation. API flexible enough to accomodate beginners to both data analysis or Haskell, and advanced type-safe pipelines.
 
 **Notebooks**: IHaskell integration with [pre-built Binder examples](https://mybinder.org/v2/gh/mchav/ihaskell-dataframe/HEAD).
 
@@ -63,10 +45,12 @@ Tabular data analysis and symbolic AI in Haskell. Supports eager computation and
 
 * Concise, declarative, composable data pipelines and machine learning.
 * Choose your level of type safety: keep it lightweight for quick analysis, or lock it down for production pipelines.
-* High performance from Haskell's optimizing compiler and an efficient columnar memory model based onn Apache Arrow.
+* High performance from Haskell's optimizing compiler and an efficient columnar memory model based on Apache Arrow.
 * Designed for interactivity: a custom REPL, IHaskell/Sabela notebook support, terminal and web plotting, and helpful error messages.
 
 ## Install
+
+The easiest way to get started is to install the standalone REPL.
 
 ```bash
 cabal update
@@ -97,7 +81,7 @@ import qualified DataFrame as D
 import qualified DataFrame.Functions as F
 import DataFrame.Expression.Operators
 
-import DataFrame ((=:))
+import DataFrame ((=:), as)
 
 sales = D.fromColumns
     [ "product" =: [1, 1, 2, 2, 3, 3 :: Int]
@@ -107,8 +91,8 @@ sales = D.fromColumns
 -- Group by product and compute totals
 sales
     |> D.groupBy ["product"]
-    |> D.aggregate [ F.sum (F.col @Int "amount") `as` "total"
-                   , F.count (F.col @Int "amount") `as` "orders"
+    |> D.aggregate [ F.sum (F.int "amount") `as` "total"
+                   , F.count (F.int "amount") `as` "orders"
                    ]
     |> D.toMarkdown'
 ```
@@ -166,7 +150,7 @@ D.describeColumns df |> D.toMarkdown'
 > | latitude            | 20640                    | 0                    | Double       |
 > | longitude           | 20640                    | 0                    | Double       |
 
-The `:declareColumns` macro (`$(D.declareColumns df)` outside the REPL) generates typed column references from a dataframe, so you can use column names directly in expressions instead of writing `F.col @Double "median_income"` every time:
+The `:declareColumns` macro (`$(D.declareColumns df)` outside the REPL) generates typed column references from a dataframe, so you can use column names directly in expressions instead of writing `F.double "median_income"` every time:
 
 ```haskell
 $(D.declareColumns df)
@@ -216,10 +200,6 @@ dataframe> df |> D.derive "nonsense" (latitude + ocean_proximity)
         '(latitude + ocean_proximity)'
 ```
 
-## Template Haskell
-
-For scripts and projects, Template Haskell can generate column bindings at compile time.
-
 ### Generate column references from a CSV
 
 `declareColumnsFromCsvFile` (in `DataFrame.TH`, also re-exported from `DataFrame`)
@@ -254,8 +234,8 @@ Compare this to the manual version which requires spelling out every column name
 ```haskell
 -- Without TH — every column needs its name and type spelled out
 df |> D.derive "rooms_per_household"
-        (F.col @Double "total_rooms" / F.col @Double "households")
-   |> D.filter (F.col @Double "median_income" .>. F.lit 5)
+        (F.double "total_rooms" / F.double "households")
+   |> D.filter (F.double "median_income" .>. F.lit 5)
    |> D.take 5
    |> D.toMarkdown'
 ```
@@ -489,9 +469,9 @@ housingSchema = makeSchema
 
 lazyResult <- L.run $
     L.scanCsv housingSchema "./data/housing.csv"
-    |> L.filter  (F.col @Double "median_income" .>. F.lit 5)
+    |> L.filter  (F.double "median_income" .>. F.lit 5)
     |> L.derive  "value_per_income"
-                 (F.col @Double "median_house_value" / F.col @Double "median_income")
+                 (F.double "median_house_value" / F.double "median_income")
     |> L.select  ["ocean_proximity", "median_house_value", "value_per_income"]
     |> L.take 1000
 

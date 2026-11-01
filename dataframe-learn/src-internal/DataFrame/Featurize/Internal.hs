@@ -80,7 +80,7 @@ requireDoubleColumn name df = case getColumn name df of
             then throw (nullableInputError name (columnTypeString c))
             else
                 if D.hasElemType @Double c
-                    then fromRight undefined (columnAsUnboxedVector (F.col @Double name) df)
+                    then fromRight undefined (columnAsUnboxedVector (F.double name) df)
                     else
                         throw
                             ( asDoubleInputError

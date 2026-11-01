@@ -145,7 +145,7 @@ The type of `D.take` is `Int -> DataFrame -> DataFrame` — an integer in, a dat
 
 ```haskell
 -- Runtime-checked (flexible):
-D.mean (F.col @Double "High Temperature (C)") weather
+D.mean (F.double "High Temperature (C)") weather
 
 -- Compile-time-checked — $(D.declareColumns …) generates typed bindings:
 $(D.declareColumns weather)
@@ -276,9 +276,9 @@ Passing a `Double` column expression where an `Int` is expected:
 
 
 ```haskell
--- D.mean (F.col @Int "longitude") housing
+-- D.mean (F.int "longitude") housing
 -- error: Couldn't match type 'Double' with 'Int' for column "longitude"
--- Fix: D.mean (F.col @Double "longitude") housing
+-- Fix: D.mean (F.double "longitude") housing
 ```
 
 > <!-- sabela:mime text/plain -->
@@ -354,7 +354,7 @@ The companions `filterNothing` and `filterAllNothing` do the opposite — they l
 
 ```haskell
 TIO.putStrLn $ D.toMarkdown
-    (D.impute (F.col @(Maybe Int) "id") 0 messy)
+    (D.impute (F.maybeInt "id") 0 messy)
 ```
 
 > <!-- sabela:mime text/plain -->
@@ -370,7 +370,7 @@ Notice the `@(Maybe Int)` type annotation — it tells the imputer what type the
 
 
 ```haskell
--- D.impute (F.col @(Maybe Double) "id") 0 messy
+-- D.impute (F.maybeDouble "id") 0 messy
 -- Exception: Type Mismatch — expected 'Maybe Double' but column is 'Maybe Integer'
 ```
 
@@ -384,7 +384,7 @@ Notice the `@(Maybe Int)` type annotation — it tells the imputer what type the
 
 ```haskell
 TIO.putStrLn $ D.toMarkdown $ D.take 10
-    (D.imputeWith F.mean (F.col @(Maybe Double) "total_bedrooms") housing)
+    (D.imputeWith F.mean (F.maybeDouble "total_bedrooms") housing)
 ```
 
 > <!-- sabela:mime text/plain -->
@@ -495,7 +495,7 @@ TIO.putStrLn $ D.toMarkdown meat
 
 ```haskell
 TIO.putStrLn $ D.toMarkdown
-    (D.derive "kilograms" (F.col @Double "ounces" * 0.03) meat)
+    (D.derive "kilograms" (F.double "ounces" * 0.03) meat)
 ```
 
 > <!-- sabela:mime text/plain -->
@@ -518,8 +518,8 @@ TIO.putStrLn $ D.toMarkdown
 
 
 ```
-F.col @Double "ounces"   -- :: Expr Double
-F.col @Text   "food"     -- :: Expr Text
+F.double "ounces"   -- :: Expr Double
+F.text   "food"     -- :: Expr Text
 ```
 
 
@@ -528,7 +528,7 @@ You can compose expressions:
 
 ```haskell
 roomsPerHousehold = D.derive "rooms_per_household"
-    (F.col @Double "total_rooms" / F.col @Double "households")
+    (F.double "total_rooms" / F.double "households")
     housing
 
 TIO.putStrLn $ D.toMarkdown (D.take 5 roomsPerHousehold)
@@ -562,7 +562,7 @@ meatToAnimal "nova lox"    = "salmon"
 meatToAnimal _             = "unknown"
 
 TIO.putStrLn $ D.toMarkdown
-    (D.derive "animal" (F.lift meatToAnimal (F.col @Text "food")) meat)
+    (D.derive "animal" (F.lift meatToAnimal (F.text "food")) meat)
 ```
 
 > <!-- sabela:mime text/plain -->
@@ -588,7 +588,7 @@ TIO.putStrLn $ D.toMarkdown
 animalMapping = [("bacon","pig"),("pulled pork","pig"),("pastrami","cow"),("corned beef","cow"),("honey ham","pig"),("nova lox","salmon")]
 
 TIO.putStrLn $ D.toMarkdown
-    (D.derive "animal2" (F.recode animalMapping (F.col @Text "food")) meat)
+    (D.derive "animal2" (F.recode animalMapping (F.text "food")) meat)
 ```
 
 > <!-- sabela:mime text/plain -->
@@ -891,7 +891,7 @@ Build and run a lazy pipeline:
 ```haskell
 lazyQuery =
     L.scanCsv housingSchema "../data/housing.csv"
-        |> L.filter (F.col @Double "median_house_value" .>=. 300000)
+        |> L.filter (F.double "median_house_value" .>=. 300000)
         |> L.select ["longitude","latitude","median_house_value","ocean_proximity"]
         |> L.take 10
 
@@ -981,7 +981,7 @@ Three functions manipulate `Text` columns inside expressions.
 emails = D.fromColumns
     [ ("email", D.fromList ["alice@example.com", "bob@haskell.org", "cara@data.io" :: T.Text]) ]
 
-emailParts = D.derive "parts" (F.splitOn "@" (F.col @T.Text "email")) emails
+emailParts = D.derive "parts" (F.splitOn "@" (F.text "email")) emails
 
 TIO.putStrLn $ D.toMarkdown emailParts
 ```
@@ -993,7 +993,7 @@ TIO.putStrLn $ D.toMarkdown emailParts
 
 
 ```haskell
-domains = D.derive "domain" (F.match "[a-z]+\\.[a-z]+" (F.col @T.Text "email")) emails
+domains = D.derive "domain" (F.match "[a-z]+\\.[a-z]+" (F.text "email")) emails
 
 TIO.putStrLn $ D.toMarkdown domains
 ```
@@ -1005,7 +1005,7 @@ TIO.putStrLn $ D.toMarkdown domains
 
 
 ```haskell
-withWords = D.derive "words" (F.matchAll "[a-z]+" (F.col @T.Text "email")) emails
+withWords = D.derive "words" (F.matchAll "[a-z]+" (F.text "email")) emails
 
 TIO.putStrLn $ D.toMarkdown withWords
 ```
@@ -1026,7 +1026,7 @@ events = D.fromColumns
     , ("date_text",  D.fromList ["2025-03-01","2025-06-15","2025-09-30" :: T.Text])
     ]
 
-withDates = D.derive "date" (F.parseDate @Day "%Y-%m-%d" (F.col @T.Text "date_text")) events
+withDates = D.derive "date" (F.parseDate @Day "%Y-%m-%d" (F.text "date_text")) events
 
 TIO.putStrLn $ D.toMarkdown withDates
 ```
@@ -1259,7 +1259,7 @@ Histograms show the distribution of a single numeric variable.
 ```haskell
 import qualified DataFrame.Display.Terminal.Plot as P
 
-houseValues = D.columnAsList (F.col @Double "median_house_value") housing
+houseValues = D.columnAsList (F.double "median_house_value") housing
 
 TIO.putStrLn $
     histogram
@@ -1289,8 +1289,8 @@ Scatter plots reveal relationships between two numeric variables.
 
 
 ```haskell
-incomes = D.columnAsList (F.col @Double "median_income") housing
-values  = D.columnAsList (F.col @Double "median_house_value") housing
+incomes = D.columnAsList (F.double "median_income") housing
+values  = D.columnAsList (F.double "median_house_value") housing
 
 TIO.putStrLn $
     scatter
@@ -1339,7 +1339,7 @@ Line graphs show trends along a continuous x-axis. The second argument is a list
 
 
 ```haskell
-ages = D.columnAsList (F.col @Double "housing_median_age") housing
+ages = D.columnAsList (F.double "housing_median_age") housing
 
 TIO.putStrLn $
     lineGraph
@@ -1366,11 +1366,11 @@ P.plotCorrelationMatrix housing
 
 ### Opting into stronger type safety
 
-Using `F.col @Double` in `D.columnAsList` ensures only numeric columns reach the plotting functions. Passing a `Text` column to a histogram is a compile error:
+Using `F.double` in `D.columnAsList` ensures only numeric columns reach the plotting functions. Passing a `Text` column to a histogram is a compile error:
 
 
 ```haskell
--- D.columnAsList (F.col @Double "ocean_proximity") housing
+-- D.columnAsList (F.double "ocean_proximity") housing
 -- error: column "ocean_proximity" has type Text, not Double
 ```
 
@@ -1392,11 +1392,11 @@ import DataFrame.Expression.Operators (as)
 grouped = D.groupBy ["ocean_proximity"] housing
 
 summary = D.aggregate
-    [ F.count  (F.col @Double "median_house_value") `as` "count"
-    , F.mean   (F.col @Double "median_house_value") `as` "mean_value"
-    , F.median (F.col @Double "median_house_value") `as` "median_value"
-    , F.maximum (F.col @Double "median_house_value") `as` "max_value"
-    , F.minimum (F.col @Double "median_house_value") `as` "min_value"
+    [ F.count  (F.double "median_house_value") `as` "count"
+    , F.mean   (F.double "median_house_value") `as` "mean_value"
+    , F.median (F.double "median_house_value") `as` "median_value"
+    , F.maximum (F.double "median_house_value") `as` "max_value"
+    , F.minimum (F.double "median_house_value") `as` "min_value"
     ] grouped
 
 TIO.putStrLn $ D.toMarkdown summary
@@ -1433,7 +1433,7 @@ $(D.declareColumns meat)
 meatGrouped = D.groupBy ["food"] meat
 
 meatSummary = D.aggregate
-    [ F.count (F.col @T.Text "food") `as` "count"
+    [ F.count (F.text "food") `as` "count"
     , F.sum   ounces                 `as` "total_oz"
     , F.mean  ounces                 `as` "mean_oz"
     ] meatGrouped
@@ -1448,7 +1448,7 @@ TIO.putStrLn $ D.toMarkdown meatSummary
 
 
 ```haskell
-TIO.putStrLn $ D.toMarkdown (D.frequencies (F.col @T.Text "ocean_proximity") housing)
+TIO.putStrLn $ D.toMarkdown (D.frequencies (F.text "ocean_proximity") housing)
 ```
 
 
@@ -1471,7 +1471,7 @@ Aggregate first, then derive new columns from the summary:
 totalRows = fromIntegral (D.nRows housing) :: Double
 
 withShare = D.derive "pct_of_total"
-    (F.toDouble (F.col @Int "count") / F.lit totalRows * F.lit 100.0)
+    (F.toDouble (F.int "count") / F.lit totalRows * F.lit 100.0)
     summary
 
 TIO.putStrLn $ D.toMarkdown withShare
@@ -1485,8 +1485,8 @@ A full group-normalise pipeline: group → compute mean and stddev → derive z-
 
 ```haskell
 incomeByProx = D.aggregate
-    [ F.mean   (F.col @Double "median_income") `as` "mean_income"
-    , F.stddev (F.col @Double "median_income") `as` "stddev_income"
+    [ F.mean   (F.double "median_income") `as` "mean_income"
+    , F.stddev (F.double "median_income") `as` "stddev_income"
     ] (D.groupBy ["ocean_proximity"] housing)
 
 TIO.putStrLn $ D.toMarkdown incomeByProx

@@ -22,14 +22,14 @@ frame =
 
 orders :: [(String, [D.SortOrder])]
 orders =
-    [ ("int asc", [D.Asc (F.col @Int "n")])
-    , ("int desc", [D.Desc (F.col @Int "n")])
-    , ("text asc", [D.Asc (F.col @T.Text "t")])
+    [ ("int asc", [D.Asc (F.int "n")])
+    , ("int desc", [D.Desc (F.int "n")])
+    , ("text asc", [D.Asc (F.text "t")])
     ,
         ( "double desc, text asc"
-        , [D.Desc (F.col @Double "d"), D.Asc (F.col @T.Text "t")]
+        , [D.Desc (F.double "d"), D.Asc (F.text "t")]
         )
-    , ("expr", [D.Asc (F.col @Int "n" * 3 - F.col @Int "id")])
+    , ("expr", [D.Asc (F.int "n" * 3 - F.int "id")])
     ]
 
 windows :: [(Int, Int)]

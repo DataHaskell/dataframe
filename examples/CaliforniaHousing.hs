@@ -76,7 +76,7 @@ normalizeFeatures df =
             ( \name d ->
                 let
                     -- Convenience reference to the column.
-                    col = F.col @Double name
+                    col = F.double name
                  in
                     D.derive name ((col - F.minimum col) / (F.maximum col - F.minimum col)) d
             )

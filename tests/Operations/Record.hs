@@ -345,7 +345,7 @@ deriveSchemaAccessorDerive = TestCase $ do
     assertEqual
         "accessor composes in derive expression"
         [20.0, 40.0]
-        (D.columnAsList (D.col @Double "double_amount") df')
+        (D.columnAsList (D.double "double_amount") df')
 
 labelColumnFilter :: Test
 labelColumnFilter = TestCase $ do
@@ -424,11 +424,11 @@ deriveSchemaValuesFromParquetAccessors = TestCase $ do
     df <- D.readParquet "./tests/data/alltypes_plain.parquet"
     assertEqual
         "prefixed accessor reads its parquet column"
-        (D.columnAsList (D.col @Double "double_col") df)
+        (D.columnAsList (D.double "double_col") df)
         (D.columnAsList alltypesDoubleCol df)
     assertEqual
         "snake_case parquet column becomes a camelCased accessor"
-        (D.columnAsList (D.col @T.Text "date_string_col") df)
+        (D.columnAsList (D.text "date_string_col") df)
         (D.columnAsList alltypesDateStringCol df)
 
 tests :: [Test]

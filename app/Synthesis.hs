@@ -32,7 +32,7 @@ type RawPredSchema =
     '[ '("Survived", Maybe Int), '("prediction", Int)]
 
 prediction :: D.Expr Int
-prediction = F.col @Int "prediction"
+prediction = F.int "prediction"
 
 main :: IO ()
 main = do
@@ -67,7 +67,7 @@ main = do
                             }
                     }
                 )
-                (F.fromMaybe 0 (F.col @(Maybe Int) "Survived"))
+                (F.fromMaybe 0 (F.maybeInt "Survived"))
                 (trainDf |> D.exclude ["PassengerId"])
         model = predict fitted
 

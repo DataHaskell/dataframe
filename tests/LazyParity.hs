@@ -82,8 +82,8 @@ joinPipelineParity =
     TestCase $
         withCsv (ordersFrame 20_000) $ \ordersPath ->
             withCsv (customersFrame 257) $ \customersPath -> do
-                let amount = F.col @Double "amount"
-                    discount = F.col @Double "discount"
+                let amount = F.double "amount"
+                    discount = F.double "discount"
                     aggs =
                         [ F.sum (amount - discount) `as` "revenue"
                         , F.count amount `as` "orders"
@@ -113,7 +113,7 @@ groupByPipelineParity :: Test
 groupByPipelineParity =
     TestCase $
         withCsv (ordersFrame 20_000) $ \ordersPath -> do
-            let amount = F.col @Double "amount"
+            let amount = F.double "amount"
                 aggs =
                     [ F.sum amount `as` "total"
                     , F.count amount `as` "n"
@@ -141,8 +141,8 @@ streamingMeanParity =
             case DI.fromList [(0, 0) :: (Double, Int)] of
                 DI.UnboxedColumn{} -> pure ()
                 _ -> assertFailure "streaming mean tuple must stay unboxed"
-            let valueD = F.col @Double "amount"
-                valueI = F.col @Int "order_id"
+            let valueD = F.double "amount"
+                valueI = F.int "order_id"
                 aggs =
                     [ F.mean valueD `as` "mean_double"
                     , F.mean valueI `as` "mean_int"
@@ -218,18 +218,18 @@ optimizedNodesParity =
         withCsv (ordersFrame 3_000) $ \ordersPath -> do
             df <- Csv.readCsvWithSchema ordersSchema ordersPath
             let scan = (L.scanCsv ordersSchema (T.pack ordersPath)){L.batchSize = 256}
-                amount = F.col @Double "amount"
+                amount = F.double "amount"
                 check lbl eager lazy = do
                     actual <- L.run lazy
                     assertEqual lbl (show eager) (show actual)
             check
                 "rename, filter on new name, select"
                 ( D.select ["amt", "order_id"] $
-                    D.filter (F.col @Double "amt" .>. 1000) $
+                    D.filter (F.double "amt" .>. 1000) $
                         D.rename "amount" "amt" df
                 )
                 ( L.select ["amt", "order_id"] $
-                    L.filter (F.col @Double "amt" .>. 1000) $
+                    L.filter (F.double "amt" .>. 1000) $
                         L.rename "amount" "amt" scan
                 )
             check
@@ -249,11 +249,11 @@ optimizedNodesParity =
             check
                 "filter on applied column stays above"
                 ( D.filter
-                    (F.col @Double "discount" .>. 2)
+                    (F.double "discount" .>. 2)
                     (D.apply (* (2 :: Double)) "discount" df)
                 )
                 ( L.filter
-                    (F.col @Double "discount" .>. 2)
+                    (F.double "discount" .>. 2)
                     (L.apply (* (2 :: Double)) "discount" scan)
                 )
             check

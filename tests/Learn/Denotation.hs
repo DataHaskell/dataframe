@@ -42,12 +42,12 @@ df =
     xs2 = [2, 1, 4, 3, 6, 5, 8, 7] :: [Double]
 
 col :: D.DataFrame -> T.Text -> [Double]
-col d n = interpD d (F.col @Double n)
+col d n = interpD d (F.double n)
 
 -- | @interpret (predict m)@ must equal @intercept + Σ coefⱼ·featureⱼ@.
 linearDenotation :: Test
 linearDenotation = TestCase $ do
-    let m = fit defaultLinearConfig (F.col @Double "y") df
+    let m = fit defaultLinearConfig (F.double "y") df
         feats = V.toList (regFeatureNames m)
         coefs = VU.toList (regCoef m)
         cols = map (col df) feats
@@ -64,7 +64,7 @@ linearDenotation = TestCase $ do
 kmeansDenotation :: Test
 kmeansDenotation = TestCase $ do
     let feats = ["x1", "x2"]
-        km = fit defaultKMeansConfig{kmK = 3, kmSeed = 1} (map (F.col @Double) feats) df
+        km = fit defaultKMeansConfig{kmK = 3, kmSeed = 1} (map (F.double) feats) df
         centers = map VU.toList (V.toList (kmCenters km))
         rows = transposeL (map (col df) feats)
         native = [nearest centers row | row <- rows]

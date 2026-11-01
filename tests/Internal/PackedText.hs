@@ -87,11 +87,11 @@ extractionParity =
 
 orderingParity :: Test
 orderingParity = TestCase $ do
-    let sortedPacked = D.sortBy [D.Asc (F.col @T.Text "k")] packedDf
-        sortedBoxed = D.sortBy [D.Asc (F.col @T.Text "k")] boxedDf
+    let sortedPacked = D.sortBy [D.Asc (F.text "k")] packedDf
+        sortedBoxed = D.sortBy [D.Asc (F.text "k")] boxedDf
     assertBool "asc sort parity" (sortedPacked == sortedBoxed)
-    let descPacked = D.sortBy [D.Desc (F.col @T.Text "k")] packedDf
-        descBoxed = D.sortBy [D.Desc (F.col @T.Text "k")] boxedDf
+    let descPacked = D.sortBy [D.Desc (F.text "k")] packedDf
+        descBoxed = D.sortBy [D.Desc (F.text "k")] boxedDf
     assertBool "desc sort parity" (descPacked == descBoxed)
 
 hashingParity :: Test
@@ -135,8 +135,8 @@ gatherPreservesPacked = TestCase $ do
 -- A sort on a packed column stays packed and equals the boxed sort.
 sortPreservesPacked :: Test
 sortPreservesPacked = TestCase $ do
-    let sortedP = D.sortBy [D.Asc (F.col @T.Text "k")] packedDf
-        sortedB = D.sortBy [D.Asc (F.col @T.Text "k")] boxedDf
+    let sortedP = D.sortBy [D.Asc (F.text "k")] packedDf
+        sortedB = D.sortBy [D.Asc (F.text "k")] boxedDf
     assertBool
         "sorted packed column stays PackedText"
         (DI.isPackedText (unsafeGetColumn "k" sortedP))
@@ -215,7 +215,7 @@ packedFromBytes rows =
 eqLiteralKernelParity :: Test
 eqLiteralKernelParity = TestCase $ do
     let base = D.fromColumns [("k", packedFromBytes kernelRowBytes)]
-        sorted = D.sortBy [D.Asc (F.col @T.Text "k")] base
+        sorted = D.sortBy [D.Asc (F.text "k")] base
         boxed df = D.fromColumns [("k", DI.materializePacked (unsafeGetColumn "k" df))]
         lits = ["apple", "", "café", "日本語", "\xFFFD", "caf", "missing"] :: [T.Text]
         result :: D.DataFrame -> D.Expr Bool -> [Bool]
@@ -231,10 +231,10 @@ eqLiteralKernelParity = TestCase $ do
         | (label, df) <- [("base", base), ("sorted", sorted)]
         , lit <- lits
         , e <-
-            [ F.col @T.Text "k" .==. F.lit lit
-            , F.col @T.Text "k" ./=. F.lit lit
-            , F.lit lit .==. F.col @T.Text "k"
-            , F.lit lit ./=. F.col @T.Text "k"
+            [ F.text "k" .==. F.lit lit
+            , F.text "k" ./=. F.lit lit
+            , F.lit lit .==. F.text "k"
+            , F.lit lit ./=. F.text "k"
             ]
         ]
 

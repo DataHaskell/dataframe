@@ -5,11 +5,12 @@ What you’ll learn
 * How Template Haskell column declarations eliminate stringly‑typed references.
 * How using FrameM lets you update a dataframe without threading the df variable by hand.
 * (Advanced) How the `Typed` module helps you write safe data pipeline.
+* (Advanced) Working with files larger than memory
 
 ## Peeking at our file
 We'll be looking at the California Housing dataset for this tutorial. Download the [housing.csv](https://raw.githubusercontent.com/mchav/dataframe/refs/heads/main/data/housing.csv) file into whatever folder you're working from.
 
-Create a file called `Housing.hs` in your working folder and copy/type the following code:
+Create a file called `Housing.hs` in your working folder and copy/type the following code (each code block is meant to be self-contained at the expense of some repetition):
 
 ```haskell
 #!/usr/bin/env cabal
@@ -20,7 +21,6 @@ Create a file called `Housing.hs` in your working folder and copy/type the follo
 module Main where
 
 import qualified DataFrame as D
-import qualified DataFrame.Functions as F
 
 main :: IO ()
 main = do
@@ -50,7 +50,7 @@ import qualified DataFrame.Functions as F
 main :: IO ()
 main = do
   df <- D.readCsv "./housing.csv"
-  print (D.derive "rooms_per_household" (F.col @Double "total_rooms" / F.col @Double "households") df)
+  print (D.derive "rooms_per_household" (F.double "total_rooms" / F.double "households") df)
 ```
 
 You'll notice the dataframe now has a new column called `rooms_per_household` at the end. This is great! But what if we had made a mistake? What if we had instead typed "totalrooms"? Or what if we had assumed both columns were ints and used integer division? These would have both resulted in runtime errors. This gets worse as we rewrite more transformations using the same columns (we're more likely to have a stray typo or get the type wrong).
@@ -73,8 +73,8 @@ module Main where
 import qualified DataFrame as D
 import qualified DataFrame.Functions as F
 
-total_rooms = F.col @Double "total_rooms"
-households = F.col @Double "households"
+total_rooms = F.double "total_rooms"
+households = F.double "households"
 
 main :: IO ()
 main = do
@@ -97,7 +97,6 @@ This does make things a little clearer but we could still make all the same mist
 module Main where
 
 import qualified DataFrame as D
-import qualified DataFrame.Functions as F
 
 $(D.declareColumnsFromCsvFile "./housing.csv")
 
@@ -147,7 +146,7 @@ main = do
         meanBedrooms = D.meanMaybe total_bedrooms dfWithRoomsPerHousehold
         dfWithTotalBedroomsImputed = D.impute total_bedrooms meanBedrooms dfWithRoomsPerHousehold
 
-    print $ dfWithTotalBedroomsImputed |> D.filter (isExpensive .&&. roomsPerHousehold .>=. 7 .&&. (F.col @Double "total_bedrooms") .>=. 200)
+    print $ dfWithTotalBedroomsImputed |> D.filter (isExpensive .&&. roomsPerHousehold .>=. 7 .&&. (F.double "total_bedrooms") .>=. 200)
 ```
 
 Our code is now inundated with different dataframe variables and a bunch of pipeline management. Should we just revert back to using the old `derive` and keep track of names and types ourselves? Not at all. We can use a structure called a `FrameM` to remove this boilerplate while still keeping the guarantees we unlocked before.
@@ -159,7 +158,6 @@ Our code is now inundated with different dataframe variables and a bunch of pipe
 module Main where
 
 import qualified DataFrame as D
-import qualified DataFrame.Functions as F
 
 import DataFrame.Expression.Operators
 
@@ -217,7 +215,7 @@ Now we can reuse the derived Exprs elsewhere - for example, in plotting, or furt
 
 We can go ahead and run the complete file with the same command as before.
 
-## Type safety, schema evolution, and the “foot‑gun”
+## Type safety, schema evolution
 
 What’s type‑safe here?
 * Expressions are typed: `median_house_value .>=. 500000` won’t compile if `median_house_value` isn’t numeric.
@@ -332,7 +330,7 @@ main = do
     df <- D.readCsv "./data/housing.csv"
     let tdf = either (error . show) id (DT.freezeWithError @Housing df)
     -- We could generate this with `D.declareColumnsFromCsvFile` as before
-    let total_bedrooms = F.col @(Maybe Double) "total_bedrooms"
+    let total_bedrooms = F.maybeDouble "total_bedrooms"
     print $ tdf
           |> DT.derive @"rooms_per_household" (DT.col @"total_rooms" / DT.col @"households")
           |> DT.impute @"total_bedrooms" (D.meanMaybe total_bedrooms df)
@@ -363,7 +361,7 @@ main :: IO ()
 main = do
     df <- D.readCsv "./data/housing.csv"
     -- We could generate this with `D.declareColumnsFromCsvFile` as before
-    let total_bedrooms = F.col @(Maybe Double) "total_bedrooms"
+    let total_bedrooms = F.maybeDouble "total_bedrooms"
     let tdf = either (error . show) id (DT.freezeWithError @Housing df)
     print $ tdf
           |> DT.derive @"rooms_per_household" (DT.col @"total_rooms" / DT.col @"households")

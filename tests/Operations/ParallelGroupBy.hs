@@ -94,8 +94,8 @@ aggParityFor :: Int -> Test
 aggParityFor n =
     TestCase $
         let df = caseFrame n
-            v = F.col @Int "v"
-            vd = F.col @Double "vd"
+            v = F.int "v"
+            vd = F.double "vd"
             aggs =
                 [ "vsum" F..= F.sum v
                 , "vmean" F..= F.mean vd
@@ -132,19 +132,19 @@ momentFrame n =
 momentResult ::
     ([T.Text] -> DD.DataFrame -> DD.GroupedDataFrame) -> Int -> DD.DataFrame
 momentResult grp n =
-    let dv1 = F.toDouble (F.col @Int "v1")
-        dv2 = F.toDouble (F.col @Int "v2")
+    let dv1 = F.toDouble (F.int "v1")
+        dv2 = F.toDouble (F.int "v2")
         df =
             D.derive "v2v2" (dv2 * dv2) $
                 D.derive "v1v1" (dv1 * dv1) $
                     D.derive "v1v2" (dv1 * dv2) (momentFrame n)
         aggs =
-            [ "n" F..= F.count (F.col @Int "v1")
+            [ "n" F..= F.count (F.int "v1")
             , "sx" F..= F.sum dv1
             , "sy" F..= F.sum dv2
-            , "sxy" F..= F.sum (F.col @Double "v1v2")
-            , "sxx" F..= F.sum (F.col @Double "v1v1")
-            , "syy" F..= F.sum (F.col @Double "v2v2")
+            , "sxy" F..= F.sum (F.double "v1v2")
+            , "sxx" F..= F.sum (F.double "v1v1")
+            , "syy" F..= F.sum (F.double "v2v2")
             ]
      in D.aggregate aggs (grp ["id2", "id4"] df)
 
@@ -176,7 +176,7 @@ directGroupAggMatches :: Int -> Test
 directGroupAggMatches n =
     TestCase $
         let df = caseFrame n
-            v = F.col @Int "v"
+            v = F.int "v"
             aggs =
                 [ "vsum" F..= F.sum v
                 , "vcount" F..= F.count v
@@ -222,7 +222,7 @@ skewedTextParity filtered = TestCase $ do
             | otherwise = T.pack ("k" ++ show ((i * 7919) `mod` 40000))
         df0 =
             D.fromColumns [("k", packedCol (map key [0 .. n - 1])), mkInt "v" [0 .. n - 1]]
-        df = if filtered then D.filter (F.col @T.Text "k" ./=. "") df0 else df0
+        df = if filtered then D.filter (F.text "k" ./=. "") df0 else df0
     assertBool
         "skewed packed text: par == seq"
         (sameGrouping (groupByPar ["k"] df) (groupBySeq ["k"] df))

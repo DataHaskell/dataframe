@@ -61,10 +61,10 @@ testGBMRegression = TestCase $ do
         gb =
             fit
                 defaultGBConfig{gbNEstimators = 60, gbMaxDepth = 2}
-                (F.col @Double "y")
+                (F.double "y")
                 df
         preds = interpD df (predict gb)
-        truth = interpD df (F.col @Double "y")
+        truth = interpD df (F.double "y")
         err = sum (zipWith (\p t -> (p - t) ^ (2 :: Int)) preds truth) / 12
     assertBool "GBM fits training data well" (err < 0.05)
     assertBool "trainScore recorded" (VU.length (gbTrainScore gb) == 60)
@@ -76,13 +76,13 @@ testGBMStaged = TestCase $ do
                 [ ("x", DI.fromList ([1 .. 8] :: [Double]))
                 , ("y", DI.fromList ([1 .. 8] :: [Double]))
                 ]
-        gb = fit defaultGBConfig{gbNEstimators = 10} (F.col @Double "y") df
+        gb = fit defaultGBConfig{gbNEstimators = 10} (F.double "y") df
     assertBool "stage 0 valid" (isJust (gbExprAtStage 0 gb))
     assertBool "out of range stage rejected" (isNothing (gbExprAtStage 11 gb))
 
 testAdaBoost :: Test
 testAdaBoost = TestCase $ do
-    let m = fit defaultAdaBoostConfig (F.col @Int "label") clsDF
+    let m = fit defaultAdaBoostConfig (F.int "label") clsDF
         preds = interpI clsDF (predict m)
     assertEqual "AdaBoost separates" [0, 0, 0, 0, 1, 1, 1, 1] preds
 
@@ -91,7 +91,7 @@ testGMM = TestCase $ do
     let m =
             fit
                 defaultGMMConfig{gmmK = 2, gmmSeed = 1}
-                [F.col @Double "a", F.col @Double "b"]
+                [F.double "a", F.double "b"]
                 blobs
         assigns = interpI blobs (predict m)
     assertBool "GMM converged" (gmmConverged m)
@@ -101,7 +101,7 @@ testGMM = TestCase $ do
     let m2 =
             fit
                 defaultGMMConfig{gmmK = 2, gmmSeed = 1}
-                [F.col @Double "a", F.col @Double "b"]
+                [F.double "a", F.double "b"]
                 blobs
     assertEqual "GMM deterministic" (gmmMeans m) (gmmMeans m2)
     assertBool "BIC finite" (not (isNaN (gmmBIC m)) && not (isInfinite (gmmBIC m)))
@@ -113,13 +113,13 @@ testDBSCAN = TestCase $ do
                 [ ("a", DI.fromList ([0, 0.1, 0.2, 5, 5.1, 5.2, 50] :: [Double]))
                 , ("b", DI.fromList ([0, 0.1, 0.0, 5, 5.0, 5.1, 50] :: [Double]))
                 ]
-        m = fit (DBSCANConfig 1.0 2) [F.col @Double "a", F.col @Double "b"] df
+        m = fit (DBSCANConfig 1.0 2) [F.double "a", F.double "b"] df
     assertEqual "two clusters" 2 (dbNClusters m)
     assertEqual "last point is noise" (-1) (VU.last (dbLabels m))
     let surrogate =
             dbscanSurrogateExpr
                 D.defaultTreeConfig
-                [F.col @Double "a", F.col @Double "b"]
+                [F.double "a", F.double "b"]
                 m
                 df
         preds = interpI df surrogate
@@ -142,11 +142,11 @@ testGridSearch = TestCase $ do
             let mdl =
                     fit
                         (LinearConfig (Ridge alpha) defaultSolverConfig)
-                        (F.col @Double "y")
+                        (F.double "y")
                         (train :: D.DataFrame)
              in r2
                     (VU.fromList (interpD test' (predict mdl)))
-                    (VU.fromList (interpD test' (F.col @Double "y")))
+                    (VU.fromList (interpD test' (F.double "y")))
         res = gridSearch 4 7 [0.0, 1.0, 100.0] score df
     assertBool "best score high" (gsBestScore res > 0.99)
     assertEqual "all configs scored" 3 (length (gsAll res))
@@ -179,10 +179,10 @@ testGBMCalibration = TestCase $ do
                     , gbLearningRate = 0.1
                     , gbMaxDepth = 3
                     }
-                (F.col @Double "label")
+                (F.double "label")
                 sigmoidCurveDF
         probs = interpD sigmoidCurveDF (gbProbaExpr m)
-        truth = map trueP (interpD sigmoidCurveDF (F.col @Double "x"))
+        truth = map trueP (interpD sigmoidCurveDF (F.double "x"))
         err =
             sum (zipWith (\p t -> abs (p - t)) probs truth)
                 / fromIntegral (length probs)
@@ -214,10 +214,10 @@ gbmData =
 testGBMBaseScore :: Test
 testGBMBaseScore = TestCase $ do
     let cfg = defaultGBConfig{gbNEstimators = 20, gbMaxDepth = 2}
-        ys = interpD gbmData (F.col @Double "y")
+        ys = interpD gbmData (F.double "y")
         mean = sum ys / fromIntegral (length ys)
-        plain = fit cfg (F.col @Double "y") gbmData
-        based = fit cfg{gbBaseScore = Just (F.lit mean)} (F.col @Double "y") gbmData
+        plain = fit cfg (F.double "y") gbmData
+        based = fit cfg{gbBaseScore = Just (F.lit mean)} (F.double "y") gbmData
         gap =
             maximum
                 ( zipWith
@@ -229,15 +229,15 @@ testGBMBaseScore = TestCase $ do
         ("base-score model matches the default, gap " ++ show gap)
         (gap < 1e-9)
     -- A per-row base is part of the prediction: shifting it shifts every score.
-    let shifted = fit cfg{gbBaseScore = Just (F.col @Double "z")} (F.col @Double "y") gbmData
+    let shifted = fit cfg{gbBaseScore = Just (F.double "z")} (F.double "y") gbmData
         noTrees =
             fit
-                cfg{gbNEstimators = 0, gbBaseScore = Just (F.col @Double "z")}
-                (F.col @Double "y")
+                cfg{gbNEstimators = 0, gbBaseScore = Just (F.double "z")}
+                (F.double "y")
                 gbmData
     assertEqual
         "zero trees predict the base"
-        (interpD gbmData (F.col @Double "z"))
+        (interpD gbmData (F.double "z"))
         (interpD gbmData (predict noTrees))
     assertBool
         "base model still fits"
@@ -248,7 +248,7 @@ testGBMSubsample :: Test
 testGBMSubsample = TestCase $ do
     let cfg = defaultGBConfig{gbNEstimators = 20, gbMaxDepth = 2}
         scores :: GBConfig -> [Double]
-        scores c = interpD gbmData (predict (fit c (F.col @Double "y") gbmData))
+        scores c = interpD gbmData (predict (fit c (F.double "y") gbmData))
     assertEqual
         "subsample 1 / colsample 1 reproduce the default"
         (scores cfg)

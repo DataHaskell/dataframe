@@ -41,7 +41,7 @@ sales = D.fromColumns
     , "y" =: [2 * x + 1 | x <- [1, 2, 3, 4, 5, 6]] :: [Double]
     ]
 
-model = fit defaultLinearConfig (D.col @Double "y") sales
+model = fit defaultLinearConfig (D.double "y") sales
 putStrLn (D.prettyPrint (predict model))
 ```
 
@@ -115,7 +115,7 @@ flowers = D.fromColumns
     , "species"      =: [0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2] :: [Double]
     ]
 
-tree = fit defaultTreeConfig (D.col @Double "species") flowers
+tree = fit defaultTreeConfig (D.double "species") flowers
 putStrLn (D.prettyPrint (predict tree))
 ```
 
@@ -180,7 +180,7 @@ curve = D.fromColumns
 
 sr = fit
         defaultSRConfig { srSeed = 3, srGenerations = 50, srPopSize = 300, srUnaryOps = [] }
-        (D.col @Double "y") curve
+        (D.double "y") curve
 putStrLn (D.prettyPrint (srBest sr) ++ "   (mse " ++ show (srBestMSE sr) ++ ")")
 ```
 
@@ -214,7 +214,7 @@ the scaler back in to recover a raw-column model:
 ```haskell
 scaler      = standardScaler ["x"] sales
 scaledSales = applyTransform (scalerTransform scaler) sales
-scaledModel = fit defaultLinearConfig (D.col @Double "y") scaledSales
+scaledModel = fit defaultLinearConfig (D.double "y") scaledSales
 
 deployed = compileThrough (scalerTransform scaler) (predict scaledModel)
 putStr (unlines
@@ -241,7 +241,7 @@ The folded expression is a function of the raw `x` alone, so it scores the
 original frame with no preprocessing step at inference time.
 
 ```haskell
-evaluate rmse deployed (D.col @Double "y") sales
+evaluate rmse deployed (D.double "y") sales
 ```
 
 > <!-- scripths:mime text/plain -->
@@ -278,10 +278,10 @@ realistic, not the `1e-15` of an in-sample toy:
 import System.Random (mkStdGen)
 
 (train, test) = D.randomSplit (mkStdGen 7) 0.75 clean
-heldModel     = fit defaultLinearConfig (D.col @Double "y") train
+heldModel     = fit defaultLinearConfig (D.double "y") train
 putStr (unlines
-    [ "held-out R^2:  " ++ show (evaluate r2   (predict heldModel) (D.col @Double "y") test)
-    , "held-out RMSE: " ++ show (evaluate rmse (predict heldModel) (D.col @Double "y") test) ])
+    [ "held-out R^2:  " ++ show (evaluate r2   (predict heldModel) (D.double "y") test)
+    , "held-out RMSE: " ++ show (evaluate rmse (predict heldModel) (D.double "y") test) ])
 ```
 
 > <!-- scripths:mime text/plain -->
@@ -293,8 +293,8 @@ fits on each training fold and scores the prediction expression on the held-out
 fold. You pass a `train -> Expr` closure, so it works with any model:
 
 ```haskell
-cv = crossValidate 5 0 rmse (D.col @Double "y")
-         (\tr -> predict (fit defaultLinearConfig (D.col @Double "y") tr))
+cv = crossValidate 5 0 rmse (D.double "y")
+         (\tr -> predict (fit defaultLinearConfig (D.double "y") tr))
          clean
 putStrLn ("5-fold RMSE: " ++ show (sum cv / fromIntegral (length cv)))
 ```
@@ -312,8 +312,8 @@ with a scikit-learn-style layout (per-class precision/recall/F1/support plus
 macro/weighted averages):
 
 ```haskell
-clf = fit defaultLogisticConfig (D.col @Double "species") flowers
-putStr (show (classificationReportExpr (predict clf) (D.col @Double "species") flowers))
+clf = fit defaultLogisticConfig (D.double "species") flowers
+putStr (show (classificationReportExpr (predict clf) (D.double "species") flowers))
 ```
 
 > <!-- scripths:mime text/plain -->
@@ -334,7 +334,7 @@ expression over the raw columns for export:
 ```haskell
 features = ["petal_length", "petal_width"]
 scalerF  = standardScaler features flowers
-pca      = fit (PCAConfig (NComp 2) True) (map (D.col @Double) features) flowers
+pca      = fit (PCAConfig (NComp 2) True) (map (D.double) features) flowers
 pipeline = scalerTransform scalerF <> pcaTransform pca
 
 D.columnNames (applyTransform pipeline flowers)
@@ -372,17 +372,17 @@ interactions = D.fromColumns
     as = [-1, -1, 1, 1, -2, 2, -2, 2] :: [Double]
     bs = [-1, 1, -1, 1, -2, -2, 2, 2] :: [Double]
 
-rawModel = fit defaultLinearConfig (D.col @Double "y") interactions
-feature  = fit defaultSynthesisConfig (D.col @Double "y") interactions
+rawModel = fit defaultLinearConfig (D.double "y") interactions
+feature  = fit defaultSynthesisConfig (D.double "y") interactions
 withFeat = D.derive "synth" (predict feature) interactions
 fitModel =
-    fit defaultLinearConfig (D.col @Double "y")
+    fit defaultLinearConfig (D.double "y")
         (D.select ["synth", "y"] withFeat)
 
 putStr (unlines
     [ "discovered feature: " ++ D.prettyPrint (predict feature)
-    , "raw linear R^2:     " ++ show (evaluate r2 (predict rawModel) (D.col @Double "y") interactions)
-    , "with synth feature: " ++ show (evaluate r2 (predict fitModel) (D.col @Double "y") withFeat)
+    , "raw linear R^2:     " ++ show (evaluate r2 (predict rawModel) (D.double "y") interactions)
+    , "with synth feature: " ++ show (evaluate r2 (predict fitModel) (D.double "y") withFeat)
     ])
 ```
 

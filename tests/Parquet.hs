@@ -99,7 +99,7 @@ allTypesPlainSnappy = testBothReadParquetPaths $ \readParquet ->
     TestCase
         ( assertEqual
             "allTypesPlainSnappy"
-            (D.filterBy (`elem` [6, 7]) (F.col @Int32 "id") allTypes)
+            (D.filterBy (`elem` [6, 7]) (F.int32 "id") allTypes)
             (unsafePerformIO (readParquet "./tests/data/alltypes_plain.snappy.parquet"))
         )
 
@@ -108,7 +108,7 @@ allTypesDictionary = testBothReadParquetPaths $ \readParquet ->
     TestCase
         ( assertEqual
             "allTypesPlainSnappy"
-            (D.filterBy (`elem` [0, 1]) (F.col @Int32 "id") allTypes)
+            (D.filterBy (`elem` [0, 1]) (F.int32 "id") allTypes)
             (unsafePerformIO (readParquet "./tests/data/alltypes_dictionary.parquet"))
         )
 
@@ -154,7 +154,7 @@ predicateWithOpts =
                         , D.predicate =
                             Just
                                 ( F.geq
-                                    (F.col @Int32 "id")
+                                    (F.int32 "id")
                                     (F.lit (6 :: Int32))
                                 )
                         }
@@ -177,7 +177,7 @@ predicateUsesNonSelectedColumnWithOpts =
                         , D.predicate =
                             Just
                                 ( F.geq
-                                    (F.col @Int32 "id")
+                                    (F.int32 "id")
                                     (F.lit (6 :: Int32))
                                 )
                         }
@@ -253,7 +253,7 @@ predicateWithOptsAcrossFiles =
                             , D.predicate =
                                 Just
                                     ( F.geq
-                                        (F.col @Int32 "id")
+                                        (F.int32 "id")
                                         (F.lit (6 :: Int32))
                                     )
                             }

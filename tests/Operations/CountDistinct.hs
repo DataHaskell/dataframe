@@ -171,8 +171,8 @@ viaAggregate =
                 expected
                 ( df
                     & D.groupBy ["g"]
-                    & D.aggregate [F.countDistinct (F.col @Int "x") `as` "u"]
-                    & D.sortBy [D.Asc (F.col @Int "g")]
+                    & D.aggregate [F.countDistinct (F.int "x") `as` "u"]
+                    & D.sortBy [D.Asc (F.int "g")]
                 )
             )
 
@@ -196,8 +196,8 @@ viaAggregateInt32Key =
                 expected
                 ( df
                     & D.groupBy ["g"]
-                    & D.aggregate [F.countDistinct (F.col @Int "x") `as` "u"]
-                    & D.sortBy [D.Asc (F.col @Int32 "g")]
+                    & D.aggregate [F.countDistinct (F.int "x") `as` "u"]
+                    & D.sortBy [D.Asc (F.int32 "g")]
                 )
             )
 

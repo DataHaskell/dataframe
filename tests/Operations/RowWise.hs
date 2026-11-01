@@ -80,7 +80,7 @@ tests =
             (\n -> [if b /= 0 then 2 * (a `div` b) else 0 | (a, b) <- zip (xs n) (ys n)])
         , rows
             "a null in the branch not chosen is ignored"
-            (If (x .>. F.lit 0) (F.col @(Maybe Int) "m") (F.lit (Just 0)))
+            (If (x .>. F.lit 0) (F.maybeInt "m") (F.lit (Just 0)))
             (\n -> [if a > 0 then m else Just 0 | (a, m) <- zip (xs n) (maybes n)])
         , rows
             "nested conditions"
@@ -103,14 +103,14 @@ tests =
             )
         , rows
             "text branches"
-            (If (x .>. F.lit 0) (F.lift T.toUpper (F.col @T.Text "name")) (F.lit "none"))
+            (If (x .>. F.lit 0) (F.lift T.toUpper (F.text "name")) (F.lit "none"))
             (\n -> [if a > 0 then T.toUpper t else "none" | (a, t) <- zip (xs n) (names n)])
         , rows
             "nullable branches"
             ( If
                 (x .>. F.lit 0)
-                (F.lift (fmap (+ 1)) (F.col @(Maybe Int) "m"))
-                (F.col @(Maybe Int) "m")
+                (F.lift (fmap (+ 1)) (F.maybeInt "m"))
+                (F.maybeInt "m")
             )
             (\n -> [if a > 0 then fmap (+ 1) m else m | (a, m) <- zip (xs n) (maybes n)])
         , rows
@@ -132,7 +132,7 @@ tests =
                     ( either
                         (const True)
                         (const False)
-                        (eval 60 (If (F.lit True) x (F.col @Int "absent")))
+                        (eval 60 (If (F.lit True) x (F.int "absent")))
                     )
                 )
             , TestCase
@@ -141,7 +141,7 @@ tests =
                     ( either
                         (const True)
                         (const False)
-                        (eval 60 (If (F.col @Bool "flag") x y))
+                        (eval 60 (If (F.bool "flag") x y))
                     )
                 )
             ]

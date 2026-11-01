@@ -28,20 +28,20 @@ model :: Expr Double
 model =
     F.lit 0.1
         * F.ifThenElse
-            (F.toDouble (F.col @Int "Age") .<=. F.lit 40.5)
+            (F.toDouble (F.int "Age") .<=. F.lit 40.5)
             ( F.ifThenElse
-                (F.col @T.Text "Class" ./=. F.lit "Business")
+                (F.text "Class" ./=. F.lit "Business")
                 (F.lit (-0.859))
                 (F.lit 0.31)
             )
             ( F.ifThenElse
-                (F.toDouble (F.col @Int "Departure/Arrival time convenient") .<=. F.lit 2.5)
+                (F.toDouble (F.int "Departure/Arrival time convenient") .<=. F.lit 2.5)
                 (F.lit 1.2)
-                (F.col @Double "Arrival Delay in Minutes" / F.lit 10)
+                (F.double "Arrival Delay in Minutes" / F.lit 10)
             )
         + F.lit 0.1
             * F.ifThenElse
-                (F.col @T.Text "Class" ./=. F.lit "Eco")
+                (F.text "Class" ./=. F.lit "Eco")
                 (F.lit 0.5)
                 (F.lit (-0.25))
 
@@ -50,7 +50,7 @@ scores e =
     either
         (error . show)
         id
-        (D.columnAsUnboxedVector (F.col @Double "s") (D.derive "s" e frame))
+        (D.columnAsUnboxedVector (F.double "s") (D.derive "s" e frame))
 
 testShowRoundTrip :: Test
 testShowRoundTrip = TestCase $ case parseShownAs @Double (show model) of

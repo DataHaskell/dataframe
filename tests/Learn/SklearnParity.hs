@@ -59,7 +59,7 @@ interpD df e = case interpret @Double df e of
     Left err -> error (show err)
 
 colDoubles :: D.DataFrame -> T.Text -> [Double]
-colDoubles df name = interpD df (F.col @Double name)
+colDoubles df name = interpD df (F.double name)
 
 closeAll :: Double -> [Double] -> [Double] -> Bool
 closeAll tol a b =
@@ -74,7 +74,7 @@ testOLSParity :: Test
 testOLSParity = TestCase $ do
     g <- loadGolden
     df <- D.readCsv "data/ml/regression.csv"
-    let m = fit defaultLinearConfig (F.col @Double "target") df
+    let m = fit defaultLinearConfig (F.double "target") df
         goldCoef = asNums (g .! "ols" .! "coef")
         goldB = asNum (g .! "ols" .! "intercept")
     assertBool
@@ -87,7 +87,7 @@ testRidgeParity = TestCase $ do
     g <- loadGolden
     df <- D.readCsv "data/ml/regression.csv"
     let m =
-            fit (LinearConfig (Ridge 1.0) defaultSolverConfig) (F.col @Double "target") df
+            fit (LinearConfig (Ridge 1.0) defaultSolverConfig) (F.double "target") df
         goldCoef = asNums (g .! "ridge" .! "coef")
     assertBool
         "Ridge coefficients match sklearn"
@@ -99,7 +99,7 @@ testPCAParity = TestCase $ do
     df <- D.readCsv "data/ml/iris.csv"
     let feats =
             map
-                (F.col @Double)
+                (F.double)
                 ["sepal_length", "sepal_width", "petal_length", "petal_width"]
         m = fit (PCAConfig (NComp 2) False) feats df
         goldEvr = asNums (g .! "pca" .! "evr")
@@ -116,7 +116,7 @@ testLogisticIrisParity :: Test
 testLogisticIrisParity = TestCase $ do
     g <- loadGolden
     df <- D.readCsv "data/ml/iris.csv"
-    let m = fit defaultLogisticConfig (F.col @Double "species") df
+    let m = fit defaultLogisticConfig (F.double "species") df
         preds = interpD df (predict m)
         truth = colDoubles df "species"
         acc = accuracyOf preds truth
@@ -129,7 +129,7 @@ testSVCParity :: Test
 testSVCParity = TestCase $ do
     g <- loadGolden
     df <- D.readCsv "data/ml/iris_binary.csv"
-    let m = fit defaultSVCConfig (F.col @Double "label") df
+    let m = fit defaultSVCConfig (F.double "label") df
         preds = interpD df (predict m)
         truth = colDoubles df "label"
         acc = accuracyOf preds truth
@@ -145,7 +145,7 @@ testGBMParity = TestCase $ do
     let m =
             fit
                 defaultGBConfig{gbLoss = LogisticDeviance, gbNEstimators = 100}
-                (F.col @Double "label")
+                (F.double "label")
                 df
         probs = interpD df (gbProbaExpr m)
         preds = map (\p -> if p > 0.5 then 1 else 0) probs
@@ -163,7 +163,7 @@ testKMeansParity = TestCase $ do
     let m =
             fit
                 defaultKMeansConfig{kmK = 3, kmNInit = 10, kmSeed = 0}
-                [F.col @Double "x", F.col @Double "y"]
+                [F.double "x", F.double "y"]
                 df
         gold = asNum (g .! "kmeans" .! "inertia")
     assertBool

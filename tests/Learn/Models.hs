@@ -72,13 +72,13 @@ clsDF =
 
 testOLS :: Test
 testOLS = TestCase $ do
-    let m = fit defaultLinearConfig (F.col @Double "y") regDF
+    let m = fit defaultLinearConfig (F.double "y") regDF
     assertBool
         "OLS coef ~ [2,-3]"
         (and (zipWith (close 1e-6) (VU.toList (regCoef m)) [2, -3]))
     assertBool "OLS intercept ~ 1" (close 1e-6 (regIntercept m) 1)
     let preds = interpD regDF (predict m)
-        truth = interpD regDF (F.col @Double "y")
+        truth = interpD regDF (F.double "y")
     assertBool "OLS expr matches y" (and (zipWith (close 1e-6) preds truth))
 
 -- | Regression frame whose feature x is stored as Int.
@@ -92,7 +92,7 @@ intFeatureDF =
 -- | A non-Double feature column is a fit-time error, not a silent coercion.
 testFitRequiresDouble :: Test
 testFitRequiresDouble = TestCase $ do
-    let m = fit defaultLinearConfig (F.col @Double "y") intFeatureDF
+    let m = fit defaultLinearConfig (F.double "y") intFeatureDF
     result <-
         try (evaluate (VU.sum (regCoef m))) :: IO (Either DataFrameException Double)
     case result of
@@ -113,7 +113,7 @@ nullableFeatureDF =
 -- | Fitting rejects a nullable input column with an actionable error.
 testFitRejectsNullable :: Test
 testFitRejectsNullable = TestCase $ do
-    let m = fit defaultLinearConfig (F.col @Double "y") nullableFeatureDF
+    let m = fit defaultLinearConfig (F.double "y") nullableFeatureDF
     result <-
         try (evaluate (VU.sum (regCoef m))) :: IO (Either DataFrameException Double)
     case result of
@@ -128,14 +128,14 @@ testFitRejectsNullable = TestCase $ do
 testRidgeShrinks :: Test
 testRidgeShrinks = TestCase $ do
     let r0 =
-            fit (LinearConfig (Ridge 0.01) defaultSolverConfig) (F.col @Double "y") regDF
-        r1 = fit (LinearConfig (Ridge 100) defaultSolverConfig) (F.col @Double "y") regDF
+            fit (LinearConfig (Ridge 0.01) defaultSolverConfig) (F.double "y") regDF
+        r1 = fit (LinearConfig (Ridge 100) defaultSolverConfig) (F.double "y") regDF
         norm = VU.sum . VU.map abs . regCoef
     assertBool "stronger ridge shrinks coefficients" (norm r1 < norm r0)
 
 testLogistic :: Test
 testLogistic = TestCase $ do
-    let m = fit defaultLogisticConfig (F.col @Int "label") clsDF
+    let m = fit defaultLogisticConfig (F.int "label") clsDF
         dec = predict m
         preds = interpI clsDF dec
         truth = [0, 0, 0, 0, 1, 1, 1, 1]
@@ -155,22 +155,22 @@ testLogisticEnumLabel = TestCase $ do
 
 testSVC :: Test
 testSVC = TestCase $ do
-    let m = fit defaultSVCConfig (F.col @Int "label") clsDF
+    let m = fit defaultSVCConfig (F.int "label") clsDF
         preds = interpI clsDF (predict m)
     assertEqual "linear SVC separates" [0, 0, 0, 0, 1, 1, 1, 1] preds
 
 testRegressionTree :: Test
 testRegressionTree = TestCase $ do
-    let m = fit defaultRegTreeConfig (F.col @Double "y") regDF
+    let m = fit defaultRegTreeConfig (F.double "y") regDF
         preds = interpD regDF (predict m)
-        truth = interpD regDF (F.col @Double "y")
+        truth = interpD regDF (F.double "y")
         sse = sum (zipWith (\p t -> (p - t) ^ (2 :: Int)) preds truth)
     assertBool "regression tree reduces error" (sse < 200)
     assertBool "tree has leaves" (dtrNLeaves m >= 2)
 
 testClassifierStats :: Test
 testClassifierStats = TestCase $ do
-    let m = fit D.defaultTreeConfig (F.col @Int "label") clsDF
+    let m = fit D.defaultTreeConfig (F.int "label") clsDF
     assertBool "classifier depth >= 1" (dtcDepth m >= 1)
 
 testPCA :: Test
@@ -178,7 +178,7 @@ testPCA = TestCase $ do
     let m =
             fit
                 (PCAConfig (NComp 2) False)
-                [F.col @Double "x1", F.col @Double "x2"]
+                [F.double "x1", F.double "x2"]
                 regDF
         ratio = VU.toList (pcaExplainedVarianceRatio m)
     assertBool "explained ratio sums ~1" (close 1e-9 (sum ratio) 1)
@@ -199,11 +199,11 @@ testKMeans = TestCase $ do
                 , ("b", DI.fromList ([0, 0.1, 0, 10, 10, 10.1] :: [Double]))
                 ]
         cfg = defaultKMeansConfig{kmK = 2, kmNInit = 5, kmSeed = 1}
-        m = fit cfg [F.col @Double "a", F.col @Double "b"] df
+        m = fit cfg [F.double "a", F.double "b"] df
         labels = VU.toList (kmLabels m)
     assertBool "two blobs split" (VU.head (kmLabels m) /= VU.last (kmLabels m))
     assertEqual "two centers" 2 (V.length (kmCenters m))
-    let m2 = fit cfg [F.col @Double "a", F.col @Double "b"] df
+    let m2 = fit cfg [F.double "a", F.double "b"] df
     assertEqual "kmeans deterministic" (kmCenters m) (kmCenters m2)
     let assigns = interpI df (predict m)
     assertEqual "assign expr matches labels" labels assigns
@@ -213,7 +213,7 @@ testTransformCompose = TestCase $ do
     let scaler = standardScaler ["x1", "x2"] regDF
         t = scalerTransform scaler
         scaledDf = applyTransform t regDF
-        m = fit defaultLinearConfig (F.col @Double "y") scaledDf
+        m = fit defaultLinearConfig (F.double "y") scaledDf
         composed = compileThrough t (predict m)
         viaCompose = interpD regDF composed
         viaStepwise = interpD scaledDf (predict m)

@@ -91,7 +91,7 @@ rightTree = Leaf "B"
 
 -- x <= 2.5: True for idx 0,1 (→ left); False for idx 2,3 (→ right)
 splitCond :: Expr Bool
-splitCond = F.col @Double "x" .<= F.lit (2.5 :: Double)
+splitCond = F.double "x" .<= F.lit (2.5 :: Double)
 
 -- Pre-computed care points for the full fixture
 carePoints3 :: [CarePoint]
@@ -216,14 +216,14 @@ partitionUnion = TestCase $ do
 countErrorsAllCorrect :: Test
 countErrorsAllCorrect = TestCase $ do
     let cps = [CarePoint 0 GoLeft, CarePoint 1 GoRight]
-        cond = F.col @Double "x" .<= F.lit (1.5 :: Double)
+        cond = F.double "x" .<= F.lit (1.5 :: Double)
         errs = countCarePointErrors cond fixtureDF cps
     assertEqual "condition routes all care points correctly" 0 errs
 
 countErrorsAllWrong :: Test
 countErrorsAllWrong = TestCase $ do
     let cps = [CarePoint 0 GoLeft, CarePoint 1 GoRight]
-        cond = F.col @Double "x" .> F.lit (1.5 :: Double)
+        cond = F.double "x" .> F.lit (1.5 :: Double)
         errs = countCarePointErrors cond fixtureDF cps
     assertEqual "reversed condition misroutes all care points" 2 errs
 
@@ -260,8 +260,8 @@ sepDF =
 -- Candidate conditions that bracket the decision boundary
 sepConds :: [Expr Bool]
 sepConds =
-    [ F.col @Double "x" .<= F.lit (10.5 :: Double)
-    , F.col @Double "x" .> F.lit (10.5 :: Double)
+    [ F.double "x" .<= F.lit (10.5 :: Double)
+    , F.double "x" .> F.lit (10.5 :: Double)
     ]
 
 testCfg :: TreeConfig
@@ -276,7 +276,7 @@ testCfg =
 wrongStump :: Tree T.Text
 wrongStump =
     Branch
-        (F.col @Double "x" .> F.lit (10.5 :: Double))
+        (F.double "x" .> F.lit (10.5 :: Double))
         (Leaf "pos")
         (Leaf "neg")
 
@@ -324,7 +324,7 @@ taoConvergesPureLabels = TestCase $ do
 
 taoDeadBranchNoCrash :: Test
 taoDeadBranchNoCrash = TestCase $ do
-    let badCond = F.col @Double "x" .<= F.lit (0.5 :: Double)
+    let badCond = F.double "x" .<= F.lit (0.5 :: Double)
         indices = V.enumFromN 0 20
         initTree = Branch badCond (Leaf "pos") (Leaf "neg") :: Tree T.Text
         result =
@@ -348,20 +348,20 @@ taoRecoversSingleObliqueDerived :: Test
 taoRecoversSingleObliqueDerived = TestCase $ do
     let labelExpr =
             F.ifThenElse
-                ((F.col @Double "x" + F.col @Double "y") .<= F.lit (4.5 :: Double))
+                ((F.double "x" + F.double "y") .<= F.lit (4.5 :: Double))
                 (F.lit ("pos" :: T.Text))
                 (F.lit ("neg" :: T.Text))
         df = D.derive @T.Text "label" labelExpr gridBaseDF
         indices = V.enumFromN 0 16
         initTree =
             Branch
-                (F.col @Double "x" .<= F.lit (2.5 :: Double))
+                (F.double "x" .<= F.lit (2.5 :: Double))
                 (Leaf "pos")
                 (Leaf "neg") ::
                 Tree T.Text
         conds =
-            [ (F.col @Double "x" + F.col @Double "y") .<= F.lit (4.5 :: Double)
-            , (F.col @Double "x" + F.col @Double "y") .> F.lit (4.5 :: Double)
+            [ (F.double "x" + F.double "y") .<= F.lit (4.5 :: Double)
+            , (F.double "x" + F.double "y") .> F.lit (4.5 :: Double)
             ]
         cfg = defaultTreeConfig{taoIterations = 5, expressionPairs = 4, minLeafSize = 1}
         result = taoOptimize @T.Text cfg "label" conds df indices initTree
@@ -375,10 +375,10 @@ taoRecoversNestedObliqueDerived :: Test
 taoRecoversNestedObliqueDerived = TestCase $ do
     let labelExpr =
             F.ifThenElse
-                ((F.col @Double "x" + F.col @Double "y") .<= F.lit (4.5 :: Double))
+                ((F.double "x" + F.double "y") .<= F.lit (4.5 :: Double))
                 (F.lit ("low" :: T.Text))
                 ( F.ifThenElse
-                    ((F.col @Double "x" - F.col @Double "y") .<= F.lit (0.5 :: Double))
+                    ((F.double "x" - F.double "y") .<= F.lit (0.5 :: Double))
                     (F.lit "mid")
                     (F.lit "high")
                 )
@@ -386,19 +386,19 @@ taoRecoversNestedObliqueDerived = TestCase $ do
         indices = V.enumFromN 0 16
         initTree =
             Branch
-                (F.col @Double "x" .<= F.lit (1.5 :: Double))
+                (F.double "x" .<= F.lit (1.5 :: Double))
                 (Leaf "low")
                 ( Branch
-                    (F.col @Double "y" .<= F.lit (3.5 :: Double))
+                    (F.double "y" .<= F.lit (3.5 :: Double))
                     (Leaf "mid")
                     (Leaf "high")
                 ) ::
                 Tree T.Text
         conds =
-            [ (F.col @Double "x" + F.col @Double "y") .<= F.lit (4.5 :: Double)
-            , (F.col @Double "x" + F.col @Double "y") .> F.lit (4.5 :: Double)
-            , (F.col @Double "x" - F.col @Double "y") .<= F.lit (0.5 :: Double)
-            , (F.col @Double "x" - F.col @Double "y") .> F.lit (0.5 :: Double)
+            [ (F.double "x" + F.double "y") .<= F.lit (4.5 :: Double)
+            , (F.double "x" + F.double "y") .> F.lit (4.5 :: Double)
+            , (F.double "x" - F.double "y") .<= F.lit (0.5 :: Double)
+            , (F.double "x" - F.double "y") .> F.lit (0.5 :: Double)
             ]
         cfg = defaultTreeConfig{taoIterations = 5, expressionPairs = 4, minLeafSize = 1}
         result = taoOptimize @T.Text cfg "label" conds df indices initTree
@@ -413,17 +413,17 @@ obliqueAxisAlignedFixture ::
 obliqueAxisAlignedFixture =
     let labelExpr =
             F.ifThenElse
-                ((F.col @Double "x" + F.col @Double "y") .<= F.lit (4.5 :: Double))
+                ((F.double "x" + F.double "y") .<= F.lit (4.5 :: Double))
                 (F.lit ("pos" :: T.Text))
                 (F.lit ("neg" :: T.Text))
         df = D.derive @T.Text "label" labelExpr gridBaseDF
         indices = V.enumFromN 0 16
         axisConds =
-            [F.col @Double "x" .<= F.lit (t :: Double) | t <- [1.5, 2.5, 3.5]]
-                ++ [F.col @Double "y" .<= F.lit (t :: Double) | t <- [1.5, 2.5, 3.5]]
+            [F.double "x" .<= F.lit (t :: Double) | t <- [1.5, 2.5, 3.5]]
+                ++ [F.double "y" .<= F.lit (t :: Double) | t <- [1.5, 2.5, 3.5]]
         initTree =
             Branch
-                (F.col @Double "x" .<= F.lit (2.5 :: Double))
+                (F.double "x" .<= F.lit (2.5 :: Double))
                 (Leaf "pos")
                 (Leaf "neg") ::
                 Tree T.Text
@@ -537,7 +537,7 @@ nullValueRoutesFalseTest = TestCase $ do
                         (V.fromList [Nothing, Just (5.0 :: Double)] :: V.Vector (Maybe Double))
                     )
                 ]
-        cond = F.fromMaybe False (F.col @(Maybe Double) "x" .<= F.lit (6.0 :: Double))
+        cond = F.fromMaybe False (F.maybeDouble "x" .<= F.lit (6.0 :: Double))
         (lft, rgt) = partitionIndices cond df (V.fromList [0, 1])
     assertBool "null row (idx 0) routes to right (false) partition" (0 `V.elem` rgt)
     assertBool "Just 5.0 <= 6.0 routes to left (true) partition" (1 `V.elem` lft)
@@ -597,7 +597,7 @@ missingnessCondsTest = TestCase $ do
         [c] ->
             assertBool
                 "cond is isNothing x"
-                (eqExpr c (F.isNothing (F.col @(Maybe Double) "x")))
+                (eqExpr c (F.isNothing (F.maybeDouble "x")))
         _ -> assertFailure "expected exactly one condition"
     assertBool
         "no missingness conds for a non-nullable DataFrame"
@@ -609,7 +609,7 @@ poolContainsMissingnessTest =
         assertBool
             "generateNumericConds contains isNothing x"
             ( any
-                (`eqExpr` F.isNothing (F.col @(Maybe Double) "x"))
+                (`eqExpr` F.isNothing (F.maybeDouble "x"))
                 (generateNumericConds defaultTreeConfig (D.exclude ["label"] nullsMixedDF))
             )
 
@@ -620,7 +620,7 @@ missingnessCondVecTest = TestCase $ do
                 defaultTreeConfig
                 (D.exclude ["label"] nullsMixedDF)
                 nullsMixedDF
-        isMissingCV cv = eqExpr (cvExpr cv) (F.isNothing (F.col @(Maybe Double) "x"))
+        isMissingCV cv = eqExpr (cvExpr cv) (F.isNothing (F.maybeDouble "x"))
         expected = VU.fromList [False, True, False, False, True, False]
     case filter isMissingCV cvs of
         (cv : _) -> assertEqual "isNothing vector marks null slots" expected (cvVec cv)
@@ -640,7 +640,7 @@ observedOnlyThresholdsTest = TestCase $ do
                     )
                 ]
         conds = generateNumericConds defaultTreeConfig{percentiles = [50]} df
-        leqAt t = F.fromMaybe False (F.col @(Maybe Double) "x" .<= F.lit (t :: Double))
+        leqAt t = F.fromMaybe False (F.maybeDouble "x" .<= F.lit (t :: Double))
     assertBool
         "median threshold from observed values (30)"
         (any (`eqExpr` leqAt 30) conds)
@@ -667,7 +667,7 @@ packedMissingnessTest = TestCase $ do
     let df =
             D.fromColumns
                 [("s", packedFromTexts (Just [1, 3]) ["yes", "", "no", ""])]
-        isMissingS = F.isNothing (F.col @(Maybe T.Text) "s")
+        isMissingS = F.isNothing (F.maybeText "s")
         conds = missingnessConditions df
     assertEqual "one missingness cond for nullable PackedText" 1 (length conds)
     case conds of
@@ -834,10 +834,10 @@ taoRecoversNestedObliqueWithoutHint :: Test
 taoRecoversNestedObliqueWithoutHint = TestCase $ do
     let labelExpr =
             F.ifThenElse
-                ((F.col @Double "x" + F.col @Double "y") .<= F.lit (4.5 :: Double))
+                ((F.double "x" + F.double "y") .<= F.lit (4.5 :: Double))
                 (F.lit ("low" :: T.Text))
                 ( F.ifThenElse
-                    ((F.col @Double "x" - F.col @Double "y") .<= F.lit (0.5 :: Double))
+                    ((F.double "x" - F.double "y") .<= F.lit (0.5 :: Double))
                     (F.lit "mid")
                     (F.lit "high")
                 )
@@ -845,17 +845,17 @@ taoRecoversNestedObliqueWithoutHint = TestCase $ do
         indices = V.enumFromN 0 16
         initTree =
             Branch
-                (F.col @Double "x" .<= F.lit (1.5 :: Double))
+                (F.double "x" .<= F.lit (1.5 :: Double))
                 (Leaf "low")
                 ( Branch
-                    (F.col @Double "y" .<= F.lit (3.5 :: Double))
+                    (F.double "y" .<= F.lit (3.5 :: Double))
                     (Leaf "mid")
                     (Leaf "high")
                 ) ::
                 Tree T.Text
         axisOnlyConds =
-            [F.col @Double "x" .<= F.lit (t :: Double) | t <- [1.5, 2.5, 3.5]]
-                ++ [F.col @Double "y" .<= F.lit (t :: Double) | t <- [1.5, 2.5, 3.5]]
+            [F.double "x" .<= F.lit (t :: Double) | t <- [1.5, 2.5, 3.5]]
+                ++ [F.double "y" .<= F.lit (t :: Double) | t <- [1.5, 2.5, 3.5]]
         cfg =
             defaultTreeConfig
                 { taoIterations = 20
@@ -1161,90 +1161,90 @@ assertEqExpr msg expected actual =
 
 threshAndLeq :: Test
 threshAndLeq = TestCase $ do
-    let a = materializeOrFail (F.col @Double "x" .<=. F.lit (3.0 :: Double))
-        b = materializeOrFail (F.col @Double "x" .<=. F.lit (1.0 :: Double))
+    let a = materializeOrFail (F.double "x" .<=. F.lit (3.0 :: Double))
+        b = materializeOrFail (F.double "x" .<=. F.lit (1.0 :: Double))
         r = combineAndVec a b
     assertEqExpr
         "AND of x≤3 and x≤1 collapses to x≤1"
-        (F.col @Double "x" .<=. F.lit (1.0 :: Double))
+        (F.double "x" .<=. F.lit (1.0 :: Double))
         (cvExpr r)
 
 threshOrLeq :: Test
 threshOrLeq = TestCase $ do
-    let a = materializeOrFail (F.col @Double "x" .<=. F.lit (3.0 :: Double))
-        b = materializeOrFail (F.col @Double "x" .<=. F.lit (1.0 :: Double))
+    let a = materializeOrFail (F.double "x" .<=. F.lit (3.0 :: Double))
+        b = materializeOrFail (F.double "x" .<=. F.lit (1.0 :: Double))
         r = combineOrVec a b
     assertEqExpr
         "OR of x≤3 and x≤1 collapses to x≤3"
-        (F.col @Double "x" .<=. F.lit (3.0 :: Double))
+        (F.double "x" .<=. F.lit (3.0 :: Double))
         (cvExpr r)
 
 threshAndLt :: Test
 threshAndLt = TestCase $ do
-    let a = materializeOrFail (F.col @Double "x" .<. F.lit (3.0 :: Double))
-        b = materializeOrFail (F.col @Double "x" .<. F.lit (1.0 :: Double))
+    let a = materializeOrFail (F.double "x" .<. F.lit (3.0 :: Double))
+        b = materializeOrFail (F.double "x" .<. F.lit (1.0 :: Double))
         r = combineAndVec a b
     assertEqExpr
         "AND of x<3 and x<1 collapses to x<1"
-        (F.col @Double "x" .<. F.lit (1.0 :: Double))
+        (F.double "x" .<. F.lit (1.0 :: Double))
         (cvExpr r)
 
 threshOrLt :: Test
 threshOrLt = TestCase $ do
-    let a = materializeOrFail (F.col @Double "x" .<. F.lit (3.0 :: Double))
-        b = materializeOrFail (F.col @Double "x" .<. F.lit (1.0 :: Double))
+    let a = materializeOrFail (F.double "x" .<. F.lit (3.0 :: Double))
+        b = materializeOrFail (F.double "x" .<. F.lit (1.0 :: Double))
         r = combineOrVec a b
     assertEqExpr
         "OR of x<3 and x<1 collapses to x<3"
-        (F.col @Double "x" .<. F.lit (3.0 :: Double))
+        (F.double "x" .<. F.lit (3.0 :: Double))
         (cvExpr r)
 
 threshAndGeq :: Test
 threshAndGeq = TestCase $ do
-    let a = materializeOrFail (F.col @Double "x" .>=. F.lit (1.0 :: Double))
-        b = materializeOrFail (F.col @Double "x" .>=. F.lit (3.0 :: Double))
+    let a = materializeOrFail (F.double "x" .>=. F.lit (1.0 :: Double))
+        b = materializeOrFail (F.double "x" .>=. F.lit (3.0 :: Double))
         r = combineAndVec a b
     assertEqExpr
         "AND of x≥1 and x≥3 collapses to x≥3"
-        (F.col @Double "x" .>=. F.lit (3.0 :: Double))
+        (F.double "x" .>=. F.lit (3.0 :: Double))
         (cvExpr r)
 
 threshOrGeq :: Test
 threshOrGeq = TestCase $ do
-    let a = materializeOrFail (F.col @Double "x" .>=. F.lit (1.0 :: Double))
-        b = materializeOrFail (F.col @Double "x" .>=. F.lit (3.0 :: Double))
+    let a = materializeOrFail (F.double "x" .>=. F.lit (1.0 :: Double))
+        b = materializeOrFail (F.double "x" .>=. F.lit (3.0 :: Double))
         r = combineOrVec a b
     assertEqExpr
         "OR of x≥1 and x≥3 collapses to x≥1"
-        (F.col @Double "x" .>=. F.lit (1.0 :: Double))
+        (F.double "x" .>=. F.lit (1.0 :: Double))
         (cvExpr r)
 
 threshAndGt :: Test
 threshAndGt = TestCase $ do
-    let a = materializeOrFail (F.col @Double "x" .>. F.lit (1.0 :: Double))
-        b = materializeOrFail (F.col @Double "x" .>. F.lit (3.0 :: Double))
+    let a = materializeOrFail (F.double "x" .>. F.lit (1.0 :: Double))
+        b = materializeOrFail (F.double "x" .>. F.lit (3.0 :: Double))
         r = combineAndVec a b
     assertEqExpr
         "AND of x>1 and x>3 collapses to x>3"
-        (F.col @Double "x" .>. F.lit (3.0 :: Double))
+        (F.double "x" .>. F.lit (3.0 :: Double))
         (cvExpr r)
 
 threshOrGt :: Test
 threshOrGt = TestCase $ do
-    let a = materializeOrFail (F.col @Double "x" .>. F.lit (1.0 :: Double))
-        b = materializeOrFail (F.col @Double "x" .>. F.lit (3.0 :: Double))
+    let a = materializeOrFail (F.double "x" .>. F.lit (1.0 :: Double))
+        b = materializeOrFail (F.double "x" .>. F.lit (3.0 :: Double))
         r = combineOrVec a b
     assertEqExpr
         "OR of x>1 and x>3 collapses to x>1"
-        (F.col @Double "x" .>. F.lit (1.0 :: Double))
+        (F.double "x" .>. F.lit (1.0 :: Double))
         (cvExpr r)
 
 -- Six negative cases: rewrite must NOT fire.
 
 threshNegMixedDirection :: Test
 threshNegMixedDirection = TestCase $ do
-    let a = materializeOrFail (F.col @Double "x" .<. F.lit (3.0 :: Double))
-        b = materializeOrFail (F.col @Double "x" .>=. F.lit (1.0 :: Double))
+    let a = materializeOrFail (F.double "x" .<. F.lit (3.0 :: Double))
+        b = materializeOrFail (F.double "x" .>=. F.lit (1.0 :: Double))
         r = combineAndVec a b
     assertEqExpr
         "mixed-direction AND keeps generic F.and form"
@@ -1253,8 +1253,8 @@ threshNegMixedDirection = TestCase $ do
 
 threshNegCrossColumn :: Test
 threshNegCrossColumn = TestCase $ do
-    let a = materializeOrFail (F.col @Double "x" .>. F.lit (1.0 :: Double))
-        b = materializeOrFail (F.col @Double "y" .>. F.lit (3.0 :: Double))
+    let a = materializeOrFail (F.double "x" .>. F.lit (1.0 :: Double))
+        b = materializeOrFail (F.double "y" .>. F.lit (3.0 :: Double))
         r = combineAndVec a b
     assertEqExpr
         "cross-column AND keeps generic F.and form"
@@ -1263,8 +1263,8 @@ threshNegCrossColumn = TestCase $ do
 
 threshNegMixedOpFamily :: Test
 threshNegMixedOpFamily = TestCase $ do
-    let a = materializeOrFail (F.col @Double "x" .>. F.lit (1.0 :: Double))
-        b = materializeOrFail (F.col @Double "x" .<. F.lit (4.0 :: Double))
+    let a = materializeOrFail (F.double "x" .>. F.lit (1.0 :: Double))
+        b = materializeOrFail (F.double "x" .<. F.lit (4.0 :: Double))
         r = combineAndVec a b
     assertEqExpr
         "different-op-family AND keeps generic F.and form"
@@ -1273,8 +1273,8 @@ threshNegMixedOpFamily = TestCase $ do
 
 threshNegEqualityOp :: Test
 threshNegEqualityOp = TestCase $ do
-    let a = materializeOrFail (F.col @Double "x" .==. F.lit (3.0 :: Double))
-        b = materializeOrFail (F.col @Double "x" .==. F.lit (1.0 :: Double))
+    let a = materializeOrFail (F.double "x" .==. F.lit (3.0 :: Double))
+        b = materializeOrFail (F.double "x" .==. F.lit (1.0 :: Double))
         r = combineOrVec a b
     assertEqExpr
         "equality OR keeps generic F.or form"
@@ -1283,8 +1283,8 @@ threshNegEqualityOp = TestCase $ do
 
 threshNegLitOnLeft :: Test
 threshNegLitOnLeft = TestCase $ do
-    let a = materializeOrFail (F.lit (1.0 :: Double) .<. F.col @Double "x")
-        b = materializeOrFail (F.lit (3.0 :: Double) .<. F.col @Double "x")
+    let a = materializeOrFail (F.lit (1.0 :: Double) .<. F.double "x")
+        b = materializeOrFail (F.lit (3.0 :: Double) .<. F.double "x")
         r = combineAndVec a b
     assertEqExpr
         "Lit-on-left AND keeps generic F.and form"
@@ -1293,8 +1293,8 @@ threshNegLitOnLeft = TestCase $ do
 
 threshNegNonLiteralRhs :: Test
 threshNegNonLiteralRhs = TestCase $ do
-    let a = materializeOrFail (F.col @Double "x" .>. F.col @Double "y")
-        b = materializeOrFail (F.col @Double "x" .>. F.lit (3.0 :: Double))
+    let a = materializeOrFail (F.double "x" .>. F.double "y")
+        b = materializeOrFail (F.double "x" .>. F.lit (3.0 :: Double))
         r = combineAndVec a b
     assertEqExpr
         "non-literal RHS AND keeps generic F.and form"
@@ -1304,8 +1304,8 @@ threshNegNonLiteralRhs = TestCase $ do
 -- The consolidated cvVec equals the elementwise AND/OR of the inputs.
 threshSemanticPreservation :: Test
 threshSemanticPreservation = TestCase $ do
-    let a = materializeOrFail (F.col @Double "x" .>. F.lit (1.0 :: Double))
-        b = materializeOrFail (F.col @Double "x" .>. F.lit (3.0 :: Double))
+    let a = materializeOrFail (F.double "x" .>. F.lit (1.0 :: Double))
+        b = materializeOrFail (F.double "x" .>. F.lit (3.0 :: Double))
         rAnd = combineAndVec a b
         rOr = combineOrVec a b
         expectedAnd = VU.zipWith (&&) (cvVec a) (cvVec b)

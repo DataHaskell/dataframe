@@ -66,7 +66,7 @@ standardScaler names df =
     ScalerModel (V.fromList names) (VU.fromList means) (VU.fromList stds)
   where
     cols = map column names
-    column n = case columnAsDoubleVector (F.col @Double n) df of
+    column n = case columnAsDoubleVector (F.double n) df of
         Right v -> v
         Left e -> throw e
     means = [VU.sum c / fromIntegral (max 1 (VU.length c)) | c <- cols]
@@ -84,7 +84,7 @@ standardScaler names df =
 scalerTransform :: ScalerModel -> Transform
 scalerTransform m =
     Transform
-        [ (n, SomeExpr ((F.col @Double n .-. F.lit mu) ./. F.lit sigma))
+        [ (n, SomeExpr ((F.double n .-. F.lit mu) ./. F.lit sigma))
         | (n, mu, sigma) <-
             zip3
                 (V.toList (smColumns m))

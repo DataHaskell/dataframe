@@ -61,10 +61,10 @@ schemaOf :: DataFrame -> Schema
 schemaOf df = M.fromList [(c, t) | c <- columnNames df, Just t <- [typeOf c]]
   where
     typeOf c
-        | ok (F.col @Int c) = Just TInt
-        | ok (F.col @Double c) = Just TDouble
-        | ok (F.col @T.Text c) = Just TText
-        | ok (F.col @Bool c) = Just TBool
+        | ok (F.int c) = Just TInt
+        | ok (F.double c) = Just TDouble
+        | ok (F.text c) = Just TText
+        | ok (F.bool c) = Just TBool
         | otherwise = Nothing
     ok :: forall a. (Columnable a) => Expr a -> Bool
     ok e = either (const False) (const True) (columnAsVector e df)
@@ -116,10 +116,10 @@ elab schema ast = case ast of
         call name args'
   where
     colOf c t = case t of
-        TInt -> SomeExpr (F.col @Int c)
-        TDouble -> SomeExpr (F.col @Double c)
-        TText -> SomeExpr (F.col @T.Text c)
-        TBool -> SomeExpr (F.col @Bool c)
+        TInt -> SomeExpr (F.int c)
+        TDouble -> SomeExpr (F.double c)
+        TText -> SomeExpr (F.text c)
+        TBool -> SomeExpr (F.bool c)
 
 -- | Make two operands the same type; a numeric literal adopts the other's.
 unify :: SomeExpr -> SomeExpr -> Either String Same

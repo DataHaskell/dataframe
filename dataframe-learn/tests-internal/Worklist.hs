@@ -51,16 +51,16 @@ mat e =
         (materializeCondVec fixtureDF e)
 
 xGt, xLt, yGt, yLt, zGt, zLt :: Double -> CondVec
-xGt n = mat (F.col @Double "x" .>. F.lit n)
-xLt n = mat (F.col @Double "x" .<. F.lit n)
-yGt n = mat (F.col @Double "y" .>. F.lit n)
-yLt n = mat (F.col @Double "y" .<. F.lit n)
-zGt n = mat (F.col @Double "z" .>. F.lit n)
-zLt n = mat (F.col @Double "z" .<. F.lit n)
+xGt n = mat (F.double "x" .>. F.lit n)
+xLt n = mat (F.double "x" .<. F.lit n)
+yGt n = mat (F.double "y" .>. F.lit n)
+yLt n = mat (F.double "y" .<. F.lit n)
+zGt n = mat (F.double "z" .>. F.lit n)
+zLt n = mat (F.double "z" .<. F.lit n)
 
 -- Same truth vector as 'xGt 2' but eSize 4 vs 3: a non-degenerate collision.
 notLe2 :: CondVec
-notLe2 = mat (F.not (F.col @Double "x" .<=. F.lit 2))
+notLe2 = mat (F.not (F.double "x" .<=. F.lit 2))
 
 litTrue :: CondVec
 litTrue = mat (F.lit True)
@@ -113,9 +113,9 @@ matW e =
 
 wideBase :: [CondVec]
 wideBase =
-    [ matW (F.col @Double "a" .>. F.lit 3)
-    , matW (F.col @Double "b" .<. F.lit 5)
-    , matW (F.col @Double "c" .>=. F.lit 3)
+    [ matW (F.double "a" .>. F.lit 3)
+    , matW (F.double "b" .<. F.lit 5)
+    , matW (F.double "c" .>=. F.lit 3)
     ]
 
 tests :: [Test]

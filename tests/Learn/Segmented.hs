@@ -67,7 +67,7 @@ lowFloor s = s{segMinRows = 3}
 recoveryTests :: [Test]
 recoveryTests =
     [ "per-segment OLS recovered" ~: do
-        let m = fit (lowFloor (segmented defaultLinearConfig)) (F.col @Double "y") twoSegDF
+        let m = fit (lowFloor (segmented defaultLinearConfig)) (F.double "y") twoSegDF
             a = segModel (segByKey ["a"] m)
             b = segModel (segByKey ["b"] m)
         assertBool "two segments" (length (smSegments m) == 2)
@@ -76,16 +76,16 @@ recoveryTests =
         assertBool "b slope ~ -3" (close 1e-9 (regCoef b VU.! 0) (-3))
         assertBool "b intercept ~ 5" (close 1e-9 (regIntercept b) 5)
     , "prediction reproduces y" ~: do
-        let m = fit (lowFloor (segmented defaultLinearConfig)) (F.col @Double "y") twoSegDF
+        let m = fit (lowFloor (segmented defaultLinearConfig)) (F.double "y") twoSegDF
             preds = interpD twoSegDF (predict m)
-            truth = interpD twoSegDF (F.col @Double "y")
+            truth = interpD twoSegDF (F.double "y")
         assertBool "routed predictions match y" (and (zipWith (close 1e-6) preds truth))
     ]
 
 routingTests :: [Test]
 routingTests =
     [ "unseen category routes to fallback" ~: do
-        let m = fit (lowFloor (segmented defaultLinearConfig)) (F.col @Double "y") twoSegDF
+        let m = fit (lowFloor (segmented defaultLinearConfig)) (F.double "y") twoSegDF
             fb = smFallback m
             unseen =
                 D.fromColumns
@@ -110,12 +110,12 @@ genericityTests =
                     , ("x", DI.fromList ([1, 2, 3, 4, 1, 2, 3, 4] :: [Double]))
                     , ("label", DI.fromList labels)
                     ]
-            m = fit (lowFloor (segmented defaultLogisticConfig)) (F.col @T.Text "label") df
+            m = fit (lowFloor (segmented defaultLogisticConfig)) (F.text "label") df
             preds = interpT df (predict m)
         assertBool "logistic predicts one label per row" (length preds == 8)
     , "symbolic base composes" ~: do
         let cfg = defaultSRConfig{srGenerations = 2, srPopSize = 12}
-            m = fit (lowFloor (segmented cfg)) (F.col @Double "y") twoSegDF
+            m = fit (lowFloor (segmented cfg)) (F.double "y") twoSegDF
             preds = interpD twoSegDF (predict m)
         assertBool "symbolic predicts one value per row" (length preds == 8)
     ]
@@ -133,7 +133,7 @@ selectionTests =
             m =
                 fit
                     (segmentOn (lowFloor (segmented defaultLinearConfig)) ["g"])
-                    (F.col @Double "y")
+                    (F.double "y")
                     df
         assertEqual "only g" ["g"] (smCatCols m)
     , "cardinality cap skips high-cardinality text" ~: do
@@ -145,7 +145,7 @@ selectionTests =
                     , ("y", DI.fromList ([1, 2, 3, 4, 5, 6, 7, 8] :: [Double]))
                     ]
             cfg = (lowFloor (segmented defaultLinearConfig)){segMaxCard = 2}
-            m = fit cfg (F.col @Double "y") df
+            m = fit cfg (F.double "y") df
         assertEqual "k (8 distinct) skipped, g kept" ["g"] (smCatCols m)
     ]
   where
@@ -163,7 +163,7 @@ nullTests =
                     , ("x", DI.fromList ([1, 2, 3, 9, 1, 2, 3, 9] :: [Double]))
                     , ("y", DI.fromList ([3, 5, 7, 0, 2, -1, -4, 0] :: [Double]))
                     ]
-            m = fit (lowFloor (segmented defaultLinearConfig)) (F.col @Double "y") df
+            m = fit (lowFloor (segmented defaultLinearConfig)) (F.double "y") df
         -- Only "a" and "b" appear as segments; "null" is never a key.
         assertBool
             "no null-keyed segment"
@@ -176,7 +176,7 @@ fitErr ::
     D.DataFrame -> IO (Either SomeException (SegmentedModel Double LinearRegressor))
 fitErr df =
     try
-        (evaluate (fit (lowFloor (segmented defaultLinearConfig)) (F.col @Double "y") df))
+        (evaluate (fit (lowFloor (segmented defaultLinearConfig)) (F.double "y") df))
 
 guardTests :: [Test]
 guardTests =
@@ -221,7 +221,7 @@ guardTests =
                     , ("n", DI.fromList ([1, 2, 3, 4, 5, 6, 7, 8] :: [Double]))
                     , ("y", DI.fromList ([1, 2, 3, 4, 5, 6, 7, 8] :: [Double]))
                     ]
-            m = fit (lowFloor (segmented defaultLinearConfig)) (F.col @Double "y") df
+            m = fit (lowFloor (segmented defaultLinearConfig)) (F.double "y") df
         assertEqual "two segments" 2 (length (smSegments m))
     ]
 
@@ -234,7 +234,7 @@ diagnosticTests =
                     , ("x", DI.fromList ([1, 2, 3, 4, 9] :: [Double]))
                     , ("y", DI.fromList ([3, 5, 7, 9, 0] :: [Double]))
                     ]
-            m = fit (lowFloor (segmented defaultLinearConfig)) (F.col @Double "y") df
+            m = fit (lowFloor (segmented defaultLinearConfig)) (F.double "y") df
         assertEqual "one local segment" 1 (length (smSegments m))
         assertEqual "segment a has 4 rows" 4 (segN (segByKey ["a"] m))
         assertEqual "b fell back with 1 row" [(["b"], 1)] (smFellBack m)
@@ -248,9 +248,9 @@ cvTests =
                     2
                     0
                     rmse
-                    (F.col @Double "y")
+                    (F.double "y")
                     ( predict
-                        . fit ((segmented defaultLinearConfig){segMinRows = 2}) (F.col @Double "y")
+                        . fit ((segmented defaultLinearConfig){segMinRows = 2}) (F.double "y")
                     )
                     twoSegDF
         assertBool "two fold scores" (length scores == 2)
@@ -265,7 +265,7 @@ poolingTests =
         let fitL lam =
                 fit
                     (pooled (lowFloor (segmented defaultLinearConfig)) lam)
-                    (F.col @Double "y")
+                    (F.double "y")
                     twoSegDF
             m0 = fitL 0
             mInf = fitL 1e9
@@ -292,7 +292,7 @@ poolingTests =
                 ( evaluate
                     ( fit
                         (pooled (lowFloor (segmented defaultSRConfig)) 1.0)
-                        (F.col @Double "y")
+                        (F.double "y")
                         twoSegDF
                     )
                 ) ::

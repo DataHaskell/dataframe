@@ -31,7 +31,7 @@ ratio =
 -- | Pearson r²: enumeration should find x·x and score it ~1.
 recoversQuadratic :: Test
 recoversQuadratic = TestCase $ do
-    let sf = fit defaultSynthesisConfig (D.col @Double "y") quad
+    let sf = fit defaultSynthesisConfig (D.double "y") quad
     assertBool
         ("quadratic r2 = " ++ show (sfScore sf))
         (sfScore sf > 0.999 && sfScore sf <= 1.0001)
@@ -40,13 +40,13 @@ recoversQuadratic = TestCase $ do
 exactRecoveryMSE :: Test
 exactRecoveryMSE = TestCase $ do
     let sf =
-            fit defaultSynthesisConfig{synLoss = MeanSquaredError} (D.col @Double "y") quad
+            fit defaultSynthesisConfig{synLoss = MeanSquaredError} (D.double "y") quad
     assertBool ("exact -mse = " ++ show (sfScore sf)) (sfScore sf > -1.0e-6)
 
 -- | Division is enumerated (with the denominator guard): a/b is recovered.
 recoversRatio :: Test
 recoversRatio = TestCase $ do
-    let sf = fit defaultSynthesisConfig (D.col @Double "y") ratio
+    let sf = fit defaultSynthesisConfig (D.double "y") ratio
     assertBool
         ("ratio r2 = " ++ show (sfScore sf))
         (sfScore sf > 0.999 && sfScore sf <= 1.0001)
@@ -54,7 +54,7 @@ recoversRatio = TestCase $ do
 -- | The bank is non-trivial and its ranked features are distinct expressions.
 distinctFeatures :: Test
 distinctFeatures = TestCase $ do
-    let sf = fit defaultSynthesisConfig (D.col @Double "y") quad
+    let sf = fit defaultSynthesisConfig (D.double "y") quad
         names = [D.prettyPrint e | (e, _) <- sfFeatures sf]
     assertBool "synthesizes more than one feature" (length names > 1)
     assertBool "ranked features are distinct" (length names == length (dedup names))
@@ -64,8 +64,8 @@ distinctFeatures = TestCase $ do
 -- | Same config and data give the same best expression.
 deterministic :: Test
 deterministic = TestCase $ do
-    let a = fit defaultSynthesisConfig (D.col @Double "y") quad
-        b = fit defaultSynthesisConfig (D.col @Double "y") quad
+    let a = fit defaultSynthesisConfig (D.double "y") quad
+        b = fit defaultSynthesisConfig (D.double "y") quad
     assertEqual
         "same best expression"
         (D.prettyPrint (sfExpr a))
@@ -79,7 +79,7 @@ refusesOversizedSearch =
             "[Error Case]"
             "synMaxAllocBytes"
             ( print
-                (D.prettyPrint (sfExpr (fit defaultSynthesisConfig (D.col @Double "y") wide)))
+                (D.prettyPrint (sfExpr (fit defaultSynthesisConfig (D.double "y") wide)))
             )
         )
 
@@ -87,7 +87,7 @@ refusesOversizedSearch =
 acceptsSmallSearch :: Test
 acceptsSmallSearch = TestCase $ do
     let cfg = defaultSynthesisConfig{synMaxSize = 3}
-        m = fit cfg (D.col @Double "y") wide
+        m = fit cfg (D.double "y") wide
     assertBool "a size-3 search over the wide frame returns" (sfScore m >= -1.0)
 
 -- | 12 features over 3000 rows: the shape that killed the kernel.

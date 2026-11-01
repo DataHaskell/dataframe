@@ -41,7 +41,7 @@ Tabular data analysis and symbolic AI in Haskell. Supports eager computation and
 
 **Operations**: filter, select, derive, groupBy, aggregate, joins (inner, left, right, full outer), sort, sample, stratified sample, distinct, k-fold splits.
 
-**Expressions**: typed column references (`F.col @Double "x"`), arithmetic, comparisons, logical operators, nullable-aware three-valued logic (`.==`, `.&&`), string matching (`like`, `regex`), casting, and user-defined functions via `lift`/`lift2`.
+**Expressions**: typed column references (`F.double "x"`), arithmetic, comparisons, logical operators, nullable-aware three-valued logic (`.==`, `.&&`), string matching (`like`, `regex`), casting, and user-defined functions via `lift`/`lift2`.
 
 **Statistics**: mean, median, mode, variance, standard deviation, percentiles, inter-quartile range, correlation, skewness, frequency tables, imputation.
 
@@ -105,8 +105,8 @@ sales = D.fromColumns
 -- Group by product and compute totals
 sales
     |> D.groupBy ["product"]
-    |> D.aggregate [ F.sum (F.col @Int "amount") `as` "total"
-                   , F.count (F.col @Int "amount") `as` "orders"
+    |> D.aggregate [ F.sum (F.int "amount") `as` "total"
+                   , F.count (F.int "amount") `as` "orders"
                    ]
     |> D.toMarkdown'
 ```
@@ -137,7 +137,7 @@ D.dimensions df
 D.describeColumns df |> D.toMarkdown'
 ```
 
-The `:declareColumns` macro (`$(D.declareColumns df)` outside the REPL) generates typed column references from a dataframe, so you can use column names directly in expressions instead of writing `F.col @Double "median_income"` every time:
+The `:declareColumns` macro (`$(D.declareColumns df)` outside the REPL) generates typed column references from a dataframe, so you can use column names directly in expressions instead of writing `F.double "median_income"` every time:
 
 ```haskell
 $(D.declareColumns df)
@@ -199,8 +199,8 @@ Compare this to the manual version which requires spelling out every column name
 ```haskell
 -- Without TH — every column needs its name and type spelled out
 df |> D.derive "rooms_per_household"
-        (F.col @Double "total_rooms" / F.col @Double "households")
-   |> D.filter (F.col @Double "median_income" .>. F.lit 5)
+        (F.double "total_rooms" / F.double "households")
+   |> D.filter (F.double "median_income" .>. F.lit 5)
    |> D.take 5
    |> D.toMarkdown'
 ```
@@ -390,9 +390,9 @@ housingSchema = makeSchema
 
 lazyResult <- L.run $
     L.scanCsv housingSchema "./data/housing.csv"
-    |> L.filter  (F.col @Double "median_income" .>. F.lit 5)
+    |> L.filter  (F.double "median_income" .>. F.lit 5)
     |> L.derive  "value_per_income"
-                 (F.col @Double "median_house_value" / F.col @Double "median_income")
+                 (F.double "median_house_value" / F.double "median_income")
     |> L.select  ["ocean_proximity", "median_house_value", "value_per_income"]
     |> L.take 1000
 

@@ -20,7 +20,7 @@ xs :: D.DataFrame
 xs = D.fromColumns [("x", D.fromList [1, 2, 3 :: Int])]
 
 derived :: Expr Int -> [Int]
-derived e = D.columnAsList (F.col @Int "y") (D.derive "y" e xs)
+derived e = D.columnAsList (F.int "y") (D.derive "y" e xs)
 
 weird :: T.Text -> Expr Int -> Expr Int -> Expr Int
 weird opName = lift2Decorated (\a b -> a * 100 + b) opName Nothing True 6
@@ -30,49 +30,49 @@ udfNamedLikeBuiltin =
     TestLabel "udf named add keeps its own function" . TestCase $
         assertEqual "" [101, 202, 303] (derived (weird "add" x x))
   where
-    x = F.col @Int "x"
+    x = F.int "x"
 
 udfOtherName :: Test
 udfOtherName =
     TestLabel "udf with fresh name" . TestCase $
         assertEqual "" [101, 202, 303] (derived (weird "myadd" x x))
   where
-    x = F.col @Int "x"
+    x = F.int "x"
 
 anonymousNotEqual :: Test
 anonymousNotEqual =
     TestLabel "anonymous udfs are not equal" . TestCase $
         assertBool "" (not (eqExpr (F.lift2 (+) x x) (F.lift2 (*) x x)))
   where
-    x = F.col @Int "x"
+    x = F.int "x"
 
 namedEqual :: Test
 namedEqual =
     TestLabel "same named op is equal" . TestCase $
         assertBool "" (eqExpr (weird "f" x x) (weird "f" x x))
   where
-    x = F.col @Int "x"
+    x = F.int "x"
 
 namedVsBuiltin :: Test
 namedVsBuiltin =
     TestLabel "named add differs from builtin add" . TestCase $
         assertBool "" (not (eqExpr (weird "add" x x) (x + x)))
   where
-    x = F.col @Int "x"
+    x = F.int "x"
 
 fromMaybeDefaults :: Test
 fromMaybeDefaults =
     TestLabel "fromMaybe defaults are part of identity" . TestCase $
         assertBool "" (not (eqExpr (F.fromMaybe 0 m) (F.fromMaybe 1 m)))
   where
-    m = F.col @(Maybe Int) "m"
+    m = F.maybeInt "m"
 
 powVariants :: Test
 powVariants =
     TestLabel "^ and ^^ are different ops" . TestCase $
         assertBool "" (not (eqExpr (d .^. two) (d .^^. two)))
   where
-    d = F.col @Double "d"
+    d = F.double "d"
     two = F.lit (2 :: Int)
 
 rowsKept :: D.DataFrame -> Expr Bool -> Int
@@ -92,7 +92,7 @@ anonymousAtomsNotMerged =
             (F.lift id d .< F.lit (2 :: Double))
   where
     ds = D.fromColumns [("d", D.fromList [1, 2, 3 :: Double])]
-    d = F.col @Double "d"
+    d = F.double "d"
 
 fromMaybeTrueNotFalseOnNull :: Test
 fromMaybeTrueNotFalseOnNull =
@@ -104,13 +104,13 @@ fromMaybeTrueNotFalseOnNull =
     ms =
         D.fromColumns
             [("m", D.fromList [Just 1, Nothing, Just 20 :: Maybe Double])]
-    m = F.col @(Maybe Double) "m"
+    m = F.maybeDouble "m"
 
 -- The six-sum moment shape must not see through a user function.
 momentsRespectUdf :: Test
 momentsRespectUdf =
     TestLabel "moment fast path keeps udf in sum" . TestCase $
-        assertEqual "" [60, 150] (D.columnAsList (F.col @Double "sx") out)
+        assertEqual "" [60, 150] (D.columnAsList (F.double "sx") out)
   where
     df =
         D.fromColumns
@@ -118,10 +118,10 @@ momentsRespectUdf =
             , ("x", D.fromList [1, 2, 3, 4, 5, 6 :: Double])
             , ("y", D.fromList [6, 5, 4, 3, 2, 1 :: Double])
             ]
-    x = F.col @Double "x"
-    y = F.col @Double "y"
+    x = F.double "x"
+    y = F.double "y"
     out =
-        D.sortBy [D.Asc (F.col @Int "k")] $
+        D.sortBy [D.Asc (F.int "k")] $
             D.aggregate
                 [ F.count x `as` "n"
                 , F.sum (F.lift (* 10) x) `as` "sx"
@@ -144,11 +144,11 @@ everyFunctionIsBuiltin =
         | (fn, ok) <- builtins
         ]
   where
-    x = F.col @Int "x"
-    d = F.col @Double "d"
-    m = F.col @(Maybe Int) "m"
-    t = F.col @T.Text "t"
-    b = F.col @Bool "b"
+    x = F.int "x"
+    d = F.double "d"
+    m = F.maybeInt "m"
+    t = F.text "t"
+    b = F.bool "b"
     l = F.col @[Int] "l"
     day = F.col @Day "day"
     builtins =
@@ -228,8 +228,8 @@ higherOrderAreAnonymous =
         | (fn, ok) <- anonymous
         ]
   where
-    x = F.col @Int "x"
-    m = F.col @(Maybe Int) "m"
+    x = F.int "x"
+    m = F.maybeInt "m"
     anonymous =
         [ ("lift", hasKey (F.lift (+ 1) x))
         , ("lift2", hasKey (F.lift2 (+) x x))

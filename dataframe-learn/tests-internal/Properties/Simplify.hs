@@ -61,18 +61,18 @@ genAtomBool = do
     t <- elements thresholds
     oneof
         [ elements
-            [ F.col @Double "x" .< F.lit t
-            , F.col @Double "x" .<= F.lit t
-            , F.col @Double "x" .> F.lit t
-            , F.col @Double "x" .>= F.lit t
-            , F.col @Double "x" .== F.lit t
-            , F.col @Double "x" ./= F.lit t
+            [ F.double "x" .< F.lit t
+            , F.double "x" .<= F.lit t
+            , F.double "x" .> F.lit t
+            , F.double "x" .>= F.lit t
+            , F.double "x" .== F.lit t
+            , F.double "x" ./= F.lit t
             ]
         , elements
-            [ F.toDouble (F.col @Int "n") .< F.lit t
-            , F.toDouble (F.col @Int "n") .<= F.lit t
-            , F.toDouble (F.col @Int "n") .> F.lit t
-            , F.toDouble (F.col @Int "n") .>= F.lit t
+            [ F.toDouble (F.int "n") .< F.lit t
+            , F.toDouble (F.int "n") .<= F.lit t
+            , F.toDouble (F.int "n") .> F.lit t
+            , F.toDouble (F.int "n") .>= F.lit t
             ]
         ]
 
@@ -92,12 +92,12 @@ genAtomMaybe :: Gen (Expr (Maybe Bool))
 genAtomMaybe = do
     t <- elements thresholds
     elements
-        [ F.col @(Maybe Double) "m" .< F.lit t
-        , F.col @(Maybe Double) "m" .<= F.lit t
-        , F.col @(Maybe Double) "m" .> F.lit t
-        , F.col @(Maybe Double) "m" .>= F.lit t
-        , F.col @(Maybe Double) "m" .== F.lit t
-        , F.col @(Maybe Double) "m" ./= F.lit t
+        [ F.maybeDouble "m" .< F.lit t
+        , F.maybeDouble "m" .<= F.lit t
+        , F.maybeDouble "m" .> F.lit t
+        , F.maybeDouble "m" .>= F.lit t
+        , F.maybeDouble "m" .== F.lit t
+        , F.maybeDouble "m" ./= F.lit t
         ]
 
 genMaybeExpr :: Int -> Gen (Expr (Maybe Bool))

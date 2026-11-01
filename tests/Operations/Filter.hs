@@ -34,7 +34,7 @@ filterColumnDoesNotExist =
         ( assertExpectException
             "[Error Case]"
             (D.columnNotFound "test0" "" (D.columnNames testData))
-            (print $ D.filter (F.col @Int "test0" .==. 0) testData)
+            (print $ D.filter (F.int "test0" .==. 0) testData)
         )
 
 filterColumnWrongType :: Test
@@ -43,7 +43,7 @@ filterColumnWrongType =
         ( assertExpectException
             "[Error Case]"
             (D.typeMismatchError (show $ typeRep @Integer) (show $ typeRep @Int))
-            (print $ D.filter (F.col @Integer "test1" .==. 0) testData)
+            (print $ D.filter (F.integer "test1" .==. 0) testData)
         )
 
 filterByColumnDoesNotExist :: Test
@@ -52,7 +52,7 @@ filterByColumnDoesNotExist =
         ( assertExpectException
             "[Error Case]"
             (D.columnNotFound "test0" "filterBy" (D.columnNames testData))
-            (print $ D.filterBy even (F.col @Int "test0") testData)
+            (print $ D.filterBy even (F.int "test0") testData)
         )
 
 filterByColumnWrongType :: Test
@@ -61,7 +61,7 @@ filterByColumnWrongType =
         ( assertExpectException
             "[Error Case]"
             (D.typeMismatchError (show $ typeRep @Integer) (show $ typeRep @Int))
-            (print $ D.filterBy even (F.col @Integer "test1") testData)
+            (print $ D.filterBy even (F.integer "test1") testData)
         )
 
 filterColumnInexistentValues :: Test
@@ -70,7 +70,7 @@ filterColumnInexistentValues =
         ( assertEqual
             "Non existent filter value returns no rows"
             (0, 8)
-            (D.dimensions $ D.filterBy (< 0) (F.col @Int "test1") testData)
+            (D.dimensions $ D.filterBy (< 0) (F.int "test1") testData)
         )
 
 filterColumnAllValues :: Test
@@ -79,7 +79,7 @@ filterColumnAllValues =
         ( assertEqual
             "Filters all columns"
             (26, 8)
-            (D.dimensions $ D.filterBy (const True) (F.col @Int "test1") testData)
+            (D.dimensions $ D.filterBy (const True) (F.int "test1") testData)
         )
 
 filterJustWAI :: Test

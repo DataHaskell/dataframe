@@ -104,20 +104,20 @@ analyzeUsers = runSqlite "test.db" $ do
     
     liftIO $ do
         -- Filter
-        let youngUsers = DF.filterBy (< 30) (F.col @Int "age") df
+        let youngUsers = DF.filterBy (< 30) (F.int "age") df
         
         -- Sort
         let sorted = DF.sortBy [DF.Asc "age"] df
         
         -- Derive columns
         let withAgeGroup = DF.derive "age_group"
-                (F.ifThenElse (F.col @Int "age" `F.lt` F.lit 30)
+                (F.ifThenElse (F.int "age" `F.lt` F.lit 30)
                     (F.lit @Text "young")
                     (F.lit @Text "adult"))
                 df
         
         -- Get column values
-        let ages = DF.columnAsList (F.col @Int "age") sorted
+        let ages = DF.columnAsList (F.int "age") sorted
         print ages  -- [25, 28, 30, 35]
 ```
 

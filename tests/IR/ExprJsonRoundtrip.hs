@@ -76,17 +76,17 @@ testCase name ok = TestCase (assertBool name ok)
 -- Row-wise expression node kinds.
 exprRoundtripTests :: [Test]
 exprRoundtripTests =
-    [ testCase "col" (roundtrips (F.col @Double "x"))
+    [ testCase "col" (roundtrips (F.double "x"))
     , testCase "lit" (roundtrips (F.lit @Int 42))
-    , testCase "arithmetic" (roundtrips (F.col @Double "x" * F.lit 2 + F.lit 1))
-    , testCase "division" (roundtrips (F.col @Double "x" / F.lit 2))
-    , testCase "comparison" (roundtrips (F.col @Double "x" .>. F.lit 0))
-    , testCase "unary sqrt" (roundtrips (sqrt (F.col @Double "x")))
-    , testCase "logBase" (roundtrips (logBase (F.lit 2) (F.col @Double "x")))
+    , testCase "arithmetic" (roundtrips (F.double "x" * F.lit 2 + F.lit 1))
+    , testCase "division" (roundtrips (F.double "x" / F.lit 2))
+    , testCase "comparison" (roundtrips (F.double "x" .>. F.lit 0))
+    , testCase "unary sqrt" (roundtrips (sqrt (F.double "x")))
+    , testCase "logBase" (roundtrips (logBase (F.lit 2) (F.double "x")))
     , testCase
         "if/then/else"
         ( roundtrips
-            ( ifThenElse (F.col @Double "x" .>. F.lit 0) (F.lit 1.0) (F.lit (-1.0)) ::
+            ( ifThenElse (F.double "x" .>. F.lit 0) (F.lit 1.0) (F.lit (-1.0)) ::
                 Expr Double
             )
         )
@@ -95,16 +95,16 @@ exprRoundtripTests =
 -- Aggregation and window node kinds (the decoder cases added for full parity).
 aggRoundtripTests :: [Test]
 aggRoundtripTests =
-    [ testCase "sum" (roundtrips (F.sum (F.col @Double "x")))
-    , testCase "count" (roundtrips (F.count (F.col @Double "x")))
-    , testCase "minimum" (roundtrips (F.minimum (F.col @Double "x")))
-    , testCase "maximum" (roundtrips (F.maximum (F.col @Int "x")))
-    , testCase "mean" (roundtrips (F.mean (F.col @Double "x")))
-    , testCase "variance" (roundtrips (F.variance (F.col @Double "x")))
-    , testCase "median" (roundtrips (F.median (F.col @Double "x")))
-    , testCase "stddev" (roundtrips (F.stddev (F.col @Double "x")))
-    , testCase "countDistinct" (roundtrips (F.countDistinct (F.col @Int "x")))
-    , testCase "over" (roundtrips (F.over ["g"] (F.sum (F.col @Double "x"))))
+    [ testCase "sum" (roundtrips (F.sum (F.double "x")))
+    , testCase "count" (roundtrips (F.count (F.double "x")))
+    , testCase "minimum" (roundtrips (F.minimum (F.double "x")))
+    , testCase "maximum" (roundtrips (F.maximum (F.int "x")))
+    , testCase "mean" (roundtrips (F.mean (F.double "x")))
+    , testCase "variance" (roundtrips (F.variance (F.double "x")))
+    , testCase "median" (roundtrips (F.median (F.double "x")))
+    , testCase "stddev" (roundtrips (F.stddev (F.double "x")))
+    , testCase "countDistinct" (roundtrips (F.countDistinct (F.int "x")))
+    , testCase "over" (roundtrips (F.over ["g"] (F.sum (F.double "x"))))
     ]
 
 -- Documented limitation: collect's list-typed output cannot be encoded.
@@ -112,10 +112,10 @@ limitationTests :: [Test]
 limitationTests =
     [ testCase
         "collect cannot encode"
-        (isLeft (encodeExpr (F.collect (F.col @Double "x"))))
+        (isLeft (encodeExpr (F.collect (F.double "x"))))
     , testCase
         "anonymous udf cannot encode"
-        (isLeft (encodeExpr (F.lift (+ 1) (F.col @Double "x"))))
+        (isLeft (encodeExpr (F.lift (+ 1) (F.double "x"))))
     ]
 
 -- Pin the wire shape Python decodes against: (x * 2) + 1 over doubles.
@@ -148,7 +148,7 @@ ioTests :: [Test]
 ioTests =
     [ TestCase $ withSystemTempDirectory "expr-ser" $ \dir -> do
         let fp = dir ++ "/expr.json"
-            e = F.col @Double "x" * F.lit 2 + F.lit 1
+            e = F.double "x" * F.lit 2 + F.lit 1
         sr <- saveExprToFile fp e
         assertEqual "save expr ok" (Right ()) sr
         loaded <- loadExprAtFromFile @Double fp
@@ -161,8 +161,8 @@ ioTests =
     , TestCase $ withSystemTempDirectory "expr-ser" $ \dir -> do
         let fp = dir ++ "/pipeline.json"
             nes =
-                [ ("z", SomeExpr (F.col @Double "x" * F.lit 2))
-                , ("w", SomeExpr (F.col @Double "x" + F.lit 10))
+                [ ("z", SomeExpr (F.double "x" * F.lit 2))
+                , ("w", SomeExpr (F.double "x" + F.lit 10))
                 ]
         sr <- savePipelineToFile fp nes
         assertEqual "save pipeline ok" (Right ()) sr
@@ -171,11 +171,11 @@ ioTests =
             Left err -> assertFailure ("load pipeline failed: " <> err)
             Right nes' -> do
                 let df' = applyTransform (Transform nes') df3
-                assertBool "z = 2x" (close (interpD df' (F.col @Double "z")) [2, 4, 6])
-                assertBool "w = x+10" (close (interpD df' (F.col @Double "w")) [11, 12, 13])
+                assertBool "z = 2x" (close (interpD df' (F.double "z")) [2, 4, 6])
+                assertBool "w = x+10" (close (interpD df' (F.double "w")) [11, 12, 13])
     , TestCase $ withSystemTempDirectory "expr-ser" $ \dir -> do
         let fp = dir ++ "/transform.json"
-            t = Transform [("z", SomeExpr (F.col @Double "x" * F.lit 2))]
+            t = Transform [("z", SomeExpr (F.double "x" * F.lit 2))]
         sr <- saveTransformToFile fp t
         assertEqual "save transform ok" (Right ()) sr
         loaded <- loadTransformFromFile fp
@@ -184,11 +184,11 @@ ioTests =
             Right t' ->
                 assertBool
                     "transform z = 2x"
-                    (close (interpD (applyTransform t' df3) (F.col @Double "z")) [2, 4, 6])
+                    (close (interpD (applyTransform t' df3) (F.double "z")) [2, 4, 6])
     , TestCase $ withSystemTempDirectory "expr-ser" $ \dir -> do
         -- End-to-end: fit OLS, persist its prediction, reload, compare outputs.
         let fp = dir ++ "/model.json"
-            m = fit defaultLinearConfig (F.col @Double "y") regDF
+            m = fit defaultLinearConfig (F.double "y") regDF
         sr <- saveExprToFile fp (predict m)
         assertEqual "save model ok" (Right ()) sr
         loaded <- loadExprAtFromFile @Double fp

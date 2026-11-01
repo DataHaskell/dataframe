@@ -103,7 +103,7 @@ clusterLabels n nbrs isCore = runST $ do
 dbscanSurrogateExpr ::
     TreeConfig -> [Expr Double] -> DBSCANModel -> DataFrame -> Expr Int
 dbscanSurrogateExpr cfg features model df =
-    fitDecisionTree cfg (F.col @Int clusterCol) augmented
+    fitDecisionTree cfg (F.int clusterCol) augmented
   where
     clusterCol = "__cluster__"
     cols = map (\e -> (columnExprName e, materializeColumn df e)) features

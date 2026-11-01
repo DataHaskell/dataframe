@@ -40,7 +40,7 @@ intSort desc = TestCase $ do
     let n = 300000
         ks = map (subtract 500) (draws 7 1000 n)
         df = D.fromColumns [("k", DI.fromList ks), ("v", DI.fromList [0 .. n - 1 :: Int])]
-        ord = if desc then D.Desc (F.col @Int "k") else D.Asc (F.col @Int "k")
+        ord = if desc then D.Desc (F.int "k") else D.Asc (F.int "k")
         expected = if desc then stableOrder Down ks else stableOrder id ks
     assertEqual
         ("Int sort desc=" ++ show desc)
@@ -54,7 +54,7 @@ narrowSort = TestCase $ do
     assertEqual
         "Int32 sort"
         (stableOrder id ks)
-        (sortedV (df & D.sortBy [D.Asc (F.col @Int32 "k")]))
+        (sortedV (df & D.sortBy [D.Asc (F.int32 "k")]))
 
 -- -0.0 and 0.0 compare equal, so they keep row order.
 doubleSort :: Test
@@ -67,11 +67,11 @@ doubleSort = TestCase $ do
     assertEqual
         "Double sort"
         (stableOrder id ks)
-        (sortedV (df & D.sortBy [D.Asc (F.col @Double "k")]))
+        (sortedV (df & D.sortBy [D.Asc (F.double "k")]))
     assertEqual
         "Double sort desc"
         (stableOrder Down ks)
-        (sortedV (df & D.sortBy [D.Desc (F.col @Double "k")]))
+        (sortedV (df & D.sortBy [D.Desc (F.double "k")]))
 
 -- A NaN column keeps the comparison sort; this only checks it still sorts.
 nanSort :: Test
@@ -81,7 +81,7 @@ nanSort = TestCase $ do
     assertEqual
         "NaN sort length"
         4
-        (length (sortedV (df & D.sortBy [D.Asc (F.col @Double "k")])))
+        (length (sortedV (df & D.sortBy [D.Asc (F.double "k")])))
 
 maskCases :: [Test]
 maskCases =

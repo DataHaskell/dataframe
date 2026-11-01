@@ -240,7 +240,7 @@ imputeHappyPath =
         ( assertEqual
             "impute fills Nothing with the given value"
             (Just $ DI.UnboxedColumn Nothing (VU.fromList [1 :: Int, 0, 3]))
-            (DI.getColumn "opt" $ impute (F.col @(Maybe Int) "opt") 0 imputeData)
+            (DI.getColumn "opt" $ impute (F.maybeInt "opt") 0 imputeData)
         )
 
 imputeColumnNotFound :: Test
@@ -249,7 +249,7 @@ imputeColumnNotFound =
         ( assertExpectException
             "[Error Case]"
             (DE.columnNotFound "missing" "impute" (D.columnNames imputeData))
-            (print $ impute (F.col @(Maybe Int) "missing") 0 imputeData)
+            (print $ impute (F.maybeInt "missing") 0 imputeData)
         )
 
 imputeOnNonOptional :: Test
@@ -258,7 +258,7 @@ imputeOnNonOptional =
         ( assertExpectException
             "[Error Case]"
             "impute"
-            (print $ impute (F.col @(Maybe Int) "plain") 0 imputeData)
+            (print $ impute (F.maybeInt "plain") 0 imputeData)
         )
 
 -- | Only a column reference can be imputed; a compound expression throws.

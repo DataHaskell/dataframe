@@ -171,10 +171,10 @@ groupAndSort =
             ( ordersDF
                 D.|> D.groupBy ["region"]
                 D.|> D.aggregate
-                    [ F.sum (F.col @Double "amount") `D.as` "total"
-                    , F.count (F.col @Double "amount") `D.as` "n"
+                    [ F.sum (F.double "amount") `D.as` "total"
+                    , F.count (F.double "amount") `D.as` "n"
                     ]
-                D.|> D.sortBy [D.Asc (F.col @T.Text "region")]
+                D.|> D.sortBy [D.Asc (F.text "region")]
             )
             ( ordersT
                 DT.|> DT.groupBy @'["region"]
@@ -187,10 +187,10 @@ groupAndSort =
             ( lo
                 L.|> L.groupBy ["region"]
                 L.|> L.aggregate
-                    [ F.sum (F.col @Double "amount") `L.as` "total"
-                    , F.count (F.col @Double "amount") `L.as` "n"
+                    [ F.sum (F.double "amount") `L.as` "total"
+                    , F.count (F.double "amount") `L.as` "n"
                     ]
-                L.|> L.sortBy [L.Asc (L.col @T.Text "region")]
+                L.|> L.sortBy [L.Asc (L.text "region")]
             )
             ( tlo
                 TL.|> TL.groupBy @'["region"]
@@ -203,9 +203,9 @@ groupAndSort =
         , fourWay
             "sortBy expression, filter, derive, select, take"
             ( ordersDF
-                D.|> D.filter (F.col @Double "amount" D..>. 2)
-                D.|> D.derive "twice" (F.col @Double "amount" * 2)
-                D.|> D.sortBy [D.Desc (F.col @Double "amount" * (-1))]
+                D.|> D.filter (F.double "amount" D..>. 2)
+                D.|> D.derive "twice" (F.double "amount" * 2)
+                D.|> D.sortBy [D.Desc (F.double "amount" * (-1))]
                 D.|> D.select ["cid", "twice"]
                 D.|> D.take 3
             )
@@ -217,9 +217,9 @@ groupAndSort =
                 DT.|> DT.take 3
             )
             ( lo
-                L.|> L.filter (F.col @Double "amount" L..>. 2)
-                L.|> L.derive "twice" (F.col @Double "amount" * 2)
-                L.|> L.sortBy [L.Desc (F.col @Double "amount" * (-1))]
+                L.|> L.filter (F.double "amount" L..>. 2)
+                L.|> L.derive "twice" (F.double "amount" * 2)
+                L.|> L.sortBy [L.Desc (F.double "amount" * (-1))]
                 L.|> L.select ["cid", "twice"]
                 L.|> L.take 3
             )
@@ -262,9 +262,9 @@ rowOps =
     TestList
         [ fourWay
             "filterBy"
-            (D.filterBy (> 4) (F.col @Double "amount") ordersDF)
+            (D.filterBy (> 4) (F.double "amount") ordersDF)
             (DT.filterBy (> 4) (DT.col @"amount") ordersT)
-            (L.filterBy (> 4) (F.col @Double "amount") lo)
+            (L.filterBy (> 4) (F.double "amount") lo)
             (TL.filterBy (> 4) (TL.col @"amount") tlo)
         , fourWay
             "filterNothing"
@@ -328,9 +328,9 @@ rowOps =
             (TL.cube (3, 2) tlo)
         , fourWay
             "topBy"
-            (D.topBy 1 3 [D.Desc (F.col @Double "amount")] ordersDF)
+            (D.topBy 1 3 [D.Desc (F.double "amount")] ordersDF)
             (DT.topBy 1 3 [DT.Desc (DT.col @"amount")] ordersT)
-            (L.topBy 1 3 [L.Desc (F.col @Double "amount")] lo)
+            (L.topBy 1 3 [L.Desc (F.double "amount")] lo)
             (TL.topBy 1 3 [TL.Desc (TL.col @"amount")] tlo)
         , fourWay
             "distinct"
@@ -358,9 +358,9 @@ rowOps =
             (TL.selectRows [4, 0, 2] tlo)
         , fourWay
             "stratifiedSample"
-            (D.stratifiedSample g 0.5 (F.col @T.Text "region") ordersDF)
+            (D.stratifiedSample g 0.5 (F.text "region") ordersDF)
             (DT.stratifiedSample g 0.5 (DT.col @"region") ordersT)
-            (L.stratifiedSample g 0.5 (F.col @T.Text "region") lo)
+            (L.stratifiedSample g 0.5 (F.text "region") lo)
             (TL.stratifiedSample g 0.5 (TL.col @"region") tlo)
         , fourWay
             "randomSplit fst"
@@ -376,9 +376,9 @@ rowOps =
             (snd (TL.randomSplit g 0.5 tlo))
         , fourWay
             "stratifiedSplit snd"
-            (snd (D.stratifiedSplit g 0.5 (F.col @T.Text "region") ordersDF))
+            (snd (D.stratifiedSplit g 0.5 (F.text "region") ordersDF))
             (snd (DT.stratifiedSplit g 0.5 (DT.col @"region") ordersT))
-            (snd (L.stratifiedSplit g 0.5 (F.col @T.Text "region") lo))
+            (snd (L.stratifiedSplit g 0.5 (F.text "region") lo))
             (snd (TL.stratifiedSplit g 0.5 (TL.col @"region") tlo))
         , fourWay
             "kFolds last"
@@ -394,8 +394,8 @@ columnOps =
         [ fourWay
             "deriveMany"
             ( D.deriveMany
-                [ "a2" D..= (F.col @Double "amount" * 2)
-                , "c1" D..= (F.col @Int "cid" + 1)
+                [ "a2" D..= (F.double "amount" * 2)
+                , "c1" D..= (F.int "cid" + 1)
                 ]
                 ordersDF
             )
@@ -404,8 +404,8 @@ columnOps =
                 ordersT
             )
             ( L.deriveMany
-                [ "a2" L..= (F.col @Double "amount" * 2)
-                , "c1" L..= (F.col @Int "cid" + 1)
+                [ "a2" L..= (F.double "amount" * 2)
+                , "c1" L..= (F.int "cid" + 1)
                 ]
                 lo
             )
@@ -415,9 +415,9 @@ columnOps =
             )
         , fourWay
             "deriveWithExpr"
-            (snd (D.deriveWithExpr "a2" (F.col @Double "amount" * 2) ordersDF))
+            (snd (D.deriveWithExpr "a2" (F.double "amount" * 2) ordersDF))
             (snd (DT.deriveWithExpr @"a2" (DT.col @"amount" * 2) ordersT))
-            (snd (L.deriveWithExpr "a2" (F.col @Double "amount" * 2) lo))
+            (snd (L.deriveWithExpr "a2" (F.double "amount" * 2) lo))
             (snd (TL.deriveWithExpr @"a2" (TL.col @"amount" * 2) tlo))
         , fourWay
             "exclude"
@@ -427,9 +427,9 @@ columnOps =
             (TL.exclude @'["region"] tlo)
         , fourWay
             "rename then filter on new name"
-            (D.filter (F.col @Double "amt" D..>. 4) (D.rename "amount" "amt" ordersDF))
+            (D.filter (F.double "amt" D..>. 4) (D.rename "amount" "amt" ordersDF))
             (DT.filter (DT.col @"amt" DT..>. 4) (DT.rename @"amount" @"amt" ordersT))
-            (L.filter (F.col @Double "amt" L..>. 4) (L.rename "amount" "amt" lo))
+            (L.filter (F.double "amt" L..>. 4) (L.rename "amount" "amt" lo))
             (TL.filter (TL.col @"amt" TL..>. 4) (TL.rename @"amount" @"amt" tlo))
         , fourWay
             "renameMany then select"
@@ -493,14 +493,14 @@ columnOps =
             (TL.applyAtIndex @"amount" 3 negate tlo)
         , fourWay
             "imputeWith"
-            (D.imputeWith F.mean (F.col @(Maybe Double) "v") nullableDF)
+            (D.imputeWith F.mean (F.maybeDouble "v") nullableDF)
             (DT.imputeWith DTF.mean (DT.col @"v") nullableT)
-            (L.imputeWith F.mean (F.col @(Maybe Double) "v") ln)
+            (L.imputeWith F.mean (F.maybeDouble "v") ln)
             (TL.imputeWith DTF.mean (TL.col @"v") tln)
         , untypedPair
             "impute (untyped)"
-            (D.impute (F.col @(Maybe Double) "v") 0 nullableDF)
-            (L.impute (F.col @(Maybe Double) "v") 0 ln)
+            (D.impute (F.maybeDouble "v") 0 nullableDF)
+            (L.impute (F.maybeDouble "v") 0 ln)
         , typedPair
             "impute (typed)"
             (DT.impute @"v" 0 nullableT)
@@ -552,9 +552,9 @@ mergeOps =
             (TL.symmetricDifference tlo (TL.drop 3 tlo))
         , fourWay
             "fold"
-            (D.fold (\n -> D.filter (F.col @Int "cid" D../=. F.lit n)) [1, 2] ordersDF)
+            (D.fold (\n -> D.filter (F.int "cid" D../=. F.lit n)) [1, 2] ordersDF)
             (DT.fold (\n -> DT.filter (DT.col @"cid" DT../=. DT.lit n)) [1, 2] ordersT)
-            (L.fold (\n -> L.filter (F.col @Int "cid" L../=. F.lit n)) [1, 2] lo)
+            (L.fold (\n -> L.filter (F.int "cid" L../=. F.lit n)) [1, 2] lo)
             (TL.fold (\n -> TL.filter (TL.col @"cid" TL../=. TL.lit n)) [1, 2] tlo)
         ]
 
@@ -569,8 +569,8 @@ summaries =
             (L.describeColumns lo)
         , untypedPair
             "frequencies"
-            (D.frequencies (F.col @T.Text "region") ordersDF)
-            (L.frequencies (F.col @T.Text "region") lo)
+            (D.frequencies (F.text "region") ordersDF)
+            (L.frequencies (F.text "region") lo)
         , untypedPair
             "frequencies (typed)"
             (DT.frequencies (DT.col @"region") ordersT)
@@ -582,21 +582,21 @@ values =
     TestList
         [ valueFourWay
             "mean"
-            (D.mean (F.col @Double "amount") ordersDF)
+            (D.mean (F.double "amount") ordersDF)
             (DT.mean (DT.col @"amount") ordersT)
-            (L.mean (F.col @Double "amount") lo)
+            (L.mean (F.double "amount") lo)
             (TL.mean (TL.col @"amount") tlo)
         , valueFourWay
             "sum"
-            (D.sum (F.col @Int "cid") ordersDF)
+            (D.sum (F.int "cid") ordersDF)
             (DT.sum (DT.col @"cid") ordersT)
-            (L.sum (F.col @Int "cid") lo)
+            (L.sum (F.int "cid") lo)
             (TL.sum (TL.col @"cid") tlo)
         , valueFourWay
             "median of a filtered query"
-            (D.median (F.col @Double "amount") (D.filter (F.col @Int "cid" D..>. 1) ordersDF))
+            (D.median (F.double "amount") (D.filter (F.int "cid" D..>. 1) ordersDF))
             (DT.median (DT.col @"amount") (DT.filter (DT.col @"cid" DT..>. 1) ordersT))
-            (L.median (F.col @Double "amount") (L.filter (F.col @Int "cid" L..>. 1) lo))
+            (L.median (F.double "amount") (L.filter (F.int "cid" L..>. 1) lo))
             (TL.median (TL.col @"amount") (TL.filter (TL.col @"cid" TL..>. 1) tlo))
         , valueFourWay
             "dimensions"
@@ -612,15 +612,15 @@ values =
             (TL.columnNames tlo)
         , valueFourWay
             "valueCounts"
-            (D.valueCounts (F.col @T.Text "region") ordersDF)
+            (D.valueCounts (F.text "region") ordersDF)
             (DT.valueCounts (DT.col @"region") ordersT)
-            (L.valueCounts (F.col @T.Text "region") lo)
+            (L.valueCounts (F.text "region") lo)
             (TL.valueCounts (TL.col @"region") tlo)
         , valueFourWay
             "columnAsList"
-            (D.columnAsList (F.col @Double "amount") ordersDF)
+            (D.columnAsList (F.double "amount") ordersDF)
             (DT.columnAsList @"amount" ordersT)
-            (L.columnAsList (F.col @Double "amount") lo)
+            (L.columnAsList (F.double "amount") lo)
             (TL.columnAsList @"amount" tlo)
         , valueFourWay
             "correlation"

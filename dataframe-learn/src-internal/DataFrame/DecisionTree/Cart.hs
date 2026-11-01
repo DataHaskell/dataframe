@@ -301,7 +301,7 @@ numericFeature ::
     (Columnable b, VU.Unbox b) =>
     T.Text -> Maybe Bitmap -> VU.Vector b -> [CartFeature]
 numericFeature c Nothing v = case testEquality (typeRep @b) (typeRep @Double) of
-    Just Refl -> [CartFeature v Nothing (\t _ -> F.col @Double c .<=. F.lit t)]
+    Just Refl -> [CartFeature v Nothing (\t _ -> F.double c .<=. F.lit t)]
     Nothing -> case sIntegral @b of
         STrue ->
             [ CartFeature
@@ -327,9 +327,9 @@ nullableLeq ::
     T.Text -> Maybe (b -> Double, Double -> Expr (Maybe Bool))
 nullableLeq c
     | Just Refl <- testEquality (typeRep @b) (typeRep @Double) =
-        Just (id, \t -> F.col @(Maybe Double) c .<= F.lit t)
+        Just (id, \t -> F.maybeDouble c .<= F.lit t)
     | Just Refl <- testEquality (typeRep @b) (typeRep @Int) =
-        Just (fromIntegral, \t -> F.col @(Maybe Int) c .<= F.lit t)
+        Just (fromIntegral, \t -> F.maybeInt c .<= F.lit t)
     | otherwise = Nothing
 
 oneHotFeatures ::
@@ -348,7 +348,7 @@ oneHot c Nothing v cat =
     CartFeature
         (VU.generate (V.length v) (\i -> if v V.! i == cat then 1 else 0))
         Nothing
-        (\_ _ -> F.col @T.Text c ./=. F.lit cat)
+        (\_ _ -> F.text c ./=. F.lit cat)
 oneHot c (Just nulls) v cat =
     CartFeature
         (VU.generate (V.length v) value)
@@ -359,7 +359,7 @@ oneHot c (Just nulls) v cat =
         | nulls VU.! i = 1 / 0
         | v V.! i == cat = 1
         | otherwise = 0
-    col' = F.col @(Maybe T.Text) c
+    col' = F.maybeText c
     -- Threshold 1 passes every non-null row, so that split is null vs non-null.
     cond t side
         | t < 1 = F.fromMaybe (side == NullsLeft) (col' ./= F.lit cat)

@@ -206,7 +206,7 @@ testKMeansInertiaStable = TestCase $ do
             kmInertia $
                 fit
                     defaultKMeansConfig{kmK = 2, kmNInit = 1, kmSeed = s}
-                    [F.col @Double "a", F.col @Double "b"]
+                    [F.double "a", F.double "b"]
                     df
         inertias = map fitSeed [0 .. 19]
         blob1 = take 5 (zip as bs)
@@ -261,7 +261,7 @@ spreadDF =
 testKMeansReproducible :: Test
 testKMeansReproducible = TestCase $ do
     let cfg s = defaultKMeansConfig{kmK = 4, kmNInit = 1, kmMaxIter = 1, kmSeed = s}
-        run s = fit (cfg s) [F.col @Double "a", F.col @Double "b"]
+        run s = fit (cfg s) [F.double "a", F.double "b"]
         a = run 1 spreadDF
         b = run 1 spreadDF
     assertEqual "k-means same seed identical model" a b
@@ -274,7 +274,7 @@ testKMeansReproducible = TestCase $ do
 testGMMReproducible :: Test
 testGMMReproducible = TestCase $ do
     let cfg s = defaultGMMConfig{gmmK = 2, gmmMaxIter = 1, gmmSeed = s}
-        run s = fit (cfg s) [F.col @Double "a", F.col @Double "b"] blobsDF
+        run s = fit (cfg s) [F.double "a", F.double "b"] blobsDF
         a = run 1
         b = run 1
     assertEqual "GMM same seed identical model" a b
@@ -292,7 +292,7 @@ testRFFReproducible = TestCase $ do
                 , ("label", DI.fromList ([0, 0, 0, 0, 1, 1, 1, 1] :: [Int]))
                 ]
         cfg s = defaultRFFConfig{rffD = 40, rffGamma = 0.2, rffSeed = s}
-        run s = fit (cfg s) (F.col @Int "label") clsDF
+        run s = fit (cfg s) (F.int "label") clsDF
         a = run 5
         b = run 5
     assertEqual "RFF same seed: same projection B" (rffB a) (rffB b)

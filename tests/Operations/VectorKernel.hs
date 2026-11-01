@@ -55,11 +55,11 @@ grid n =
         ]
 
 vi, vj :: Expr Int
-vi = F.col @Int "vi"
-vj = F.col @Int "vj"
+vi = F.int "vi"
+vj = F.int "vj"
 
 vd :: Expr Double
-vd = F.col @Double "vd"
+vd = F.double "vd"
 
 aggSets :: [[(T.Text, SomeExpr)]]
 aggSets =

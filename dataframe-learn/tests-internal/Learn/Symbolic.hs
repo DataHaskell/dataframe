@@ -47,10 +47,10 @@ testSRRecovers = TestCase $ do
                     , srPopSize = 300
                     , srUnaryOps = []
                     }
-                (F.col @Double "y")
+                (F.double "y")
                 df
         preds = interpD df (srBest m)
-        truth = interpD df (F.col @Double "y")
+        truth = interpD df (F.double "y")
         err = sum (zipWith (\p t -> (p - t) ^ (2 :: Int)) preds truth) / 10
     assertBool "SR recovers x*x+x to low error" (err < 1e-6)
     assertBool "Pareto front non-empty" (not (null (srPareto m)))
@@ -66,14 +66,14 @@ testSRDeterminism = TestCase $ do
         run =
             fit
                 defaultSRConfig{srSeed = 9, srGenerations = 20}
-                (F.col @Double "y")
+                (F.double "y")
                 df
     assertEqual "SR deterministic best MSE" (srBestMSE run) (srBestMSE (rerun df))
   where
     rerun =
         fit
             defaultSRConfig{srSeed = 9, srGenerations = 20}
-            (F.col @Double "y")
+            (F.double "y")
 
 testSimplifyPreservesEval :: Test
 testSimplifyPreservesEval = TestCase $ do
@@ -100,7 +100,7 @@ testKernelPCA = TestCase $ do
         m =
             fit
                 defaultKernelPCAConfig{kpcaNComponents = 2, kpcaNLandmarks = 8, kpcaSeed = 1}
-                [F.col @Double "a", F.col @Double "b"]
+                [F.double "a", F.double "b"]
                 df
         pc1 = case kernelPCAExprs m of
             ((_, e) : _) -> interpD df e
@@ -123,7 +123,7 @@ testRFFSVM = TestCase $ do
         m =
             fit
                 defaultRFFConfig{rffD = 80, rffGamma = 0.2, rffSeed = 2}
-                (F.col @Int "label")
+                (F.int "label")
                 df
         preds = interpI df (predict m)
     assertEqual "RFF SVM separates" [0, 0, 0, 0, 1, 1, 1, 1] preds

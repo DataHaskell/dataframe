@@ -41,29 +41,29 @@ tdf = either (error . show) id (DT.freezeWithError baseDF)
 statParity :: Test
 statParity =
     TestList
-        [ eq "mean" (TS.mean (DT.col @"y") tdf) (D.mean (F.col @Double "y") baseDF)
-        , eq "median" (TS.median (DT.col @"y") tdf) (D.median (F.col @Double "y") baseDF)
+        [ eq "mean" (TS.mean (DT.col @"y") tdf) (D.mean (F.double "y") baseDF)
+        , eq "median" (TS.median (DT.col @"y") tdf) (D.median (F.double "y") baseDF)
         , eq
             "variance"
             (TS.variance (DT.col @"y") tdf)
-            (D.variance (F.col @Double "y") baseDF)
+            (D.variance (F.double "y") baseDF)
         , eq
             "stddev"
             (TS.standardDeviation (DT.col @"y") tdf)
-            (D.standardDeviation (F.col @Double "y") baseDF)
-        , eq "sum" (TS.sum (DT.col @"x") tdf) (D.sum (F.col @Int "x") baseDF)
+            (D.standardDeviation (F.double "y") baseDF)
+        , eq "sum" (TS.sum (DT.col @"x") tdf) (D.sum (F.int "x") baseDF)
         , eq
             "percentile"
             (TS.percentile 50 (DT.col @"y") tdf)
-            (D.percentile 50 (F.col @Double "y") baseDF)
+            (D.percentile 50 (F.double "y") baseDF)
         , eq
             "iqr"
             (TS.interQuartileRange (DT.col @"y") tdf)
-            (D.interQuartileRange (F.col @Double "y") baseDF)
+            (D.interQuartileRange (F.double "y") baseDF)
         , eq
             "skewness"
             (TS.skewness (DT.col @"y") tdf)
-            (D.skewness (F.col @Double "y") baseDF)
+            (D.skewness (F.double "y") baseDF)
         , eq
             "correlation"
             (TS.correlation @"x" @"y" tdf)
@@ -77,25 +77,25 @@ statParity =
 exprParity :: Test
 exprParity =
     TestList
-        [ deriveEq "pow" (DTF.pow (DT.col @"x") 2) (F.pow (F.col @Int "x") 2)
-        , deriveEq "relu" (DTF.relu (DT.col @"x")) (F.relu (F.col @Int "x"))
-        , deriveEq "toMaybe" (DTF.toMaybe (DT.col @"x")) (F.toMaybe (F.col @Int "x"))
+        [ deriveEq "pow" (DTF.pow (DT.col @"x") 2) (F.pow (F.int "x") 2)
+        , deriveEq "relu" (DTF.relu (DT.col @"x")) (F.relu (F.int "x"))
+        , deriveEq "toMaybe" (DTF.toMaybe (DT.col @"x")) (F.toMaybe (F.int "x"))
         , deriveEq
             "min"
             (DTF.min (DT.col @"x") (DT.lit 3))
-            (F.min (F.col @Int "x") (F.lit @Int 3))
+            (F.min (F.int "x") (F.lit @Int 3))
         , deriveEq
             "splitOn"
             (DTF.splitOn "a" (DT.col @"g"))
-            (F.splitOn "a" (F.col @T.Text "g"))
+            (F.splitOn "a" (F.text "g"))
         , deriveEq
             "recodeWithDefault"
             (DTF.recodeWithDefault 0 [(1 :: Int, 100 :: Int)] (DT.col @"x"))
-            (F.recodeWithDefault 0 [(1 :: Int, 100 :: Int)] (F.col @Int "x"))
+            (F.recodeWithDefault 0 [(1 :: Int, 100 :: Int)] (F.int "x"))
         , deriveEq
             "eq"
             (DTF.eq (DT.col @"x") (DT.lit 3))
-            (F.eq (F.col @Int "x") (F.lit @Int 3))
+            (F.eq (F.int "x") (F.lit @Int 3))
         , deriveEq
             "and"
             (DTF.and (DTF.lt (DT.col @"x") (DT.lit 5)) (DTF.geq (DT.col @"x") (DT.lit 2)))
@@ -113,8 +113,8 @@ exprParity =
             (F.castWithDefault (0 :: Int) "g")
         ]
   where
-    x = F.col @Int "x"
-    g = F.col @T.Text "g"
+    x = F.int "x"
+    g = F.text "g"
     deriveEq ::
         (DI.Columnable a) =>
         String -> DT.TExpr S a -> D.Expr a -> Test
@@ -136,7 +136,7 @@ aggParity =
         , same "not" (DTF.not (DTF.eq (DT.col @"x") 1)) (F.not (F.eq x 1))
         ]
   where
-    x = F.col @Int "x"
+    x = F.int "x"
     same :: (DI.Columnable a) => String -> DT.TExpr S a -> D.Expr a -> Test
     same lbl te ue = TestCase (assertBool lbl (eqExpr (DT.unTExpr te) ue))
 
@@ -159,7 +159,7 @@ applyParity =
         , TestCase
             ( assertEqual
                 "valueCounts"
-                (D.valueCounts (F.col @T.Text "g") baseDF)
+                (D.valueCounts (F.text "g") baseDF)
                 (DT.valueCounts (DT.col @"g") tdf)
             )
         , TestCase
@@ -195,7 +195,7 @@ accessParity =
         [ TestCase
             ( assertEqual
                 "columnAsDoubleVector"
-                (extract (D.columnAsDoubleVector (F.col @Double "y") baseDF))
+                (extract (D.columnAsDoubleVector (F.double "y") baseDF))
                 (DT.columnAsDoubleVector @"y" tdf)
             )
         , TestCase
@@ -239,13 +239,13 @@ newOpsParity =
     TestList
         [ same
             "topBy"
-            (D.topBy 1 2 [D.Desc (F.col @Double "y")] baseDF)
+            (D.topBy 1 2 [D.Desc (F.double "y")] baseDF)
             (DT.topBy 1 2 [DT.Desc (DT.col @"y")] tdf)
         , same
             "deriveMany"
             ( D.deriveMany
-                [ "x2" D..= (F.col @Int "x" * 2)
-                , "y2" D..= (F.col @Double "y" + 1)
+                [ "x2" D..= (F.int "x" * 2)
+                , "y2" D..= (F.double "y" + 1)
                 ]
                 baseDF
             )
@@ -271,7 +271,7 @@ newOpsParity =
             (DT.applyDouble @"y" (> 20) tdf)
         , same
             "fold"
-            (D.fold (\n -> D.filter (F.col @Int "x" ./=. F.lit n)) [2, 4] baseDF)
+            (D.fold (\n -> D.filter (F.int "x" ./=. F.lit n)) [2, 4] baseDF)
             (DT.fold (\n -> DT.filter (DT.col @"x" DT../=. DT.lit n)) [2, 4] tdf)
         , TestCase (assertBool "empty is null" (DT.null DT.empty))
         , TestCase (assertEqual "null" (D.null baseDF) (DT.null tdf))
@@ -281,7 +281,7 @@ newOpsParity =
         , TestCase
             ( assertEqual
                 "frame stats via DataFrame.Typed"
-                (D.mean (F.col @Double "y") baseDF)
+                (D.mean (F.double "y") baseDF)
                 (DT.mean (DT.col @"y") tdf)
             )
         , TestCase

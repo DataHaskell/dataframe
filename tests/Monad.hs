@@ -72,8 +72,8 @@ sortByMOrdersRows =
             "sortByM sorts ascending on A"
             [1, 2, 3]
             ( D.columnAsList @Int
-                (F.col @Int "A")
-                (execFrameM verbFixture (sortByM [Asc (F.col @Int "A")]))
+                (F.int "A")
+                (execFrameM verbFixture (sortByM [Asc (F.int "A")]))
             )
         )
 

@@ -75,7 +75,7 @@ testSum =
                 , ("sum", DI.fromList (replicate 10 (55 :: Int)))
                 ]
             )
-            (D.derive "sum" (F.sum (F.col @Int "A")) df)
+            (D.derive "sum" (F.sum (F.int "A")) df)
         )
 
 testPow :: Test
@@ -86,7 +86,7 @@ testPow =
             [4, 9, 16, 25, 36, 49, 64, 81, 100, 121]
             ( D.columnAsList @Int
                 (F.col "sq")
-                (D.derive "sq" (F.pow (F.col @Int "A" + F.lit 1) 2) df)
+                (D.derive "sq" (F.pow (F.int "A" + F.lit 1) 2) df)
             )
         )
 

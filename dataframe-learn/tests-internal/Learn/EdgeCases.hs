@@ -175,7 +175,7 @@ testLogisticProbsExtremeFeatures = TestCase $ do
                 [ ("x", DI.fromList ([-3, -2, -1, -0.5, 0.5, 1, 2, 3] :: [Double]))
                 , ("label", DI.fromList ([0, 0, 0, 0, 1, 1, 1, 1] :: [Int]))
                 ]
-        m = fit defaultLogisticConfig (F.col @Int "label") trainDf
+        m = fit defaultLogisticConfig (F.int "label") trainDf
         probs = logisticProbExprs m
         extremeDf =
             D.fromColumns
@@ -196,7 +196,7 @@ testOLSOneRow = TestCase $ do
                 [ ("x", DI.fromList ([2] :: [Double]))
                 , ("y", DI.fromList ([7] :: [Double]))
                 ]
-        m = fit defaultLinearConfig (F.col @Double "y") df
+        m = fit defaultLinearConfig (F.double "y") df
         preds = interpD df (predict m)
     assertBool "single OLS prediction finite" (all finite preds)
     assertBool
@@ -211,7 +211,7 @@ testLogisticSingleClass = TestCase $ do
                 [ ("x", DI.fromList ([-2, -1, 0, 1, 2] :: [Double]))
                 , ("label", DI.fromList ([1, 1, 1, 1, 1] :: [Int]))
                 ]
-        m = fit defaultLogisticConfig (F.col @Int "label") df
+        m = fit defaultLogisticConfig (F.int "label") df
         preds = interpI df (predict m)
     assertEqual
         "single-class logistic predicts that class everywhere"
@@ -227,7 +227,7 @@ testLogisticConstantFeatureIgnored = TestCase $ do
                 , ("const", DI.fromList (replicate 8 (5.0 :: Double)))
                 , ("label", DI.fromList ([0, 0, 0, 0, 1, 1, 1, 1] :: [Int]))
                 ]
-        m = fit defaultLogisticConfig (F.col @Int "label") df
+        m = fit defaultLogisticConfig (F.int "label") df
         preds = interpI df (predict m)
     assertEqual
         "logistic ignores constant column and separates"
@@ -244,7 +244,7 @@ testLinearConstantFeatureZeroWeight = TestCase $ do
                 , ("const", DI.fromList (replicate 6 (5.0 :: Double)))
                 , ("y", DI.fromList [3 * x + 4 | x <- xs])
                 ]
-        m = fit defaultLinearConfig (F.col @Double "y") df
+        m = fit defaultLinearConfig (F.double "y") df
         coefs = VU.toList (regCoef m)
         names = V.toList (regFeatureNames m)
         byName = zip names coefs
@@ -266,7 +266,7 @@ testKMeansKGreaterThanN = TestCase $ do
                 , ("b", DI.fromList ([0, 5, 10] :: [Double]))
                 ]
         cfg = defaultKMeansConfig{kmK = 10, kmNInit = 3, kmSeed = 1}
-        m = fit cfg [F.col @Double "a", F.col @Double "b"] df
+        m = fit cfg [F.double "a", F.double "b"] df
     assertEqual "k clamped to n=3 centres" 3 (V.length (kmCenters m))
     let labels = VU.toList (kmLabels m)
     assertBool "all labels in [0,2]" (all (\l -> l >= 0 && l < 3) labels)
@@ -284,7 +284,7 @@ testKMeansAllIdentical = TestCase $ do
                 , ("b", DI.fromList (replicate 6 (4.0 :: Double)))
                 ]
         cfg = defaultKMeansConfig{kmK = 2, kmNInit = 3, kmSeed = 1}
-        m = fit cfg [F.col @Double "a", F.col @Double "b"] df
+        m = fit cfg [F.double "a", F.double "b"] df
     assertBool
         "centres finite on degenerate identical data"
         (all (VU.all finite) (V.toList (kmCenters m)))
@@ -301,7 +301,7 @@ testGMMKGreaterThanN = TestCase $ do
                 , ("b", DI.fromList ([0, 10] :: [Double]))
                 ]
         cfg = defaultGMMConfig{gmmK = 5, gmmSeed = 1}
-        m = fit cfg [F.col @Double "a", F.col @Double "b"] df
+        m = fit cfg [F.double "a", F.double "b"] df
     assertEqual "GMM k clamped to n=2" 2 (VU.length (gmmWeights m))
     assertBool "GMM weights finite" (VU.all finite (gmmWeights m))
     assertBool "GMM weights sum to ~1" (close 1e-6 (VU.sum (gmmWeights m)) 1)
@@ -318,7 +318,7 @@ testPCAConstantColumn = TestCase $ do
         m =
             fit
                 (PCAConfig (NComp 2) False)
-                [F.col @Double "x", F.col @Double "const"]
+                [F.double "x", F.double "const"]
                 df
         ratio = VU.toList (pcaExplainedVarianceRatio m)
     assertBool "explained ratios finite" (all finite ratio)
@@ -343,7 +343,7 @@ testPCAExtremeScale = TestCase $ do
         m =
             fit
                 (PCAConfig (NComp 1) False)
-                [F.col @Double "x", F.col @Double "y"]
+                [F.double "x", F.double "y"]
                 df
         comp0 = pcaComponents m V.! 0
         nrm = sqrt (VU.sum (VU.map (^ (2 :: Int)) comp0))

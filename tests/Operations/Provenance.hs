@@ -22,7 +22,7 @@ base =
 
 -- A frame with one derived column "z".
 withZ :: D.DataFrame
-withZ = D.derive "z" (F.col @Int "x" + F.col "y") base
+withZ = D.derive "z" (F.int "x" + F.col "y") base
 
 -- Inserting a new column must not wipe provenance of existing derived columns.
 insertPreservesProvenance :: Test
@@ -40,7 +40,7 @@ insertPreservesProvenance =
 insertOverwriteDropsOwnExpr :: Test
 insertOverwriteDropsOwnExpr =
     let
-        df2 = D.derive "w" (F.col @Int "x") withZ
+        df2 = D.derive "w" (F.int "x") withZ
         df3 = D.insertColumn "z" (DI.fromList [99 :: Int]) df2
      in
         TestCase $ do
@@ -63,7 +63,7 @@ deriveTracksExpression =
 -- Multiple derives accumulate.
 deriveManyTracksAll :: Test
 deriveManyTracksAll =
-    let df = D.derive "w" (F.col @Int "x") withZ
+    let df = D.derive "w" (F.int "x") withZ
      in TestCase
             ( assertEqual
                 "two derive calls should leave two expressions"
@@ -74,7 +74,7 @@ deriveManyTracksAll =
 -- Re-deriving a column replaces its expression and keeps the count stable.
 deriveOverwriteReplacesExpression :: Test
 deriveOverwriteReplacesExpression =
-    let df = D.derive "z" (F.col @Int "y") withZ -- overwrite z
+    let df = D.derive "z" (F.int "y") withZ -- overwrite z
      in TestCase
             ( assertEqual
                 "re-deriving z should not duplicate the entry"
@@ -85,7 +85,7 @@ deriveOverwriteReplacesExpression =
 -- deriveWithExpr should also track the expression.
 deriveWithExprTracksExpression :: Test
 deriveWithExprTracksExpression =
-    let (_, df) = D.deriveWithExpr @Int "z" (F.col @Int "x" + F.col "y") base
+    let (_, df) = D.deriveWithExpr @Int "z" (F.int "x" + F.col "y") base
      in TestCase
             ( assertBool
                 "deriveWithExpr should record z in derivingExpressions"
@@ -123,7 +123,7 @@ semiGroupPreservesLeft =
 
 semiGroupPreservesBoth :: Test
 semiGroupPreservesBoth =
-    let dfW = D.derive "w" (F.col @Int "y") base
+    let dfW = D.derive "w" (F.int "y") base
         merged = withZ <> dfW
      in TestCase
             ( assertEqual
@@ -135,8 +135,8 @@ semiGroupPreservesBoth =
 -- Left frame wins when both sides have an expression for the same column.
 semiGroupLeftBias :: Test
 semiGroupLeftBias =
-    let dfLeft = D.derive "z" (F.col @Int "x") base
-        dfRight = D.derive "z" (F.col @Int "y") base
+    let dfLeft = D.derive "z" (F.int "x") base
+        dfRight = D.derive "z" (F.int "y") base
         merged = dfLeft <> dfRight
      in TestCase
             ( assertEqual
@@ -164,7 +164,7 @@ emptyWithSemiGroup =
 
 horizontalMergePreservesLeft :: Test
 horizontalMergePreservesLeft =
-    let dfW = D.derive "w" (F.col @Int "y") base
+    let dfW = D.derive "w" (F.int "y") base
         extra = D.fromColumns [("q", DI.fromList [0 :: Int, 0, 0, 0, 0])]
         merged = dfW ||| extra
      in TestCase
@@ -179,7 +179,7 @@ horizontalMergePreservesRight =
         dfW =
             D.derive
                 "w"
-                (F.col @Int "y")
+                (F.int "y")
                 (D.fromColumns [("y", DI.fromList [2 .. 6 :: Int])])
         merged = extra ||| dfW
      in TestCase
@@ -193,7 +193,7 @@ horizontalMergePreservesBoth =
     let dfZ = withZ
         dfW = D.fromColumns [("q", DI.fromList [0 :: Int, 0, 0, 0, 0])]
         -- give dfW a derived column on a separate base
-        dfWD = D.derive "w" (F.col @Int "q") dfW
+        dfWD = D.derive "w" (F.int "q") dfW
         merged = dfZ ||| dfWD
      in TestCase
             ( assertEqual
