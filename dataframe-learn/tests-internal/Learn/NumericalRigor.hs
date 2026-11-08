@@ -1,6 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE TypeApplications #-}
 
 -- | Numerical-rigor suite: gradient checks, reproducibility, RNG properties.
 module Learn.NumericalRigor (tests) where

@@ -99,7 +99,7 @@ testPCAParity = TestCase $ do
     df <- D.readCsv "data/ml/iris.csv"
     let feats =
             map
-                (F.double)
+                F.double
                 ["sepal_length", "sepal_width", "petal_length", "petal_width"]
         m = fit (PCAConfig (NComp 2) False) feats df
         goldEvr = asNums (g .! "pca" .! "evr")

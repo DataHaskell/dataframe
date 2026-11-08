@@ -69,6 +69,10 @@ col = Col
 int :: T.Text -> Expr Int
 int = Col
 
+-- | Column reference of type Integer; same as `col @Integer`.
+integer :: T.Text -> Expr Integer
+integer = Col
+
 -- | Column reference of type Double; same as `col @Double`.
 double :: T.Text -> Expr Double
 double = Col

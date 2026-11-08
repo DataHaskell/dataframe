@@ -1,6 +1,5 @@
 {-# LANGUAGE NumericUnderscores #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TypeApplications #-}
 
 import Data.Time
 import qualified Data.Vector.Unboxed as VU

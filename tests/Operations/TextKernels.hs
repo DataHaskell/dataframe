@@ -1,5 +1,4 @@
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TypeApplications #-}
 
 -- | contains and length on packed text agree with the Text functions per row.
 module Operations.TextKernels (tests) where

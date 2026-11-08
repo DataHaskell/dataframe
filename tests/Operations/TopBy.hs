@@ -1,5 +1,4 @@
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TypeApplications #-}
 
 -- | 'topBy' returns the window a full 'sortBy' would, for every key type.
 module Operations.TopBy (tests) where

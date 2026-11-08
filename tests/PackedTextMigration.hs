@@ -1,5 +1,4 @@
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TypeApplications #-}
 
 -- | Packed-text columns must behave identically to boxed Text columns.
 module PackedTextMigration (tests) where

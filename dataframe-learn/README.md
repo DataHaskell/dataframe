@@ -248,7 +248,7 @@ evaluate rmse deployed (D.double "y") sales
 > <interactive>:112:15: error: [GHC-88464]
 >     Variable not in scope: deployed :: D.Expr Double
 > 
-> <interactive>:112:44: error: [GHC-88464]
+> <interactive>:112:39: error: [GHC-88464]
 >     Variable not in scope: sales :: D.DataFrame
 
 ## Splitting the data, and evaluation
@@ -317,12 +317,12 @@ putStr (show (classificationReportExpr (predict clf) (D.double "species") flower
 ```
 
 > <!-- scripths:mime text/plain -->
-> <interactive>:170:59: error: [GHC-88464]
+> <interactive>:170:54: error: [GHC-88464]
 >     Variable not in scope: flowers :: D.DataFrame
 > 
 > <interactive>:173:49: error: [GHC-88464] Variable not in scope: clf
 > 
-> <interactive>:173:80: error: [GHC-88464]
+> <interactive>:173:75: error: [GHC-88464]
 >     Variable not in scope: flowers :: D.DataFrame
 
 ## Pipelines compose as a monoid
@@ -344,7 +344,7 @@ D.columnNames (applyTransform pipeline flowers)
 > <interactive>:182:36: error: [GHC-88464]
 >     Variable not in scope: flowers :: D.DataFrame
 > 
-> <interactive>:183:74: error: [GHC-88464]
+> <interactive>:183:69: error: [GHC-88464]
 >     Variable not in scope: flowers :: D.DataFrame
 > 
 > <interactive>:188:31: error: [GHC-88464]

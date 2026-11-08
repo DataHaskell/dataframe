@@ -1,5 +1,4 @@
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TypeApplications #-}
 
 -- | Spec for the saturateCandidates worklist against the boolExprsVec oracle.
 module Worklist (tests, props) where

@@ -1,5 +1,4 @@
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TypeApplications #-}
 
 -- | The synthesis enumerator recovers small exact features deterministically.
 module Learn.Synthesis (tests) where

@@ -1,5 +1,4 @@
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TypeApplications #-}
 
 -- | Must NOT compile: 'impute' requires a nullable expression.
 module ImputePlain where

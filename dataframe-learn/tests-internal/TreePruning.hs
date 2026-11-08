@@ -1,5 +1,4 @@
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TypeApplications #-}
 
 -- | Specification for the fitted-tree pruning pass (pruneDead).
 module TreePruning (tests) where

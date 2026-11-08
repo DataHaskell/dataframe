@@ -64,7 +64,7 @@ linearDenotation = TestCase $ do
 kmeansDenotation :: Test
 kmeansDenotation = TestCase $ do
     let feats = ["x1", "x2"]
-        km = fit defaultKMeansConfig{kmK = 3, kmSeed = 1} (map (F.double) feats) df
+        km = fit defaultKMeansConfig{kmK = 3, kmSeed = 1} (map F.double feats) df
         centers = map VU.toList (V.toList (kmCenters km))
         rows = transposeL (map (col df) feats)
         native = [nearest centers row | row <- rows]
