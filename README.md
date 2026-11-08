@@ -35,7 +35,7 @@
 
 # DataFrame
 
-Tabular data analysis and symbolic AI in Haskell. Supports eager computation and lazy/deferred computation. API flexible enough to accomodate beginners to both data analysis or Haskell, and advanced type-safe pipelines.
+Tabular data analysis and symbolic AI in Haskell. Supports eager computation and lazy/deferred computation. API flexible enough to accommodate beginners to both data analysis or Haskell, and advanced type-safe pipelines.
 
 **Notebooks**: IHaskell integration with [pre-built Binder examples](https://mybinder.org/v2/gh/mchav/ihaskell-dataframe/HEAD).
 

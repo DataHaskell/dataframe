@@ -58,7 +58,7 @@ For quantitative data our goal is to understand the population distribution thro
 We can calculate sample statistics from the data such as the sample mean, sample variance etc. Although it's most often useful to use graphs to visualize the data's distribution, univariate non-graphical EDA describes aspects of the data's histogram.
 
 ### Missing data
-Arguably the first thing to do when presented with a datset is check for null values.
+Arguably the first thing to do when presented with a dataset is check for null values.
 
 
 ```haskell
@@ -83,9 +83,9 @@ TIO.putStrLn $ D.toMarkdown $ D.describeColumns df
 It seems we have most of the data except some missing total bedrooms. Dealing with nulls is a separate topic that requires intimate knowledge of the data. So for this initial pass we'll leave out the total_bedrooms variable.
 
 ### Central tendency
-The central tendency of a distribution describes a "typical" value of that distribution. The most common statistical measures of central tendency are arithmetic mean and median. For symmetric distributions the mean and the median are the same. But for a skewed distribution the mean is pulled towards the "heavier" side wherease the median is more robust to these changes.
+The central tendency of a distribution describes a "typical" value of that distribution. The most common statistical measures of central tendency are arithmetic mean and median. For symmetric distributions the mean and the median are the same. But for a skewed distribution the mean is pulled towards the "heavier" side whereas the median is more robust to these changes.
 
-For a given column calculating the mean and median is fairly straightfoward and shown below.
+For a given column calculating the mean and median is fairly straightforward and shown below.
 
 
 ```haskell
@@ -107,7 +107,7 @@ Note: You need to pass the expression for the column into these functions not th
 Spread is a measure of how far away from the center we are still likely to find data values. There are three main measures of spread: variance, mean absolute deviation, standard deviation, and interquartile range.
 
 ### Mean absolute deviation
-We start by looking at mean absolute deviation since it's the simplest measure of spread. The mean absolute deviation measures how far from the average values are on average. We calcuate it by taking the absolute value of the difference between each observation and the mean of that variable, then finally taking the average of those.
+We start by looking at mean absolute deviation since it's the simplest measure of spread. The mean absolute deviation measures how far from the average values are on average. We calculate it by taking the absolute value of the difference between each observation and the mean of that variable, then finally taking the average of those.
 
 In the housing dataset it'll tell how "typical" our typical home price is.
 
@@ -239,7 +239,7 @@ Skewness measures how left or right shifted a distribution is from a normal dist
 
 The formula for skewness is the mean cubic deviation divided by the cube of the standard deviation. It captures the relationship between the mean deviation (asymmetry of the data) and the standard deviation (spread of the data).
 
-The intuition behind why a positive skew is left shifted follows from the formula. The numerator is more sensitive to outliers. So the futher left a distribution is the more the right-tail values will be exaggerated by the cube causing the skewness to be positive.
+The intuition behind why a positive skew is left shifted follows from the formula. The numerator is more sensitive to outliers. So the further left a distribution is the more the right-tail values will be exaggerated by the cube causing the skewness to be positive.
 
 A skewness score between -0.5 and 0.5 means the data has little skew. A score between -0.5 and -1 or 0.5 and 1 means the data has moderate skew. A skewness greater than 1 or less than -1 means the data is heavily skewed.
 
@@ -295,7 +295,7 @@ Pictures oftentimes give a more informative account of what our data looks like.
 In this section, we'll next look at some techniques for visualizing univariate data.
 
 ### Histograms
-Histograms are bar plots where each bar represents the frequency (count) or propotion (count / total) of cases for a
+Histograms are bar plots where each bar represents the frequency (count) or proportion (count / total) of cases for a
 range of value. Going back to our california housing dataset, we can plot a histogram of house prices:
 
 
