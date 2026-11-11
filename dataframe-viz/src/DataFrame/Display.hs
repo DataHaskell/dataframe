@@ -22,3 +22,6 @@ defaultDisplayOptions =
 -- | Render a 'DataFrame' to stdout according to 'DisplayOptions'.
 display :: DisplayOptions -> D.DataFrame -> IO ()
 display opts = T.putStrLn . D.asTextWith Plain (displayTruncate opts)
+
+displayRows :: Int -> D.DataFrame -> IO ()
+displayRows n = T.putStrLn . D.asTextWith Plain (Just D.defaultTruncateConfig{D.maxRows = n})

@@ -1,6 +1,6 @@
 cabal-version:      3.4
 name:               dataframe-learn
-version:            2.5.0.0
+version:            2.5.0.1
 synopsis:           Interpretable, expression-returning machine learning for the dataframe ecosystem.
 description:
     A small scikit-learn-style ML library where every model returns both an
@@ -62,8 +62,8 @@ library internal
                         containers >= 0.6.7 && < 0.10,
                         parallel >= 3.3 && < 4,
                         random >= 1.2 && < 2,
-                        dataframe-core >= 2.6 && < 2.7,
-                        dataframe-operations >= 2.6 && < 2.7,
+                        dataframe-core >= 2.7 && < 2.8,
+                        dataframe-operations >= 2.7 && < 2.8,
                         text >= 2.1 && < 3,
                         vector >= 0.13 && < 0.15,
                         vector-algorithms >= 0.9 && < 0.11
@@ -106,11 +106,11 @@ library
                         containers >= 0.6.7 && < 0.10,
                         parallel >= 3.3 && < 4,
                         random >= 1.2 && < 2,
-                        dataframe-core >= 2.6 && < 2.7,
-                        dataframe-core >= 2.6 && < 2.7,
-                        dataframe-operations >= 2.6 && < 2.7,
-                        dataframe-operations >= 2.6 && < 2.7,
-                        dataframe-expr-serializer >= 1.3 && < 1.4,
+                        dataframe-core >= 2.7 && < 2.8,
+                        dataframe-core >= 2.7 && < 2.8,
+                        dataframe-operations >= 2.7 && < 2.8,
+                        dataframe-operations >= 2.7 && < 2.8,
+                        dataframe-expr-serializer >= 1.4 && < 1.5,
                         dataframe-learn:internal,
                         text >= 2.1 && < 3,
                         vector >= 0.13 && < 0.15,
@@ -144,13 +144,13 @@ test-suite learn-internal
                         aeson >= 0.11.0.0 && < 3,
                         bytestring >= 0.11 && < 0.14,
                         containers >= 0.6.7 && < 0.10,
-                        dataframe-core >= 2.6 && < 2.7,
-                        dataframe-core >= 2.6 && < 2.7,
+                        dataframe-core >= 2.7 && < 2.8,
+                        dataframe-core >= 2.7 && < 2.8,
                         dataframe-csv >= 2.3 && < 2.4,
                         dataframe-learn,
                         dataframe-learn:internal,
-                        dataframe-operations >= 2.6 && < 2.7,
-                        dataframe-operations >= 2.6 && < 2.7,
+                        dataframe-operations >= 2.7 && < 2.8,
+                        dataframe-operations >= 2.7 && < 2.8,
                         HUnit >= 1.6 && < 1.8,
                         QuickCheck >= 2 && < 3,
                         random >= 1 && < 2,

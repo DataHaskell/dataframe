@@ -1,6 +1,6 @@
 # Revision history for dataframe
 
-## Unreleased
+## 3.8.0.0
 
 ### Breaking changes
 * `filter` takes a boolean expression (`Expr Bool -> DataFrame -> DataFrame`),
@@ -48,8 +48,12 @@
   `isHaskellIdentifier`, `isReservedId` and `isVarId` move to
   `DataFrame.TH.Identifier` (dataframe-th), and `optionalToDoubleVector` to
   `DataFrame.Internal.Statistics`.
-
-### Additions
+* `dataframe-viz`: typed charts reject nullable columns at compile time;
+  `enc`, `facet`, `histogram`, `box`, etc. require `a ~ BaseType a`.
+* Column shorthands in `DataFrame.Functions`: `int`, `double`,
+  `text`, `bool`, their `maybe*` forms, and `int32`, `int64`, `float32`,
+  `float64` (e.g. `F.double "x"` for `F.col @Double "x"`).
+* `dataframe-viz`: `displayRows n` prints a frame showing at most `n` rows.
 * `DataFrame.Lazy` and `DataFrame.Typed.Lazy` cover the eager API: row ops
   (`filterBy`, `filterJust`, `drop`, `takeLast`, `range`, `topBy`,
   `distinct`, `sample`, `shuffle`, splits and folds), column ops (`exclude`,
@@ -72,8 +76,6 @@
   `unsafeCast` (schema-checked column), `eq`, `lt`, `gt`, `leq`, `geq`,
   `and`, `or`, `countDistinct`, `topK`, `bottomK`, `isNull`, `isNotNull`,
   `contains` and `length`, completing parity with `DataFrame.Functions`.
-
-### Fixes
 * Lazy CSV and Parquet scans return columns in file order, like eager
   reads, instead of alphabetical order.
 * A user function named like a builtin (e.g. `"add"`) no longer runs the
