@@ -1,3 +1,4 @@
+{-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
@@ -44,15 +45,20 @@ import Data.Type.Equality (testEquality, (:~:) (Refl))
 import Data.Typeable (Typeable)
 import Data.Vector.Internal.Check (HasCallStack)
 import Data.Word (Word16, Word32, Word64, Word8)
-import DataFrame.Errors (DataFrameException (..))
+import DataFrame.Errors (DataFrameException (..), TypeErrorContext (..))
 import DataFrame.Internal.Column (
     Column (..),
     Columnable,
     atIndicesStable,
-    materializeMerged,
+    bitmapHasNulls,
     sliceColumn,
+    toVector,
  )
-import DataFrame.Internal.Data.PackedText (packedSlice, sliceCmpBytes)
+import DataFrame.Internal.Data.PackedText (
+    packedLength,
+    packedSlice,
+    sliceCmpBytes,
+ )
 import DataFrame.Internal.DataFrame (
     DataFrame (..),
     columnNames,
@@ -215,56 +221,65 @@ sortIndicesOf cmp ixs = runST $ do
 -- | Build a row-index comparator from a SortOrder and a DataFrame.
 sortOrderComparator :: SortOrder -> DataFrame -> Int -> Int -> Ordering
 sortOrderComparator (Asc (Col name :: Expr a)) df =
-    case unsafeGetColumn name df of
-        BoxedColumn _ (v :: V.Vector b) -> case testEquality (typeRep @a) (typeRep @b) of
-            Just Refl -> \i j -> compare (v `V.unsafeIndex` i) (v `V.unsafeIndex` j)
-            Nothing -> \_ _ -> EQ
-        UnboxedColumn _ (v :: VU.Vector b) -> case testEquality (typeRep @a) (typeRep @b) of
-            Just Refl -> \i j -> compare (v `VU.unsafeIndex` i) (v `VU.unsafeIndex` j)
-            Nothing -> \_ _ -> EQ
-        PackedText _ p -> case testEquality (typeRep @a) (typeRep @T.Text) of
-            Just Refl -> \i j ->
-                let (ai, oi, li) = packedSlice p i
-                    (aj, oj, lj) = packedSlice p j
-                 in sliceCmpBytes ai oi li aj oj lj
-            Nothing -> \_ _ -> EQ
-        c@(MergedColumn _ _) -> case materializeMerged c of
-            BoxedColumn _ (v :: V.Vector b) -> case testEquality (typeRep @a) (typeRep @b) of
-                Just Refl -> \i j -> compare (v `V.unsafeIndex` i) (v `V.unsafeIndex` j)
-                Nothing -> \_ _ -> EQ
-            _ -> \_ _ -> EQ
+    columnComparator @a name (unsafeGetColumn name df)
 sortOrderComparator (Desc (Col name :: Expr a)) df =
-    case unsafeGetColumn name df of
-        BoxedColumn _ (v :: V.Vector b) -> case testEquality (typeRep @a) (typeRep @b) of
-            Just Refl -> \i j -> compare (v `V.unsafeIndex` j) (v `V.unsafeIndex` i)
-            Nothing -> \_ _ -> EQ
-        UnboxedColumn _ (v :: VU.Vector b) -> case testEquality (typeRep @a) (typeRep @b) of
-            Just Refl -> \i j -> compare (v `VU.unsafeIndex` j) (v `VU.unsafeIndex` i)
-            Nothing -> \_ _ -> EQ
-        PackedText _ p -> case testEquality (typeRep @a) (typeRep @T.Text) of
-            Just Refl -> \i j ->
-                let (ai, oi, li) = packedSlice p i
-                    (aj, oj, lj) = packedSlice p j
-                 in sliceCmpBytes aj oj lj ai oi li
-            Nothing -> \_ _ -> EQ
-        c@(MergedColumn _ _) -> case materializeMerged c of
-            BoxedColumn _ (v :: V.Vector b) -> case testEquality (typeRep @a) (typeRep @b) of
-                Just Refl -> \i j -> compare (v `V.unsafeIndex` j) (v `V.unsafeIndex` i)
-                Nothing -> \_ _ -> EQ
-            _ -> \_ _ -> EQ
+    flip (columnComparator @a name (unsafeGetColumn name df))
 sortOrderComparator _ _ = error "Sorting on compound column"
+
+columnComparator ::
+    forall a. (Columnable a, Ord a) => T.Text -> Column -> Int -> Int -> Ordering
+columnComparator name col = case col of
+    UnboxedColumn bm (v :: VU.Vector b)
+        | noNulls (VU.length v) bm ->
+            case testEquality (typeRep @a) (typeRep @b) of
+                Just Refl ->
+                    \i j -> compare (v `VU.unsafeIndex` i) (v `VU.unsafeIndex` j)
+                Nothing -> compareConverted
+        | otherwise -> compareConverted
+    BoxedColumn bm (v :: V.Vector b)
+        | noNulls (V.length v) bm ->
+            case testEquality (typeRep @a) (typeRep @b) of
+                Just Refl ->
+                    \i j -> compare (v `V.unsafeIndex` i) (v `V.unsafeIndex` j)
+                Nothing -> compareConverted
+        | otherwise -> compareConverted
+    PackedText bm p
+        | noNulls (packedLength p) bm ->
+            case testEquality (typeRep @a) (typeRep @T.Text) of
+                Just Refl -> \i j ->
+                    let (ai, oi, li) = packedSlice p i
+                        (aj, oj, lj) = packedSlice p j
+                     in sliceCmpBytes ai oi li aj oj lj
+                Nothing -> compareConverted
+        | otherwise -> compareConverted
+    MergedColumn _ _ -> compareConverted
+  where
+    compareConverted = case toVector @a col of
+        Right (v :: V.Vector a) ->
+            \i j -> compare (v `V.unsafeIndex` i) (v `V.unsafeIndex` j)
+        Left (TypeMismatchException ctx) ->
+            throw $
+                TypeMismatchException
+                    ctx
+                        { errorColumnName = Just (T.unpack name)
+                        , callingFunctionName = Just "sortBy"
+                        }
+        Left err -> throw err
+    noNulls n = maybe True (not . bitmapHasNulls n)
 
 -- | Sort row indices using a comparator function.
 
 -- | Stable LSD radix sort by one clean numeric column, else 'Nothing'.
 radixSortIndices :: SortOrder -> DataFrame -> Maybe (VU.Vector Int)
 radixSortIndices ord df = case ord of
-    Asc (Col name) -> keysOf name False
-    Desc (Col name) -> keysOf name True
+    Asc (Col name :: Expr a) -> keysOf @a name False
+    Desc (Col name :: Expr a) -> keysOf @a name True
     _ -> Nothing
   where
+    keysOf :: forall a. (Typeable a) => T.Text -> Bool -> Maybe (VU.Vector Int)
     keysOf name desc = case unsafeGetColumn name df of
         UnboxedColumn Nothing (v :: VU.Vector b) -> do
+            Refl <- testEquality (typeRep @a) (typeRep @b)
             key <- orderKey @b
             -- NaN has no 'compare' order; leave it to the comparison sort.
             case testEquality (typeRep @b) (typeRep @Double) of

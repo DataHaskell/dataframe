@@ -1,8 +1,10 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TypeApplications #-}
 
 module Operations.Sort where
 
 import Assertions
+import Control.Exception (SomeException, evaluate, try)
 import Data.Char
 import qualified Data.Text as T
 import qualified DataFrame as D
@@ -154,6 +156,63 @@ sortByCompoundMissingColumn =
             )
         )
 
+nullableTestData :: D.DataFrame
+nullableTestData =
+    D.fromColumns
+        [ ("a", DI.fromList [Just (3 :: Int), Nothing, Just 1, Just 2])
+        , ("t", DI.fromList [Just ("c" :: T.Text), Just "a", Nothing, Just "b"])
+        , ("i", DI.fromList [0 :: Int .. 3])
+        ]
+
+sortedRowIds :: [D.SortOrder] -> [Int]
+sortedRowIds ords = D.columnAsList (F.col @Int "i") (D.sortBy ords nullableTestData)
+
+sortByNullableAscending :: Test
+sortByNullableAscending =
+    TestCase
+        ( assertEqual
+            "Asc on a Maybe Int column sorts, nulls first"
+            [1, 2, 3, 0]
+            (sortedRowIds [D.Asc (F.col @(Maybe Int) "a")])
+        )
+
+sortByNullableDescending :: Test
+sortByNullableDescending =
+    TestCase
+        ( assertEqual
+            "Desc on a Maybe Int column sorts, nulls last"
+            [0, 3, 2, 1]
+            (sortedRowIds [D.Desc (F.col @(Maybe Int) "a")])
+        )
+
+sortByNullableText :: Test
+sortByNullableText =
+    TestCase
+        ( assertEqual
+            "Asc on a Maybe Text column sorts, nulls first"
+            [2, 1, 3, 0]
+            (sortedRowIds [D.Asc (F.col @(Maybe T.Text) "t")])
+        )
+
+topByNullableAscending :: Test
+topByNullableAscending =
+    TestCase
+        ( assertEqual
+            "topBy on an ascending nullable key agrees with Maybe's Ord"
+            [1, 2]
+            ( D.columnAsList
+                (F.col @Int "i")
+                (D.topBy 0 2 [D.Asc (F.col @(Maybe Int) "a")] nullableTestData)
+            )
+        )
+
+sortByWrongTypeThrows :: Test
+sortByWrongTypeThrows = TestCase $ do
+    r <-
+        try (evaluate (length (sortedRowIds [D.Asc (F.col @Double "i")]))) ::
+            IO (Either SomeException Int)
+    assertBool "Sorting with the wrong key type throws" (either (const True) (const False) r)
+
 tests :: [Test]
 tests =
     [ TestLabel "sortByAscendingWAI" sortByAscendingWAI
@@ -167,4 +226,9 @@ tests =
         sortByCompoundExpressionDescending
     , TestLabel "sortByCompoundMixedWithBareColumn" sortByCompoundMixedWithBareColumn
     , TestLabel "sortByCompoundMissingColumn" sortByCompoundMissingColumn
+    , TestLabel "sortByNullableAscending" sortByNullableAscending
+    , TestLabel "sortByNullableDescending" sortByNullableDescending
+    , TestLabel "sortByNullableText" sortByNullableText
+    , TestLabel "topByNullableAscending" topByNullableAscending
+    , TestLabel "sortByWrongTypeThrows" sortByWrongTypeThrows
     ]
