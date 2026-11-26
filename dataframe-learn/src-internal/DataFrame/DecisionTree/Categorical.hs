@@ -2,6 +2,7 @@
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 
@@ -25,6 +26,7 @@ module DataFrame.DecisionTree.Categorical (
     discreteCondVecs,
 ) where
 
+import DataFrame.DecisionTree.ColumnKind (ColumnKind (..), columnKind, withColumnVector)
 import DataFrame.DecisionTree.CondVec (CondVec (..), materializeCondVec)
 import DataFrame.DecisionTree.Types (
     ColumnOrdering,
@@ -197,14 +199,6 @@ catCtx ti cfg =
 catValueListsFor :: (Ord a, Ord target) => CatCtx target -> V.Vector a -> [[a]]
 catValueListsFor ctx = catValueLists (ccBinary ctx) (ccPos ctx) (ccTargets ctx) (ccSubsetCap ctx)
 
--- | True for numeric columns (handled by the numeric pool, not here).
-isNumericKind :: forall a. (Columnable a) => Bool
-isNumericKind = case sFloating @a of
-    STrue -> True
-    SFalse -> case sIntegral @a of
-        STrue -> True
-        SFalse -> False
-
 -- | All equality-based candidate splits from non-numeric columns.
 discreteConditions ::
     forall target.
@@ -217,18 +211,11 @@ discreteConditions targetInfo cfg df =
 columnConds ::
     (Columnable target, Ord target) =>
     CatCtx target -> DataFrame -> T.Text -> [Expr Bool]
-columnConds ctx df colName = case unsafeGetColumn colName df of
-    BoxedColumn Nothing (column :: V.Vector a) -> nonNullColConds ctx colName column
-    BoxedColumn (Just bm) (column :: V.Vector a) -> nullableColConds ctx colName bm column
-    UnboxedColumn _ (_ :: VU.Vector a) -> []
-    pt@(PackedText _ _) -> case materializePacked pt of
-        BoxedColumn Nothing (column :: V.Vector a) -> nonNullColConds ctx colName column
-        BoxedColumn (Just bm) (column :: V.Vector a) -> nullableColConds ctx colName bm column
-        _ -> []
-    mc@(MergedColumn _ _) -> case materializeMerged mc of
-        BoxedColumn Nothing (column :: V.Vector a) -> nonNullColConds ctx colName column
-        BoxedColumn (Just bm) (column :: V.Vector a) -> nullableColConds ctx colName bm column
-        _ -> []
+columnConds ctx df colName = withCategory ctx df colName $ \bm (column :: V.Vector a) ->
+    maybe
+        (nonNullColConds ctx colName column)
+        (\b -> nullableColConds ctx colName b column)
+        bm
 
 nonNullColConds ::
     forall a target.
@@ -247,7 +234,7 @@ nullableColConds ::
     (Columnable a, Ord target) =>
     CatCtx target -> T.Text -> Bitmap -> V.Vector a -> [Expr Bool]
 nullableColConds ctx colName bm column
-    | isNumericKind @a || V.null valid = []
+    | V.null valid = []
     | otherwise =
         fromMaybe
             []
@@ -284,12 +271,13 @@ isDisallowedPair cfg l r =
         (disallowedCombinations (synthConfig cfg))
 
 pairConds :: ColumnOrdering -> DataFrame -> (T.Text, T.Text) -> [Expr Bool]
-pairConds ords df (l, r) = case ( materializePacked (unsafeGetColumn l df)
-                                , materializePacked (unsafeGetColumn r df)
-                                ) of
-    (BoxedColumn Nothing (_ :: V.Vector a), BoxedColumn Nothing (_ :: V.Vector b)) -> strictPairConds @a @b l r
-    (BoxedColumn (Just _) (_ :: V.Vector a), BoxedColumn (Just _) (_ :: V.Vector b)) -> nullablePairConds @a @b ords l r
-    _ -> []
+pairConds ords df (l, r) =
+    withColumnVector (unsafeGetColumn l df) $ \bmL (_ :: V.Vector a) ->
+        withColumnVector (unsafeGetColumn r df) $ \bmR (_ :: V.Vector b) ->
+            case (columnKind @a ords, bmL, bmR) of
+                (Discrete, Nothing, Nothing) -> strictPairConds @a @b l r
+                (Discrete, Just _, Just _) -> nullablePairConds @a @b ords l r
+                _ -> []
 
 strictPairConds ::
     forall a b. (Columnable a, Columnable b) => T.Text -> T.Text -> [Expr Bool]
@@ -334,17 +322,24 @@ discreteCondVecs targetInfo cfg df =
 columnCondVecs ::
     (Columnable target, Ord target) =>
     CatCtx target -> DataFrame -> T.Text -> [CondVec]
-columnCondVecs ctx df colName = case unsafeGetColumn colName df of
-    BoxedColumn Nothing (column :: V.Vector a) -> nonNullColCondVecs ctx colName column
-    BoxedColumn (Just bm) (column :: V.Vector a) -> mapMaybe (materializeCondVec df) (nullableColConds ctx colName bm column)
-    UnboxedColumn _ (_ :: VU.Vector a) -> []
-    pt@(PackedText _ _) -> case materializePacked pt of
-        BoxedColumn Nothing (column :: V.Vector a) -> nonNullColCondVecs ctx colName column
-        BoxedColumn (Just bm) (column :: V.Vector a) -> mapMaybe (materializeCondVec df) (nullableColConds ctx colName bm column)
-        _ -> []
-    mc@(MergedColumn _ _) -> case materializeMerged mc of
-        BoxedColumn Nothing (column :: V.Vector a) -> nonNullColCondVecs ctx colName column
-        BoxedColumn (Just bm) (column :: V.Vector a) -> mapMaybe (materializeCondVec df) (nullableColConds ctx colName bm column)
+columnCondVecs ctx df colName = withCategory ctx df colName $ \bm (column :: V.Vector a) ->
+    maybe
+        (nonNullColCondVecs ctx colName column)
+        (\b -> mapMaybe (materializeCondVec df) (nullableColConds ctx colName b column))
+        bm
+
+{- | Run @k@ on a column's elements when its element type is a category
+('columnKind'), whatever its storage; numbers belong to the numeric pool.
+-}
+withCategory ::
+    CatCtx target ->
+    DataFrame ->
+    T.Text ->
+    (forall a. (Columnable a) => Maybe Bitmap -> V.Vector a -> [r]) ->
+    [r]
+withCategory ctx df colName k = withColumnVector (unsafeGetColumn colName df) $ \bm (column :: V.Vector a) ->
+    case columnKind @a (ccOrds ctx) of
+        Discrete -> k bm column
         _ -> []
 
 nonNullColCondVecs ::

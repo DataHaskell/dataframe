@@ -20,6 +20,7 @@ module DataFrame.DecisionTree.Numeric (
     numericCols,
 ) where
 
+import DataFrame.DecisionTree.ColumnKind (AsDouble (..), ColumnKind (..), columnKind)
 import DataFrame.DecisionTree.CondVec (CondVec (..), materializeCondVec)
 import DataFrame.DecisionTree.Types (SynthConfig (..), TreeConfig (..))
 import DataFrame.Expression.Operators
@@ -33,10 +34,8 @@ import Data.List (sort)
 import Data.Maybe (catMaybes, mapMaybe)
 import qualified Data.Set as Set
 import qualified Data.Text as T
-import Data.Type.Equality (testEquality, (:~:) (..))
 import qualified Data.Vector as V
 import qualified Data.Vector.Unboxed as VU
-import Type.Reflection (typeRep)
 
 -- | A numeric feature expression, non-nullable or nullable.
 data NumExpr
@@ -239,23 +238,17 @@ admitNovel seen0 = go seen0 []
 numericCols :: DataFrame -> [NumExpr]
 numericCols df = concatMap (numExprsOfColumn df) (columnNames df)
 
+-- | A column's numeric expression, if its element type is a number ('columnKind').
 numExprsOfColumn :: DataFrame -> T.Text -> [NumExpr]
 numExprsOfColumn df colName = case unsafeGetColumn colName df of
-    UnboxedColumn Nothing (_ :: VU.Vector b) -> strictNumeric @b colName
-    BoxedColumn (Just _) (_ :: V.Vector b) -> nullableNumeric @b colName
-    UnboxedColumn (Just _) (_ :: VU.Vector b) -> nullableNumeric @b colName
+    UnboxedColumn bm (_ :: VU.Vector b) -> numExprOf @b colName bm
+    BoxedColumn bm (_ :: V.Vector b) -> numExprOf @b colName bm
     _ -> []
 
-strictNumeric :: forall b. (Columnable b) => T.Text -> [NumExpr]
-strictNumeric c = case testEquality (typeRep @b) (typeRep @Double) of
-    Just Refl -> [NDouble (Col c)]
-    Nothing -> case sIntegral @b of
-        STrue -> [NDouble (F.toDouble (Col @b c))]
-        SFalse -> []
-
-nullableNumeric :: forall b. (Columnable b) => T.Text -> [NumExpr]
-nullableNumeric c = case testEquality (typeRep @b) (typeRep @Double) of
-    Just Refl -> [NMaybeDouble (Col @(Maybe b) c)]
-    Nothing -> case sIntegral @b of
-        STrue -> [NMaybeDouble (F.whenPresent (realToFrac @b @Double) (Col @(Maybe b) c))]
-        SFalse -> []
+{- | Only numbers are asked about here, so no ordering registry is needed: a
+category comes back 'Unsplittable' and is left to the categorical pool.
+-}
+numExprOf :: forall b. (Columnable b) => T.Text -> Maybe Bitmap -> [NumExpr]
+numExprOf c bm = case columnKind @b mempty of
+    Ordered num -> [maybe (NDouble (columnAsDouble num c)) (const (NMaybeDouble (nullableAsDouble num c))) bm]
+    _ -> []

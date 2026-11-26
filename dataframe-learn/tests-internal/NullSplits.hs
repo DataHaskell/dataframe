@@ -37,6 +37,8 @@ tests =
     , TestLabel "null splits: unseen nulls still route" unseenNullsRoute
     , TestLabel "null splits: CART null indicator" cartNullIndicator
     , TestLabel "null splits: AdaBoost null indicator" adaBoostNullIndicator
+    , TestLabel "bool splits: a flag column is a feature" boolFlagSplits
+    , TestLabel "bool splits: a nullable flag column is a feature" nullableBoolFlagSplits
     ]
 
 fitAll ::
@@ -129,6 +131,26 @@ unseenNullsRoute = TestCase $ do
     assertBool
         "null rows land in a leaf"
         (VU.all (`elem` [0, 1]) (VU.drop 4 scored))
+
+-- The target is the flag itself, so one split on it fits exactly.
+boolFlagSplits :: Test
+boolFlagSplits = TestCase $ do
+    let flag = [False, True, False, True, True, False]
+        y = [if b then 1 else 0 | b <- flag]
+        df = withTarget y [("flag", DI.fromList flag)]
+        (t, inSample) = fitAll 1 df (VU.fromList y)
+    assertEqual "fits exactly" (VU.fromList y) inSample
+    assertEqual "interpreted agrees" (VU.fromList y) (interpreted df t)
+
+-- True, False and null rows each have their own target: depth 2 separates them.
+nullableBoolFlagSplits :: Test
+nullableBoolFlagSplits = TestCase $ do
+    let flag = [Just False, Just True, Nothing, Just True, Nothing, Just False] :: [Maybe Bool]
+        y = [maybe 2 (\b -> if b then 1 else 0) m | m <- flag]
+        df = withTarget y [("flag", maybeCol flag)]
+        (t, inSample) = fitAll 2 df (VU.fromList y)
+    assertEqual "fits exactly" (VU.fromList y) inSample
+    assertEqual "interpreted agrees" (VU.fromList y) (interpreted df t)
 
 -- The target depends only on whether x is null.
 indicatorFrame :: ([Double], D.DataFrame)

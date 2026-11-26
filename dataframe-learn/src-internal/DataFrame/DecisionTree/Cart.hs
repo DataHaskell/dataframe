@@ -18,7 +18,13 @@ module DataFrame.DecisionTree.Cart (
 ) where
 
 import qualified Data.List as L
-import DataFrame.DecisionTree.Types (Tree (..), TreeConfig (..))
+import DataFrame.DecisionTree.ColumnKind (
+    AsDouble (..),
+    ColumnKind (..),
+    columnKind,
+    withColumnVector,
+ )
+import DataFrame.DecisionTree.Types (Tree (..), TreeConfig (..), defaultColumnOrdering)
 import DataFrame.Errors (DataFrameException (..), TypeErrorContext (..))
 import DataFrame.Expression.Operators
 import qualified DataFrame.Functions as F
@@ -276,16 +282,21 @@ cartFeaturesByColumn :: T.Text -> DataFrame -> [(T.Text, CartFeature)]
 cartFeaturesByColumn target df =
     [(c, f) | c <- filter (/= target) (columnNames df), f <- featuresOfColumn df c]
 
+{- | A column's split features, chosen by its element type ('columnKind'), never by
+its storage: numbers get one threshold feature, categories (Text, Bool, Char, ...)
+one feature per level.
+-}
 featuresOfColumn :: DataFrame -> T.Text -> [CartFeature]
 featuresOfColumn df c = case unsafeGetColumn c df of
-    UnboxedColumn bm (v :: VU.Vector b) -> numericFeature @b c bm v
-    BoxedColumn bm (v :: V.Vector b) -> oneHotFeatures @b c bm v
-    pt@(PackedText _ _) -> case materializePacked pt of
-        BoxedColumn bm (v :: V.Vector b) -> oneHotFeatures @b c bm v
-        _ -> []
-    mc@(MergedColumn _ _) -> case materializeMerged mc of
-        BoxedColumn bm (v :: V.Vector b) -> oneHotFeatures @b c bm v
-        _ -> []
+    -- Numbers are usually stored unboxed; read them without boxing.
+    UnboxedColumn bm (v :: VU.Vector b)
+        | Ordered num <- columnKind @b defaultColumnOrdering ->
+            [orderedFeature num c bm (VU.length v) (v VU.!)]
+    col -> withColumnVector col $ \bm (v :: V.Vector b) ->
+        case columnKind @b defaultColumnOrdering of
+            Ordered num -> [orderedFeature num c bm (V.length v) (v V.!)]
+            Discrete -> levelFeatures c bm v
+            Unsplittable -> []
 
 nullFlags :: Int -> Bitmap -> VU.Vector Bool
 nullFlags n bm = VU.generate n (not . bitmapTestBit bm)
@@ -296,60 +307,38 @@ trainingNulls nulls
     | VU.or nulls = Just nulls
     | otherwise = Nothing
 
-numericFeature ::
-    forall b.
-    (Columnable b, VU.Unbox b) =>
-    T.Text -> Maybe Bitmap -> VU.Vector b -> [CartFeature]
-numericFeature c Nothing v = case testEquality (typeRep @b) (typeRep @Double) of
-    Just Refl -> [CartFeature v Nothing (\t _ -> F.double c .<=. F.lit t)]
-    Nothing -> case sIntegral @b of
-        STrue ->
-            [ CartFeature
-                (VU.map fromIntegral v)
-                Nothing
-                (\t _ -> F.toDouble (F.col @b c) .<=. F.lit t)
-            ]
-        SFalse -> []
-numericFeature c (Just bm) v = case nullableLeq @b c of
-    Just (toD, leq) ->
-        [ CartFeature
-            (VU.imap (\i x -> if nulls VU.! i then 1 / 0 else toD x) v)
-            (trainingNulls nulls)
-            (\t side -> F.fromMaybe (side == NullsLeft) (leq t))
-        ]
-    Nothing -> []
+-- | A number's threshold feature: @x <= t@. Reads row @i@ only when it is not null.
+orderedFeature :: AsDouble b -> T.Text -> Maybe Bitmap -> Int -> (Int -> b) -> CartFeature
+orderedFeature num c Nothing n at =
+    CartFeature
+        (VU.generate n (valueAsDouble num . at))
+        Nothing
+        (\t _ -> columnAsDouble num c .<=. F.lit t)
+orderedFeature num c (Just bm) n at =
+    CartFeature
+        (VU.generate n (\i -> if nulls VU.! i then 1 / 0 else valueAsDouble num (at i)))
+        (trainingNulls nulls)
+        (\t side -> F.fromMaybe (side == NullsLeft) (nullableAsDouble num c .<= F.lit t))
   where
-    nulls = nullFlags (VU.length v) bm
+    nulls = nullFlags n bm
 
-nullableLeq ::
-    forall b.
-    (Columnable b) =>
-    T.Text -> Maybe (b -> Double, Double -> Expr (Maybe Bool))
-nullableLeq c
-    | Just Refl <- testEquality (typeRep @b) (typeRep @Double) =
-        Just (id, \t -> F.maybeDouble c .<= F.lit t)
-    | Just Refl <- testEquality (typeRep @b) (typeRep @Int) =
-        Just (fromIntegral, \t -> F.maybeInt c .<= F.lit t)
-    | otherwise = Nothing
-
-oneHotFeatures ::
-    forall b.
-    (Columnable b) => T.Text -> Maybe Bitmap -> V.Vector b -> [CartFeature]
-oneHotFeatures c bm v = case testEquality (typeRep @b) (typeRep @T.Text) of
-    Just Refl -> [oneHot c nulls v cat | cat <- Set.toList (Set.fromList present)]
-    Nothing -> []
+-- | A category's one-hot features, one per level present, in ascending level order.
+levelFeatures ::
+    forall b. (Columnable b, Ord b) => T.Text -> Maybe Bitmap -> V.Vector b -> [CartFeature]
+levelFeatures c bm v = [levelFeature c nulls v lvl | lvl <- Set.toList (Set.fromList present)]
   where
     nulls = fmap (nullFlags (V.length v)) bm
     present = [x | (i, x) <- zip [0 ..] (V.toList v), maybe True (not . (VU.! i)) nulls]
 
-oneHot ::
-    T.Text -> Maybe (VU.Vector Bool) -> V.Vector T.Text -> T.Text -> CartFeature
-oneHot c Nothing v cat =
+-- | One level's feature: 1 on rows equal to it, 0 elsewhere. LEFT is "not this level".
+levelFeature ::
+    forall b. (Columnable b) => T.Text -> Maybe (VU.Vector Bool) -> V.Vector b -> b -> CartFeature
+levelFeature c Nothing v lvl =
     CartFeature
-        (VU.generate (V.length v) (\i -> if v V.! i == cat then 1 else 0))
+        (VU.generate (V.length v) (\i -> if v V.! i == lvl then 1 else 0))
         Nothing
-        (\_ _ -> F.text c ./=. F.lit cat)
-oneHot c (Just nulls) v cat =
+        (\_ _ -> Col @b c ./=. Lit lvl)
+levelFeature c (Just nulls) v lvl =
     CartFeature
         (VU.generate (V.length v) value)
         (trainingNulls nulls)
@@ -357,12 +346,14 @@ oneHot c (Just nulls) v cat =
   where
     value i
         | nulls VU.! i = 1 / 0
-        | v V.! i == cat = 1
+        | v V.! i == lvl = 1
         | otherwise = 0
-    col' = F.maybeText c
+    col' = Col @(Maybe b) c
+    -- A null is never equal to the level, so it passes "not this level"; NullsRight takes it out.
+    notLevel = col' ./=. Lit (Just lvl)
     -- Threshold 1 passes every non-null row, so that split is null vs non-null.
     cond t side
-        | t < 1 = F.fromMaybe (side == NullsLeft) (col' ./= F.lit cat)
+        | t < 1 = if side == NullsLeft then notLevel else F.isJust col' .&&. notLevel
         | side == NullsLeft = F.lit True
         | otherwise = F.isJust col'
 

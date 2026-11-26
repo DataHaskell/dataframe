@@ -8,6 +8,7 @@ import Test.HUnit
 import Test.QuickCheck
 
 import qualified Cart
+import qualified ColumnKinds
 import qualified DecisionTree
 import qualified HistogramTrees
 import qualified Learn.EdgeCases
@@ -28,6 +29,7 @@ tests =
             ++ HistogramTrees.tests
             ++ LinearSolver.tests
             ++ NullSplits.tests
+            ++ ColumnKinds.tests
             ++ TreePruning.tests
             ++ Worklist.tests
             ++ Learn.Numerics.tests

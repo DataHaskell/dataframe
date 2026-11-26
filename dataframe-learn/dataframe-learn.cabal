@@ -36,6 +36,7 @@ library internal
     visibility:         private
     exposed-modules:
                         DataFrame.DecisionTree.Types
+                        DataFrame.DecisionTree.ColumnKind
                         DataFrame.DecisionTree.CondVec
                         DataFrame.DecisionTree.Cart
                         DataFrame.DecisionTree.Numeric
@@ -128,6 +129,7 @@ test-suite learn-internal
     other-modules:      DataFrameApi
                         Cart
                         NullSplits
+                        ColumnKinds
                         HistogramTrees
                         DecisionTree
                         TreePruning
