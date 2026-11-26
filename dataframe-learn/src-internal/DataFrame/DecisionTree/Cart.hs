@@ -13,7 +13,9 @@ module DataFrame.DecisionTree.Cart (
     sortIndicesByValue,
     buildCartTree,
     cartFeatures,
+    cartFeaturesWith,
     cartFeaturesByColumn,
+    cartFeaturesByColumnWith,
     cartTargetLabels,
 ) where
 
@@ -24,7 +26,12 @@ import DataFrame.DecisionTree.ColumnKind (
     columnKind,
     withColumnVector,
  )
-import DataFrame.DecisionTree.Types (Tree (..), TreeConfig (..), defaultColumnOrdering)
+import DataFrame.DecisionTree.Types (
+    ColumnOrdering,
+    Tree (..),
+    TreeConfig (..),
+    defaultColumnOrdering,
+ )
 import DataFrame.Errors (DataFrameException (..), TypeErrorContext (..))
 import DataFrame.Expression.Operators
 import qualified DataFrame.Functions as F
@@ -43,6 +50,7 @@ import Control.Exception (throw)
 import Data.Either (fromRight)
 import Data.Function (on)
 import qualified Data.Map.Strict as M
+import Data.Maybe (isNothing)
 import qualified Data.Set as Set
 import qualified Data.Text as T
 import Data.Type.Equality (testEquality, (:~:) (..))
@@ -101,7 +109,7 @@ buildCartTree cfg target df =
     cartToTree feats classes (buildCartNode ctx 0 (VU.enumFromN 0 nAll) featSorted)
   where
     nAll = nRows df
-    feats = V.fromList (cartFeatures target df)
+    feats = V.fromList (cartFeaturesWith (columnOrdering cfg) target df)
     featSorted = V.map (sortIndicesByValue . cfValues) feats
     labels = cartLabels @a df target
     classes = cartClasses labels
@@ -275,27 +283,34 @@ bumpClass c = zipWith (\j x -> if j == c then x + 1 else x) [0 ..]
 
 -- | One-hot features in @pd.get_dummies(drop_first=False)@ column order.
 cartFeatures :: T.Text -> DataFrame -> [CartFeature]
-cartFeatures target df = map snd (cartFeaturesByColumn target df)
+cartFeatures = cartFeaturesWith defaultColumnOrdering
+
+-- | 'cartFeatures' using a custom category ordering registry.
+cartFeaturesWith :: ColumnOrdering -> T.Text -> DataFrame -> [CartFeature]
+cartFeaturesWith ords target df = map snd (cartFeaturesByColumnWith ords target df)
 
 -- | 'cartFeatures', each paired with the column it was built from.
 cartFeaturesByColumn :: T.Text -> DataFrame -> [(T.Text, CartFeature)]
-cartFeaturesByColumn target df =
-    [(c, f) | c <- filter (/= target) (columnNames df), f <- featuresOfColumn df c]
+cartFeaturesByColumn = cartFeaturesByColumnWith defaultColumnOrdering
 
-{- | A column's split features, chosen by its element type ('columnKind'), never by
-its storage: numbers get one threshold feature, categories (Text, Bool, Char, ...)
-one feature per level.
--}
-featuresOfColumn :: DataFrame -> T.Text -> [CartFeature]
-featuresOfColumn df c = case unsafeGetColumn c df of
-    -- Numbers are usually stored unboxed; read them without boxing.
-    UnboxedColumn bm (v :: VU.Vector b)
-        | Ordered num <- columnKind @b defaultColumnOrdering ->
-            [orderedFeature num c bm (VU.length v) (v VU.!)]
+-- | 'cartFeaturesByColumn' using a custom category ordering registry.
+cartFeaturesByColumnWith ::
+    ColumnOrdering -> T.Text -> DataFrame -> [(T.Text, CartFeature)]
+cartFeaturesByColumnWith ords target df =
+    [(c, f) | c <- filter (/= target) (columnNames df), f <- featuresOfColumn ords df c]
+
+-- | A column's split features, chosen by 'columnKind', never by storage.
+featuresOfColumn :: ColumnOrdering -> DataFrame -> T.Text -> [CartFeature]
+featuresOfColumn ords df c = case unsafeGetColumn c df of
+    -- Read unboxed numbers and categories directly without boxing.
+    UnboxedColumn bm (v :: VU.Vector b) -> case columnKind @b ords of
+        Ordered num -> [orderedFeature num c bm (VU.length v) (v VU.!)]
+        Discrete -> levelFeatures c bm (VU.length v) (v VU.!)
+        Unsplittable -> []
     col -> withColumnVector col $ \bm (v :: V.Vector b) ->
-        case columnKind @b defaultColumnOrdering of
+        case columnKind @b ords of
             Ordered num -> [orderedFeature num c bm (V.length v) (v V.!)]
-            Discrete -> levelFeatures c bm v
+            Discrete -> levelFeatures c bm (V.length v) (v V.!)
             Unsplittable -> []
 
 nullFlags :: Int -> Bitmap -> VU.Vector Bool
@@ -307,7 +322,7 @@ trainingNulls nulls
     | VU.or nulls = Just nulls
     | otherwise = Nothing
 
--- | A number's threshold feature: @x <= t@. Reads row @i@ only when it is not null.
+-- | Threshold feature @x <= t@; reads row @i@ only when non-null.
 orderedFeature :: AsDouble b -> T.Text -> Maybe Bitmap -> Int -> (Int -> b) -> CartFeature
 orderedFeature num c Nothing n at =
     CartFeature
@@ -322,36 +337,52 @@ orderedFeature num c (Just bm) n at =
   where
     nulls = nullFlags n bm
 
--- | A category's one-hot features, one per level present, in ascending level order.
+-- | One-hot features per level (one feature for a non-null binary column).
 levelFeatures ::
-    forall b. (Columnable b, Ord b) => T.Text -> Maybe Bitmap -> V.Vector b -> [CartFeature]
-levelFeatures c bm v = [levelFeature c nulls v lvl | lvl <- Set.toList (Set.fromList present)]
+    forall b.
+    (Columnable b, Ord b) =>
+    T.Text -> Maybe Bitmap -> Int -> (Int -> b) -> [CartFeature]
+levelFeatures c bm n at =
+    [levelFeature c nulls trainNulls n at lvl | lvl <- chosen]
   where
-    nulls = fmap (nullFlags (V.length v)) bm
-    present = [x | (i, x) <- zip [0 ..] (V.toList v), maybe True (not . (VU.! i)) nulls]
+    nulls = fmap (nullFlags n) bm
+    trainNulls = nulls >>= trainingNulls
+    present = [at i | i <- [0 .. n - 1], maybe True (not . (VU.! i)) nulls]
+    allLevels = Set.toAscList (Set.fromList present)
+    chosen = case allLevels of
+        [lvl, _] | isNothing trainNulls -> [lvl]
+        _ -> allLevels
 
--- | One level's feature: 1 on rows equal to it, 0 elsewhere. LEFT is "not this level".
+-- | One level's feature: 1 on rows equal to it, 0 elsewhere.
 levelFeature ::
-    forall b. (Columnable b) => T.Text -> Maybe (VU.Vector Bool) -> V.Vector b -> b -> CartFeature
-levelFeature c Nothing v lvl =
+    forall b.
+    (Columnable b) =>
+    T.Text ->
+    Maybe (VU.Vector Bool) ->
+    Maybe (VU.Vector Bool) ->
+    Int ->
+    (Int -> b) ->
+    b ->
     CartFeature
-        (VU.generate (V.length v) (\i -> if v V.! i == lvl then 1 else 0))
+levelFeature c Nothing _ n at lvl =
+    CartFeature
+        (VU.generate n (\i -> if at i == lvl then 1 else 0))
         Nothing
         (\_ _ -> Col @b c ./=. Lit lvl)
-levelFeature c (Just nulls) v lvl =
+levelFeature c (Just nulls) trainNulls n at lvl =
     CartFeature
-        (VU.generate (V.length v) value)
-        (trainingNulls nulls)
+        (VU.generate n value)
+        trainNulls
         cond
   where
     value i
         | nulls VU.! i = 1 / 0
-        | v V.! i == lvl = 1
+        | at i == lvl = 1
         | otherwise = 0
     col' = Col @(Maybe b) c
-    -- A null is never equal to the level, so it passes "not this level"; NullsRight takes it out.
+    -- Null is unequal to the level, so NullsRight filters it out.
     notLevel = col' ./=. Lit (Just lvl)
-    -- Threshold 1 passes every non-null row, so that split is null vs non-null.
+    -- Threshold 1 passes every non-null row, splitting null vs non-null.
     cond t side
         | t < 1 = if side == NullsLeft then notLevel else F.isJust col' .&&. notLevel
         | side == NullsLeft = F.lit True
@@ -359,18 +390,8 @@ levelFeature c (Just nulls) v lvl =
 
 -- | Target column as string labels (matches pandas @y.astype(str)@).
 cartTargetLabels :: T.Text -> DataFrame -> V.Vector T.Text
-cartTargetLabels target df = case unsafeGetColumn target df of
-    BoxedColumn _ (v :: V.Vector b) -> case testEquality (typeRep @b) (typeRep @T.Text) of
-        Just Refl -> v
-        Nothing -> V.map (T.pack . show) v
-    UnboxedColumn _ (v :: VU.Vector b) -> V.map (T.pack . show) (V.convert v)
-    pt@(PackedText _ _) -> case materializePacked pt of
-        BoxedColumn _ (v :: V.Vector b) -> case testEquality (typeRep @b) (typeRep @T.Text) of
+cartTargetLabels target df =
+    withColumnVector (unsafeGetColumn target df) $ \_ (v :: V.Vector b) ->
+        case testEquality (typeRep @b) (typeRep @T.Text) of
             Just Refl -> v
             Nothing -> V.map (T.pack . show) v
-        _ -> V.empty
-    mc@(MergedColumn _ _) -> case materializeMerged mc of
-        BoxedColumn _ (v :: V.Vector b) -> case testEquality (typeRep @b) (typeRep @T.Text) of
-            Just Refl -> v
-            Nothing -> V.map (T.pack . show) v
-        _ -> V.empty

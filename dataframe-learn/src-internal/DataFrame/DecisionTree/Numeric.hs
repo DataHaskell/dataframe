@@ -20,7 +20,12 @@ module DataFrame.DecisionTree.Numeric (
     numericCols,
 ) where
 
-import DataFrame.DecisionTree.ColumnKind (AsDouble (..), ColumnKind (..), columnKind)
+import DataFrame.DecisionTree.ColumnKind (
+    AsDouble (..),
+    ColumnKind (..),
+    columnKind,
+    withColumnType,
+ )
 import DataFrame.DecisionTree.CondVec (CondVec (..), materializeCondVec)
 import DataFrame.DecisionTree.Types (SynthConfig (..), TreeConfig (..))
 import DataFrame.Expression.Operators
@@ -32,6 +37,7 @@ import DataFrame.Internal.Interpreter (interpret)
 
 import Data.List (sort)
 import Data.Maybe (catMaybes, mapMaybe)
+import Data.Proxy (Proxy (..))
 import qualified Data.Set as Set
 import qualified Data.Text as T
 import qualified Data.Vector as V
@@ -101,11 +107,8 @@ generateNumericConds cfg df = thresholdConds ++ missingnessConditions df
 missingnessConditions :: DataFrame -> [Expr Bool]
 missingnessConditions df = concatMap missingCond (columnNames df)
   where
-    missingCond name = case unsafeGetColumn name df of
-        BoxedColumn (Just _) (_ :: V.Vector b) -> [F.isNothing (Col @(Maybe b) name)]
-        UnboxedColumn (Just _) (_ :: VU.Vector b) -> [F.isNothing (Col @(Maybe b) name)]
-        PackedText (Just _) _ -> [F.isNothing (Col @(Maybe T.Text) name)]
-        _ -> []
+    missingCond name = withColumnType (unsafeGetColumn name df) $ \bm (_ :: Proxy b) ->
+        maybe [] (const [F.isNothing (Col @(Maybe b) name)]) bm
 
 -- | Thresholds for nullable expressions come from the observed values only.
 numericThresholds :: TreeConfig -> DataFrame -> NumExpr -> [Double]
@@ -238,16 +241,13 @@ admitNovel seen0 = go seen0 []
 numericCols :: DataFrame -> [NumExpr]
 numericCols df = concatMap (numExprsOfColumn df) (columnNames df)
 
--- | A column's numeric expression, if its element type is a number ('columnKind').
+-- | A column's numeric expression when 'columnKind' is 'Ordered'.
 numExprsOfColumn :: DataFrame -> T.Text -> [NumExpr]
-numExprsOfColumn df colName = case unsafeGetColumn colName df of
-    UnboxedColumn bm (_ :: VU.Vector b) -> numExprOf @b colName bm
-    BoxedColumn bm (_ :: V.Vector b) -> numExprOf @b colName bm
-    _ -> []
+numExprsOfColumn df colName =
+    withColumnType (unsafeGetColumn colName df) $ \bm (_ :: Proxy b) ->
+        numExprOf @b colName bm
 
-{- | Only numbers are asked about here, so no ordering registry is needed: a
-category comes back 'Unsplittable' and is left to the categorical pool.
--}
+-- | Numbers need no ordering registry; categories return 'Unsplittable'.
 numExprOf :: forall b. (Columnable b) => T.Text -> Maybe Bitmap -> [NumExpr]
 numExprOf c bm = case columnKind @b mempty of
     Ordered num -> [maybe (NDouble (columnAsDouble num c)) (const (NMaybeDouble (nullableAsDouble num c))) bm]

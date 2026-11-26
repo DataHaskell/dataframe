@@ -2,11 +2,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 
-{- | Every tree learner splits on a column by its element type, never by its
-storage: numbers (Double, Float, integral) by threshold, categories (Text,
-String, Bool, Char) by level. Before 'DataFrame.DecisionTree.ColumnKind', an
-unboxed Bool, Char or Float column was silently dropped.
--}
+-- | Decision-tree splits follow element kind, never physical column storage.
 module ColumnKinds (tests) where
 
 import Data.Either (fromRight)
@@ -16,15 +12,21 @@ import qualified Data.Vector as V
 import qualified Data.Vector.Unboxed as VU
 import Test.HUnit
 
-import DataFrame.DecisionTree.Cart (cartFeaturesByColumn)
+import DataFrame.DecisionTree.Cart (cartFeaturesByColumn, cartFeaturesWith)
 import DataFrame.DecisionTree.Fit (fitDecisionTree, treeToExpr)
+import DataFrame.DecisionTree.Numeric (numericCols)
 import DataFrame.DecisionTree.Regression (
     RegFit (..),
     RegTreeConfig (..),
     defaultRegTreeConfig,
     fitRegTree,
  )
-import DataFrame.DecisionTree.Types (TreeConfig (..), defaultTreeConfig)
+import DataFrame.DecisionTree.Types (
+    TreeConfig (..),
+    defaultColumnOrdering,
+    defaultTreeConfig,
+    orderable,
+ )
 import qualified DataFrame.Internal.Column as DI
 import DataFrame.Internal.Expression (Expr (..), getColumns)
 import DataFrame.Internal.Interpreter (interpret)
@@ -41,9 +43,11 @@ tests =
     , TestLabel "column kinds: classifier splits on a Char" (classifierSplits charColumn)
     , TestLabel "column kinds: classifier splits on a Float" (classifierSplits floatColumn)
     , TestLabel "column kinds: classifier splits on a String" (classifierSplits stringColumn)
+    , TestLabel "column kinds: custom ColumnOrdering reaches CART and classifier" customOrderingSplits
+    , TestLabel "column kinds: MergedColumn is consistent across learners" mergedColumnSplits
     ]
 
--- | Six rows; the second, fourth and fifth are the positive class in every fixture.
+-- | Six rows; the 2nd, 4th and 5th are positive in every fixture.
 positives :: [Bool]
 positives = [False, True, False, True, True, False]
 
@@ -53,7 +57,7 @@ charColumn = DI.fromList [if p then 'y' else 'n' | p <- positives]
 floatColumn = DI.fromList [if p then 2.5 else 0.5 :: Float | p <- positives]
 stringColumn = DI.fromList [if p then "yes" else "no" :: String | p <- positives]
 
--- | Numbers give one threshold feature, categories one feature per level present.
+-- | Numbers and non-null pairs give 1 feature; k>=3 levels give k.
 cartFeatureCounts :: Test
 cartFeatureCounts = TestCase $ do
     let df =
@@ -71,7 +75,7 @@ cartFeatureCounts = TestCase $ do
         counts = M.fromListWith (+) [(c, 1 :: Int) | (c, _) <- cartFeaturesByColumn "y" df]
     assertEqual
         "features per column"
-        (M.fromList [("d", 1), ("f", 1), ("i", 1), ("b", 2), ("c", 3), ("t", 2), ("s", 3), ("mb", 2)])
+        (M.fromList [("d", 1), ("f", 1), ("i", 1), ("b", 1), ("c", 3), ("t", 1), ("s", 3), ("mb", 2)])
         counts
 
 -- | A depth-1 regression tree on the column alone fits the 0/1 target exactly.
@@ -102,3 +106,57 @@ classifierSplits col = TestCase $ do
             Left err -> error (show err)
     assertEqual "splits on x" ["x"] (getColumns e)
     assertEqual "recovers the labels" (V.fromList labels) predicted
+
+-- | Custom category type, unsplittable until registered via 'orderable'.
+data Tier = Free | Pro | Enterprise
+    deriving (Eq, Ord, Show)
+
+customOrderingSplits :: Test
+customOrderingSplits = TestCase $ do
+    let tiers = [if p then Enterprise else Free | p <- positives]
+        labels = [if p then "paid" else "free" :: T.Text | p <- positives]
+        y = [if p then 1 else 0 :: Double | p <- positives]
+        dfCls = D.fromColumns [("label", DI.fromList labels), ("tier", DI.fromList tiers)]
+        dfReg = D.fromColumns [("y", DI.fromList y), ("tier", DI.fromList tiers)]
+        ords = defaultColumnOrdering <> orderable @Tier
+        unregistered = fitDecisionTree @T.Text defaultTreeConfig{maxTreeDepth = 1} (Col "label") dfCls
+        registered =
+            fitDecisionTree @T.Text
+                defaultTreeConfig{maxTreeDepth = 1, columnOrdering = ords, taoIterations = 0}
+                (Col "label")
+                dfCls
+        predicted = case interpret @T.Text dfCls registered of
+            Right (DI.TColumn c) -> fromRight V.empty (DI.toVector @T.Text @V.Vector c)
+            Left err -> error (show err)
+        regFit =
+            fitRegTree
+                defaultRegTreeConfig{rtMaxDepth = 1}
+                (V.fromList (cartFeaturesWith ords "y" dfReg))
+                (VU.fromList y)
+                Nothing
+    assertEqual "ignored when unregistered" [] (getColumns unregistered)
+    assertEqual "CART seed splits on tier when registered" ["tier"] (getColumns registered)
+    assertEqual "classifier recovers labels" (V.fromList labels) predicted
+    assertEqual "regression fits with custom ordering" (VU.fromList y) (rfFitted regFit)
+
+-- | MergedColumn (These Int Int) splits consistently across learners.
+mergedColumnSplits :: Test
+mergedColumnSplits = TestCase $ do
+    let leftCol = DI.fromList [if p then 1 else 0 :: Int | p <- positives]
+        rightCol = DI.fromList [if p then 9 else 2 :: Int | p <- positives]
+        merged = DI.mkMergedColumns leftCol rightCol
+        labels = [if p then "pos" else "neg" :: T.Text | p <- positives]
+        df = D.fromColumns [("label", DI.fromList labels), ("m", merged)]
+        ords = defaultColumnOrdering <> orderable @(DI.These Int Int)
+        e =
+            fitDecisionTree @T.Text
+                defaultTreeConfig{maxTreeDepth = 1, columnOrdering = ords}
+                (Col "label")
+                df
+        predicted = case interpret @T.Text df e of
+            Right (DI.TColumn c) -> fromRight V.empty (DI.toVector @T.Text @V.Vector c)
+            Left err -> error (show err)
+    assertEqual "merged column is not numeric" 0 (length (numericCols df))
+    assertEqual "default ordering skips merged column" 0 (length (cartFeaturesWith defaultColumnOrdering "label" df))
+    assertEqual "registered ordering gives 1 binary feature" 1 (length (cartFeaturesWith ords "label" df))
+    assertEqual "classifier recovers labels on merged column" (V.fromList labels) predicted

@@ -5,27 +5,22 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 
-{- | How the tree learners split on a column.
-
-The kind of a column is decided by its element type, never by how it is stored.
-An unboxed @Bool@ and a boxed @Text@ are both categories; an unboxed @Float@ and
-an unboxed @Int@ are both numbers. Every split-candidate generator (CART features,
-the classifier's numeric pool and its categorical pool) dispatches through
-'columnKind', so a column type is either split on by all of them in the same way,
-or by none of them.
--}
+-- | Dispatch decision-tree splits by element type rather than storage.
 module DataFrame.DecisionTree.ColumnKind (
     ColumnKind (..),
     AsDouble (..),
     columnKind,
+    withColumnType,
     withColumnVector,
 ) where
 
 import Data.Maybe (fromMaybe)
+import Data.Proxy (Proxy (..))
 import qualified Data.Text as T
 import Data.Type.Equality (testEquality, (:~:) (..))
 import qualified Data.Vector as V
 import qualified Data.Vector.Generic as VG
+import qualified Data.Vector.Unboxed as VU
 import Type.Reflection (typeRep)
 
 import DataFrame.DecisionTree.Types (ColumnOrdering, withOrdFrom)
@@ -35,17 +30,14 @@ import DataFrame.Internal.Expression (Expr (..))
 
 -- | What a column of element type @a@ offers a split.
 data ColumnKind a where
-    -- | A number (floating or integral): threshold splits on its value as a 'Double'.
+    -- | Floating or integral: threshold splits on its 'Double' value.
     Ordered :: AsDouble a -> ColumnKind a
-    -- | A category (any other type with a registered ordering): equality splits on its levels.
+    -- | Registered non-numeric 'Ord' type: equality splits on levels.
     Discrete :: (Ord a) => ColumnKind a
     -- | Neither a number nor a registered category: no splits.
     Unsplittable :: ColumnKind a
 
-{- | The kind of element type @a@. Categories need an 'Ord' instance from the
-registry (to collect their levels); 'DataFrame.DecisionTree.Types.defaultColumnOrdering'
-covers @Bool@, @Char@, @Text@ and @String@.
--}
+-- | Classify @a@ as 'Ordered', 'Discrete' (if in @ords@), or 'Unsplittable'.
 columnKind :: forall a. (Columnable a) => ColumnOrdering -> ColumnKind a
 columnKind ords = case sFloating @a of
     STrue -> Ordered asDouble
@@ -53,13 +45,13 @@ columnKind ords = case sFloating @a of
         STrue -> Ordered asDouble
         SFalse -> fromMaybe Unsplittable (withOrdFrom @a ords Discrete)
 
--- | How to read a number column as a 'Double': its values, and the expression a split prints.
+-- | How to read a number column as a 'Double' in values and split expressions.
 data AsDouble a = AsDouble
     { valueAsDouble :: a -> Double
     , columnAsDouble :: T.Text -> Expr Double
-    -- ^ The column as a 'Double' (a plain reference when it already is one).
+    -- ^ Plain 'Col' for 'Double', or lifted via 'F.toDouble'.
     , nullableAsDouble :: T.Text -> Expr (Maybe Double)
-    -- ^ The same for a nullable column.
+    -- ^ Nullable numeric column lifted to @Maybe Double@.
     }
 
 asDouble :: forall a. (Columnable a, Real a) => AsDouble a
@@ -71,9 +63,19 @@ asDouble = case testEquality (typeRep @a) (typeRep @Double) of
             (F.toDouble . Col @a)
             (F.whenPresent (realToFrac @a @Double) . Col @(Maybe a))
 
-{- | A column's null bitmap and elements as a boxed vector, whatever its storage.
-Elements at null positions are placeholders and must not be read.
--}
+-- | A column's null bitmap and element type, without materializing storage.
+withColumnType ::
+    Column -> (forall a. (Columnable a) => Maybe Bitmap -> Proxy a -> r) -> r
+withColumnType col k = case col of
+    BoxedColumn bm (_ :: V.Vector a) -> k bm (Proxy @a)
+    UnboxedColumn bm (_ :: VU.Vector a) -> k bm (Proxy @a)
+    PackedText bm _ -> k bm (Proxy @T.Text)
+    MergedColumn l r ->
+        withColumnType l $ \_ (_ :: Proxy a) ->
+            withColumnType r $ \_ (_ :: Proxy b) ->
+                k Nothing (Proxy @(These a b))
+
+-- | A column's null bitmap and boxed elements (null slots are placeholders).
 withColumnVector ::
     Column -> (forall a. (Columnable a) => Maybe Bitmap -> V.Vector a -> r) -> r
 withColumnVector col k = case col of

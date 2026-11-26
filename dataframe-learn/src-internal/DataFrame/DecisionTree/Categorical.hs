@@ -26,7 +26,12 @@ module DataFrame.DecisionTree.Categorical (
     discreteCondVecs,
 ) where
 
-import DataFrame.DecisionTree.ColumnKind (ColumnKind (..), columnKind, withColumnVector)
+import DataFrame.DecisionTree.ColumnKind (
+    ColumnKind (..),
+    columnKind,
+    withColumnType,
+    withColumnVector,
+ )
 import DataFrame.DecisionTree.CondVec (CondVec (..), materializeCondVec)
 import DataFrame.DecisionTree.Types (
     ColumnOrdering,
@@ -45,6 +50,7 @@ import Data.Function (on)
 import Data.List (inits, sort, sortBy, subsequences)
 import qualified Data.Map.Strict as M
 import Data.Maybe (fromMaybe, mapMaybe)
+import Data.Proxy (Proxy (..))
 import qualified Data.Set as Set
 import qualified Data.Text as T
 import Data.Type.Equality (testEquality, (:~:) (..))
@@ -272,8 +278,8 @@ isDisallowedPair cfg l r =
 
 pairConds :: ColumnOrdering -> DataFrame -> (T.Text, T.Text) -> [Expr Bool]
 pairConds ords df (l, r) =
-    withColumnVector (unsafeGetColumn l df) $ \bmL (_ :: V.Vector a) ->
-        withColumnVector (unsafeGetColumn r df) $ \bmR (_ :: V.Vector b) ->
+    withColumnType (unsafeGetColumn l df) $ \bmL (_ :: Proxy a) ->
+        withColumnType (unsafeGetColumn r df) $ \bmR (_ :: Proxy b) ->
             case (columnKind @a ords, bmL, bmR) of
                 (Discrete, Nothing, Nothing) -> strictPairConds @a @b l r
                 (Discrete, Just _, Just _) -> nullablePairConds @a @b ords l r
@@ -328,19 +334,22 @@ columnCondVecs ctx df colName = withCategory ctx df colName $ \bm (column :: V.V
         (\b -> mapMaybe (materializeCondVec df) (nullableColConds ctx colName b column))
         bm
 
-{- | Run @k@ on a column's elements when its element type is a category
-('columnKind'), whatever its storage; numbers belong to the numeric pool.
--}
+-- | Run @k@ when the column is 'Discrete' under 'columnKind'.
 withCategory ::
     CatCtx target ->
     DataFrame ->
     T.Text ->
     (forall a. (Columnable a) => Maybe Bitmap -> V.Vector a -> [r]) ->
     [r]
-withCategory ctx df colName k = withColumnVector (unsafeGetColumn colName df) $ \bm (column :: V.Vector a) ->
-    case columnKind @a (ccOrds ctx) of
-        Discrete -> k bm column
-        _ -> []
+withCategory ctx df colName k =
+    let col = unsafeGetColumn colName df
+     in withColumnType col $ \_ (_ :: Proxy a) ->
+            case columnKind @a (ccOrds ctx) of
+                Discrete -> withColumnVector col $ \bm (column :: V.Vector b) ->
+                    case testEquality (typeRep @a) (typeRep @b) of
+                        Just Refl -> k bm column
+                        Nothing -> []
+                _ -> []
 
 nonNullColCondVecs ::
     forall a target.
